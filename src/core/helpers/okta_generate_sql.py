@@ -222,7 +222,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - tenant_id (String, INDEX)
             - okta_id (String, INDEX)
             - user_okta_id (String, ForeignKey -> users.okta_id)
-            - factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce, password, webauthn, security_question, token, push, totp
+            - factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce(fastpass), password, webauthn, security_question, token, push(okta verify), totp
             - provider (String, INDEX)
             - status (String, INDEX)
             - email (String, NULL)

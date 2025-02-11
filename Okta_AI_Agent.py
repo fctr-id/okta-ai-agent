@@ -150,7 +150,7 @@ async def process_with_reasoning(question: str) -> Dict[str, str]:
         }
 
       
-DISPLAY_LIMIT = 5
+DISPLAY_LIMIT = 20
 async def main():
     executor = SQLExecutor()
     logger.info(f"Starting Okta Query Assistant (Reasoning: {'Enabled' if USE_PRE_REASONING else 'Disabled'}) Provider: {os.getenv('AI_PROVIDER')}")

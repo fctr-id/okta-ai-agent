@@ -33,7 +33,7 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file in the project root with your configurations:
+4. Rename the `.env.sample` file in the project root to `.env` and update it with your configurations:
 ```ini
 # Okta Configuration
 OKTA_CLIENT_ORGURL=https://your-dev-instance.okta.com
@@ -49,19 +49,14 @@ VERTEX_AI_REASONING_MODEL=gemini-1.5-pro
 VERTEX_AI_CODING_MODEL=gemini-1.5-pro
 ```
 
-## Initial Setup
+## Pull Okta data into DB
 
-1. Initialize the database:
-```bash
-python src/okta_db_sync/db/operations.py
-```
-
-2. Perform initial sync:
+1. Perform initial sync:
 ```bash
 python Fetch_Okta_Data.py
 ```
 
-## Usage
+## Query using AI 
 
 1. Start the AI agent:
 ```bash
@@ -70,18 +65,19 @@ python Okta_AI_Agent.py
 
 2. Ask questions in natural language, for example:
    - "List all active users"
-   - "Show me groups with access to Salesforce"
-   - "Find users with MFA enabled"
+   - "Show me a list of users assigned to application 'app-name'."
+   - "Find all users that have PUSH registered"
 
 ## Important Notes
 
 1. **Beta Version**: This is a beta release. Use in non-production environments only.
-2. **Data Security**: 
+2. **Limited Fields** - Currently only fetching hte login and email addresses from users' profile. No other attributes
+3. **Data Security**: 
    - The tool stores data locally in SQLite
    - No data is sent to AI providers except query context
    - Use appropriate API tokens and credentials
 
-3. **Limitations**:
+4. **Limitations**:
    - Sync process is incremental but may take time for large organizations
    - AI responses depend on the chosen provider's capabilities
    - Some complex queries may require refinement
@@ -96,6 +92,6 @@ For issues or questions:
 
 ## Legal Notice
 
-This software is proprietary and confidential. Unauthorized copying, modification, distribution, or use of this software is strictly prohibited.
+Please refer to License.md file for licensing info
 
-© 2024 All rights reserved.
+© 2024 Fctr .All rights reserved.
