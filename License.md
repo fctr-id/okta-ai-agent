@@ -44,7 +44,7 @@ This software is provided "AS IS", without warranty of any kind. In no event sha
 
 ## Commercial Licensing
 
-For commercial licensing inquiries, including multi-tenant deployments, please contact [Your Email].
+For commercial licensing inquiries, including multi-tenant deployments, please contact dan@fctr.io
 
 ---
 

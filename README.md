@@ -46,6 +46,9 @@ OKTA_CLIENT_TOKEN=your-okta-api-token
 # AI Provider Selection (vertex_ai, openai, azure_openai, openai_compatible)
 AI_PROVIDER=vertex_ai
 
+#Set this to False if you do not want to use a reasoning model prior to generation of the query
+USE_PRE_REASONING=True
+
 # Configure based on your chosen AI provider
 # Example for Vertex AI:
 VERTEX_AI_SERVICE_ACCOUNT_FILE=path/to/service-account.json
@@ -75,7 +78,7 @@ python Okta_AI_Agent.py
 ## Important Notes
 
 1. **Beta Version**: This is a beta release. Use in non-production environments only.
-2. **Limited Fields** - Currently only fetching the login and email addresses from users' profile. No other attributes
+2. **Limited Fields** - Currently only fetching the login and email addresses from users' profile. No other user attributes
 3. **Data Security**: 
    - The tool stores data locally in SQLite
    - No data is sent to AI providers except query context
