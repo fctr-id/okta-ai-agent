@@ -75,7 +75,7 @@ python Okta_AI_Agent.py
 ## Important Notes
 
 1. **Beta Version**: This is a beta release. Use in non-production environments only.
-2. **Limited Fields** - Currently only fetching hte login and email addresses from users' profile. No other attributes
+2. **Limited Fields** - Currently only fetching the login and email addresses from users' profile. No other attributes
 3. **Data Security**: 
    - The tool stores data locally in SQLite
    - No data is sent to AI providers except query context
