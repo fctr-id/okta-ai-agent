@@ -1,0 +1,9 @@
+pydantic
+pydantic-ai
+openai
+python-dotenv
+okta
+sqlalchemy
+aiosqlite
+python-dotenv
+pydantic-settings
