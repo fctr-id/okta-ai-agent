@@ -21,7 +21,7 @@ This tool provides:
 
 ## Installation
 
-1. Extract the zip file to your desired location
+1. git clone `https://github.com/fctr-id/okta-ai-agent`
 2. Create a virtual environment:
 ```bash
 python -m venv venv
