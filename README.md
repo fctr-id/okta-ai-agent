@@ -21,7 +21,11 @@ This tool provides:
 
 ## Installation
 
-1. git clone `https://github.com/fctr-id/okta-ai-agent`
+1. Clone the repo: 
+```bash
+git clone `https://github.com/fctr-id/okta-ai-agent`
+```
+
 2. Create a virtual environment:
 ```bash
 python -m venv venv
