@@ -23,7 +23,7 @@ This tool provides:
 
 1. Clone the repo: 
 ```bash
-git clone `https://github.com/fctr-id/okta-ai-agent`
+git clone https://github.com/fctr-id/okta-ai-agent
 ```
 
 2. Create a virtual environment:
