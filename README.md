@@ -25,19 +25,23 @@ This tool provides:
 ```bash
 git clone https://github.com/fctr-id/okta-ai-agent
 ```
+2. Change directory to the new folder:
+```bash
+cd okta-ai-agent
+```
 
-2. Create a virtual environment:
+3. Create a virtual environment:
 ```bash
 python -m venv venv
 .\venv\Scripts\activate
 ```
 
-3. Install dependencies:
+4. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Rename the `.env.sample` file in the project root to `.env` and update it with your configurations:
+5. Rename the `.env.sample` file in the project root to `.env` and update it with your configurations:
 ```ini
 # Okta Configuration
 OKTA_CLIENT_ORGURL=https://your-dev-instance.okta.com

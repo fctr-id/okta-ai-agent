@@ -1,9 +1,8 @@
 pydantic
-pydantic-ai
+pydantic-ai=0.0.24
 openai
 python-dotenv
 okta
 sqlalchemy
 aiosqlite
-python-dotenv
 pydantic-settings

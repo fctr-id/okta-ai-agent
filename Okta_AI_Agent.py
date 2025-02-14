@@ -77,7 +77,7 @@ def save_results_to_csv(results: List[dict], filename: str):
         raise  
 
 # Add configuration for reasoning
-USE_PRE_REASONING = os.getenv('USE_PRE_REASONING', False)
+
 class SQLExecutor:
     def __init__(self):
         self.db = DatabaseOperations()
@@ -151,6 +151,8 @@ async def process_with_reasoning(question: str) -> Dict[str, str]:
 
       
 DISPLAY_LIMIT = 20
+USE_PRE_REASONING = os.getenv('USE_PRE_REASONING', 'false').lower() == 'true'
+#print(f"Using Pre-Reasoning: {USE_PRE_REASONING}")
 async def main():
     executor = SQLExecutor()
     logger.info(f"Starting Okta Query Assistant (Reasoning: {'Enabled' if USE_PRE_REASONING else 'Disabled'}) Provider: {os.getenv('AI_PROVIDER')}")

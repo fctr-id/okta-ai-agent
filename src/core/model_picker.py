@@ -7,6 +7,9 @@ from openai import AsyncAzureOpenAI
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai import Agent
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class AIProvider(str, Enum):
     VERTEX_AI = "vertex_ai"
@@ -22,6 +25,7 @@ class ModelConfig:
     @staticmethod
     def get_models() -> Dict[ModelType, any]:
         provider = os.getenv('AI_PROVIDER', 'vertex').lower()
+        #print(f"Provider: {provider}")
         
         if provider == AIProvider.VERTEX_AI:
             service_account = os.getenv('GOOGLE_APPLICATION_CREDENTIALS') or os.getenv('VERTEX_AI_SERVICE_ACCOUNT_FILE') 

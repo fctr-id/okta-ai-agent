@@ -15,9 +15,9 @@ model = ModelConfig.get_model(ModelType.REASONING)
 class ReasoningDependencies:
     tenant_id: str
 
-#class ReasoningQuery(BaseModel):
-#    expanded_query: str = Field(description='Expanded version of user query with additional context')
-#    explanation: str = Field(description='Explanation of how the query was expanded')
+class ReasoningResponse(BaseModel):
+    expanded_query: str = Field(description='Expanded version of user query with additional context')
+    explanation: str = Field(description='Explanation of how the query was expanded')
 
 reasoning_agent = Agent(
     model,
@@ -37,6 +37,7 @@ reasoning_agent = Agent(
     
     ### Output JSON Format ###:
     - You MUST not add any additional entities to be queried not requested by the user in the query
+    - For most of the queries try to use LIKE operator unless the exact match is requested by the user
     - The output JSON should contain the following keys and no other characters or words. No quotes or the word "JSON" is needed:
     - expanded_query: expanded and clarified version of the query (ignore generic terms or words in user query)
     - explanation: explanation of what was added/clarified
@@ -50,6 +51,7 @@ reasoning_agent = Agent(
     
     ### Domain Knowledge ###:
     - Users can be assigned to applications directly or through group membership
+    - Users have their own attrbiutes, do NOT ask fror applications assignments when asked for uer details
     - Application names should use the friendly "label" field
     - Always consider both direct and group-based access
     - Consider deleted/non-deleted records
@@ -66,8 +68,9 @@ reasoning_agent = Agent(
     
     1. User Access:
         - Users can access applications through direct assignment or group membership
+        - DO NOT show application assignments when asked about users unless specifically asked about it
         - Users are identified by email or login
-        - User status can be: STAGED, PROVISIONED/PENDING USER ACTION, ACTIVE, RECOVERY/PASSWORD RESET, PASSWORD EXPIRED, LOCKED OUT, SUSPENDED , DEPROVISIONED
+        - User status can be: STAGED, PROVISIONED (also known as pending user action), ACTIVE, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT, SUSPENDED , DEPROVISIONED
         - ALways list users and groups of all statuses unless specifically asked for a particular status
     
     2. Applications:
@@ -97,17 +100,37 @@ reasoning_agent = Agent(
 
 def extract_json_from_text(text: str) -> dict:
     """Extract JSON from text response"""
+    if isinstance(text, (dict, ReasoningResponse)):
+        return text if isinstance(text, dict) else text.model_dump()
+    
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        json_pattern = r'\{(?:[^{}]|(?R))*\}'
-        matches = re.findall(json_pattern, text)
-        if matches:
-            try:
-                return json.loads(matches[0])
-            except json.JSONDecodeError:
-                raise ValueError("Found JSON-like structure but couldn't parse it")
-        raise ValueError("No valid JSON found in response")
+        # Try to clean the text first
+        text = text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.endswith("```"):
+            text = text[:-3]
+        
+        try:
+            return json.loads(text.strip())
+        except json.JSONDecodeError:
+            json_pattern = r'\{(?:[^{}]|(?R))*\}'
+            matches = re.findall(json_pattern, text)
+            if matches:
+                try:
+                    return json.loads(matches[0])
+                except json.JSONDecodeError:
+                    logger.error(f"Failed to parse JSON from: {text}")
+                    return {
+                        "expanded_query": "",
+                        "explanation": "Failed to parse reasoning response"
+                    }
+            return {
+                "expanded_query": "",
+                "explanation": "No valid JSON found in response"
+            }
 
 async def expand_query(question: str) -> dict:
     """Expand a user query with additional context"""

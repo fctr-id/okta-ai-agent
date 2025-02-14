@@ -35,30 +35,47 @@ class openAICompatibleModel(OpenAIModel):
         self, 
         messages: List[ModelMessage], 
         stream: bool, 
-        model_settings: ModelSettings | None
+        model_settings: ModelSettings | None,
+        model_request_parameters: dict | None = None  # Add this parameter
     ) -> Union[ChatCompletion, AsyncStream[ChatCompletionChunk]]:
-        #print("_completions_create in CustomOpenAIModel called")
         openai_messages = list(chain(*(self._map_message(m) for m in messages)))
-        model_settings = model_settings or {}
-        model_settings.pop('parallel_tool_calls', None)  # Remove the unsupported field
-
-        # Debug: Print model_settings to verify 'parallel_tool_calls' is removed
-        #print("model_settings before API call:", model_settings)
-
+        
+        # Use model_request_parameters if provided, otherwise use model_settings
+        params = model_request_parameters or {}
+        if model_settings:
+            model_settings.pop('parallel_tool_calls', None)
+    
         return await self.client.chat.completions.create(
             model=self.model_name,
             messages=openai_messages,
             stream=stream,
-            max_tokens=model_settings.get('max_tokens', NOT_GIVEN),
-            temperature=model_settings.get('temperature', NOT_GIVEN),
-            top_p=model_settings.get('top_p', NOT_GIVEN),
-            timeout=model_settings.get('timeout', NOT_GIVEN),
+            max_tokens=params.get('max_tokens', NOT_GIVEN),
+            temperature=params.get('temperature', NOT_GIVEN),
+            top_p=params.get('top_p', NOT_GIVEN),
+            timeout=params.get('timeout', NOT_GIVEN),
         )
+        
+    async def request(self, messages, model_settings=None, tools=None, tool_choice=None):
+        """Handle request with all expected parameters"""
+        #print("OpenAI Compatible request called")
+        
+        # Initialize default model_request_parameters
+        model_request_parameters = {
+            'max_tokens': NOT_GIVEN,
+            'temperature': NOT_GIVEN,
+            'top_p': NOT_GIVEN,
+            'timeout': NOT_GIVEN
+        }
     
-    async def request(self, messages, model_settings=None):
-        print("Fireworks CustomOpenAIModel.request called")
+        # Update with model_settings if provided
         if model_settings:
             model_settings.pop('parallel_tool_calls', None)
-            # Debug: Print model_settings after removal
-            #print("model_settings after removal:", model_settings)
-        return await super().request(messages, model_settings)
+            model_request_parameters.update({
+                'max_tokens': model_settings.get('max_tokens', NOT_GIVEN),
+                'temperature': model_settings.get('temperature', NOT_GIVEN),
+                'top_p': model_settings.get('top_p', NOT_GIVEN),
+                'timeout': model_settings.get('timeout', NOT_GIVEN)
+            })
+    
+        # Call parent class request with required parameters
+        return await super().request(messages, model_settings, model_request_parameters)

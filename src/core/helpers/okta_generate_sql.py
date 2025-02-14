@@ -52,6 +52,10 @@ sql_agent = Agent(
             The query has to be a valid query for the SQLLite database and MUST only use the schema provided below
             ### OUTPUT CONSIDERATIONS ###:
             - The output has to contain 2 root nodes: sql and explanation as shown below and no other words or extra characters and no new line characters.
+            - For most of the queries try to use LIKE operator unless the exact match is requested by the user
+            - Make sure to print only the fields the user requested in the query
+            - Do not print the timestamps from the database unless specifically requested by the user
+            - Make sure you are not adding any additional entities to be queried not requested by the user in the query
             - Understand the intent of the user query and print the necessary columns in addition to the ones requested so the data is complete and the user can understand the output.
             - When searching anything user related search against email and login fields
             - When searching for applications search against the application label field NOT the name field
@@ -71,6 +75,8 @@ sql_agent = Agent(
             - Always list ACTIVE apps unless specifically asked for inactive ones
             - Always search for the user by email and login fields and use LIKE for these fields as well
             - Always search for the group by name and use LIKE for the group name as well
+            
+            
             ### User-Application-Group Assignment Logic ###:
             - Assignments are mutually exclusive, i.e. a user cannot be directly assigned to an app if he is a member of a group assigned to the app
             - Group assignments take precedence
@@ -87,7 +93,7 @@ sql_agent = Agent(
                 F -- Yes --> G[Use Direct Assignment]
                 F -- No --> H[No Access]            
                         
-            Example Queries:
+            Example Queries for application memberships for users:
             Query: list all users assigned to FCTR ID Login app and show if it's a direct or assignment by a group
             Output: SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, a.label, a.name, 'Group Assignment' AS assignment_type, g.name AS group_name FROM group_application_assignments gaa INNER JOIN groups g ON g.okta_id = gaa.group_okta_id INNER JOIN applications a ON a.okta_id = gaa.application_okta_id INNER JOIN user_group_memberships ugm ON ugm.group_okta_id = g.okta_id INNER JOIN users u ON u.okta_id = ugm.user_okta_id WHERE a.label LIKE '%fctr id - demo%' AND u.status = 'ACTIVE' UNION SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, a.label, a.name, 'Direct Assignment' AS assignment_type, NULL AS group_name FROM user_application_assignments uaa INNER JOIN users u ON u.okta_id = uaa.user_okta_id INNER JOIN applications a ON a.okta_id = uaa.application_okta_id WHERE a.label LIKE '%fctr id - demo%' AND u.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM group_application_assignments gaa INNER JOIN user_group_memberships ugm ON ugm.group_okta_id = gaa.group_okta_id WHERE ugm.user_okta_id = u.okta_id AND gaa.application_okta_id = uaa.application_okta_id)
             
@@ -117,7 +123,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - first_name (String)
             - last_name (String)
             - login (String, INDEX)
-            - status (String, INDEX)
+            - status (String, INDEX)  #STAGED, PROVISIONED (also known as pending user action), ACTIVE, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT, SUSPENDED , DEPROVISIONED
             - created_at (DateTime)
             - updated_at (DateTime)
             - last_synced_at (DateTime, INDEX)
