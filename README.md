@@ -1,12 +1,13 @@
-<p align="center">
+<div align="center">
   <a href="https://fctr.io">
     <img src="https://fctr.io/images/logo.svg" alt="fctr.io" width="110" height="auto">
   </a>
-</p>
+</div>
 
-<h1 style="margin-top: -6px" align="center">AI Agent for Okta</h1>
+<h2 style="margin-left: 10px" align="center">AI Agent for Okta<sup style="font-size: 50%"><smaller>(BETA)</smaller></sup></h2>
 
-This AI agent lets you use natural language to query your Okta tenant's details. Built for admins, powered by enterprise AI models.
+
+This AI agent is the first of it's kind that lets you use natural language to query your Okta tenant's details. Built for admins, powered by enterprise AI models.
 
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start](#-quick-start)
@@ -22,11 +23,13 @@ This AI agent lets you use natural language to query your Okta tenant's details.
   - [Security First 🛡️](#security-first-️)
   - [Current Limitations 🔍](#current-limitations-)
 - [🆘 Need Help?](#-need-help)
+- [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
+- [👥 Contributors](#-contributors)
 - [⚖️ Legal Stuff](#️-legal-stuff)
 
 ## ✨ What's Special?
 
-This  tool brings you:
+The first AI Agent for Okta that has the following features:
 * 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLlite DB
 * 💡 **Natural Language Queries** - Talk to your Okta data in simple english
 *  ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
@@ -162,6 +165,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 * Proper token hygiene required
 
 ### Current Limitations 🔍
+* The responses are stateless, i.e., every query is answered as is asked without any relevance to the previous queries / responses.
 * AI responses vary by provider
 * Complex questions might need simplifying
 * One tenant at a time
@@ -176,6 +180,13 @@ Before raising an issue, check:
 
 Still having problems? Open an issue on GitHub or email support@fctr.io (response times may vary)
 
+## 💡 Feature Requests & Ideas
+
+Have an idea or suggestion? [Open a feature request](https://github.com/fctr-id/okta-ai-agent/issues/new?labels=enhancement) on GitHub!
+
+## 👥 Contributors
+
+Interested in contributing? We'd love to have you! Reach out to dan@fctr.io
 
 ## ⚖️ Legal Stuff
 
