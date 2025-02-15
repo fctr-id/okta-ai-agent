@@ -13,8 +13,8 @@ This AI agent lets you use natural language to query your Okta tenant's details.
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
-  - [Get Started in Minutes!](#get-started-in-minutes)
-- [🎯 Usage](#-usage)
+  - [Get Started](#get-started)
+  - [🎯 Usage](#-usage)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
   - [Data Privacy](#data-privacy)
@@ -22,7 +22,7 @@ This AI agent lets you use natural language to query your Okta tenant's details.
 - [⚠️ Good to Know](#️-good-to-know)
   - [Beta Release 🧪](#beta-release-)
   - [Security First 🛡️](#security-first-️)
-  - [Current Boundaries 🎯](#current-boundaries-)
+  - [Current Limitations 🔍](#current-limitations-)
 - [🆘 Need Help?](#-need-help)
 - [⚖️ Legal Stuff](#️-legal-stuff)
 
@@ -46,7 +46,7 @@ This  tool brings you:
 * Okta tenant superadmin acess
 * Access to any supported AI provider mentioned above
 
-### Get Started in Minutes!
+### Get Started
 
 1. **Clone & Navigate**
 ```bash
@@ -81,7 +81,7 @@ VERTEX_AI_REASONING_MODEL=gemini-1.5-pro
 VERTEX_AI_CODING_MODEL=gemini-1.5-pro
 ```
 
-## 🎯 Usage
+### 🎯 Usage
 
 1. **Sync Your Data**
 ```bash
@@ -119,9 +119,12 @@ python Okta_AI_Agent.py
   - No Okta user data
   - No organizational data
   - No synced database contents
+  
 
-> **Note**: Future relases may introduce features that will require the Okta data to be sent to the LLM for summarization.
->  Any such changes will be clearly documented in release notes.
+⚠️ **Future Features Notice** ⚠️
+
+Future releases may introduce optional features that require sending Okta data to LLMs for summarization.
+All such changes will be clearly documented in release notes.
 
 ### Data Model Overview 
 ( as of  feb 15th, 2025)
@@ -155,7 +158,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 * AI sees only what it needs to
 * Proper token hygiene required
 
-### Current Boundaries 🎯
+### Current Limitations 🔍
 * AI responses vary by provider
 * Complex questions might need simplifying
 * One tenant at a time
