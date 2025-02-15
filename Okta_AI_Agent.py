@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from src.utils.logging import logger
 
-load_dotenv()
+load_dotenv(override=True)
 
 src_path = Path(__file__).parent / "src"
 sys.path.append(str(src_path))
