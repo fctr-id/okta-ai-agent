@@ -1,108 +1,140 @@
-# Pydantic AI Okta Agent
+<p align="center">
+  <a href="https://fctr.io">
+    <img src="https://fctr.io/images/logo.svg" alt="fctr.io" width="110" height="auto">
+  </a>
+</p>
 
-An AI-powered Okta management tool that combines data synchronization with natural language querying capabilities.
 
-## Overview
+<h1 align="center">AI Agent for Okta</h1>
 
-This tool provides:
-1. Automated Okta data synchronization
-2. Natural language querying of Okta data
-3. Support for multiple AI providers (Vertex AI, OpenAI, Azure OpenAI, etc.)
+This AI agent lets you use natural language to query your Okta tenant's details. Built for admins, powered by enterprise AI models.
 
-## Prerequisites
 
-- Python 3.12 or higher
-- Access to an Okta developer instance
-- Access to at least one of the supported AI providers:
-  - Google Vertex AI
-  - OpenAI
-  - Azure OpenAI
-  - OpenAI Compatible API (e.g., Fireworks)
+## ✨ What's Special?
 
-## Installation
+This  tool brings you:
+* 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLlite DB
+* 💡 **Natural Language Queries** - Talk to your Okta data in simple english
+*  ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
+     -  Google Vertex AI (Gemini 1.5 Pro)
+     -  OpenAI (GPT-4)
+     -  Azure OpenAI (GPT-4)
+     -  Ollama (Local, Self-hosted, use 32B+ models)
+     -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
 
-1. Clone the repo: 
+## 🛡️ Security & Privacy 
+
+### Data Control
+- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
+- **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
+- **LLM Flexibility**: 
+  - Use your enterprise-approved AI providers
+  - Deploy Ollama locally for a completely local environment
+  - Full control over model selection  
+
+### Data Privacy (as of Feb 15th, 2025)
+- ✅ **What's Sent to LLMs**:
+  - User queries (user prompts)
+  - System prompts 
+- ❌ **What's Not Sent**:
+  - No Okta user data
+  - No organizational data
+  - No synced database contents
+
+> **Note**: Future relases may introduce features that will require the Okta data to be sent to the LLM for summarization.
+>  Any such changes will be clearly documented in release notes.
+
+## 🚀 Quick Start
+
+### Prerequisites
+* Python 3.12+
+* Okta tenant superadmin acess
+* Access to any supported AI provider mentioned above
+
+### Get Started in Minutes!
+
+1. **Clone & Navigate**
 ```bash
 git clone https://github.com/fctr-id/okta-ai-agent
-```
-2. Change directory to the new folder:
-```bash
 cd okta-ai-agent
 ```
 
-3. Create a virtual environment:
+2. **Set Up Your Python Virtual Environment**
 ```bash
 python -m venv venv
 .\venv\Scripts\activate
-```
-
-4. Install dependencies:
-```bash
 pip install -r requirements.txt
 ```
 
-5. Rename the `.env.sample` file in the project root to `.env` and update it with your configurations:
+3. **Configure Your .env file** (`.env`)
+```bash
+cp .env.sample .env
+```
+Modify these as needed
 ```ini
-# Okta Configuration
+# 🔐 Okta Configuration
 OKTA_CLIENT_ORGURL=https://your-dev-instance.okta.com
 OKTA_CLIENT_TOKEN=your-okta-api-token
 
-# AI Provider Selection (vertex_ai, openai, azure_openai, openai_compatible)
+# 🧠 AI Settings
 AI_PROVIDER=vertex_ai
-
-#Set this to False if you do not want to use a reasoning model prior to generation of the query
 USE_PRE_REASONING=True
 
-# Configure based on your chosen AI provider
-# Example for Vertex AI:
+# 🌐 Vertex AI Configuration
 VERTEX_AI_SERVICE_ACCOUNT_FILE=path/to/service-account.json
 VERTEX_AI_REASONING_MODEL=gemini-1.5-pro
 VERTEX_AI_CODING_MODEL=gemini-1.5-pro
 ```
 
-## Pull Okta data into DB
+## 🎯 Usage
 
-1. Perform initial sync:
+1. **Sync Your Data**
 ```bash
 python Fetch_Okta_Data.py
 ```
 
-## Query using AI 
-
-1. Start the AI agent:
+2. **Start the AI Magic**
 ```bash
 python Okta_AI_Agent.py
 ```
 
-2. Ask questions in natural language, for example:
-   - "List all active users"
-   - "Show me a list of users assigned to application 'app-name'."
-   - "Find all users that have PUSH registered"
+3. **Ask Away!** Try these cool queries:
+* 👥 "Who are my active users?"
+* 🎯 "Show me users in the 'Sales' application"
+* 📱 "List everyone with PUSH authentication"
 
-## Important Notes
+## ⚠️ Good to Know
 
-1. **Beta Version**: This is a beta release. Use in non-production environments only.
-2. **Limited Fields** - Currently only fetching the login and email addresses from users' profile. No other user attributes
-3. **Data Security**: 
-   - The tool stores data locally in SQLite
-   - No data is sent to AI providers except query context
-   - Use appropriate API tokens and credentials
+### Beta Release 🧪
+* Testing grounds - keep it out of production!
+* Currently focusing on core user fields
+* Large orgs might need a coffee break during sync
 
-4. **Limitations**:
-   - Sync process is incremental but may take time for large organizations
-   - AI responses depend on the chosen provider's capabilities
-   - Some complex queries may require refinement
+### Security First 🛡️
+* Data lives safely in your local SQLite
+* AI sees only what it needs to
+* Proper token hygiene required
 
-## Support
+### Current Boundaries 🎯
+* AI responses vary by provider
+* Complex questions might need simplifying
+* One tenant at a time
 
-For issues or questions:
-1. Check configuration in `.env`
-2. Verify Okta API token permissions
-3. Ensure AI provider credentials are correct
-4. Check logs in `logs/` directory
+## 🆘 Need Help?
 
-## Legal Notice
+Before raising an issue, check:
+1. 📝 `.env` configuration
+2. 🔑 Okta API permissions
+3. 🤖 AI provider setup
+4. 📊 `logs` directory
 
-Please refer to License.md file for licensing info
+Still having problems? Open an issue on GitHub or email support@fctr.io (response times may vary)
 
-© 2024 Fctr .All rights reserved.
+
+## ⚖️ Legal Stuff
+
+Check out [`License.md`](License.md) for the fine print.
+
+---
+
+🌟 © 2024 Fctr. All rights reserved. Made with ❤️ for the Okta community.
