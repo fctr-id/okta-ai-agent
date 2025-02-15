@@ -8,8 +8,6 @@
 
 This AI agent lets you use natural language to query your Okta tenant's details. Built for admins, powered by enterprise AI models.
 
-## 📑 Index
-- [📑 Index](#-index)
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
@@ -100,6 +98,11 @@ python Okta_AI_Agent.py
 
 
 ## 🛡️ Security & Privacy 
+
+<p align="center">
+  <img src="docs/okta_ai_agent_architecture.png" alt="Okta AI Agent Demo" width="800" height="auto">
+</p>
+
 
 ### Data Control
 - **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
