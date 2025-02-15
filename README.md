@@ -4,7 +4,7 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">AI Agent for Okta<sup style="font-size: 50%"><smaller>(BETA)</smaller></sup></h2>
+<h2 style="margin-left: 10px" align="center">AI Agent for Okta (BETA)</h2>
 
 
 This AI agent is the first of it's kind that lets you use natural language to query your Okta tenant's details. Built for admins, powered by enterprise AI models.
@@ -26,7 +26,6 @@ This AI agent is the first of it's kind that lets you use natural language to qu
 - [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
 - [👥 Contributors](#-contributors)
 - [⚖️ Legal Stuff](#️-legal-stuff)
-
 ## ✨ What's Special?
 
 The first AI Agent for Okta that has the following features:
@@ -117,7 +116,7 @@ python Okta_AI_Agent.py
 
 
 ### Data Privacy 
-( as of  feb 15th, 2025)
+
 - ✅ **What's Sent to LLMs**:
   - User queries (user prompts)
   - System prompts 
@@ -133,7 +132,6 @@ Future releases may introduce optional features that require sending Okta data t
 All such changes will be clearly documented in release notes.
 
 ### Data Model Overview 
-( as of  feb 15th, 2025)
 
 | Entity | Core Fields |
 |--------|------------|
