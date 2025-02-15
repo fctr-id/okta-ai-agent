@@ -4,11 +4,27 @@
   </a>
 </p>
 
-
-<h1 align="center">AI Agent for Okta</h1>
+<h1 style="margin-top: -6px" align="center">AI Agent for Okta</h1>
 
 This AI agent lets you use natural language to query your Okta tenant's details. Built for admins, powered by enterprise AI models.
 
+## 📑 Index
+- [📑 Index](#-index)
+- [✨ What's Special?](#-whats-special)
+- [🚀 Quick Start](#-quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Get Started in Minutes!](#get-started-in-minutes)
+- [🎯 Usage](#-usage)
+- [🛡️ Security \& Privacy](#️-security--privacy)
+  - [Data Control](#data-control)
+  - [Data Privacy (as of Feb 15th, 2025)](#data-privacy-as-of-feb-15th-2025)
+  - [Data Model Overview (as of Feb 15th, 2025)](#data-model-overview-as-of-feb-15th-2025)
+- [⚠️ Good to Know](#️-good-to-know)
+  - [Beta Release 🧪](#beta-release-)
+  - [Security First 🛡️](#security-first-️)
+  - [Current Boundaries 🎯](#current-boundaries-)
+- [🆘 Need Help?](#-need-help)
+- [⚖️ Legal Stuff](#️-legal-stuff)
 
 ## ✨ What's Special?
 
@@ -21,28 +37,7 @@ This  tool brings you:
      -  Azure OpenAI (GPT-4)
      -  Ollama (Local, Self-hosted, use 32B+ models)
      -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
-
-## 🛡️ Security & Privacy 
-
-### Data Control
-- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
-- **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
-- **LLM Flexibility**: 
-  - Use your enterprise-approved AI providers
-  - Deploy Ollama locally for a completely local environment
-  - Full control over model selection  
-
-### Data Privacy (as of Feb 15th, 2025)
-- ✅ **What's Sent to LLMs**:
-  - User queries (user prompts)
-  - System prompts 
-- ❌ **What's Not Sent**:
-  - No Okta user data
-  - No organizational data
-  - No synced database contents
-
-> **Note**: Future relases may introduce features that will require the Okta data to be sent to the LLM for summarization.
->  Any such changes will be clearly documented in release notes.
+  
 
 ## 🚀 Quick Start
 
@@ -101,7 +96,49 @@ python Okta_AI_Agent.py
 3. **Ask Away!** Try these cool queries:
 * 👥 "Who are my active users?"
 * 🎯 "Show me users in the 'Sales' application"
-* 📱 "List everyone with PUSH authentication"
+* 📱 "List everyone with PUSH authentication"  
+
+
+## 🛡️ Security & Privacy 
+
+### Data Control
+- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
+- **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
+- **LLM Flexibility**: 
+  - Use your enterprise-approved AI providers
+  - Deploy Ollama locally for a completely local environment
+  - Full control over model selection  
+
+### Data Privacy (as of Feb 15th, 2025)
+- ✅ **What's Sent to LLMs**:
+  - User queries (user prompts)
+  - System prompts 
+- ❌ **What's Not Sent**:
+  - No Okta user data
+  - No organizational data
+  - No synced database contents
+
+> **Note**: Future relases may introduce features that will require the Okta data to be sent to the LLM for summarization.
+>  Any such changes will be clearly documented in release notes.
+
+### Data Model Overview (as of Feb 15th, 2025)
+
+| Entity | Core Fields |
+|--------|------------|
+| Users | `email`, `login`, `first_name`, `last_name`, `status` |
+| Groups | `name`, `description` |
+| Applications | `name`, `label`, `status`, `sign_on_mode` |
+| Factors | `factor_type`, `provider`, `status`, `device_type` |
+| Policies | `name`, `description`, `status`, `type` |
+
+The relationship data for users -> factors, users -> groups, users -> applications 
+
+Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
+
+> **Note**: You can view the data saved to your SqlLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
+
+
+
 
 ## ⚠️ Good to Know
 
