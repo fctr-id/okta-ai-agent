@@ -17,8 +17,8 @@ This AI agent lets you use natural language to query your Okta tenant's details.
 - [🎯 Usage](#-usage)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
-  - [Data Privacy (as of Feb 15th, 2025)](#data-privacy-as-of-feb-15th-2025)
-  - [Data Model Overview (as of Feb 15th, 2025)](#data-model-overview-as-of-feb-15th-2025)
+  - [Data Privacy](#data-privacy)
+  - [Data Model Overview](#data-model-overview)
 - [⚠️ Good to Know](#️-good-to-know)
   - [Beta Release 🧪](#beta-release-)
   - [Security First 🛡️](#security-first-️)
@@ -109,7 +109,9 @@ python Okta_AI_Agent.py
   - Deploy Ollama locally for a completely local environment
   - Full control over model selection  
 
-### Data Privacy (as of Feb 15th, 2025)
+
+### Data Privacy 
+( as of  feb 15th, 2025)
 - ✅ **What's Sent to LLMs**:
   - User queries (user prompts)
   - System prompts 
@@ -121,7 +123,8 @@ python Okta_AI_Agent.py
 > **Note**: Future relases may introduce features that will require the Okta data to be sent to the LLM for summarization.
 >  Any such changes will be clearly documented in release notes.
 
-### Data Model Overview (as of Feb 15th, 2025)
+### Data Model Overview 
+( as of  feb 15th, 2025)
 
 | Entity | Core Fields |
 |--------|------------|
