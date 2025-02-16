@@ -4,11 +4,7 @@
   </a>
 </div>
 
-<div align="center">
-  <h2 style="display: inline-block; margin-right: 5px">AI Agent for Okta</h2>
-  <h5 style="display: inline-block">(BETA)</h5>
-</div>
-
+<h2 style="margin-left: 10px" align="center">AI Agent for Okta </h2><h3>(BETA)</h3>
 
 This AI agent is the first of it's kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers. IT GRC teams and audit teams, powered by enterprise AI models.
 
