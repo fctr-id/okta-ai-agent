@@ -75,6 +75,8 @@ def save_results_to_csv(results: List[dict], filename: str):
     except Exception as e:
         logger.error(f"Error saving results to CSV: {str(e)}")
         raise  
+    
+  
 
 # Add configuration for reasoning
 
@@ -125,6 +127,31 @@ class SQLExecutor:
         except Exception as e:
             logger.error(f"Query execution failed: {str(e)}", exc_info=True)
             return {"error": str(e)}
+        
+async def get_last_sync_info(executor: SQLExecutor) -> str:
+    """Get last successful sync time for users entity"""
+    sql = """
+    SELECT 
+        sync_end_time as last_sync,
+        records_processed
+    FROM sync_history 
+    WHERE status = 'SUCCESS'
+    AND entity_type = 'User'
+    ORDER BY sync_end_time DESC
+    LIMIT 1
+    """
+    try:
+        result = await executor.execute_query(sql)
+        if result and result["results"]:
+            sync_info = result["results"][0]
+            return f"\n🔄 Last Users Sync: {sync_info['last_sync']} "
+        return "\n🔄 No user sync history available"
+    except Exception as e:
+        logger.error(f"Error fetching users sync history: {str(e)}")
+        return "\n🔄 Unable to fetch sync information"
+    
+
+### Reasoning Agent Integration        
         
 async def process_with_reasoning(question: str) -> Dict[str, str]:
     """Process question through reasoning agent first"""
@@ -226,6 +253,10 @@ async def main():
                             writer.writeheader()
                             writer.writerows(query_result["results"])
                             print(output.getvalue())
+                            
+                        sync_info = await get_last_sync_info(executor)
+                        print("\n" + "-" * 40)
+                        print(sync_info)                              
                     else:
                         # Automatically save larger result sets
                         try:
@@ -250,13 +281,14 @@ async def main():
                                 writer.writeheader()
                                 writer.writerows(preview_data)
                                 print(output.getvalue())
+                                          
                             
                         except Exception as e:
                             logger.error(f"Error saving results: {str(e)}")
                             print(f"\n❌ Error saving results: {str(e)}")
                 else:
-                    print("No records found")
-                
+                    print("No records found")                   
+                         
         except Exception as e:
             logger.error(f"Error processing question: {str(e)}", exc_info=True)
             print(f"\nError: {str(e)}")
