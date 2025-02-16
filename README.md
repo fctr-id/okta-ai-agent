@@ -32,6 +32,8 @@ This AI agent is the first of it's kind that lets you use natural language to qu
 - [👥 Contributors](#-contributors)
 - [⚖️ Legal Stuff](#️-legal-stuff)
 
+&nbsp;
+
 ## ✨ What's Special?
 
 The first AI Agent for Okta that has the following features:
