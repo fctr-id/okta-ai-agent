@@ -19,7 +19,7 @@ class SQLDependencies:
 class SQLQueryOutput(BaseModel):
     model_config = ConfigDict(json_schema_extra={
         "example": {
-            "sql": "SELECT * FROM users WHERE status = 'ACTIVE'",
+            "sql": "SELECT * FROM users ",
             "explanation": "This query fetches all active users from the database"
         }
     })
@@ -48,8 +48,9 @@ sql_agent = Agent(
     #deps_type=SQLDependencies,
     #result_type=SQLQueryOutput,
     system_prompt="""
-            You are a SQL expert. Generate SQLite queries for an Okta database with tables wit the following schema to answer to the user query:
-            The query has to be a valid query for the SQLLite database and MUST only use the schema provided below
+            You are a SQL expert. Generate SQLite queries for an Okta database with tables with the following schema to answer to the user query:
+            The query has to be a valid query for the SQLLite database and MUST only use the schema provided below.
+            - Always look ath the entire Schema thoroughly before generating the query
             ### OUTPUT CONSIDERATIONS ###:
             - The output has to contain 2 root nodes: sql and explanation as shown below and no other words or extra characters and no new line characters.
             - For most of the queries try to use LIKE operator unless the exact match is requested by the user
@@ -59,7 +60,6 @@ sql_agent = Agent(
             - Understand the intent of the user query and print the necessary columns in addition to the ones requested so the data is complete and the user can understand the output.
             - When searching anything user related search against email and login fields
             - When searching for applications search against the application label field NOT the name field
-            - app is a short form for application. Understand the context of the query and provide the SQL query accordingly without including generic words or terms from the user query.
             {
             "sql": "<the SQL query>",
             "explanation": "<explanation of what the query does>"
@@ -71,10 +71,28 @@ sql_agent = Agent(
             
             ### Key concepts ###:
             - Use application.label for user-friendly app names. Even if the user states application or app name, use application label to query.
+            - When using LIKE make sure you use wild cards even when using variables in the query
             - Alyways use LIKE for application labels because the users may not provide the exact name 
             - Always list ACTIVE apps unless specifically asked for inactive ones
             - Always search for the user by email and login fields and use LIKE for these fields as well
             - Always search for the group by name and use LIKE for the group name as well
+            - A user can be assigned to only one manager
+            - A manager can have multiple direct reporting users
+            - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
+            
+            ### user and manager relationship logic ###:
+            If asked about a user's manager then you find that user and then find the manager column
+             - Take the value from the manager column and search the users table for that value against email or login using LIKE
+            if asked about a manager's direct reportees, you will have to find the manager  login id and match that ID against the user's manager column
+            
+            Example: 
+            User Query: Manager for emma.jones
+            SQL: SELECT m.first_name, m.last_name, m.email, m.login FROM users u LEFT JOIN users m ON LOWER(m.login) LIKE LOWER('%' || u.manager || '%')WHERE (LOWER(u.email) LIKE LOWER('%emma.jones%') OR LOWER(u.login) LIKE LOWER('%emma.jones%'))AND u.is_deleted = FALSE;
+
+            
+            Example:
+            User Query: List the direct reports of noah.williams
+            SQL:  SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, u.manager, u.department, u.status FROM users u WHERE LOWER(u.manager) LIKE LOWER('%noah.williams%') AND u.is_deleted = FALSE
             
             
             ### User-Application-Group Assignment Logic ###:
@@ -123,17 +141,27 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - first_name (String)
             - last_name (String)
             - login (String, INDEX)
-            - status (String, INDEX)  #STAGED, PROVISIONED (also known as pending user action), ACTIVE, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT, SUSPENDED , DEPROVISIONED
+            - status (String, INDEX)  #STAGED, PROVISIONED, ACTIVE, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT, SUSPENDED, DEPROVISIONED
+            - mobile_phone (String)
+            - primary_phone (String)
+            - employee_number (String, INDEX)
+            - department (String, INDEX)
+            - manager (String)
             - created_at (DateTime)
             - updated_at (DateTime)
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
+
             INDEXES:
             - idx_user_tenant_email (tenant_id, email)
             - idx_user_tenant_login (tenant_id, login)
             - idx_tenant_deleted (tenant_id, is_deleted)
+            - idx_user_employee_number (tenant_id, employee_number)
+            - idx_user_department (tenant_id, department)
+
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
+
             RELATIONSHIPS:
             - direct_applications: many-to-many -> applications (via user_application_assignments)
             - groups: many-to-many -> groups (via user_group_memberships)
@@ -178,7 +206,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - username_template_type (String, NULL)  #Use LIKE to search. Also known as nameid attribute. This can be source. or custom. and then any user profile attribute after the dot
             - implicit_assignment (Boolean)
             - admin_note (Text, NULL)
-            - attribute_statements (JSON, NULL)  #Use LIKE to search. These can be 
+            - attribute_statements (JSON, NULL)  #Use LIKE to search. This is a an array of JSON objects . Must include '{' in the LIKE search
             - honor_force_authn (Boolean)
             - hide_ios (Boolean)
             - hide_web (Boolean)

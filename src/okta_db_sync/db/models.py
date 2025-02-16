@@ -105,6 +105,11 @@ class User(BaseModel):
     last_name = Column(String)
     login = Column(String, index=True)
     status = Column(String, index=True)
+    mobile_phone = Column(String)
+    primary_phone = Column(String)
+    employee_number = Column(String, index=True)
+    department = Column(String, index=True)
+    manager = Column(String) 
     
     #groups = relationship('Group', secondary=user_groups, back_populates='users', passive_deletes=True)
     #authenticators = relationship('Authenticator', secondary=user_authenticators, back_populates='users', passive_deletes=True)
@@ -117,6 +122,8 @@ class User(BaseModel):
     __table_args__ = (
         Index('idx_user_tenant_email', 'tenant_id', 'email'),
         Index('idx_user_tenant_login', 'tenant_id', 'login'),
+        Index('idx_user_employee_number', 'tenant_id', 'employee_number'),
+        Index('idx_user_department', 'tenant_id', 'department'),
         {'extend_existing': True}
     )
 

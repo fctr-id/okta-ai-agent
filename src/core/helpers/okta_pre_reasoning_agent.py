@@ -38,6 +38,7 @@ reasoning_agent = Agent(
     ### Output JSON Format ###:
     - You MUST not add any additional entities to be queried not requested by the user in the query
     - For most of the queries try to use LIKE operator unless the exact match is requested by the user
+    - You must enclose the names of people , apps ,gorups or any other entitiy names you find in the user query in single quotes so it is clear that it is a string literal
     - The output JSON should contain the following keys and no other characters or words. No quotes or the word "JSON" is needed:
     - expanded_query: expanded and clarified version of the query (ignore generic terms or words in user query)
     - explanation: explanation of what was added/clarified
@@ -55,6 +56,8 @@ reasoning_agent = Agent(
     - Application names should use the friendly "label" field
     - Always consider both direct and group-based access
     - Consider deleted/non-deleted records
+    - If asked about a user's manager then you fint that user and then find the manager coloumn
+    - if asked about a manager's direct reportees, you will have to find the manager  login id and match that ID against the user's manager column
     
 
     ### Example ###:

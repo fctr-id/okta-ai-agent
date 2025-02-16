@@ -177,6 +177,11 @@ class OktaClientWrapper:
             'last_name': user.get('profile', {}).get('lastName'),
             'login': user.get('profile', {}).get('login'),
             'status': user.get('status'),
+            'mobile_phone': user.get('profile', {}).get('mobilePhone'),
+            'primary_phone': user.get('profile', {}).get('primaryPhone'),
+            'employee_number': user.get('profile', {}).get('employeeNumber'),
+            'department': user.get('profile', {}).get('department'),
+            'manager': user.get('profile', {}).get('manager'),
             'factors': factors,
             'app_links': app_links,
             'group_memberships': group_memberships
