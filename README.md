@@ -7,13 +7,15 @@
 <h2 style="margin-left: 10px" align="center">AI Agent for Okta (BETA)</h2>
 
 
-This AI agent is the first of it's kind that lets you use natural language to query your Okta tenant's details. Built for admins, powered by enterprise AI models.
+This AI agent is the first of it's kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers. IT GRC teams and audit teams, powered by enterprise AI models.
 
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
   - [Get Started](#get-started)
   - [🎯 Usage](#-usage)
+  - [Usage Examples \& Community Queries](#usage-examples--community-queries)
+  - [Share Your Queries!](#share-your-queries)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
   - [Data Privacy](#data-privacy)
@@ -22,10 +24,15 @@ This AI agent is the first of it's kind that lets you use natural language to qu
   - [Beta Release 🧪](#beta-release-)
   - [Security First 🛡️](#security-first-️)
   - [Current Limitations 🔍](#current-limitations-)
+- [🗺️ Roadmap](#️-roadmap)
+  - [Real-time Data Integration](#real-time-data-integration)
+  - [Event Log Analytics](#event-log-analytics)
+  - [Managed Changes](#managed-changes)
 - [🆘 Need Help?](#-need-help)
 - [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
 - [👥 Contributors](#-contributors)
 - [⚖️ Legal Stuff](#️-legal-stuff)
+
 ## ✨ What's Special?
 
 The first AI Agent for Okta that has the following features:
@@ -93,10 +100,22 @@ python Fetch_Okta_Data.py
 python Okta_AI_Agent.py
 ```
 
-3. **Ask Away!** Try these cool queries:
+### Usage Examples & Community Queries
+
+Try these example queries to get started:
+
 * 👥 "Who are my active users?"
 * 🎯 "Show me users in the 'Sales' application"
-* 📱 "List everyone with PUSH authentication"  
+* 📱 "List everyone with PUSH authentication"
+
+### Share Your Queries!
+
+We're building a community knowledge base! Explore and contribute:
+
+| Action | Link |
+|--------|------|
+| 📝 Submit Query | [Share your examples](https://messy-heath-9e9.notion.site/19cc111b8adc80f9889bdc9badf1ee89?pvs=105) |
+| 🔍 View Examples | [Browse community queries](https://messy-heath-9e9.notion.site/19cc111b8adc80718a40e59d1c41b30f?v=19cc111b8adc8013b94e000ce7e23638&pvs=4) |
 
 
 ## 🛡️ Security & Privacy 
@@ -134,20 +153,20 @@ All such changes will be clearly documented in release notes.
 ### Data Model Overview 
 
 | Entity | Core Fields |
-|--------|------------|
-| Users | `email`, `login`, `first_name`, `last_name`, `status` |
+|--------|-------------|
+| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager` |
 | Groups | `name`, `description` |
-| Applications | `name`, `label`, `status`, `sign_on_mode` |
-| Factors | `factor_type`, `provider`, `status`, `device_type` |
+| Applications | `name`, `label`, `status`, `sign_on_mode`, `metadata_url`, `sign_on_url`, `audience`, `destination`, `signing_kid`, `username_template`, `username_template_type`, `admin_note`, `attribute_statements`, `honor_force_authn`, `hide_ios`, `hide_web`, `policy_id`, `settings`, `features`, `visibility`, `credentials`, `licensing`, `embedded_url`, `accessibility`, `user_name_template`, `app_settings`, `app_embedded_url` |
+| UserFactors | `factor_type`, `provider`, `status`, `email`, `phone_number`, `device_type`, `device_name`, `platform` |
 | Policies | `name`, `description`, `status`, `type` |
+
+
 
 The relationship data for users -> factors, users -> groups, users -> applications 
 
 Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 
 > **Note**: You can view the data saved to your SqlLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
-
-
 
 
 ## ⚠️ Good to Know
@@ -159,14 +178,35 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 
 ### Security First 🛡️
 * Data lives safely in your local SQLite
-* AI sees only what it needs to
+* AI/LLM sees only what it needs to
 * Proper token hygiene required
 
 ### Current Limitations 🔍
 * The responses are stateless, i.e., every query is answered as is asked without any relevance to the previous queries / responses.
+* Tested on Identity engine only
 * AI responses vary by provider
 * Complex questions might need simplifying
 * One tenant at a time
+
+## 🗺️ Roadmap
+
+### Real-time Data Integration
+- [ ] User Snapshots
+  - Profile, factors & last week's activity summary
+  - Live session data
+  - Risk indicators
+
+### Event Log Analytics
+- [ ] System Log Queries
+  - Failed logins, MFA events, admin actions
+  - Anomaly detection
+  - Custom reports
+
+### Managed Changes
+- [ ] Change Management with Approvals
+  - Group memberships
+  - Policy modifications
+  - App assignments
 
 ## 🆘 Need Help?
 
