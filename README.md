@@ -36,7 +36,6 @@ This AI agent is the first of it's kind that lets you use natural language to qu
 
 ## ✨ What's Special?
 
-The first AI Agent for Okta that has the following features:
 * 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLlite DB
 * 💡 **Natural Language Queries** - Talk to your Okta data in simple english
 *  ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
