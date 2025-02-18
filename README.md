@@ -6,12 +6,15 @@
 
 <h2 style="margin-left: 10px" align="center">AI Agent for Okta (BETA)</h2>
 
-This AI agent is the first of it's kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers. IT GRC teams and audit teams, powered by enterprise AI models.
+This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers, IT GRC teams and audit teams, powered by enterprise AI models. The vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
+
 
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
   - [Get Started](#get-started)
+    - [Windows Setup](#windows-setup)
+    - [Linux/MacOS Setup](#linuxmacos-setup)
   - [🎯 Usage](#-usage)
   - [Usage Examples \& Community Queries](#usage-examples--community-queries)
   - [Share Your Queries!](#share-your-queries)
@@ -24,9 +27,10 @@ This AI agent is the first of it's kind that lets you use natural language to qu
   - [Security First 🛡️](#security-first-️)
   - [Current Limitations 🔍](#current-limitations-)
 - [🗺️ Roadmap](#️-roadmap)
-  - [Real-time Data Integration](#real-time-data-integration)
-  - [Event Log Analytics](#event-log-analytics)
-  - [Managed Changes](#managed-changes)
+  - [Phase 1: Data Access \& Insights](#phase-1-data-access--insights)
+  - [Phase 2: Real-time Operations](#phase-2-real-time-operations)
+  - [Phase 3: Autonomous Operations](#phase-3-autonomous-operations)
+  - [Phase 4: Full Automation](#phase-4-full-automation)
 - [🆘 Need Help?](#-need-help)
 - [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
 - [👥 Contributors](#-contributors)
@@ -61,10 +65,29 @@ git clone https://github.com/fctr-id/okta-ai-agent
 cd okta-ai-agent
 ```
 
-2. **Set Up Your Python Virtual Environment**
-```bash
+2. **Set Up Python Virtual Environment**
+
+#### Windows Setup
+```batch
+# Create virtual environment
 python -m venv venv
+
+# Activate virtual environment
 .\venv\Scripts\activate
+
+# Install requirements
+pip install -r requirements.txt
+```
+
+#### Linux/MacOS Setup
+```bash
+# Create virtual environment
+python3 -m venv venv
+
+# Activate virtual environment
+source venv/bin/activate
+
+# Install requirements
 pip install -r requirements.txt
 ```
 
@@ -190,23 +213,37 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 
 ## 🗺️ Roadmap
 
-### Real-time Data Integration
-- [ ] Work with real time data / APIs
-  - Profile, factors & last week's activity summary
-  - User summary
+### Phase 1: Data Access & Insights
+- [x] Natural language queries for Okta data
+- [x] Multi-provider AI support
+- [x] Save details for users, apps, groups, factors, polcies and their relationships
+
+### Phase 2: Real-time Operations
+- [ ] Live user summary
+  - Profile, factors & activity snapshots
   - Risk indicators
-
-### Event Log Analytics
-- [ ] System Log Queries
-  - Failed logins, MFA events, admin actions
+  - Session management
+- [ ] Event Log Analytics
+  - Natural language log queries
   - Anomaly detection
-  - Custom reports
+  - Custom report generation
 
-### Managed Changes
-- [ ] Change Management with Approvals
+### Phase 3: Autonomous Operations
+- [ ] Automated Changes with Approval Workflow
   - Group memberships
   - Policy modifications
   - App assignments
+- [ ] Self-service Integration
+  - Chatbot interface
+  - Teams/Slack integration
+  - Email notifications
+
+### Phase 4: Full Automation
+- [ ] AI-driven Policy Management
+- [ ] Automated User Lifecycle
+- [ ] Intelligent Access Reviews
+- [ ] Risk-based Authentication
+- [ ] Complete Admin Automation
 
 ## 🆘 Need Help?
 
@@ -232,4 +269,4 @@ Check out [`License.md`](License.md) for the fine print.
 
 ---
 
-🌟 © 2024 Fctr. All rights reserved. Made with ❤️ for the Okta community.
+🌟 © 2025 Fctr. All rights reserved. Made with ❤️ for the Okta community.
