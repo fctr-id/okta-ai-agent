@@ -201,11 +201,19 @@ async def process_with_reasoning(question: str) -> Dict[str, str]:
 DISPLAY_LIMIT = 20
 USE_PRE_REASONING = os.getenv('USE_PRE_REASONING', 'false').lower() == 'true'
 #print(f"Using Pre-Reasoning: {USE_PRE_REASONING}")
+
+class Colors:
+    BLUE_BG = '\033[44m'
+    GREEN_BG = '\033[42m'
+    MAGENTA_BG = '\033[45m'
+    RESET = '\033[0m'
+    
+    
 async def main():
     executor = SQLExecutor()
     logger.info(f"Starting Okta Query Assistant (Reasoning: {'Enabled' if USE_PRE_REASONING else 'Disabled'}) Provider: {os.getenv('AI_PROVIDER')}")
     print("\nWelcome to Okta Query Assistant!")
-    print(f"Reasoning Agent: {'Enabled' if USE_PRE_REASONING else 'Disabled'}")
+    print(f"{Colors.GREEN_BG}Reasoning Agent: {Colors.RESET}{'Enabled' if USE_PRE_REASONING else 'Disabled'}")
     print("Type 'exit' to quit\n")
     
     while True:
@@ -229,6 +237,9 @@ async def main():
                     print("-" * 40)
                     continue
                 processed_question = reasoning_result["query"]
+                # Add colored output for expanded query
+                print(f"\n{Colors.BLUE_BG}Expanded Query:{Colors.RESET}")
+                print(f"{processed_question}")
                 logger.debug("Using processed question for SQL generation")
             else:
                 processed_question = question
@@ -237,6 +248,10 @@ async def main():
             logger.debug("Generating SQL using agent")
             sql_response = await sql_agent.run(processed_question)
             result = extract_json_from_text(str(sql_response.data))
+            
+                        # Add colored output for generated SQL
+            print(f"\n{Colors.GREEN_BG}Generated SQL:{Colors.RESET}")
+            print(f"{result['sql']}")
             
             # Check if SQL is empty (invalid/unsupported query)
             if not result["sql"].strip():
@@ -288,7 +303,7 @@ async def main():
                                 "okta_ai_agent_results"
                             )
                             print(f"\n📊 Found {query_result['count']} records")
-                            print(f"💾 Results automatically saved to: {saved_file}")
+                            print(f"{Colors.MAGENTA_BG}💾 Results automatically saved to:{Colors.RESET} {saved_file}")
                             print(f"\nFirst {DISPLAY_LIMIT} records preview:")
                             print("-" * 40)
                             
