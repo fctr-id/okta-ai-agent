@@ -16,6 +16,7 @@ This AI agent is the first of its kind that lets you use natural language to que
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
+  - [Youtube Installation \& demo video](#youtube-installation--demo-video)
   - [Get Started](#get-started)
     - [Windows Setup](#windows-setup)
     - [Linux/MacOS Setup](#linuxmacos-setup)
@@ -60,6 +61,11 @@ This AI agent is the first of its kind that lets you use natural language to que
 * Python 3.12+
 * Okta tenant superadmin acess
 * Access to any supported AI provider mentioned above
+
+### Youtube Installation & demo video
+
+[![Demo video](https://img.youtube.com/vi/mEg_TqMjOvM/0.jpg)](https://www.youtube.com/watch?v=mEg_TqMjOvM)
+
 
 ### Get Started
 
