@@ -1,11 +1,16 @@
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from sqlalchemy import Column, String, DateTime, Boolean, ForeignKey, Integer, Table, Index, UniqueConstraint, Text, JSON, Enum as SQLEnum
-from sqlalchemy.sql import func, text
-from datetime import datetime
+from sqlalchemy.sql import func, text, functions
+from datetime import datetime, timezone
 import enum
 
 Base = declarative_base()
+
+# Add this helper function at the top of the file
+def get_utc_now():
+    """Return current UTC datetime"""
+    return datetime.now(timezone.utc)
 
 class BaseModel(Base):
     __abstract__ = True
@@ -13,9 +18,13 @@ class BaseModel(Base):
     id = Column(Integer, primary_key=True)
     tenant_id = Column(String, nullable=False, index=True)
     okta_id = Column(String, nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    last_synced_at = Column(DateTime, index=True)
+    # API response timestamps
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Local tracking timestamps
+    last_synced_at = Column(DateTime(timezone=True), index=True)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)
     is_deleted = Column(Boolean, default=False, index=True)
 
     __table_args__ = (
@@ -28,8 +37,8 @@ class SyncBase(Base):
     
     id = Column(Integer, primary_key=True)
     tenant_id = Column(String, nullable=False, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)    
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now)   
 
 #user_groups = Table(
 #    'user_groups',
@@ -64,8 +73,8 @@ user_application_assignments = Table(
     Column('app_instance_id', String, nullable=False),  # appInstanceId from appLinks
     Column('credentials_setup', Boolean, default=False),
     Column('hidden', Boolean, default=False),
-    Column('created_at', DateTime, default=datetime.utcnow),
-    Column('updated_at', DateTime, default=datetime.utcnow, onupdate=datetime.utcnow),
+    Column('created_at', DateTime(timezone=True), default=get_utc_now),
+    Column('updated_at', DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now),
     Index('idx_user_app_tenant', 'tenant_id'),
     UniqueConstraint('tenant_id', 'user_okta_id', 'application_okta_id', name='uix_user_app_assignment')
 )
@@ -78,8 +87,8 @@ group_application_assignments = Table(
     Column('application_okta_id', String, ForeignKey('applications.okta_id', ondelete='CASCADE'), primary_key=True),
     Column('tenant_id', String, nullable=False),
     Column('assignment_id', String, nullable=False),
-    Column('created_at', DateTime, default=datetime.utcnow),
-    Column('updated_at', DateTime, default=datetime.utcnow, onupdate=datetime.utcnow),
+    Column('created_at', DateTime(timezone=True), default=get_utc_now),
+    Column('updated_at', DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now),
     Index('idx_group_app_tenant', 'tenant_id'),
     UniqueConstraint('tenant_id', 'group_okta_id', 'application_okta_id', name='uix_group_app_assignment')
 )
@@ -91,8 +100,8 @@ user_group_memberships = Table(
     Column('user_okta_id', String, ForeignKey('users.okta_id', ondelete='CASCADE'), primary_key=True),
     Column('group_okta_id', String, ForeignKey('groups.okta_id', ondelete='CASCADE'), primary_key=True),
     Column('tenant_id', String, nullable=False),
-    Column('created_at', DateTime, default=datetime.utcnow),
-    Column('updated_at', DateTime, default=datetime.utcnow, onupdate=datetime.utcnow),
+    Column('created_at', DateTime(timezone=True), default=get_utc_now),
+    Column('updated_at', DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now),
     Index('idx_user_group_tenant', 'tenant_id'),
     UniqueConstraint('tenant_id', 'user_okta_id', 'group_okta_id', name='uix_user_group_membership')
 )
@@ -194,9 +203,9 @@ class Application(BaseModel):
     hide_web = Column(Boolean, default=False)
     
     # Timestamps and flags
-    created_at = Column(DateTime, nullable=True)
-    last_updated_at = Column(DateTime, nullable=True)
-    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated_at = Column(DateTime(timezone=True), nullable=True)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     policy = relationship('Policy', foreign_keys=[policy_id], back_populates='applications')
@@ -242,9 +251,9 @@ class Policy(BaseModel):
     type = Column(String, index=True)
     
     # Timestamps
-    created_at = Column(DateTime, nullable=True)
-    last_updated_at = Column(DateTime, nullable=True)
-    last_synced_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated_at = Column(DateTime(timezone=True), nullable=True)
+    last_synced_at = Column(DateTime(timezone=True), nullable=True)
     
     # Relationships
     applications = relationship('Application', back_populates='policy', foreign_keys='Application.policy_id')
@@ -278,8 +287,8 @@ class UserFactor(BaseModel):
     status = Column(String, index=True)
     
     # New timestamp fields
-    created_at = Column(DateTime, nullable=True)
-    last_updated_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+    last_updated_at = Column(DateTime(timezone=True), nullable=True)
     
     # Factor type specific fields
     email = Column(String, nullable=True)
@@ -310,14 +319,14 @@ class SyncHistory(SyncBase):
     __tablename__ = 'sync_history'
     
     entity_type = Column(String, nullable=False, index=True)
-    sync_start_time = Column(DateTime, default=func.now())
-    sync_end_time = Column(DateTime)
+    sync_start_time = Column(DateTime(timezone=True), default=func.now())
+    sync_end_time = Column(DateTime(timezone=True))
     status = Column(SQLEnum(SyncStatus), nullable=False, default=SyncStatus.STARTED)
     records_processed = Column(Integer, default=0)
-    last_successful_sync = Column(DateTime)
+    last_successful_sync = Column(DateTime(timezone=True))
     error_message = Column(String)
 
     __table_args__ = (
         Index('idx_sync_tenant_entity', 'tenant_id', 'entity_type'),
         {'extend_existing': True}
-    )   
+    )  

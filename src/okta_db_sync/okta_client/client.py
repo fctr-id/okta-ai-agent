@@ -25,6 +25,20 @@ from okta.models import User, Group, Policy, Application
 
 T = TypeVar('T')
 
+
+from datetime import datetime, timezone
+
+def parse_timestamp(timestamp_str: Optional[str]) -> Optional[datetime]:
+    """Convert Okta timestamp string to UTC datetime object"""
+    if not timestamp_str:
+        return None
+    try:
+        # Parse ISO format and ensure UTC
+        dt = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        return dt.astimezone(timezone.utc)
+    except (ValueError, AttributeError):
+        return None
+
 class OktaClientWrapper:
     """
     Async wrapper for Okta API client with relationship handling.
@@ -130,7 +144,7 @@ class OktaClientWrapper:
             
         except Exception as e:
             logger.error(f"Error in pagination: {str(e)}")
-            raise
+            raise     
         
    
     async def list_users(self, since: Optional[datetime] = None) -> List[Dict]:
@@ -182,6 +196,8 @@ class OktaClientWrapper:
             'employee_number': user.get('profile', {}).get('employeeNumber'),
             'department': user.get('profile', {}).get('department'),
             'manager': user.get('profile', {}).get('manager'),
+            'created_at': parse_timestamp(user.get('created')),
+            'last_updated_at': parse_timestamp(user.get('lastUpdated')),            
             'factors': factors,
             'app_links': app_links,
             'group_memberships': group_memberships
@@ -257,6 +273,8 @@ class OktaClientWrapper:
                 'okta_id': group_id,
                 'name': group.get('profile', {}).get('name'),
                 'description': group.get('profile', {}).get('description'),
+                'created_at': parse_timestamp(group.get('created')),
+                'last_updated_at': parse_timestamp(group.get('lastUpdated')),                
                 'applications': app_assignments  # Include app assignments
             }
         except Exception as e:
@@ -341,7 +359,8 @@ class OktaClientWrapper:
                 'sign_on_url': sign_on.get('ssoAcsUrl') if isinstance(sign_on, dict) else getattr(sign_on, 'ssoAcsUrl', None),
                 'audience': sign_on.get('audience') if isinstance(sign_on, dict) else getattr(sign_on, 'audience', None),
                 'destination': sign_on.get('destination') if isinstance(sign_on, dict) else getattr(sign_on, 'destination', None),
-                
+                'created_at': parse_timestamp(app.get('created')),
+                'last_updated_at': parse_timestamp(app.get('lastUpdated')),
                 
                 # Links
                 
@@ -410,7 +429,9 @@ class OktaClientWrapper:
                             'name': policy.name,
                             'description': policy.description,
                             'status': policy.status,
-                            'type': policy_type
+                            'type': policy_type,
+                            'created_at': parse_timestamp(getattr(policy, 'created', None)),
+                            'last_updated_at': parse_timestamp(getattr(policy, 'lastUpdated', None))                            
                         }
                         transformed.append(policy_dict)
                     

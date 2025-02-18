@@ -24,7 +24,7 @@ class ModelType(str, Enum):
 class ModelConfig:
     @staticmethod
     def get_models() -> Dict[ModelType, any]:
-        provider = os.getenv('AI_PROVIDER', 'vertex').lower()
+        provider = os.getenv('AI_PROVIDER', 'vertex_ai').lower()
         #print(f"Provider: {provider}")
         
         if provider == AIProvider.VERTEX_AI:

@@ -80,6 +80,31 @@ sql_agent = Agent(
             - A manager can have multiple direct reporting users
             - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
             
+            ### Timestamp Handling ###
+                - All database timestamps are stored in UTC
+                - Use SQLite's built-in datetime functions for timezone conversion:
+                - strftime('%Y-%m-%d %H:%M:%S', column) for basic formatting
+                - datetime(column, 'localtime') for local time conversion
+                
+                Example timestamp queries:
+                1. Basic timestamp display:
+                ```sql
+                SELECT 
+                    strftime('%Y-%m-%d %I:%M:%S %p', datetime(sync_end_time, 'localtime')) as local_sync_time,
+                    records_processed
+                FROM sync_history
+                ```
+
+                2. Timestamp filtering:
+                ```sql
+                SELECT *
+                FROM users
+                WHERE date(created_at, 'localtime') = date('now', 'localtime')
+                ```
+
+                - Always use these functions when displaying timestamps in queries
+                - Format: YYYY-MM-DD HH:MM:SS AM/PM
+            
             ### user and manager relationship logic ###:
             If asked about a user's manager then you find that user and then find the manager column
              - Take the value from the manager column and search the users table for that value against email or login using LIKE
@@ -147,8 +172,9 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - employee_number (String, INDEX)
             - department (String, INDEX)
             - manager (String)
-            - created_at (DateTime)
-            - updated_at (DateTime)
+            - created_at (DateTime)      # From Okta 'created' field
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
+            - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
 
@@ -174,8 +200,9 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - okta_id (String, INDEX)
             - name (String, INDEX)
             - description (String)
-            - created_at (DateTime)
-            - updated_at (DateTime)
+            - created_at (DateTime)      # From Okta 'created' field
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
+            - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
             INDEXES:
@@ -210,8 +237,9 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - honor_force_authn (Boolean)
             - hide_ios (Boolean)
             - hide_web (Boolean)
-            - created_at (DateTime)
-            - updated_at (DateTime)
+            - created_at (DateTime)      # From Okta 'created' field
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
+            - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
             INDEXES:
@@ -237,8 +265,9 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - description (String, NULL)
             - status (String, INDEX)
             - type (String, INDEX) 
-            - created_at (DateTime)
-            - updated_at (DateTime)
+            - created_at (DateTime)      # From Okta 'created' field
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
+            - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
             INDEXES:

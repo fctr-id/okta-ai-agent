@@ -8,6 +8,7 @@ import asyncio
 import json, os, sys
 from pathlib import Path
 import csv
+import pytz
 from io import StringIO
 from dotenv import load_dotenv
 from datetime import datetime
@@ -128,8 +129,16 @@ class SQLExecutor:
             logger.error(f"Query execution failed: {str(e)}", exc_info=True)
             return {"error": str(e)}
         
+def get_local_timezone():
+    """Get the local timezone name"""
+    return datetime.now().astimezone().tzname()
+        
+from datetime import datetime
+import pytz
+from zoneinfo import ZoneInfo
+
 async def get_last_sync_info(executor: SQLExecutor) -> str:
-    """Get last successful sync time for users entity"""
+    """Get last successful sync time for users entity in local timezone"""
     sql = """
     SELECT 
         sync_end_time as last_sync,
@@ -142,9 +151,21 @@ async def get_last_sync_info(executor: SQLExecutor) -> str:
     """
     try:
         result = await executor.execute_query(sql)
-        if result and result["results"]:
+        if result and result.get("results") and len(result["results"]) > 0:
             sync_info = result["results"][0]
-            return f"\n🔄 Last Users Sync: {sync_info['last_sync']} "
+            
+            # Convert UTC timestamp to local time
+            utc_dt = datetime.fromisoformat(str(sync_info['last_sync']))
+            if utc_dt.tzinfo is None:
+                utc_dt = utc_dt.replace(tzinfo=pytz.UTC)
+            
+            # Get local timezone
+            local_tz = datetime.now().astimezone().tzinfo
+            local_time = utc_dt.astimezone(local_tz)
+            
+            # Format with 12-hour clock
+            formatted_time = local_time.strftime("%Y-%m-%d %I:%M:%S %p %Z")
+            return f"\n🔄 Last Users Sync: {formatted_time} ({sync_info['records_processed']} records)"
         return "\n🔄 No user sync history available"
     except Exception as e:
         logger.error(f"Error fetching users sync history: {str(e)}")
