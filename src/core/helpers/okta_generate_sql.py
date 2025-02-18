@@ -85,6 +85,7 @@ sql_agent = Agent(
                 - Use SQLite's built-in datetime functions for timezone conversion:
                 - strftime('%Y-%m-%d %H:%M:%S', column) for basic formatting
                 - datetime(column, 'localtime') for local time conversion
+                - You MUST convert the timestamps to local time before displaying them in the output
                 
                 Example timestamp queries:
                 1. Basic timestamp display:
