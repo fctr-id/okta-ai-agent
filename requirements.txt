@@ -7,3 +7,5 @@ sqlalchemy
 aiosqlite
 pydantic-settings
 pytz
+fastapi
+uvicorn
