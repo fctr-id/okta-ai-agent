@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.backend.app.routers.query import router as query_router
+from .routers import query  # Changed from app.routers to relative import
 from src.utils.logging import logger
 
 app = FastAPI(
@@ -11,10 +11,8 @@ app = FastAPI(
 
 # Log application startup
 logger.info("Initializing Okta AI Agent API")
-logger.debug(f"FastAPI Configuration: title={app.title}, version={app.version}")
 
-# Configure CORS for future frontend integration
-logger.info("Configuring CORS middleware")
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
@@ -22,20 +20,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-logger.debug("CORS middleware configured with allow_origins=['http://localhost:3000']")
 
-# Include routers
-logger.info("Registering API routers")
-app.include_router(query_router, prefix="/api/v1", tags=["queries"])
-logger.debug("Query router registered with prefix='/api/v1'")
+# Register router - only one registration needed
+app.include_router(query.router, prefix="/api")
 
 @app.get("/health")
 async def health_check():
-    logger.debug("Health check endpoint called")
     return {
         "status": "healthy",
         "service": "Okta AI Agent API"
     }
-
-# Log application startup complete
-logger.info("Okta AI Agent API initialization complete")
