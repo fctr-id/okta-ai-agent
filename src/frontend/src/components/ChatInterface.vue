@@ -125,13 +125,13 @@ const removeTypingIndicator = () => {
 }
 
 const addErrorMessage = (error) => {
-    removeTypingIndicator()
+    removeTypingIndicator();
     messages.value.push({
         type: 'assistant',
-        content: error.message || 'Sorry, I encountered an error processing your request.',
-        isError: true // Add this flag for styling
-    })
-}
+        content: typeof error === 'object' ? error.message || 'An error occurred' : error,
+        isError: true
+    });
+};
 
 onMounted(() => {
     try {
@@ -169,7 +169,7 @@ const handleStreamResponse = async (streamResponse) => {
 
     try {
         for await (const data of streamResponse.getStream()) {
-            console.log('Stream data:', data);
+            //console.log('Stream data:', data);
             if (!data) continue;
 
             switch (data.type) {
@@ -536,22 +536,29 @@ watch(() => messages.value.length, () => {
     }
 }
 
+
 /* Loading Animation */
 .loading-dots {
     display: flex;
     gap: 8px;
-    padding: 16px;
-    justify-content: center;
+    padding: 0px 14px 12px 14px;
 }
 
 .loading-dots span {
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-radius: 50%;
     background-color: #4C64E2;
     display: inline-block;
     animation: bounce 1.4s infinite ease-in-out both;
-    opacity: 0.6;
+}
+
+.loading-dots span:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.loading-dots span:nth-child(2) {
+    animation-delay: -0.16s;
 }
 
 /* Responsive Design */

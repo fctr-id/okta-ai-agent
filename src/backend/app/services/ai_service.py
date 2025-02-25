@@ -63,7 +63,7 @@ class SQLExecutor:
 
 class AIService:
     
-    BATCH_SIZE = 100
+    BATCH_SIZE = 10
     
     @staticmethod
     async def get_last_sync_info(executor: SQLExecutor) -> str:

@@ -14,7 +14,7 @@ export function useFetchStream() {
         isLoading.value = true;
         error.value = null;
         const startTime = Date.now();
-        let partialChunk = '';
+        let partialChunk = "";
 
         const controller = new AbortController();
         const connectionTimeout = new Promise((_, reject) => {
@@ -63,7 +63,7 @@ export function useFetchStream() {
                                     try {
                                         yield JSON.parse(partialChunk);
                                     } catch (parseError) {
-                                        console.error('Final chunk parse error:', parseError);
+                                        console.error("Final chunk parse error:", parseError);
                                     }
                                 }
                                 break;
@@ -77,10 +77,10 @@ export function useFetchStream() {
 
                             // Combine partial chunk with new data and split by newlines
                             const chunkText = decoder.decode(value, { stream: true });
-                            const chunks = (partialChunk + chunkText).split('\n');
-                            
+                            const chunks = (partialChunk + chunkText).split("\n");
+
                             // Last item might be incomplete, save it for next iteration
-                            partialChunk = chunks.pop() || '';
+                            partialChunk = chunks.pop() || "";
 
                             // Process complete chunks
                             for (const chunk of chunks) {
@@ -88,10 +88,10 @@ export function useFetchStream() {
                                     try {
                                         yield JSON.parse(chunk);
                                     } catch (parseError) {
-                                        console.error('Chunk parse error:', parseError);
+                                        console.error("Chunk parse error:", parseError);
                                         yield {
-                                            type: 'error',
-                                            content: 'Error processing stream data'
+                                            type: "error",
+                                            content: "Error processing stream data",
                                         };
                                     }
                                 }
@@ -107,7 +107,9 @@ export function useFetchStream() {
 
                 abort() {
                     controller.abort();
-                    reader.cancel();
+                    reader?.cancel(); // Add null check
+                    error.value = new Error("Stream aborted"); // Add error state
+                    isLoading.value = false; // Ensure loading state is cleared
                 },
             };
         } catch (e) {

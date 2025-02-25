@@ -17,31 +17,14 @@
 
         <!-- Data Table Display -->
         <div v-else-if="displayedItems.length > 0" class="table-content">
-            <v-data-table 
-                :key="`table-${displayedItems.length}`"
-                :headers="formattedHeaders" 
-                :items="displayedItems" 
-                :loading="loading" 
-                :items-per-page="5"
-                :search="search" 
-                :sort-by="sortBy" 
-                density="compact"
-                hover
-            >
+            <v-data-table :key="`table-${displayedItems.length}`" :headers="formattedHeaders" :items="displayedItems"
+                :loading="loading" :items-per-page="5" :search="search" :sort-by="sortBy" density="compact" hover>
                 <template v-slot:top>
                     <div class="table-header-container">
                         <div class="search-row pl-4">
-                            <v-text-field 
-                                v-model="search" 
-                                prepend-inner-icon="mdi-text-search-variant" 
-                                label="Search" 
-                                single-line
-                                hide-details 
-                                density="compact" 
-                                variant="underlined" 
-                                class="search-field" 
-                                color="#4C64E2"
-                            />
+                            <v-text-field v-model="search" prepend-inner-icon="mdi-text-search-variant" label="Search"
+                                single-line hide-details density="compact" variant="underlined" class="search-field"
+                                color="#4C64E2" />
                         </div>
                         <div class="info-row py-4 pl-4">
                             <div class="table-info">
@@ -50,7 +33,8 @@
                                     <span>Last Updated: {{ getLastSyncTime }}</span>
                                 </div>
                                 <div class="results-count">
-                                    <span>{{ displayedItems.length }} {{ displayedItems.length === 1 ? 'result' : 'results' }}</span>
+                                    <span>{{ displayedItems.length }} {{ displayedItems.length === 1 ? 'result' :
+                                        'results' }}</span>
                                 </div>
                             </div>
                         </div>
@@ -88,9 +72,7 @@ const props = defineProps({
 })
 
 // State management
-const accumulatedData = ref([])
-const totalRecords = ref(0)
-const isStreaming = ref(false)
+
 const search = ref('')
 const sortBy = ref([{ key: 'email', order: 'asc' }])
 
@@ -102,21 +84,16 @@ const isError = computed(() => props.type === MessageType.ERROR)
 const isMetadata = computed(() => props.type === MessageType.METADATA)
 
 
-const isTextData = computed(() => 
-    props.type === 'text' || 
+const isTextData = computed(() =>
+    props.type === 'text' ||
     (typeof props.content === 'object' && props.content?.type === 'text')
 )
 
-const hasResults = computed(() => {
-    if (isTextData.value) return false;
-    return displayedItems.value?.length > 0;  
-});
-
 const displayedItems = computed(() => {
-    console.log('Computing displayedItems:', {
-        type: props.type,
-        content: props.content
-    });
+    //console.log('Computing displayedItems:', {
+    //    type: props.type,
+    //    content: props.content
+    //});
 
     if (props.type === MessageType.STREAM || props.type === MessageType.BATCH) {
         return Array.isArray(props.content) ? props.content : [];
@@ -162,12 +139,6 @@ const formattedJson = computed(() => {
     }
 })
 
-// Loading state
-const isLoading = computed(() => {
-    return props.loading || 
-           (props.type === MessageType.STREAM && displayedItems.value.length === 0);
-});
-
 const getLastSyncTime = computed(() => {
     if (props.metadata?.last_sync) {
         return props.metadata.last_sync;
@@ -178,33 +149,38 @@ const getLastSyncTime = computed(() => {
 
 const getErrorContent = computed(() => {
     if (!isError.value) return '';
-    
+
     if (typeof props.content === 'string') {
         return props.content;
     }
-    
+
     if (typeof props.content === 'object') {
         return props.content.message || String(props.content);
     }
-    
+
     return 'An error occurred';
 });
 
 // Cleanup
 onBeforeUnmount(() => {
-    accumulatedData.value = []
-    totalRecords.value = 0
-    isStreaming.value = false
     search.value = ''
     sortBy.value = [{ key: 'email', order: 'asc' }]
+
+    // Clear table data
+    displayedContent.value = []
+    headerCache.value = []
 })
 
+
+// Use this to debu streaming data udates sent from backend
+/*
 watch(() => props.content, (newContent) => {
     console.log('Content updated:', {
         length: Array.isArray(newContent) ? newContent.length : 0,
         type: props.type
     });
 }, { deep: true });
+*/
 </script>
 
 <style scoped>
