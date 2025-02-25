@@ -21,26 +21,14 @@ async def process_query(request: Request):
 
         logger.info(f"Processing query: {query}")
         
-        # Get the first response to check type
-        async for first_response in AIService.process_query(query):
-            response_data = json.loads(first_response)
-            
-            # If it's a text response, return directly without streaming
-            if response_data.get("type") == "text":
-                return JSONResponse(content=response_data)
-                
-            # For stream data, continue with streaming
-            async def generate_stream():
-                # Yield the first response we already got
-                yield first_response + "\n"
-                # Continue with remaining stream
-                async for result in AIService.process_query(query):
-                    yield result + "\n"
+        async def generate_stream():
+            async for response in AIService.process_query(query):
+                yield response + "\n"
 
-            return StreamingResponse(
-                generate_stream(),
-                media_type='application/x-ndjson'
-            )
+        return StreamingResponse(
+            generate_stream(),
+            media_type='application/x-ndjson'
+        )
 
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}", exc_info=True)

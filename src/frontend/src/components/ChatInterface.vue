@@ -214,31 +214,21 @@ const sendMessage = async () => {
 
         try {
             for await (const data of streamResponse.getStream()) {
-                if (data.type === 'text') {
+                console.log('Stream response:', data)
+                if (!hasReceivedResponse) {
                     removeTypingIndicator()
+                    hasReceivedResponse = true
+
                     messages.value.push({
                         type: 'assistant',
                         dataType: data.type,
                         content: data.content,
                         metadata: data.metadata,
-                        isLoading: false
+                        isLoading: false,
                     })
-                    break  // Exit loop for text messages
-                } else {
-                    // Continue streaming for other types
-                    if (!hasReceivedResponse) {
-                        removeTypingIndicator()
-                        hasReceivedResponse = true
-                    }
-                    messages.value.push({
-                        type: 'assistant',
-                        dataType: data.type,
-                        content: data.content,
-                        metadata: data.metadata,
-                        isLoading: false
-                    })
+                    await scrollToBottom()
+                    break
                 }
-                await scrollToBottom()
             }
         } catch (streamError) {
             console.error('Stream processing error:', streamError)

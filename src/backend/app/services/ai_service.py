@@ -11,7 +11,7 @@ from src.utils.logging import logger
 class SQLExecutor:
     def __init__(self):
         self.db = DatabaseOperations()
-        logger.info("Initialized SQLExecutor")  # Log initialization
+        logger.info("Initialized SQLExecutor")
     
     @staticmethod
     async def validate_sql(sql: str) -> bool:
@@ -103,11 +103,21 @@ class AIService:
 
     @staticmethod
     async def process_query(query: str) -> AsyncGenerator[str, None]:
+        """
+        Process a natural language query about Okta data.
+        
+        Operation sequence:
+        1. Input validation
+        2. Initialize executor & get sync info
+        3. Expand query through reasoning
+        4. Generate SQL
+        5. Execute query
+        6. Format and return results
+        """
         try:
-            # Add detailed logging for query processing steps
             logger.info(f"Starting query processing: {query}")
             
-            # Basic input validation
+            # Input validation
             if not query or query.strip() == "":
                 logger.warning("Empty query received")
                 yield json.dumps({
@@ -115,29 +125,28 @@ class AIService:
                     "content": "I need a question to help you. Please provide a specific query about your Okta data."
                 })
                 return
-
-            # Initialize components
+    
+            # Initialize components and get sync info
             executor = SQLExecutor()
             last_sync = await AIService.get_last_sync_info(executor)
             
-            # Get expanded query with detailed logging
+            # Query expansion through reasoning
             logger.info("Calling expand_query...")
             reasoning_result = await expand_query(query)
-            logger.info(f"Reasoning expanded query: {reasoning_result['expanded_query']}")
-            logger.info(f"Reasoning explanation: {reasoning_result['explanation']}")
+            expanded_query = reasoning_result.get('expanded_query', '')
+            logger.info(f"Reasoning expanded query: {expanded_query}")
+            logger.info(f"Reasoning explanation: {reasoning_result.get('explanation')}")
             
-            # Validate reasoning result
-            if not reasoning_result or not reasoning_result.get("expanded_query"):
-                logger.warning(f"Invalid reasoning result: {reasoning_result}")
+            if not expanded_query:
                 yield json.dumps({
                     "type": "text",
                     "content": "I couldn't understand your question. Please rephrase it to be more specific about Okta data."
                 })
                 return
-                
-            # Generate SQL with detailed logging
+    
+            # SQL generation and validation
             logger.info("Generating SQL...")
-            sql_response = await sql_agent.run(reasoning_result["expanded_query"])
+            sql_response = await sql_agent.run(expanded_query)
             sql_result = extract_json_from_text(str(sql_response.data))
             logger.info(f"SQL generation result: {sql_result}")
             
@@ -148,8 +157,8 @@ class AIService:
                     "content": "I couldn't generate a valid query. Please try rephrasing your question."
                 })
                 return
-            
-            # Execute query
+    
+            # Query execution
             logger.info(f"Executing SQL: {sql_result['sql']}")
             query_results = await executor.execute_query(sql_result["sql"])
             
@@ -160,39 +169,35 @@ class AIService:
                     "content": f"Database error: {query_results['error']}"
                 })
                 return
-                
-            # Format and return results
-            response = {
+
+            # Results processing and response formatting
+            headers = []
+            if query_results.get("results") and len(query_results["results"]) > 0:
+                headers = [{
+                    "text": key.replace('_', ' ').title(),
+                    "value": key,
+                    "align": 'start'
+                } for key in query_results["results"][0].keys()]
+
+            # Send single response
+            logger.info("Sending response to client")
+            yield json.dumps({
                 "type": "stream",
                 "content": query_results.get("results", []),
                 "metadata": {
-                    "query": reasoning_result["expanded_query"],
+                    "query": expanded_query,
                     "sql": sql_result["sql"],
                     "explanation": sql_result.get("explanation", ""),
                     "last_sync": last_sync,
-                    "headers": (
-                        [{"text": key.title(), "value": key} 
-                        for key in query_results["results"][0].keys()]
-                        if query_results.get("results") and query_results["results"]
-                        else []
-                    )
+                    "headers": headers,
+                    "timestamp": datetime.now().isoformat()  # Add timestamp for tracking
                 }
-            }
-            
-            logger.info("Sending response to client")
-            yield json.dumps(response)
+            })
+            return  # Explicit return after yielding
 
         except Exception as e:
             logger.error(f"Error in process_query: {str(e)}", exc_info=True)
             yield json.dumps({
                 "type": "error",
                 "content": f"An error occurred: {str(e)}"
-            })
-            
-        except Exception as e:
-            logger.error(f"Error processing query: {str(e)}", exc_info=True)
-            yield json.dumps({
-                "status": "error", 
-                "message": str(e),
-                "timestamp": datetime.now().isoformat()
             })
