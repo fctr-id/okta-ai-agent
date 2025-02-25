@@ -1,7 +1,7 @@
 import { ref } from "vue";
 
 const CONFIG = {
-    CONNECTION_TIMEOUT: 5000, // 5 seconds for initial connection
+    CONNECTION_TIMEOUT: 10000, // 5 seconds for initial connection
     CHUNK_TIMEOUT: 10000, // 10 seconds between chunks
     TOTAL_TIMEOUT: 300000, // 5 minutes total stream time
 };

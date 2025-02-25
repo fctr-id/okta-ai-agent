@@ -9,7 +9,6 @@ router = APIRouter()
 
 @router.post("/query")
 async def process_query(request: Request):
-    """Process queries using AIService and return streaming results"""
     try:
         data = await request.json()
         query = data.get("query")
@@ -17,52 +16,35 @@ async def process_query(request: Request):
         if not query:
             return JSONResponse(
                 status_code=400,
-                content={
-                    "type": "error",
-                    "content": "Query is required"
-                }
+                content={"type": "error", "content": "Query is required"}
             )
 
         logger.info(f"Processing query: {query}")
         
-        async def generate_stream():
-            async for result in AIService.process_query(query):
-                # Parse the JSON string from AIService
-                result_dict = json.loads(result)
+        # Get the first response to check type
+        async for first_response in AIService.process_query(query):
+            response_data = json.loads(first_response)
+            
+            # If it's a text response, return directly without streaming
+            if response_data.get("type") == "text":
+                return JSONResponse(content=response_data)
                 
-                if result_dict.get("status") == "error":
-                    yield json.dumps({
-                        "type": "error",
-                        "content": result_dict.get("message", "Unknown error occurred")
-                    }) + "\n"
-                else:
-                    # Format successful response
-                    yield json.dumps({
-                        "type": "stream",
-                        "content": result_dict.get("results", []),
-                        "metadata": {
-                            "query": result_dict.get("query"),
-                            "sql": result_dict.get("sql"),
-                            "explanation": result_dict.get("explanation"),
-                            "last_sync": result_dict.get("last_sync"),
-                            "headers": [
-                                {"text": key.title(), "value": key} 
-                                for key in (result_dict.get("results", [{}])[0].keys() if result_dict.get("results") else [])
-                            ]
-                        }
-                    }) + "\n"
+            # For stream data, continue with streaming
+            async def generate_stream():
+                # Yield the first response we already got
+                yield first_response + "\n"
+                # Continue with remaining stream
+                async for result in AIService.process_query(query):
+                    yield result + "\n"
 
-        return StreamingResponse(
-            generate_stream(),
-            media_type='application/x-ndjson'
-        )
+            return StreamingResponse(
+                generate_stream(),
+                media_type='application/x-ndjson'
+            )
 
     except Exception as e:
         logger.error(f"Error processing request: {str(e)}", exc_info=True)
         return JSONResponse(
             status_code=500,
-            content={
-                "type": "error",
-                "content": str(e)
-            }
+            content={"type": "error", "content": str(e)}
         )

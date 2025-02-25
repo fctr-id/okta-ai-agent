@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy import select, and_, not_
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Type, TypeVar, Optional, Dict, Any
+from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator
 from .models import Base, User, UserFactor, group_application_assignments
 from src.config.settings import settings
 from src.utils.logging import logger
+
 
 ModelType = TypeVar('ModelType', bound=Base)
 
@@ -57,7 +58,7 @@ class DatabaseOperations:
             await self.engine.dispose()            
 
     @asynccontextmanager    
-    async def get_session(self) -> AsyncSession:
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """
         Get async database session with automatic commit/rollback.
         

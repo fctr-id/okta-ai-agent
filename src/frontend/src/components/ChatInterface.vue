@@ -71,7 +71,7 @@
                     <div class="d-flex flex-column w-100 py-2">
                         <div class="d-flex align-center gap-2">
                             <v-text-field v-model="userInput" placeholder="What do you want to find?" variant="outlined"
-                                color="#9DA8F5" hide-details class="chat-input" density="comfortable"
+                                color="#9DA8F5" hide-details class="chat-input text-grey-darken-2" density="comfortable"
                                 @keyup.enter="sendMessage" @keydown="handleKeyDown" />
                             <v-btn icon @click="sendMessage" class="send-button" variant="outlined">
                                 <v-icon color="#FFF" size="20">mdi-send-outline</v-icon>
@@ -211,21 +211,33 @@ const sendMessage = async () => {
         const streamResponse = await postStream('/api/query', { query: sanitizedInput })
         let hasReceivedResponse = false
 
+
         try {
             for await (const data of streamResponse.getStream()) {
-                // Remove typing indicator before adding first response
-                if (!hasReceivedResponse) {
+                if (data.type === 'text') {
                     removeTypingIndicator()
-                    hasReceivedResponse = true
+                    messages.value.push({
+                        type: 'assistant',
+                        dataType: data.type,
+                        content: data.content,
+                        metadata: data.metadata,
+                        isLoading: false
+                    })
+                    break  // Exit loop for text messages
+                } else {
+                    // Continue streaming for other types
+                    if (!hasReceivedResponse) {
+                        removeTypingIndicator()
+                        hasReceivedResponse = true
+                    }
+                    messages.value.push({
+                        type: 'assistant',
+                        dataType: data.type,
+                        content: data.content,
+                        metadata: data.metadata,
+                        isLoading: false
+                    })
                 }
-
-                messages.value.push({
-                    type: 'assistant',
-                    dataType: data.type, // 'stream' or 'json'
-                    content: data.content,
-                    metadata: data.metadata,
-                    isLoading: false,
-                })
                 await scrollToBottom()
             }
         } catch (streamError) {
@@ -337,7 +349,7 @@ watch(() => messages.value.length, () => {
     white-space: pre-wrap;
     word-break: break-word;
     margin-top: 24px;
-    font-size: 15px;
+    font-size: 14.5px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     animation: subtleSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -356,20 +368,25 @@ watch(() => messages.value.length, () => {
     gap: 8px;
     padding-left: 32px;
     margin-bottom: 16px;
-    width: fit-content;  /* Make wrapper fit content */
-    max-width: 80%;     /* Keep maximum width limit */
+    width: fit-content;
+    /* Make wrapper fit content */
+    max-width: 80%;
+    /* Keep maximum width limit */
 }
 
 .bot-message {
     background: white;
-    padding: 10px 10px;
+    padding: 10px 14px;
     border-radius: 15px;
     border-top-left-radius: 0;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     animation: subtleSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    width: fit-content;  /* Adapt to content */
-    min-width: 100%;    /* Take at least full width of parent */
-    font-size: 15px;
+    width: fit-content;
+    /* Adapt to content */
+    min-width: 100%;
+    /* Take at least full width of parent */
+    color: #555;
+    font-size: 14.5px;
 }
 
 .data-display {
@@ -391,15 +408,17 @@ watch(() => messages.value.length, () => {
 .bot-content {
     flex: 1;
     margin-top: 24px;
-    width: 100%;        /* Take full width of parent */
-    min-width: 200px;   /* Minimum width for readability */
+    width: 100%;
+    /* Take full width of parent */
+    min-width: 200px;
+    /* Minimum width for readability */
 }
 
 
 .bot-message .message-text {
     font-size: 15px !important;
     line-height: 20px;
-    color: #555;
+    color: #777 !important;
 }
 
 /* Error Message Styles */
