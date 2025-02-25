@@ -80,6 +80,13 @@ sql_agent = Agent(
             - A manager can have multiple direct reporting users
             - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
             
+            ##Key Columns to use in the queries##
+            - Always use the following columns when answering queries unless more ore less are asked
+            - For user related query Users: email, login, first_name, last_name, status
+            - groups: name, description
+            - applications: label, name, status
+            - factors: factor_type, provider, status
+            
             ### Timestamp Handling ###
                 - All database timestamps are stored in UTC
                 - Use SQLite's built-in datetime functions for timezone conversion:

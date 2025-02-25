@@ -24,7 +24,7 @@
 
                 <!-- Chat Messages Area -->
                 <v-main class="chat-area">
-                    <div class="messages-container d-flex flex-column gap-4 py-4 px-4" ref="messagesContainer">
+                    <div class="messages-container d-flex flex-column gap-4 py-4 px-0" ref="messagesContainer">
                         <template v-for="(message, index) in messages" :key="index">
                             <!-- User Message -->
                             <div v-if="message.type === 'user'" class="user-message-wrapper">
@@ -277,22 +277,20 @@ watch(() => messages.value.length, () => {
 <style scoped>
 /* Layout & Background */
 .bg-custom {
-    background-color: #f4f4f4 !important;
+    background-color: #fff !important;
 }
 
 .chat-wrapper {
-    max-width: 960px;
+    max-width: 1440px;
     width: 100%;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     background: white;
-}
-
-/* Header Styles */
-.toolbar-logo {
-    display: flex;
-    align-items: center;
+    margin: 0 auto;
+    border-left: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.08);
 }
 
 /* Chat Area Container */
@@ -301,6 +299,8 @@ watch(() => messages.value.length, () => {
     overflow: hidden;
     position: relative;
     background: #f4f4f4;
+    border-top: 1px solid #e5e7eb;
+    border-bottom: 1px solid #e5e7eb;
 }
 
 .messages-container {
@@ -313,7 +313,9 @@ watch(() => messages.value.length, () => {
     scroll-behavior: smooth;
     -ms-overflow-style: none;
     scrollbar-width: none;
-    margin-bottom: 24px;
+    margin: 0 auto 24px auto;
+    padding: 0 48px;
+    max-width: 1400px;
 
     &::-webkit-scrollbar {
         display: none;
@@ -325,144 +327,116 @@ watch(() => messages.value.length, () => {
     position: relative;
     display: flex;
     justify-content: flex-end;
-    gap: 8px;
+    gap: 12px;
     padding-right: 32px;
+    width: 100%;
+    margin: 16px 0;
 }
 
 .user-message {
     background-color: #4C64E2;
     color: white;
-    padding: 12px 16px;
-    border-radius: 15px;
-    border-top-right-radius: 0;
-    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    border-top-right-radius: 4px;
+    width: fit-content; /* Changed from max-width: 60% */
+    min-width: min-content; /* Changed from fixed 200px */
+    max-width: 80%; /* Added max-width constraint */
     white-space: pre-wrap;
     word-break: break-word;
-    margin-top: 24px;
     font-size: 14.5px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    line-height: 1.5;
+    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.2);
     animation: subtleSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.user-info {
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 24px;
 }
 
 /* Message Styles - Bot */
 .bot-message-wrapper {
     position: relative;
     display: flex;
-    gap: 8px;
+    gap: 12px;
     padding-left: 32px;
-    margin-bottom: 16px;
-    width: fit-content;
-    /* Make wrapper fit content */
-    max-width: 80%;
-    /* Keep maximum width limit */
+    padding-right: 32px;
+    width: 100%;
+    margin: 16px 0;
 }
 
 .bot-message {
     background: white;
-    padding: 10px 14px;
-    border-radius: 15px;
-    border-top-left-radius: 0;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    animation: subtleSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    width: fit-content;
-    /* Adapt to content */
-    min-width: 100%;
-    /* Take at least full width of parent */
-    color: #555;
+    padding: 6px 14px;
+    border-radius: 16px;
+    border-top-left-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    width: fit-content; /* Changed from 100% */
+    min-width: min-content; /* Added */
+    max-width: 100%; /* Added */
+    color: #2c3e50;
     font-size: 14.5px;
+    line-height: 1.5;
+    animation: subtleSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
+
 
 .data-display {
     width: 100%;
-    min-width: 100%;
+    overflow-x: auto;
+    margin: 12px 0;
+    padding: 0px 0px;
+    border: none; /* Added to remove any inner borders */
 }
 
-.bot-info {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
+/* Remove any potential inner borders */
 
 .bot-content {
-    flex: 1;
-    margin-top: 24px;
-    width: 100%;
-    /* Take full width of parent */
-    min-width: 200px;
-    /* Minimum width for readability */
-}
-
-
-.bot-message .message-text {
-    font-size: 15px !important;
-    line-height: 20px;
-    color: #777 !important;
+    width: fit-content; /* Changed from 100% */
+    min-width: min-content; /* Added */
+    max-width: 100%; /* Added */
+    display: flex;
+    flex-direction: column;
 }
 
 /* Error Message Styles */
 .bot-message.error {
     background-color: #FEF2F2;
     border: 1px solid #FCA5A5;
-    box-shadow: 0 2px 4px rgba(220, 38, 38, 0.1);
-}
-
-.bot-message .message-text.error-text {
-    color: #DC2626 !important;
-    font-weight: 500;
-}
-
-
-/* Code Block Styles */
-pre {
-    white-space: pre-wrap;
-    margin: 0;
-}
-
-.message-card {
-    min-width: 200px;
+    box-shadow: 0 2px 8px rgba(220, 38, 38, 0.1);
 }
 
 /* Footer & Input Area */
 .footer-container {
-    border-top: 1px solid rgba(0, 0, 0, 0.12);
-    padding: 60px 25px !important;
+    border-top: 1px solid #e5e7eb;
+    padding: 60px 25px !important; /* Increased top padding significantly */
     height: auto !important;
-    min-height: 84px !important;
-    max-height: 84px !important;
+    min-height: 120px !important;
+    max-height: 120px !important;
     position: sticky;
     bottom: 0;
     width: 100%;
     background: white;
+    z-index: 10;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.03);
+    display: flex;
+    align-items: center;
 }
 
 .chat-input :deep(.v-field) {
-    border-radius: 10px !important;
+    border-radius: 12px !important;
+    background: #f8f9fa !important;
 }
 
 .send-button {
-    border-radius: 5px !important;
+    border-radius: 12px !important;
     width: 52px !important;
-    height: 48px !important;
+    height: 52px !important;
     background: #4C64E2 !important;
-    border: 1px solid #666 !important;
+    border: none !important;
     margin-left: 16px !important;
-    padding: 12px !important;
-    transition: transform 0.2s ease-out;
+    padding: 14px !important;
+    transition: all 0.2s ease-out;
 
     &:hover {
-        transform: scale(1.1);
+        transform: scale(1.05);
+        background: #3b4fd9 !important;
     }
 }
 
@@ -470,60 +444,79 @@ pre {
 @keyframes subtleSlideUp {
     from {
         opacity: 0;
-        transform: translateY(8px);
+        transform: translateY(12px);
     }
-
     to {
         opacity: 1;
         transform: translateY(0);
     }
 }
 
-/* Spacing Utilities */
-.user-message-wrapper:last-child,
-.bot-message-wrapper:last-child {
-    margin-bottom: 24px;
-}
-
-/* Animation Classes */
-.user-info,
-.bot-info {
-    animation: subtleSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-
 /* Loading Animation */
 .loading-dots {
     display: flex;
     gap: 8px;
-    padding: 12px 16px;
+    padding: 16px;
+    justify-content: center;
 }
 
 .loading-dots span {
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     background-color: #4C64E2;
     display: inline-block;
     animation: bounce 1.4s infinite ease-in-out both;
+    opacity: 0.6;
 }
 
-.loading-dots span:nth-child(1) {
-    animation-delay: -0.32s;
+/* Responsive Design */
+@media (max-width: 1440px) {
+    .chat-wrapper {
+        max-width: 100%;
+    }
 }
 
-.loading-dots span:nth-child(2) {
-    animation-delay: -0.16s;
+@media (max-width: 1024px) {
+    .messages-container {
+        padding: 0 32px;
+    }
+    
+    .user-message {
+        max-width: 70%;
+    }
+}
+
+@media (max-width: 768px) {
+    .messages-container {
+        padding: 0 16px;
+    }
+    
+    .footer-container {
+        padding: 16px 24px !important;
+    }
+    
+    .user-message {
+        max-width: 80%;
+    }
+    
+    .bot-message {
+        width: calc(100% - 32px);
+    }
+}
+
+@media (max-width: 480px) {
+    .user-message,
+    .bot-message {
+        padding: 14px 16px;
+        font-size: 14px;
+    }
 }
 
 @keyframes bounce {
-
-    0%,
-    80%,
-    100% {
+    0%, 80%, 100% {
         transform: scale(0);
     }
-
     40% {
         transform: scale(1.0);
     }

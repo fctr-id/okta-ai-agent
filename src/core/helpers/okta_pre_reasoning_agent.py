@@ -59,6 +59,12 @@ reasoning_agent = Agent(
     - If asked about a user's manager then you fint that user and then find the manager coloumn
     - if asked about a manager's direct reportees, you will have to find the manager  login id and match that ID against the user's manager column
     
+                ##Key Columns to use in the queries##
+            - Always use the following columns when answering queries unless more ore less are asked
+            - For user related query Users: email, login, first_name, last_name, status
+            - groups: name, description
+            - applications: label, name, status
+            - factors: factor_type, provider, status
 
     ### Example ###:
     User Query: "show support@fctr.io apps"
