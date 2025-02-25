@@ -2,7 +2,7 @@
     <div class="data-display">
         <!-- Text Message Display -->
         <div v-if="isTextData" class="text-content">
-            {{ content }}
+            {{ props.content }}
         </div>
 
         <!-- JSON Data Display -->
@@ -11,29 +11,46 @@
         </div>
 
         <!-- Error Message Display -->
-        <div v-else-if="isError" class="error-content">
-            {{ content }}
+        <div v-if="isError" class="error-content">
+            {{ getErrorContent }}
         </div>
 
         <!-- Data Table Display -->
-        <div v-else-if="hasResults">
-            <v-data-table :headers="formattedHeaders" :items="tableItems" :loading="loading" :items-per-page="10"
-                :search="search" :sort-by="sortBy" hover>
+        <div v-else-if="displayedItems.length > 0" class="table-content">
+            <v-data-table 
+                :key="`table-${displayedItems.length}`"
+                :headers="formattedHeaders" 
+                :items="displayedItems" 
+                :loading="loading" 
+                :items-per-page="5"
+                :search="search" 
+                :sort-by="sortBy" 
+                density="compact"
+                hover
+            >
                 <template v-slot:top>
                     <div class="table-header-container">
                         <div class="search-row pl-4">
-                            <v-text-field v-model="search" prepend-inner-icon="mdi-magnify" label="Search" single-line
-                                hide-details density="comfortable" variant="underlined" class="search-field" />
+                            <v-text-field 
+                                v-model="search" 
+                                prepend-inner-icon="mdi-text-search-variant" 
+                                label="Search" 
+                                single-line
+                                hide-details 
+                                density="compact" 
+                                variant="underlined" 
+                                class="search-field" 
+                                color="#4C64E2"
+                            />
                         </div>
                         <div class="info-row py-4 pl-4">
                             <div class="table-info">
                                 <div class="sync-info">
                                     <v-icon icon="mdi-sync" size="small" class="sync-icon" />
-                                    <span>Last synchronized: {{ props.metadata?.last_sync || 'Never' }}</span>
+                                    <span>Last Updated: {{ getLastSyncTime }}</span>
                                 </div>
                                 <div class="results-count">
-                                    <span>{{ tableItems.length }} {{ tableItems.length === 1 ? 'result' : 'results'
-                                        }}</span>
+                                    <span>{{ displayedItems.length }} {{ displayedItems.length === 1 ? 'result' : 'results' }}</span>
                                 </div>
                             </div>
                         </div>
@@ -43,22 +60,25 @@
         </div>
 
         <!-- No Results Message -->
-        <div v-else-if="!loading && !hasResults" class="no-results">
+        <div v-else-if="!loading && !displayedItems.length" class="no-results">
             No results found
         </div>
     </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
 
+// Props with improved type definitions
 const props = defineProps({
     type: String,
     content: {
+        type: [Array, Object, String],
         required: true
     },
     metadata: {
+        type: Object,
         default: () => ({})
     },
     loading: {
@@ -67,25 +87,48 @@ const props = defineProps({
     }
 })
 
-// Search and sort state
+// State management
+const accumulatedData = ref([])
+const totalRecords = ref(0)
+const isStreaming = ref(false)
 const search = ref('')
-const sortBy = ref([
-    {
-        key: '',
-        order: 'asc'
-    }
-])
+const sortBy = ref([{ key: 'email', order: 'asc' }])
 
-
-// Type checks
+// Type checks with simplified logic
 const isStreamData = computed(() => props.type === MessageType.STREAM)
 const isJsonData = computed(() => props.type === MessageType.JSON)
 const isError = computed(() => props.type === MessageType.ERROR)
-const isTextData = computed(() => props.type === MessageType.TEXT)
-const isDataType = computed(() => props.type === 'data')
+//const isTextData = computed(() => props.type === MessageType.TEXT)
+const isMetadata = computed(() => props.type === MessageType.METADATA)
 
-// Table data formatting
+
+const isTextData = computed(() => 
+    props.type === 'text' || 
+    (typeof props.content === 'object' && props.content?.type === 'text')
+)
+
+const hasResults = computed(() => {
+    if (isTextData.value) return false;
+    return displayedItems.value?.length > 0;  
+});
+
+const displayedItems = computed(() => {
+    console.log('Computing displayedItems:', {
+        type: props.type,
+        content: props.content
+    });
+
+    if (props.type === MessageType.STREAM || props.type === MessageType.BATCH) {
+        return Array.isArray(props.content) ? props.content : [];
+    }
+    return [];
+});
+
+
+
+
 const formattedHeaders = computed(() => {
+    // Use metadata headers if available
     if (props.metadata?.headers && Array.isArray(props.metadata.headers)) {
         return props.metadata.headers.map(header => ({
             title: header.text,
@@ -96,8 +139,9 @@ const formattedHeaders = computed(() => {
         }))
     }
 
-    if (hasResults.value && tableItems.value.length > 0) {
-        return Object.keys(tableItems.value[0]).map(key => ({
+    // Generate headers from data if available
+    if (displayedItems.value.length > 0) {
+        return Object.keys(displayedItems.value[0]).map(key => ({
             title: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
             key: key,
             align: 'start',
@@ -109,20 +153,58 @@ const formattedHeaders = computed(() => {
     return []
 })
 
-const tableItems = computed(() => {
-    if ((isStreamData.value || isDataType.value) && Array.isArray(props.content)) {
-        return props.content
+const formattedJson = computed(() => {
+    try {
+        return JSON.stringify(props.content, null, 2)
+    } catch (error) {
+        console.error('JSON formatting error:', error)
+        return String(props.content)
     }
-    return []
 })
 
-const hasResults = computed(() => {
-    return Array.isArray(props.content) && props.content.length > 0
+// Loading state
+const isLoading = computed(() => {
+    return props.loading || 
+           (props.type === MessageType.STREAM && displayedItems.value.length === 0);
+});
+
+const getLastSyncTime = computed(() => {
+    if (props.metadata?.last_sync) {
+        return props.metadata.last_sync;
+    }
+
+    return 'Never';
+});
+
+const getErrorContent = computed(() => {
+    if (!isError.value) return '';
+    
+    if (typeof props.content === 'string') {
+        return props.content;
+    }
+    
+    if (typeof props.content === 'object') {
+        return props.content.message || String(props.content);
+    }
+    
+    return 'An error occurred';
+});
+
+// Cleanup
+onBeforeUnmount(() => {
+    accumulatedData.value = []
+    totalRecords.value = 0
+    isStreaming.value = false
+    search.value = ''
+    sortBy.value = [{ key: 'email', order: 'asc' }]
 })
 
-const formattedJson = computed(() =>
-    JSON.stringify(props.content, null, 2)
-)
+watch(() => props.content, (newContent) => {
+    console.log('Content updated:', {
+        length: Array.isArray(newContent) ? newContent.length : 0,
+        type: props.type
+    });
+}, { deep: true });
 </script>
 
 <style scoped>
@@ -157,13 +239,9 @@ const formattedJson = computed(() =>
     color: #DC2626;
     background-color: #FEF2F2;
     border-radius: 4px;
-    padding: 12px;
+    padding: 0px;
 }
 
-.text-content {
-    white-space: pre-line;
-    padding: 12px 0;
-}
 
 .query-info {
     padding: 12px;
@@ -180,7 +258,7 @@ const formattedJson = computed(() =>
 }
 
 /* Data Table Styles */
-::v-deep .v-data-table {
+:v-deep .v-data-table {
     background: transparent;
     box-shadow: none;
 }
@@ -202,20 +280,20 @@ const formattedJson = computed(() =>
     background-color: #E5E7EB !important;
 }
 
-::v-deep .v-data-table-header__content {
+:v-deep .v-data-table-header__content {
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
 
-::v-deep .v-data-table-header__sort-icon {
+:v-deep .v-data-table-header__sort-icon {
     color: #4B5563 !important;
     opacity: 0.7;
     margin-left: 4px;
     font-size: 1rem;
 }
 
-::v-deep .v-data-table__wrapper {
+:v-deep .v-data-table__wrapper {
     overflow-x: auto;
     border: 1px solid #E5E7EB;
     border-radius: 8px;
@@ -223,25 +301,25 @@ const formattedJson = computed(() =>
 }
 
 /* Toolbar and Search Styles */
-::v-deep .table-toolbar {
+:v-deep .table-toolbar {
     padding: 0 0 16px 0 !important;
     background: transparent !important;
 }
 
-::v-deep .search-field {
+:v-deep .search-field {
     max-width: 280px;
 }
 
-::v-deep .search-field .v-field__input {
+:v-deep .search-field .v-field__input {
     padding: 4px 12px;
     color: #374151;
 }
 
-::v-deep .search-field .v-field__append-inner {
+:v-deep .search-field .v-field__append-inner {
     padding-top: 8px;
 }
 
-::v-deep .search-field .v-field__input input::placeholder {
+:v-deep .search-field .v-field__input input::placeholder {
     color: #9CA3AF;
 }
 
@@ -275,16 +353,16 @@ const formattedJson = computed(() =>
 }
 
 /* Row Styles */
-::v-deep .v-data-table .v-data-table-row {
+:v-deep .v-data-table .v-data-table-row {
     border-bottom: 1px solid #E5E7EB;
     transition: background-color 0.2s ease;
 }
 
-::v-deep .v-data-table .v-data-table-row:hover {
+:v-deep .v-data-table .v-data-table-row:hover {
     background-color: #F9FAFB !important;
 }
 
-::v-deep .v-data-table .v-data-table-row td {
+:v-deep .v-data-table .v-data-table-row td {
     padding: 12px 16px;
     font-size: 0.875rem;
     color: #374151;
@@ -292,17 +370,17 @@ const formattedJson = computed(() =>
 }
 
 /* Pagination Styles */
-::v-deep .v-data-table-footer {
+:v-deep .v-data-table-footer {
     padding: 12px 16px;
     background: transparent;
 }
 
 /* Loading and Empty States */
-::v-deep .v-data-table__progress {
+:v-deep .v-data-table__progress {
     display: none;
 }
 
-::v-deep .v-data-table__empty-wrapper {
+:v-deep .v-data-table__empty-wrapper {
     color: #6B7280;
     font-size: 0.875rem;
     padding: 24px;
@@ -314,7 +392,7 @@ const formattedJson = computed(() =>
 
 /* Responsive Styles */
 @media (max-width: 600px) {
-    ::v-deep .search-field {
+    :v-deep .search-field {
         max-width: 100%;
     }
 
@@ -328,7 +406,7 @@ const formattedJson = computed(() =>
         text-align: left;
     }
 
-    ::v-deep .table-toolbar {
+    :v-deep .table-toolbar {
         padding: 0 0 12px 0 !important;
     }
 }

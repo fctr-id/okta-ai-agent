@@ -2,6 +2,7 @@ from typing import Dict, Any, AsyncGenerator
 import json
 from datetime import datetime
 import pytz
+import asyncio
 from sqlalchemy import text
 from src.core.helpers.okta_pre_reasoning_agent import expand_query
 from src.core.helpers.okta_generate_sql import sql_agent, extract_json_from_text
@@ -61,6 +62,9 @@ class SQLExecutor:
             return {"error": str(e)}
 
 class AIService:
+    
+    BATCH_SIZE = 100
+    
     @staticmethod
     async def get_last_sync_info(executor: SQLExecutor) -> str:
         """Get last successful sync time for users entity in local timezone"""
@@ -104,7 +108,7 @@ class AIService:
     @staticmethod
     async def process_query(query: str) -> AsyncGenerator[str, None]:
         """
-        Process a natural language query about Okta data.
+        Process a natural language query about Okta data with batch streaming.
         
         Operation sequence:
         1. Input validation
@@ -112,7 +116,7 @@ class AIService:
         3. Expand query through reasoning
         4. Generate SQL
         5. Execute query
-        6. Format and return results
+        6. Stream results in batches
         """
         try:
             logger.info(f"Starting query processing: {query}")
@@ -135,12 +139,11 @@ class AIService:
             reasoning_result = await expand_query(query)
             expanded_query = reasoning_result.get('expanded_query', '')
             logger.info(f"Reasoning expanded query: {expanded_query}")
-            logger.info(f"Reasoning explanation: {reasoning_result.get('explanation')}")
             
             if not expanded_query:
                 yield json.dumps({
                     "type": "text",
-                    "content": "I couldn't understand your question. Please rephrase it to be more specific about Okta data."
+                    "content": "Please ask a question related to okta entities."
                 })
                 return
     
@@ -170,30 +173,60 @@ class AIService:
                 })
                 return
 
-            # Results processing and response formatting
+            results = query_results.get("results", [])
+            total_records = len(results)
+            
+            # Send initial metadata
             headers = []
-            if query_results.get("results") and len(query_results["results"]) > 0:
+            if results and len(results) > 0:
                 headers = [{
                     "text": key.replace('_', ' ').title(),
                     "value": key,
                     "align": 'start'
-                } for key in query_results["results"][0].keys()]
+                } for key in results[0].keys()]
 
-            # Send single response
-            logger.info("Sending response to client")
             yield json.dumps({
-                "type": "stream",
-                "content": query_results.get("results", []),
-                "metadata": {
+                "type": "metadata",
+                "content": {
+                    "total_records": total_records,
+                    "total_batches": (total_records + AIService.BATCH_SIZE - 1) // AIService.BATCH_SIZE,
+                    "batch_size": AIService.BATCH_SIZE,
                     "query": expanded_query,
                     "sql": sql_result["sql"],
                     "explanation": sql_result.get("explanation", ""),
                     "last_sync": last_sync,
                     "headers": headers,
-                    "timestamp": datetime.now().isoformat()  # Add timestamp for tracking
+                    "timestamp": datetime.now().isoformat()
                 }
             })
-            return  # Explicit return after yielding
+
+            # Stream results in batches
+            for i in range(0, total_records, AIService.BATCH_SIZE):
+                batch = results[i:i + AIService.BATCH_SIZE]
+                batch_number = i // AIService.BATCH_SIZE + 1
+                
+                yield json.dumps({
+                    "type": "batch",
+                    "content": batch,
+                    "metadata": {
+                        "batch_number": batch_number,
+                        "batch_size": len(batch),
+                        "start_index": i,
+                        "end_index": min(i + AIService.BATCH_SIZE, total_records)
+                    }
+                })
+                
+                # Small delay to prevent overwhelming the client
+                await asyncio.sleep(0.1)
+
+            # Send completion message
+            yield json.dumps({
+                "type": "complete",
+                "content": {
+                    "total_records": total_records,
+                    "timestamp": datetime.now().isoformat()
+                }
+            })
 
         except Exception as e:
             logger.error(f"Error in process_query: {str(e)}", exc_info=True)

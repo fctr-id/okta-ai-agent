@@ -55,9 +55,7 @@
 
                                         <!-- Loading Indicator -->
                                         <div v-if="message.isTyping" class="loading-dots">
-                                            <span></span>
-                                            <span></span>
-                                            <span></span>
+                                            <span></span><span></span><span></span>
                                         </div>
                                     </div>
                                 </div>
@@ -94,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, nextTick } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import DataDisplay from './messages/DataDisplay.vue'
 
@@ -165,6 +163,89 @@ const handleKeyDown = (e) => {
 
 const { postStream } = useFetchStream()
 
+// Update in the script section of ChatInterface.vue
+const handleStreamResponse = async (streamResponse) => {
+    let currentMessage = null;
+
+    try {
+        for await (const data of streamResponse.getStream()) {
+            console.log('Stream data:', data);
+            if (!data) continue;
+
+            switch (data.type) {
+                case 'text':
+                    removeTypingIndicator();
+                    messages.value.push({
+                        type: 'assistant',
+                        content: data.content,
+                        isError: false
+                    });
+                    await scrollToBottom();
+                    break;
+                case 'metadata':
+                    removeTypingIndicator();
+                    currentMessage = {
+                        type: 'assistant',
+                        dataType: 'stream',
+                        content: [], // Will hold the data rows
+                        metadata: data.content, // Direct assignment without spreading
+                        isLoading: true
+                    };
+                    messages.value.push(currentMessage);
+                    await scrollToBottom();
+                    break;
+
+                case 'batch':
+                    if (currentMessage && Array.isArray(data.content)) {
+                        // Append new content instead of replacing
+                        currentMessage.content = [
+                            ...currentMessage.content || [],
+                            ...data.content
+                        ];
+
+                        // Update metadata
+                        currentMessage.metadata = {
+                            ...currentMessage.metadata,
+                            batchInfo: data.metadata
+                        };
+
+                        // Force reactivity update
+                        messages.value = [...messages.value];
+                        await scrollToBottom(true);
+                    }
+                    break;
+
+                case 'complete':
+                    if (currentMessage) {
+                        currentMessage.isLoading = false;
+                        messages.value = [...messages.value];
+                    }
+                    break;
+
+                case 'error':
+                    removeTypingIndicator();
+                    messages.value.push({
+                        type: 'assistant',
+                        content: typeof data.content === 'object' ? data.content.message : data.content,
+                        isError: true
+                    });
+                    await scrollToBottom();
+                    break;
+            }
+        }
+    } catch (error) {
+        console.error('Stream processing error:', error);
+        removeTypingIndicator();
+        addErrorMessage(error);
+    } finally {
+        if (currentMessage) {
+            currentMessage.isLoading = false;
+        }
+        isLoading.value = false;
+    }
+};
+
+
 const sendMessage = async () => {
     const sanitizedInput = sanitizeInput(userInput.value.trim())
 
@@ -179,11 +260,22 @@ const sendMessage = async () => {
 
         // Handle message history
         try {
-            const isDuplicate = messageHistory.value.includes(sanitizedInput)
-            if (!isDuplicate) {
+            const existingIndex = messageHistory.value.indexOf(sanitizedInput)
+
+            if (existingIndex === -1) {
+                // New message - add to front of history
                 messageHistory.value = [sanitizedInput, ...messageHistory.value.slice(0, CONFIG.MAX_HISTORY - 1)]
-                localStorage.setItem('messageHistory', JSON.stringify(messageHistory.value))
+            } else {
+                // Existing message - move to front of history
+                messageHistory.value = [
+                    sanitizedInput,
+                    ...messageHistory.value.slice(0, existingIndex),
+                    ...messageHistory.value.slice(existingIndex + 1)
+                ]
             }
+
+            // Save to localStorage and reset index
+            localStorage.setItem('messageHistory', JSON.stringify(messageHistory.value))
             historyIndex.value = -1
         } catch (historyError) {
             console.error('History management error:', historyError)
@@ -207,34 +299,9 @@ const sendMessage = async () => {
         })
         await scrollToBottom()
 
-        // Make API call using the composable
+        // Make API call and handle stream
         const streamResponse = await postStream('/api/query', { query: sanitizedInput })
-        let hasReceivedResponse = false
-
-
-        try {
-            for await (const data of streamResponse.getStream()) {
-                console.log('Stream response:', data)
-                if (!hasReceivedResponse) {
-                    removeTypingIndicator()
-                    hasReceivedResponse = true
-
-                    messages.value.push({
-                        type: 'assistant',
-                        dataType: data.type,
-                        content: data.content,
-                        metadata: data.metadata,
-                        isLoading: false,
-                    })
-                    await scrollToBottom()
-                    break
-                }
-            }
-        } catch (streamError) {
-            console.error('Stream processing error:', streamError)
-            removeTypingIndicator()
-            throw streamError
-        }
+        await handleStreamResponse(streamResponse)
 
     } catch (error) {
         console.error('Error:', error)
@@ -339,9 +406,12 @@ watch(() => messages.value.length, () => {
     padding: 10px 14px;
     border-radius: 16px;
     border-top-right-radius: 4px;
-    width: fit-content; /* Changed from max-width: 60% */
-    min-width: min-content; /* Changed from fixed 200px */
-    max-width: 80%; /* Added max-width constraint */
+    width: fit-content;
+    /* Changed from max-width: 60% */
+    min-width: min-content;
+    /* Changed from fixed 200px */
+    max-width: 80%;
+    /* Added max-width constraint */
     white-space: pre-wrap;
     word-break: break-word;
     font-size: 14.5px;
@@ -367,30 +437,42 @@ watch(() => messages.value.length, () => {
     border-radius: 16px;
     border-top-left-radius: 4px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-    width: fit-content; /* Changed from 100% */
-    min-width: min-content; /* Added */
-    max-width: 100%; /* Added */
+    width: fit-content;
+    /* Changed from 100% */
+    min-width: min-content;
+    /* Added */
+    max-width: 100%;
+    /* Added */
     color: #2c3e50;
     font-size: 14.5px;
     line-height: 1.5;
     animation: subtleSlideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.bot-message .message-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 10px 14px;
+}
 
 .data-display {
     width: 100%;
     overflow-x: auto;
     margin: 12px 0;
     padding: 0px 0px;
-    border: none; /* Added to remove any inner borders */
+    border: none;
+    /* Added to remove any inner borders */
 }
 
 /* Remove any potential inner borders */
 
 .bot-content {
-    width: fit-content; /* Changed from 100% */
-    min-width: min-content; /* Added */
-    max-width: 100%; /* Added */
+    width: fit-content;
+    /* Changed from 100% */
+    min-width: min-content;
+    /* Added */
+    max-width: 100%;
+    /* Added */
     display: flex;
     flex-direction: column;
 }
@@ -405,7 +487,8 @@ watch(() => messages.value.length, () => {
 /* Footer & Input Area */
 .footer-container {
     border-top: 1px solid #e5e7eb;
-    padding: 60px 25px !important; /* Increased top padding significantly */
+    padding: 60px 25px !important;
+    /* Increased top padding significantly */
     height: auto !important;
     min-height: 120px !important;
     max-height: 120px !important;
@@ -446,6 +529,7 @@ watch(() => messages.value.length, () => {
         opacity: 0;
         transform: translateY(12px);
     }
+
     to {
         opacity: 1;
         transform: translateY(0);
@@ -481,7 +565,7 @@ watch(() => messages.value.length, () => {
     .messages-container {
         padding: 0 32px;
     }
-    
+
     .user-message {
         max-width: 70%;
     }
@@ -491,21 +575,22 @@ watch(() => messages.value.length, () => {
     .messages-container {
         padding: 0 16px;
     }
-    
+
     .footer-container {
         padding: 16px 24px !important;
     }
-    
+
     .user-message {
         max-width: 80%;
     }
-    
+
     .bot-message {
         width: calc(100% - 32px);
     }
 }
 
 @media (max-width: 480px) {
+
     .user-message,
     .bot-message {
         padding: 14px 16px;
@@ -514,9 +599,13 @@ watch(() => messages.value.length, () => {
 }
 
 @keyframes bounce {
-    0%, 80%, 100% {
+
+    0%,
+    80%,
+    100% {
         transform: scale(0);
     }
+
     40% {
         transform: scale(1.0);
     }

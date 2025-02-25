@@ -1,9 +1,9 @@
 import { ref } from "vue";
 
 const CONFIG = {
-    CONNECTION_TIMEOUT: 10000, // 5 seconds for initial connection
-    CHUNK_TIMEOUT: 10000, // 10 seconds between chunks
-    TOTAL_TIMEOUT: 300000, // 5 minutes total stream time
+    CONNECTION_TIMEOUT: 10000,
+    CHUNK_TIMEOUT: 10000,
+    TOTAL_TIMEOUT: 300000,
 };
 
 export function useFetchStream() {
@@ -14,8 +14,8 @@ export function useFetchStream() {
         isLoading.value = true;
         error.value = null;
         const startTime = Date.now();
+        let partialChunk = '';
 
-        // Setup connection timeout
         const controller = new AbortController();
         const connectionTimeout = new Promise((_, reject) => {
             setTimeout(() => {
@@ -50,7 +50,6 @@ export function useFetchStream() {
 
                     try {
                         while (true) {
-                            // Check total stream duration
                             if (Date.now() - startTime > CONFIG.TOTAL_TIMEOUT) {
                                 throw new Error(
                                     `Stream exceeded maximum duration of ${CONFIG.TOTAL_TIMEOUT / 1000} seconds`
@@ -58,17 +57,45 @@ export function useFetchStream() {
                             }
 
                             const { value, done } = await reader.read();
-                            if (done) break;
+                            if (done) {
+                                // Process any remaining partial chunk
+                                if (partialChunk.trim()) {
+                                    try {
+                                        yield JSON.parse(partialChunk);
+                                    } catch (parseError) {
+                                        console.error('Final chunk parse error:', parseError);
+                                    }
+                                }
+                                break;
+                            }
 
-                            // Check chunk timeout
                             const now = Date.now();
                             if (now - lastChunkTime > CONFIG.CHUNK_TIMEOUT) {
                                 throw new Error(`No data received for ${CONFIG.CHUNK_TIMEOUT / 1000} seconds`);
                             }
-
                             lastChunkTime = now;
-                            const chunk = decoder.decode(value);
-                            yield JSON.parse(chunk);
+
+                            // Combine partial chunk with new data and split by newlines
+                            const chunkText = decoder.decode(value, { stream: true });
+                            const chunks = (partialChunk + chunkText).split('\n');
+                            
+                            // Last item might be incomplete, save it for next iteration
+                            partialChunk = chunks.pop() || '';
+
+                            // Process complete chunks
+                            for (const chunk of chunks) {
+                                if (chunk.trim()) {
+                                    try {
+                                        yield JSON.parse(chunk);
+                                    } catch (parseError) {
+                                        console.error('Chunk parse error:', parseError);
+                                        yield {
+                                            type: 'error',
+                                            content: 'Error processing stream data'
+                                        };
+                                    }
+                                }
+                            }
                         }
                     } catch (e) {
                         error.value = e;
