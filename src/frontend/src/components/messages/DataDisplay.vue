@@ -22,19 +22,32 @@
                 <template v-slot:top>
                     <div class="table-header-container">
                         <div class="search-row pl-4">
-                            <v-text-field v-model="search" prepend-inner-icon="mdi-text-search-variant" label="Search"
-                                single-line hide-details density="compact" variant="underlined" class="search-field"
-                                color="#4C64E2" />
+                            <div class="header-actions">
+                                <div class="left-section">
+                                    <v-btn v-if="displayedItems.length > 0" prepend-icon="mdi-download" variant="text"
+                                        density="comfortable" size="small" @click="downloadCSV" class="download-btn">
+                                        Download CSV
+                                    </v-btn>
+                                </div>
+                                <div class="right-section">
+                                    <v-text-field v-model="search" prepend-inner-icon="mdi-text-search-variant"
+                                        clearable clear-icon="mdi-close" label="Search" single-line hide-details
+                                        density="compact" variant="underlined" class="search-field" color="#4C64E2"
+                                        @click:clear="clearSearch" />
+                                </div>
+                            </div>
                         </div>
-                        <div class="info-row py-4 pl-4">
+                        <div class="info-row py-2 pl-6">
                             <div class="table-info">
                                 <div class="sync-info">
                                     <v-icon icon="mdi-sync" size="small" class="sync-icon" />
                                     <span>Last Updated: {{ getLastSyncTime }}</span>
                                 </div>
                                 <div class="results-count">
-                                    <span>{{ displayedItems.length }} {{ displayedItems.length === 1 ? 'result' :
-                                        'results' }}</span>
+                                    <span>
+                                        {{ displayedItems.length }}
+                                        {{ displayedItems.length === 1 ? 'result' : 'results' }}
+                                    </span>
                                 </div>
                             </div>
                         </div>
@@ -53,6 +66,10 @@
 <script setup>
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
+
+const clearSearch = () => {
+    search.value = ''
+}
 
 // Props with improved type definitions
 const props = defineProps({
@@ -103,7 +120,7 @@ const displayedItems = computed(() => {
 
 
 
-
+// Formatted Headers
 const formattedHeaders = computed(() => {
     // Use metadata headers if available
     if (props.metadata?.headers && Array.isArray(props.metadata.headers)) {
@@ -130,6 +147,7 @@ const formattedHeaders = computed(() => {
     return []
 })
 
+// Formatted JSON content
 const formattedJson = computed(() => {
     try {
         return JSON.stringify(props.content, null, 2)
@@ -139,6 +157,7 @@ const formattedJson = computed(() => {
     }
 })
 
+// Last sync time from the backend metadata
 const getLastSyncTime = computed(() => {
     if (props.metadata?.last_sync) {
         return props.metadata.last_sync;
@@ -147,6 +166,7 @@ const getLastSyncTime = computed(() => {
     return 'Never';
 });
 
+//Display error content
 const getErrorContent = computed(() => {
     if (!isError.value) return '';
 
@@ -172,6 +192,76 @@ onBeforeUnmount(() => {
 })
 
 
+// Add CSV download functionality
+const downloadCSV = () => {
+    if (!displayedItems.value?.length) {
+        console.warn('No items to download')
+        return
+    }
+
+    try {
+        // Generate headers from first item
+        const firstItem = displayedItems.value[0]
+        const headers = Object.keys(firstItem).map(key => ({
+            text: key.replace(/_/g, ' ').toUpperCase(),
+            value: key
+        }))
+
+        // Create CSV content
+        const headerRow = headers
+            .map(h => `"${h.text}"`)
+            .join(',')
+
+        const dataRows = displayedItems.value.map(item => 
+            headers
+                .map(h => {
+                    const value = item[h.value]
+                    return `"${value ?? ''}"` 
+                })
+                .join(',')
+        )
+
+        const csvContent = [headerRow, ...dataRows].join('\n')
+
+        // Create local timestamp for filename
+        const now = new Date()
+        const localTimestamp = now.toLocaleString('en-US', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        }).replace(/[/:]/g, '-').replace(',', '')
+        
+        const filename = `okta-data-${localTimestamp}.csv`
+
+        // Create and trigger download
+        const blob = new Blob([csvContent], { 
+            type: 'text/csv;charset=utf-8' 
+        })
+
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement('a')
+        link.setAttribute('href', url)
+        link.setAttribute('download', filename)
+        link.style.display = 'none'
+        
+        document.body.appendChild(link)
+        link.click()
+        
+        // Cleanup
+        setTimeout(() => {
+            document.body.removeChild(link)
+            URL.revokeObjectURL(url)
+        }, 100)
+
+    } catch (error) {
+        console.error('CSV generation error:', error)
+    }
+}
+
 // Use this to debu streaming data udates sent from backend
 /*
 watch(() => props.content, (newContent) => {
@@ -187,6 +277,36 @@ watch(() => props.content, (newContent) => {
 .data-display {
     width: 100%;
     margin: 8px 0;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding-right: 16px;
+    gap: 16px;
+}
+
+.left-section {
+    flex-shrink: 0;
+}
+
+.right-section {
+    flex-grow: 1;
+    max-width: 300px;
+    margin-left: auto;
+}
+
+.download-btn {
+    color: #4C64E2;
+    text-transform: none;
+    white-space: nowrap;
+    font-size: 14px;
+}
+
+.download-btn:hover {
+    background-color: rgba(76, 100, 226, 0.04);
 }
 
 .info-row {
