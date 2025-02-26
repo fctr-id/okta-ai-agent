@@ -31,8 +31,14 @@ async def process_query(request: Request):
         )
 
     except Exception as e:
+        # Log the full error for debugging
         logger.error(f"Error processing request: {str(e)}", exc_info=True)
+        
+        # Return a generic error message to the user
         return JSONResponse(
             status_code=500,
-            content={"type": "error", "content": str(e)}
+            content={
+                "type": "error",
+                "content": "Error processing request. Please try again."
+            }
         )

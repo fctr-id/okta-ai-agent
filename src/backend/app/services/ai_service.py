@@ -17,22 +17,23 @@ class SQLExecutor:
     @staticmethod
     async def validate_sql(sql: str) -> bool:
         """Validate SQL query for safety"""
-        logger.debug(f"Validating SQL query: {sql}")
-        
-        # Check if query starts with SELECT
-        if not sql.upper().strip().startswith('SELECT'):
-            logger.warning(f"Non-SELECT query attempted: {sql}")
-            return False
+        try:
+            logger.debug(f"Validating SQL query: {sql}")
             
-        # Check for dangerous operations
-        dangerous_ops = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'TRUNCATE', 'ALTER']
-        for op in dangerous_ops:
-            if f" {op} " in sql.upper():
-                logger.warning(f"Dangerous operation {op} found in query: {sql}")
-                return False
-        
-        logger.debug("SQL validation passed")
-        return True        
+            if not sql.upper().strip().startswith('SELECT'):
+                logger.warning(f"Non-SELECT query attempted: {sql}")
+                raise Exception("Invalid query type")
+                
+            dangerous_ops = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'TRUNCATE', 'ALTER']
+            for op in dangerous_ops:
+                if f" {op} " in sql.upper():
+                    logger.warning(f"Dangerous operation {op} found in query: {sql}")
+                    raise Exception("Invalid query type")
+            
+            return True
+        except Exception as e:
+            logger.error(f"SQL validation failed: {str(e)}")
+            raise Exception("Invalid query type")
     
     async def execute_query(self, sql: str) -> Dict[str, Any]:
         """Execute SQL query and return formatted results"""
@@ -40,8 +41,7 @@ class SQLExecutor:
             logger.debug(f"Starting query execution: {sql}")
             
             if not await self.validate_sql(sql):
-                logger.error("Invalid SQL query attempted")
-                return {"error": "This query type is not allowed"}
+                raise Exception("Invalid query type")
                 
             async with self.db.get_session() as session:
                 logger.debug("Database session created")
@@ -59,7 +59,7 @@ class SQLExecutor:
                 }
         except Exception as e:
             logger.error(f"Query execution failed: {str(e)}", exc_info=True)
-            return {"error": str(e)}
+            return {"error": "Error processing request. Please try again."}
 
 class AIService:
     
@@ -68,115 +68,91 @@ class AIService:
     @staticmethod
     async def get_last_sync_info(executor: SQLExecutor) -> str:
         """Get last successful sync time for users entity in local timezone"""
-        logger.debug("Fetching last sync information")
-        
-        sql = """
-        SELECT sync_end_time as last_sync
-        FROM sync_history 
-        WHERE status = 'SUCCESS'
-        AND entity_type = 'User'
-        ORDER BY sync_end_time DESC
-        LIMIT 1
-        """
         try:
+            logger.debug("Fetching last sync information")
+            
+            sql = """
+            SELECT sync_end_time as last_sync
+            FROM sync_history 
+            WHERE status = 'SUCCESS'
+            AND entity_type = 'User'
+            ORDER BY sync_end_time DESC
+            LIMIT 1
+            """
+            
             result = await executor.execute_query(sql)
+            if result.get("error"):
+                return "Not available"
+                
             if result and result["results"] and len(result["results"]) > 0:
                 sync_info = result["results"][0]
                 
-                logger.debug(f"Found sync info: {sync_info}")
-                
-                # Convert UTC timestamp to local time
                 utc_dt = datetime.fromisoformat(str(sync_info['last_sync']))
                 if utc_dt.tzinfo is None:
                     utc_dt = utc_dt.replace(tzinfo=pytz.UTC)
                 
-                # Get local timezone
                 local_tz = datetime.now().astimezone().tzinfo
                 local_time = utc_dt.astimezone(local_tz)
                 
-                formatted_time = local_time.strftime("%Y-%m-%d %I:%M:%S %p %Z")
-                logger.info(f"Last sync time retrieved: {formatted_time}")
-                return formatted_time
+                return local_time.strftime("%Y-%m-%d %I:%M:%S %p %Z")
             
-            logger.warning("No sync history found")
             return "No sync history available"
             
         except Exception as e:
-            logger.error(f"Error fetching users sync history: {str(e)}", exc_info=True)
-            return f"Error fetching sync time: {str(e)}"
+            logger.error(f"Error fetching sync info: {str(e)}", exc_info=True)
+            return "Not available"
 
     @staticmethod
     async def process_query(query: str) -> AsyncGenerator[str, None]:
-        """
-        Process a natural language query about Okta data with batch streaming.
-        
-        Operation sequence:
-        1. Input validation
-        2. Initialize executor & get sync info
-        3. Expand query through reasoning
-        4. Generate SQL
-        5. Execute query
-        6. Stream results in batches
-        """
+        """Process a natural language query about Okta data with batch streaming."""
         try:
             logger.info(f"Starting query processing: {query}")
             
-            # Input validation
             if not query or query.strip() == "":
-                logger.warning("Empty query received")
                 yield json.dumps({
-                    "type": "text",
-                    "content": "I need a question to help you. Please provide a specific query about your Okta data."
+                    "type": "error",
+                    "content": "Please provide a specific question about your Okta data."
                 })
                 return
     
-            # Initialize components and get sync info
             executor = SQLExecutor()
             last_sync = await AIService.get_last_sync_info(executor)
             
-            # Query expansion through reasoning
-            logger.info("Calling expand_query...")
+            logger.info("Expanding query...")
             reasoning_result = await expand_query(query)
             expanded_query = reasoning_result.get('expanded_query', '')
-            logger.info(f"Reasoning expanded query: {expanded_query}")
             
             if not expanded_query:
                 yield json.dumps({
-                    "type": "text",
-                    "content": "Please ask a question related to okta entities."
+                    "type": "error",
+                    "content": "Please ask a question relevant to Okta users, groups, or applications."
                 })
                 return
     
-            # SQL generation and validation
             logger.info("Generating SQL...")
             sql_response = await sql_agent.run(expanded_query)
             sql_result = extract_json_from_text(str(sql_response.data))
-            logger.info(f"SQL generation result: {sql_result}")
             
             if not sql_result or not sql_result.get("sql"):
-                logger.warning("No SQL generated")
                 yield json.dumps({
-                    "type": "text",
-                    "content": "I couldn't generate a valid query. Please try rephrasing your question."
+                    "type": "error",
+                    "content": "I couldn't process your request. Please try rephrasing your question."
                 })
                 return
     
-            # Query execution
             logger.info(f"Executing SQL: {sql_result['sql']}")
             query_results = await executor.execute_query(sql_result["sql"])
             
             if query_results.get("error"):
-                logger.error(f"SQL execution error: {query_results['error']}")
                 yield json.dumps({
                     "type": "error",
-                    "content": f"Database error: {query_results['error']}"
+                    "content": "Error processing request. Please try again."
                 })
                 return
 
             results = query_results.get("results", [])
             total_records = len(results)
             
-            # Send initial metadata
             headers = []
             if results and len(results) > 0:
                 headers = [{
@@ -200,7 +176,6 @@ class AIService:
                 }
             })
 
-            # Stream results in batches
             for i in range(0, total_records, AIService.BATCH_SIZE):
                 batch = results[i:i + AIService.BATCH_SIZE]
                 batch_number = i // AIService.BATCH_SIZE + 1
@@ -216,10 +191,8 @@ class AIService:
                     }
                 })
                 
-                # Small delay to prevent overwhelming the client
                 await asyncio.sleep(0.1)
 
-            # Send completion message
             yield json.dumps({
                 "type": "complete",
                 "content": {
@@ -232,5 +205,5 @@ class AIService:
             logger.error(f"Error in process_query: {str(e)}", exc_info=True)
             yield json.dumps({
                 "type": "error",
-                "content": f"An error occurred: {str(e)}"
+                "content": "Error processing request. Please try again."
             })
