@@ -9,9 +9,11 @@
 This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers, IT GRC teams and audit teams, powered by enterprise AI models. The vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
 
-
+<div align="center">
+<h3>A new web interface! (coming very soon)</h3>
+</div>
 <p align="center">
-  <h3> A new web interface (coming very soon!!)
+  
   <img src="docs/okta-ai-agent-install.gif" alt="Okta AI Agent Demo" width="800" height="auto">
 </p>
 
