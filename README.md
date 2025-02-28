@@ -14,7 +14,7 @@ This AI agent is the first of its kind that lets you use natural language to que
 </div>
 <p align="center">
   
-  <img src="docs/okta-ai-agent-install.gif" alt="Okta AI Agent Demo" width="800" height="auto">
+  <img src="docs/agent-new-web-ui.gif" alt="Okta AI Agent Demo" width="800" height="auto">
 </p>
 
 - [✨ What's Special?](#-whats-special)
