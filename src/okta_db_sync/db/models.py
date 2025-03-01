@@ -330,3 +330,32 @@ class SyncHistory(SyncBase):
         Index('idx_sync_tenant_entity', 'tenant_id', 'entity_type'),
         {'extend_existing': True}
     )  
+    
+    
+# Authentication Models
+class UserRole(str, enum.Enum):
+    ADMIN = "admin"
+    USER = "user"
+
+class AuthUser(Base):
+    """User model for authentication"""
+    __tablename__ = "auth_users"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(SQLEnum(UserRole), default=UserRole.ADMIN, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=get_utc_now, nullable=False)
+    updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now, nullable=False)
+    
+    # Keep track of whether initial setup has been completed
+    setup_completed = Column(Boolean, default=False, nullable=False)
+    
+    # For security, add login tracking
+    last_login = Column(DateTime, nullable=True)
+    login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<AuthUser username={self.username}, role={self.role}>"    

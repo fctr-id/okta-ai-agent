@@ -51,3 +51,4 @@ sqlite_db/*.db
 okta.yaml
 
 results/*
+src/backend/app/static/*

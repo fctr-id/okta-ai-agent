@@ -11,7 +11,7 @@
                         <div class="beta-badge">BETA</div>
                     </div>
                 </div>
-                <button class="logout-btn" aria-label="Logout">
+                <button class="logout-btn" aria-label="Logout" @click="handleLogout">
                     <v-icon>mdi-logout</v-icon>
                 </button>
             </div>
@@ -125,6 +125,8 @@ import { ref, watch, nextTick, onMounted } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
 import { MessageType } from '@/components/messages/messageTypes'
+import { useAuth } from '@/composables/useAuth'
+import { useRouter } from 'vue-router'
 
 // ---------- STATE MANAGEMENT ----------
 
@@ -137,7 +139,8 @@ const isClearable = ref(true) // Whether the text input can be cleared
 const lastQuestion = ref('') // Stores the last question that was asked
 const isFocused = ref(false) // Tracks if the search input is focused
 const hasResults = ref(false) // Whether there are results to display
-
+const auth = useAuth()
+const router = useRouter()
 /**
  * Response data state
  */
@@ -181,6 +184,11 @@ const getContentClass = (type) => {
     }
 }
 
+/* Code to handle logout */
+const handleLogout = async () => {
+  await auth.logout()
+  router.push('/login')
+}
 // ---------- PREDEFINED CONTENT ----------
 
 /**

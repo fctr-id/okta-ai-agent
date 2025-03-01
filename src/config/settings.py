@@ -16,8 +16,20 @@ class Settings(BaseSettings):
     DATABASE_URL: str = None  # Will be set in __init__
     SYNC_INTERVAL_HOURS: int = 1
     LOG_LEVEL: str = "INFO"
-    NUM_OF_THREADS: int = os.getenv("NUM_OF_THREADS")
-   
+    NUM_OF_THREADS: int = int(os.getenv("NUM_OF_THREADS", "4"))
+    
+    # JWT Settings
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "CHANGE-THIS-KEY-IN-PRODUCTION-ENVIRONMENTS")
+    JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    
+    # Cookie Settings
+    COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "True").lower() == "true"
+    COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax")
+    COOKIE_MAX_AGE_SECONDS: int = int(os.getenv("COOKIE_MAX_AGE_SECONDS", "1800"))  # 30 minutes
+    
+    # SQLite path (used by auth migration)
+    SQLITE_PATH: str = str(DB_FILE)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -34,6 +46,7 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        env_file_encoding = 'utf-8'
         extra = "allow"  # Allow extra fields
 
 settings = Settings()

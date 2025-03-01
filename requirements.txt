@@ -9,3 +9,6 @@ pydantic-settings
 pytz
 fastapi
 uvicorn
+argon2-cffi
+python-jose[cryptography]
+python-multipart

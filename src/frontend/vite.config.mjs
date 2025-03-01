@@ -4,10 +4,9 @@ import Vue from "@vitejs/plugin-vue";
 import Vuetify, { transformAssetUrls } from "vite-plugin-vuetify";
 import ViteFonts from "unplugin-fonts/vite";
 import VueRouter from "unplugin-vue-router/vite";
-
-// Utilities
-import { defineConfig } from "vite";
 import { fileURLToPath, URL } from "node:url";
+import { defineConfig } from "vite";
+import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -70,4 +69,17 @@ export default defineConfig({
       },
     },
   },
+  // Configure build output to be served by FastAPI
+  build: {
+    outDir: '../backend/app/static',
+    emptyOutDir: true,
+    assetsDir: 'assets',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor': ['vue', 'vue-router', 'vuetify']
+        }
+      }
+    }
+  }
 });

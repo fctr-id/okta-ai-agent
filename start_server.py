@@ -1,20 +1,34 @@
-import uvicorn
-import os, sys
-from pathlib import Path
+import subprocess
 
-if __name__ == "__main__":
-    # Get the project root directory
-    project_root = Path(__file__).parent
+def run_command(command):
+    """Run a shell command and print output"""
+    print(f"Executing: {command}")
     
-    # Add the project root to Python path
-    sys.path.append(str(project_root))
-    
-    # Set environment variable for Python path
-    os.environ["PYTHONPATH"] = str(project_root)
-    
-    uvicorn.run(
-        "src.backend.app.main:app",
-        host="127.0.0.1",
-        port=8001,
-        reload=False
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
     )
+    
+    # Stream output in real time
+    while True:
+        output = process.stdout.readline()
+        if output == '' and process.poll() is not None:
+            break
+        if output:
+            print(output.strip())
+            
+    # Get any remaining output
+    stdout, stderr = process.communicate()
+    
+    if process.returncode != 0:
+        print(f"Error executing command: {stderr}")
+        return False
+    
+    return True
+
+# Run the FastAPI server
+print("Starting server...")
+run_command("python -m uvicorn src.backend.app.main:app --reload --host 0.0.0.0 --port 8001")

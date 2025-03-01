@@ -10,11 +10,12 @@ Key features:
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, and_, not_
+from sqlalchemy import select, and_, not_, update, func
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator
-from .models import Base, User, UserFactor, group_application_assignments
+from datetime import datetime, timezone
+from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
+from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole
+from src.core.helpers.argon2_hash import hash_password, verify_password, check_password_needs_rehash, calculate_lockout_time
 from src.config.settings import settings
 from src.utils.logging import logger
 
@@ -357,3 +358,97 @@ class DatabaseOperations:
         except Exception as e:
             logger.error(f"Error processing group relationships: {str(e)}")
             raise               
+        
+
+
+    #Authentication methods:
+
+    async def get_auth_user(self, session: AsyncSession, username: str) -> Optional[AuthUser]:
+        """Get a user by username"""
+        result = await session.execute(select(AuthUser).where(AuthUser.username == username))
+        return result.scalars().first()
+
+    async def create_auth_user(self, session: AsyncSession, username: str, password: str, 
+                            role: UserRole = UserRole.ADMIN) -> AuthUser:
+        """Create a new authentication user"""
+        password_hash = hash_password(password)
+        
+        user = AuthUser(
+            username=username,
+            password_hash=password_hash,
+            role=role,
+            setup_completed=True
+        )
+        
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user
+
+    async def check_setup_completed(self, session: AsyncSession) -> bool:
+        """Check if the initial setup has been completed"""
+        result = await session.execute(select(func.count(AuthUser.id)).where(AuthUser.setup_completed == True))
+        count = result.scalar()
+        return count > 0
+
+    async def update_password(self, session: AsyncSession, username: str, new_password: str) -> bool:
+        """Update a user's password"""
+        password_hash = hash_password(new_password)
+        
+        stmt = (
+            update(AuthUser)
+            .where(AuthUser.username == username)
+            .values(
+                password_hash=password_hash,
+                updated_at=datetime.now(timezone.utc)
+            )
+        )
+        
+        result = await session.execute(stmt)
+        await session.commit()
+        
+        return result.rowcount > 0
+
+    async def verify_user_credentials(self, session: AsyncSession, username: str, 
+                                    password: str) -> Union[AuthUser, None]:
+        """Verify user credentials and handle login attempts"""
+        user = await self.get_auth_user(session, username)
+        
+        if not user:
+            logger.warning(f"Login attempt for non-existent user: {username}")
+            return None
+        
+        if not user.is_active:
+            logger.warning(f"Login attempt for inactive user: {username}")
+            return None
+            
+        # Check if the account is temporarily locked
+        now = datetime.now(timezone.utc)
+        if user.locked_until and user.locked_until > now:
+            logger.warning(f"Login attempt for locked account: {username}")
+            return None
+        
+        # Verify password
+        if verify_password(user.password_hash, password):
+            # Successful login - reset attempts and update last login
+            user.login_attempts = 0
+            user.last_login = now
+            user.locked_until = None
+            
+            # Check if password needs rehashing
+            if check_password_needs_rehash(user.password_hash):
+                user.password_hash = hash_password(password)
+                
+            await session.commit()
+            return user
+        else:
+            # Failed login - increment attempts and possibly lock account
+            user.login_attempts += 1
+            
+            # After 5 failed attempts, lock the account temporarily
+            if user.login_attempts >= 5:
+                user.locked_until = calculate_lockout_time(user.login_attempts)
+                logger.warning(f"Account locked due to failed attempts: {username}")
+                
+            await session.commit()
+            return None        
