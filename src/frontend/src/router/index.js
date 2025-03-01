@@ -1,26 +1,26 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import ChatInterface from '@/components/ChatInterface.vue'
+import ChatInterfaceV2 from '@/components/ChatInterfaceV2.vue'
 
+// Define routes
 const routes = [
   {
     path: '/',
-    component: () => import('@/pages/index.vue'),
-    name: 'home'
-  }
+    name: 'Home',
+    component: ChatInterface
+  },
+  {
+    path: '/v2',
+    name: 'ChatV2',
+    component: ChatInterfaceV2
+  },
+  // ...any other existing routes...
 ]
 
+// Create router
 const router = createRouter({
   history: createWebHistory(),
-  routes,
-  scrollBehavior() {
-    // Always scroll to top when navigating
-    return { top: 0 }
-  }
-})
-
-// Navigation guard for future auth implementation
-router.beforeEach((to, from, next) => {
-  console.info(`Navigating from ${from.path} to ${to.path}`)
-  next()
+  routes
 })
 
 export default router

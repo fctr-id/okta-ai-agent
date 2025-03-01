@@ -18,39 +18,36 @@
         <!-- Data Table Display -->
         <div v-else-if="displayedItems.length > 0" class="table-content">
             <v-data-table :key="`table-${displayedItems.length}`" :headers="formattedHeaders" :items="displayedItems"
-                :loading="loading" :items-per-page="5" :search="search" :sort-by="sortBy" density="compact" hover>
+                :loading="loading" :items-per-page="10" :search="search" :sort-by="sortBy" density="compact" hover>
                 <template v-slot:top>
-                    <div class="table-header-container">
+                    <div class="table-header-container pb-6">
                         <div class="search-row pl-4">
                             <div class="header-actions">
                                 <div class="left-section">
-                                    <v-btn v-if="displayedItems.length > 0" prepend-icon="mdi-download" variant="text"
-                                        density="comfortable" size="small" @click="downloadCSV" class="download-btn">
+                                    <v-btn class="download-btn" @click="downloadCSV" variant="tonal">
+                                        <v-icon size="small" start>mdi-download</v-icon>
                                         Download CSV
                                     </v-btn>
+
+                                    <div class="sync-info">
+                                        <v-icon class="sync-icon" size="small">mdi-update</v-icon>
+                                        <span>Updated at: {{ getLastSyncTime }}</span>
+                                    </div>
                                 </div>
+
                                 <div class="right-section">
-                                    <v-text-field v-model="search" prepend-inner-icon="mdi-text-search-variant"
-                                        clearable clear-icon="mdi-close" label="Search" single-line hide-details
-                                        density="compact" variant="underlined" class="search-field" color="#4C64E2"
-                                        @click:clear="clearSearch" />
+                                    <!--<div class="results-count" v-if="displayedItems.length">
+                                        {{ displayedItems.length }} {{ displayedItems.length === 1 ? 'result' :
+                                        'results' }}
+                                    </div>-->
+
+                                    <v-text-field v-model="search" density="comfortable" hide-details
+                                        placeholder="Search results" prepend-inner-icon="mdi-magnify" single-line clearable
+                                        variant="outlined" class="search-field"></v-text-field>
                                 </div>
                             </div>
                         </div>
-                        <div class="info-row py-2 pl-6">
-                            <div class="table-info">
-                                <div class="sync-info">
-                                    <v-icon icon="mdi-sync" size="small" class="sync-icon" />
-                                    <span>Last Updated: {{ getLastSyncTime }}</span>
-                                </div>
-                                <div class="results-count">
-                                    <span>
-                                        {{ displayedItems.length }}
-                                        {{ displayedItems.length === 1 ? 'result' : 'results' }}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
+                        <!-- Remove the info-row div completely -->
                     </div>
                 </template>
             </v-data-table>
@@ -58,7 +55,9 @@
 
         <!-- No Results Message -->
         <div v-else-if="!loading && !displayedItems.length" class="no-results">
-            No results found
+            <v-icon icon="mdi-information-outline" color="#4C64E2" size="large" class="mb-3"></v-icon>
+            <div class="no-results-message">No results found</div>
+            <div class="no-results-hint">Try adjusting your query or search terms</div>
         </div>
     </div>
 </template>
@@ -157,12 +156,28 @@ const formattedJson = computed(() => {
     }
 })
 
-// Last sync time from the backend metadata
 const getLastSyncTime = computed(() => {
+    // Check multiple possible locations
     if (props.metadata?.last_sync) {
         return props.metadata.last_sync;
     }
-
+    
+    // Check with brackets notation (case sensitive)
+    if (props.metadata?.['last_sync']) {
+        return props.metadata['last_sync'];
+    }
+    
+    // Check if it might be inside a nested structure
+    if (props.metadata?.headers && 
+        props.metadata?.timestamp && 
+        props.metadata?.query) {
+        // This appears to be the backend metadata structure
+        return props.metadata.last_sync || 'Never';
+    }
+    
+    // Log what we have for debugging
+    console.log('Last sync not found in:', props.metadata);
+    
     return 'Never';
 });
 
@@ -187,8 +202,8 @@ onBeforeUnmount(() => {
     sortBy.value = [{ key: 'email', order: 'asc' }]
 
     // Clear table data
-    displayedContent.value = []
-    headerCache.value = []
+    //displayedContent.value = []
+    //headerCache.value = []
 })
 
 
@@ -212,11 +227,11 @@ const downloadCSV = () => {
             .map(h => `"${h.text}"`)
             .join(',')
 
-        const dataRows = displayedItems.value.map(item => 
+        const dataRows = displayedItems.value.map(item =>
             headers
                 .map(h => {
                     const value = item[h.value]
-                    return `"${value ?? ''}"` 
+                    return `"${value ?? ''}"`
                 })
                 .join(',')
         )
@@ -234,12 +249,12 @@ const downloadCSV = () => {
             second: '2-digit',
             hour12: false
         }).replace(/[/:]/g, '-').replace(',', '')
-        
+
         const filename = `okta-data-${localTimestamp}.csv`
 
         // Create and trigger download
-        const blob = new Blob([csvContent], { 
-            type: 'text/csv;charset=utf-8' 
+        const blob = new Blob([csvContent], {
+            type: 'text/csv;charset=utf-8'
         })
 
         const url = URL.createObjectURL(blob)
@@ -247,10 +262,10 @@ const downloadCSV = () => {
         link.setAttribute('href', url)
         link.setAttribute('download', filename)
         link.style.display = 'none'
-        
+
         document.body.appendChild(link)
         link.click()
-        
+
         // Cleanup
         setTimeout(() => {
             document.body.removeChild(link)
@@ -271,12 +286,139 @@ watch(() => props.content, (newContent) => {
     });
 }, { deep: true });
 */
+
 </script>
 
 <style scoped>
 .data-display {
+    margin: 0;
     width: 100%;
-    margin: 8px 0;
+    padding: 24px;
+}
+
+.text-content {
+    padding: 16px;
+    line-height: 1.6;
+    font-size: 15px;
+    color: #374151;
+    border-radius: 8px;
+    background: #f9faff;
+    margin: 0 auto;
+    max-width: 800px;
+    text-align: center; /* Center the text */
+    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.05);
+}
+
+/* Streamlined header */
+.header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0 0 12px 0;
+}
+
+.left-section {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.right-section {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.download-btn {
+    color: #4C64E2;
+    text-transform: none;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 0 16px !important;
+    height: 36px;
+    border: 1px solid #eef1ff !important;
+}
+
+.download-btn:hover {
+    background: #f8f9ff !important;
+}
+
+.sync-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #5d6b8a;
+    font-size: 0.813rem;
+    white-space: nowrap;
+}
+
+.sync-icon {
+    color: #4C64E2;
+    font-size: 16px;
+}
+
+.results-count {
+    color: #6B7280;
+    font-size: 0.813rem;
+}
+
+/* Content Type Styles */
+.json-content {
+    padding: 16px;
+    overflow-x: auto;
+    margin: 0 auto;
+    max-width: 800px;
+    background: #f9faff;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.05);
+}
+
+.json-content pre {
+    margin: 0;
+    font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #374151;
+}
+
+.error-content {
+    color: #991B1B;
+    border-left: 3px solid #DC2626;
+    padding: 14px 18px;
+    font-size: 15px;
+    background: #FEF2F2;
+    border-radius: 8px;
+    margin: 0 auto; /* Already centered, but reinforcing */
+    max-width: 600px;
+    line-height: 1.5;
+    box-shadow: 0 8px 16px rgba(220, 38, 38, 0.08),
+                0 2px 4px rgba(220, 38, 38, 0.08),
+                0 0 1px rgba(0, 0, 0, 0.08);
+    width: fit-content;
+    min-width: 300px;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center content inside */
+    text-align: center; /* Center text */
+}
+
+.no-results {
+  padding: 24px 16px;
+  text-align: center;
+  color: #6b7280;
+  font-size: 15px;
+  margin: 0 auto;
+  max-width: 600px;
+  background: transparent; /* Remove background */
+  border-radius: 0;        /* Remove border radius */
+  box-shadow: none;        /* Remove shadow */
+}
+
+
+.table-header-container {
+    padding: 16px 0 8px 0;
 }
 
 .header-actions {
@@ -284,226 +426,161 @@ watch(() => props.content, (newContent) => {
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding-right: 16px;
-    gap: 16px;
+    padding: 0;
 }
 
 .left-section {
-    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: nowrap;
 }
 
 .right-section {
-    flex-grow: 1;
-    max-width: 300px;
-    margin-left: auto;
-}
-
-.download-btn {
-    color: #4C64E2;
-    text-transform: none;
-    white-space: nowrap;
-    font-size: 14px;
-}
-
-.download-btn:hover {
-    background-color: rgba(76, 100, 226, 0.04);
-}
-
-.info-row {
-    margin-bottom: 0px;
     display: flex;
-    justify-content: flex-start;
+    align-items: center;
+    gap: 16px;
+    flex: 1;
+    justify-content: flex-end;
 }
 
-/* Content Type Styles */
-.json-content {
-    background: #f5f5f5;
-    padding: 12px;
-    border-radius: 4px;
-    overflow-x: auto;
+.search-field {
+    min-width: 280px;
+    max-width: 400px;
+    flex-grow: 1;
 }
 
-.json-content pre {
-    margin: 0;
-    font-family: monospace;
+:deep(.search-field .v-field__input) {
     font-size: 14px;
-    white-space: pre-wrap;
-    word-break: break-word;
 }
 
-.error-content {
-    color: #DC2626;
-    background-color: #FEF2F2;
-    border-radius: 4px;
-    padding: 0px;
+:deep(.search-field .v-field) {
+    border-radius: 6px;
+    border: 1px solid #eef1ff;
 }
 
-
-.query-info {
-    padding: 12px;
-    background-color: #f4f4f4;
-    border-radius: 4px;
-}
-
-.no-results {
-    padding: 12px;
-    background-color: #f8f9fa;
-    border-radius: 4px;
-    font-style: italic;
-    color: #707070;
-}
-
-/* Data Table Styles */
-:v-deep .v-data-table {
+/* Minimalist Table Styles */
+:deep(.v-data-table) {
     background: transparent;
     box-shadow: none;
 }
 
-::v-deep .v-data-table__th {
-    background-color: #F3F4F6 !important;
-    color: #4B5563 !important;
-    font-weight: 600 !important;
-    font-size: 0.813rem !important;
-    letter-spacing: 0.01em;
-    text-transform: none;
-    padding: 8px 16px !important;
-    cursor: pointer;
-    transition: background-color 0.2s ease;
-    border-bottom: 1px solid #E5E7EB;
-}
-
-::v-deep .v-data-table__th:hover {
-    background-color: #E5E7EB !important;
-}
-
-:v-deep .v-data-table-header__content {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-:v-deep .v-data-table-header__sort-icon {
-    color: #4B5563 !important;
-    opacity: 0.7;
-    margin-left: 4px;
-    font-size: 1rem;
-}
-
-:v-deep .v-data-table__wrapper {
+:deep(.v-data-table__wrapper) {
     overflow-x: auto;
-    border: 1px solid #E5E7EB;
+    border: 1px solid #eef1ff;
     border-radius: 8px;
-    background: white;
 }
 
-/* Toolbar and Search Styles */
-:v-deep .table-toolbar {
-    padding: 0 0 16px 0 !important;
-    background: transparent !important;
+/* More aggressive table header styling */
+:deep(.v-data-table) th,
+:deep(.v-data-table-header th),
+:deep(.v-data-table-header__cell),
+:deep(.v-data-table) .v-data-table-header th {
+  transition: all 0.2s ease !important;
+  font-weight: 500 !important;
+  color: #374151 !important;
+  font-size: 13px !important;
+  letter-spacing: 0.3px !important;
+  text-transform: uppercase !important;
+  position: relative !important;
+  background-color: #FAFBFF !important;
 }
 
-:v-deep .search-field {
-    max-width: 280px;
+/* Stronger hover selectors */
+:deep(.v-data-table) th:hover,
+:deep(.v-data-table-header th:hover),
+:deep(.v-data-table-header__cell:hover),
+:deep(.v-data-table) .v-data-table-header th:hover {
+  background-color: #f0f3ff !important; 
+  color: #4C64E2 !important;
+  cursor: pointer !important;
 }
 
-:v-deep .search-field .v-field__input {
-    padding: 4px 12px;
-    color: #374151;
+/* Bottom indicator using multiple selectors */
+:deep(.v-data-table) th:hover::after,
+:deep(.v-data-table-header th:hover::after),
+:deep(.v-data-table-header__cell:hover::after) {
+  content: '' !important;
+  position: absolute !important;
+  bottom: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  height: 2px !important;
+  background: #4C64E2 !important;
+  opacity: 0.7 !important;
 }
 
-:v-deep .search-field .v-field__append-inner {
-    padding-top: 8px;
+/* Alternative approach using direct style attributes */
+:deep([role="columnheader"]) {
+  transition: background-color 0.2s ease !important;
 }
 
-:v-deep .search-field .v-field__input input::placeholder {
-    color: #9CA3AF;
+:deep([role="columnheader"]:hover) {
+  background-color: #f0f3ff !important;
+  color: #4C64E2 !important;
 }
 
-.table-info {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 24px;
-    padding: 8px 0;
-    margin-bottom: 8px;
+
+
+/* Clean row styles */
+:deep(.v-data-table-row:hover) {
+    background-color: #f9faff !important;
 }
 
-.sync-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: #6B7280;
-    font-size: 0.813rem;
-}
-
-.sync-icon {
-    color: #6B7280;
-    font-size: 16px;
-}
-
-.results-count {
-    color: #6B7280;
-    font-size: 0.813rem;
-    min-width: 80px;
-    text-align: right;
-}
-
-/* Row Styles */
-:v-deep .v-data-table .v-data-table-row {
-    border-bottom: 1px solid #E5E7EB;
-    transition: background-color 0.2s ease;
-}
-
-:v-deep .v-data-table .v-data-table-row:hover {
-    background-color: #F9FAFB !important;
-}
-
-:v-deep .v-data-table .v-data-table-row td {
-    padding: 12px 16px;
+:deep(.v-data-table .v-data-table-row td) {
+    padding: 12px 16px !important;
     font-size: 0.875rem;
     color: #374151;
-    background: white;
+    border-bottom: 1px solid #f5f7ff;
 }
 
-/* Pagination Styles */
-:v-deep .v-data-table-footer {
-    padding: 12px 16px;
-    background: transparent;
+/* Simplified Pagination */
+:deep(.v-data-table-footer) {
+    padding: 6px 8px;
+    border-top: 1px solid #eef1ff;
 }
 
-/* Loading and Empty States */
-:v-deep .v-data-table__progress {
-    display: none;
-}
-
-:v-deep .v-data-table__empty-wrapper {
-    color: #6B7280;
-    font-size: 0.875rem;
-    padding: 24px;
-    text-align: center;
-    background: white;
-    border-radius: 8px;
-    border: 1px solid #E5E7EB;
-}
-
-/* Responsive Styles */
-@media (max-width: 600px) {
-    :v-deep .search-field {
-        max-width: 100%;
+/* Responsive adjustments */
+@media (max-width: 992px) {
+    .header-actions {
+        flex-wrap: wrap;
+        gap: 16px;
     }
+    
+    .right-section {
+        flex: 1 0 100%;
+        order: 1;
+    }
+    
+    .left-section {
+        order: 2;
+    }
+}
 
-    .table-info {
-        flex-direction: column;
-        align-items: flex-start;
+@media (max-width: 768px) {
+    .right-section {
+        flex-direction: row-reverse;
+    }
+    
+    .search-field {
+        min-width: 0;
+        flex: 1;
+    }
+}
+
+@media (max-width: 480px) {
+    .left-section {
+        flex-wrap: wrap;
         gap: 8px;
     }
-
-    .results-count {
-        text-align: left;
+    
+    .right-section {
+        flex-direction: column;
+        align-items: flex-start;
     }
-
-    :v-deep .table-toolbar {
-        padding: 0 0 12px 0 !important;
+    
+    .search-field {
+        width: 100%;
     }
 }
 </style>

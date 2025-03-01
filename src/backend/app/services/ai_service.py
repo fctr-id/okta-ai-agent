@@ -63,7 +63,7 @@ class SQLExecutor:
 
 class AIService:
     
-    BATCH_SIZE = 10
+    BATCH_SIZE = 100
     
     @staticmethod
     async def get_last_sync_info(executor: SQLExecutor) -> str:
@@ -121,6 +121,7 @@ class AIService:
             logger.info("Expanding query...")
             reasoning_result = await expand_query(query)
             expanded_query = reasoning_result.get('expanded_query', '')
+            logger.info(f"Expanded query: {expanded_query}")
             
             if not expanded_query:
                 yield json.dumps({

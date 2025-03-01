@@ -1,13 +1,13 @@
 <template>
   <v-app>
     <v-main>
-      <chat-interface />
+      <router-view />
     </v-main>
   </v-app>
 </template>
 
 <script setup>
-import ChatInterface from '@/components/ChatInterface.vue'
+// Remove the import for ChatInterface since we're using router-view now
 </script>
 
 <style>
