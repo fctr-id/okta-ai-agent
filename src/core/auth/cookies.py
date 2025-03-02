@@ -10,7 +10,7 @@ def set_auth_cookie(response: Response, token: str) -> None:
         token: JWT token string
     """
     response.set_cookie(
-        key="access_token",
+        key="fctr_session",
         value=token,
         httponly=True,
         secure=settings.COOKIE_SECURE,
@@ -25,4 +25,4 @@ def clear_auth_cookie(response: Response) -> None:
     Args:
         response: FastAPI response object
     """
-    response.delete_cookie(key="access_token")
+    response.delete_cookie(key="fctr_session")

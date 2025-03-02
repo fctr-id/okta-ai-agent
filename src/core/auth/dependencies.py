@@ -9,8 +9,8 @@ from src.okta_db_sync.db.operations import DatabaseOperations
 from src.okta_db_sync.db.models import AuthUser
 from src.utils.logging import logger
 
-# Create cookie security scheme
-oauth2_scheme = APIKeyCookie(name="access_token")
+# Create cookie security scheme with new name
+oauth2_scheme = APIKeyCookie(name="fctr_session")
 
 # Database connection
 db_operations = DatabaseOperations()
@@ -23,7 +23,7 @@ async def get_db_session() -> AsyncSession:
 async def get_current_user(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
-    access_token: Optional[str] = Cookie(None)
+    session_token: Optional[str] = Cookie(None, alias="fctr_session")  # Updated: use explicit cookie name
 ) -> AuthUser:
     """
     Dependency to get the current authenticated user
@@ -31,7 +31,7 @@ async def get_current_user(
     Args:
         request: FastAPI request object
         session: Database session
-        access_token: JWT token from cookie
+        session_token: JWT token from cookie
         
     Returns:
         AuthUser object if authentication is valid
@@ -40,20 +40,20 @@ async def get_current_user(
         HTTPException: If authentication is invalid
     """
     # Check if token exists
-    if not access_token:
+    if not session_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": "Bearer realm=\"Okta AI Agent API\""},  # Improved header
         )
     
     # Validate token and extract user ID
-    token_data = decode_access_token(access_token)
+    token_data = decode_access_token(session_token)
     if not token_data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
+            headers={"WWW-Authenticate": "Bearer realm=\"Okta AI Agent API\""},  # Improved header
         )
     
     username = token_data.get("sub")

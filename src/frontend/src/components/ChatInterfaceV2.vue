@@ -1,22 +1,5 @@
 <template>
-    <div class="chat-interface">
-        <!-- Modern floating header -->
-        <header class="floating-header">
-            <div class="header-content">
-                <div class="brand">
-                    <img src="@/assets/fctr-logo.png" alt="Okta Logo" height="24" />
-                    <div class="brand-divider"></div>
-                    <div class="title-with-badge">
-                        <span>AI Agent for Okta</span>
-                        <div class="beta-badge">BETA</div>
-                    </div>
-                </div>
-                <button class="logout-btn" aria-label="Logout" @click="handleLogout">
-                    <v-icon>mdi-logout</v-icon>
-                </button>
-            </div>
-        </header>
-
+    <AppLayout contentClass="chat-content">
         <main class="content-area mt-10" :class="{ 'has-results': hasResults }">
             <!-- Search Container with Animated Position -->
             <div :class="['search-container', hasResults ? 'moved' : '']">
@@ -40,8 +23,7 @@
                         <!-- Search input with dynamic placeholder -->
                         <v-text-field v-model="userInput" @keydown="handleKeyDown" autofocus refs="searchInput"
                             @update:model-value="handleUserInputChange" :focused="isFocused" @focus="isFocused = true"
-                            @blur="isFocused = false"
-                            :placeholder="hasResults ? 'Ask anything about your Okta tenant...' : 'Ask anything about your Okta tenant...'"
+                            @blur="isFocused = false" placeholder="Ask anything about your Okta tenant..."
                             variant="plain" color="#4C64E2" bg-color="transparent" hide-details class="search-input"
                             :clearable="true" />
 
@@ -53,7 +35,6 @@
                     </div>
                 </div>
 
-
                 <!-- Suggestions -->
                 <transition name="fade-up">
                     <div v-if="!hasResults" class="suggestions-wrapper">
@@ -62,13 +43,12 @@
                                 variant="outlined" @click="selectSuggestion(suggestion)" size="small">
                                 {{ suggestion }}
                             </v-btn>
-                            <!-- Show more button removed -->
                         </div>
                     </div>
                 </transition>
             </div>
 
-            <!-- Display User question-->
+            <!-- Display User question -->
             <transition name="fade">
                 <div v-if="hasResults && lastQuestion" class="question-header-container">
                     <div class="question-header">
@@ -89,17 +69,6 @@
                         :metadata="currentResponse.metadata" />
                 </div>
             </transition>
-
-            <!-- Modern footer credit -->
-            <footer class="page-footer">
-                <div class="footer-content">
-                    <span>Powered by </span>
-                    <a href="https://fctr.io" target="_blank" class="branded-link">
-                        Fctr Identity
-                    </a>
-                    <span class="disclaimer">• Responses may require verification</span>
-                </div>
-            </footer>
         </main>
 
         <!-- Loading overlay -->
@@ -109,10 +78,8 @@
                 <span>Processing your query...</span>
             </div>
         </transition>
-    </div>
+    </AppLayout>
 </template>
-
-
 
 <script setup>
 /**
@@ -127,6 +94,7 @@ import DataDisplay from '@/components/messages/DataDisplay.vue'
 import { MessageType } from '@/components/messages/messageTypes'
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
+import AppLayout from '@/components/layout/AppLayout.vue'
 
 // ---------- STATE MANAGEMENT ----------
 
@@ -141,6 +109,7 @@ const isFocused = ref(false) // Tracks if the search input is focused
 const hasResults = ref(false) // Whether there are results to display
 const auth = useAuth()
 const router = useRouter()
+
 /**
  * Response data state
  */
@@ -184,11 +153,6 @@ const getContentClass = (type) => {
     }
 }
 
-/* Code to handle logout */
-const handleLogout = async () => {
-  await auth.logout()
-  router.push('/login')
-}
 // ---------- PREDEFINED CONTENT ----------
 
 /**
@@ -204,9 +168,6 @@ const suggestions = ref([
     'List all users along with their registered factors',
     'show me all users who are in locked status'
 ])
-
-// Deprecated - no longer needed with new suggestion implementation
-// const showMoreSuggestions = ref(false)
 
 // ---------- API INTERACTION ----------
 
@@ -270,8 +231,6 @@ const resetInterface = () => {
         content: '',
         metadata: {}
     }
-    // No longer needed:
-    // showMoreSuggestions.value = false
 }
 
 /**
@@ -327,8 +286,6 @@ const sendQuery = async () => {
                 case 'metadata':
                     // Store headers from metadata
                     headers = data.content?.headers || []
-                    //console.log("Metadata received:", data.content); // Add this line
-                    //console.log("Last sync value:", data.content?.last_sync); // Add this line
                     currentResponse.value = {
                         type: MessageType.STREAM, // Important: Use STREAM type
                         content: [],
@@ -382,7 +339,6 @@ const sendQuery = async () => {
     }
 }
 
-
 /* Code to let the user scroll through the last 5 questions */
 // Inside script setup, add these constants and refs
 const CONFIG = {
@@ -434,168 +390,27 @@ const updateMessageHistory = (query) => {
 }
 
 onMounted(() => {
-  // Force document to be scrollable
-  document.documentElement.style.overflow = 'auto'
-  document.body.style.overflow = 'auto'
-  document.documentElement.style.height = 'auto'
-  document.body.style.height = 'auto'
-  
-  // Force layout recalculation on smaller screens
-  if (window.innerHeight <= 800) {
-    document.querySelector('.chat-interface')?.classList.add('small-screen')
-  }
+    // Force document to be scrollable
+    document.documentElement.style.overflow = 'auto'
+    document.body.style.overflow = 'auto'
+    document.documentElement.style.height = 'auto'
+    document.body.style.height = 'auto'
+
+    // Force layout recalculation on smaller screens
+    if (window.innerHeight <= 800) {
+        document.querySelector('.chat-content')?.classList.add('small-screen')
+    }
 })
 </script>
 
 <style scoped>
-/* Create an extended background effect */
+@import '@/styles/variables.scss';
 
-body, html {
-  height: auto !important;
-  min-height: 100% !important;
-  overflow-y: auto !important;
-  position: relative !important;
-}
-
-/* Fixed chat interface base layout */
-.chat-interface {
-  min-height: 100vh;
-  /* Remove any height restrictions */
-  height: auto !important;
-  overflow-y: visible !important;
-  overflow-x: hidden;
-  display: block !important; /* Important change - use block instead of flex */
-  position: relative !important;
-  background: linear-gradient(180deg, #fafbff 0%, #f8f9ff 100%);
-}
-
-/* Add a full-width header background */
-.chat-interface::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 100px;
-    /* Adjust based on header height + desired extension */
-    background: linear-gradient(to bottom,
-            rgba(76, 100, 226, 0.03) 0%,
-            rgba(76, 100, 226, 0.01) 70%,
-            transparent 100%);
-    z-index: 1;
-}
-
-/* Cleaner, more modern header design */
-
-/* Update header-content style */
-.header-content {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: white;
-    backdrop-filter: blur(15px);
-    border-radius: 16px;
-    padding: 16px 24px;
-    box-shadow: 0 2px 20px rgba(76, 100, 226, 0.08),
-        0 1px 8px rgba(76, 100, 226, 0.05);
-    position: relative;
-    border: none;
-    /* Remove border for cleaner look */
-    z-index: 2;
-}
-
-/* Create subtle blue spill effect */
-.floating-header::after {
-    content: '';
-    position: absolute;
-    bottom: -25px;
-    left: 5%;
-    right: 5%;
-    height: 25px;
-    background: radial-gradient(ellipse at center,
-            rgba(76, 100, 226, 0.25) 0%,
-            rgba(76, 100, 226, 0.1) 50%,
-            rgba(76, 100, 226, 0) 85%);
-    filter: blur(12px);
-    z-index: 1;
-    pointer-events: none;
-}
-
-/* Floating header positioning */
-.floating-header {
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 100;
-    width: calc(100% - 40px);
-    max-width: 1280px;
-    position: relative;
-}
-
-.brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-weight: 500;
-    color: #2c3e50;
-}
-
-.title-with-badge {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.brand-divider {
-    height: 20px;
-    width: 1px;
-    background: #e0e0e0;
-}
-
-.beta-badge {
-    background: #F0F3FF;
-    color: #4C64E2;
-    font-size: 11px;
-    font-weight: 600;
-    padding: 4px 8px;
-    border-radius: 6px;
-    letter-spacing: 0.5px;
-}
-
-.logout-btn {
+/* Search container */
+.chat-content {
     background: transparent;
-    border: none;
-    color: #777;
-    cursor: pointer;
-    padding: 8px;
-    border-radius: 8px;
-    transition: all 0.2s ease;
 }
 
-.logout-btn:hover {
-    background: #f5f5f5;
-    color: #333;
-}
-
-/* Main content area */
-.content-area {
-    width: calc(100% - 40px) !important;
-    /* Match header's width calculation exactly */
-    max-width: 1280px !important;
-    margin: 0 auto;
-    padding: 0;
-    /* Remove padding from container */
-    transition: all 0.3s ease;
-}
-
-.content-area.has-results {
-    padding-top: 60px;
-    /* Add top padding to clear the header */
-    padding-bottom: 60px;
-}
-
-/* Search container - moved higher */
 .search-container {
     position: fixed;
     left: 50%;
@@ -654,6 +469,20 @@ body, html {
     display: none;
 }
 
+/* Main content area */
+.content-area {
+    width: calc(100% - 40px);
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0;
+    transition: all 0.3s ease;
+}
+
+.content-area.has-results {
+    padding-top: 60px;
+    padding-bottom: 60px;
+}
+
 /* Modern integrated search */
 .search-wrapper {
     width: 100%;
@@ -672,14 +501,12 @@ body, html {
     position: relative;
     overflow: hidden;
     border: 1px solid #4C64E2;
-    /* Always show blue border */
 }
 
 .integrated-search-bar:has(.v-field--focused) {
     box-shadow: 0 8px 28px rgba(76, 100, 226, 0.15);
     transform: translateY(-2px);
     border: 1.5px solid #4C64E2;
-    /* Make it slightly bolder when focused */
 }
 
 /* Add a subtle side accent when focused */
@@ -842,14 +669,6 @@ body, html {
     background: #f8f9ff !important;
 }
 
-.show-more-btn {
-    color: #4C64E2 !important;
-    font-weight: 500 !important;
-    height: 32px !important;
-    font-size: 13px !important;
-    text-transform: none !important;
-}
-
 /* Centered question header with blue background */
 .question-header-container {
     max-width: 1280px;
@@ -861,8 +680,8 @@ body, html {
 }
 
 .question-header {
-    background-color: #4C64E2; /* Blue background from original user message */
-    color: white; /* White text for contrast */
+    background-color: #4C64E2;
+    color: white;
     padding: 12px 20px;
     border-radius: 12px;
     width: fit-content;
@@ -874,7 +693,7 @@ body, html {
     display: flex;
     align-items: center;
     gap: 12px;
-    box-shadow: 0 4px 16px rgba(76, 100, 226, 0.2); /* Enhanced shadow for blue background */
+    box-shadow: 0 4px 16px rgba(76, 100, 226, 0.2);
 }
 
 .question-icon {
@@ -884,18 +703,18 @@ body, html {
 }
 
 .question-icon :deep(.v-icon) {
-    color: white !important; /* Force white icon */
+    color: white !important;
 }
 
 .question-text {
     font-weight: 500;
-    color: white; /* Ensure text is white */
+    color: white;
 }
 
 .question-timestamp {
     font-size: 12px;
     opacity: 0.8;
-    color: rgba(255, 255, 255, 0.9); /* Semi-transparent white */
+    color: rgba(255, 255, 255, 0.9);
     margin-left: 8px;
     white-space: nowrap;
 }
@@ -912,30 +731,19 @@ body, html {
     }
 }
 
-/* Results area */
-.results-area {
-    border-radius: 16px;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
-    background: white;
-    overflow: hidden;
-    margin-top: 16px;
-    width: 100%;
-    padding: 0;
-}
-
+/* Results containers */
 .results-container {
-  max-width: 1280px;
-  width: calc(100% - 40px);
-  margin-left: auto !important; 
-  margin-right: auto !important;
-  margin-top: 12px;
-  margin-bottom: 180px !important; /* Increased from 80px to 180px */
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  overflow: visible !important;
+    max-width: 1280px;
+    width: calc(100% - 40px);
+    margin-left: auto !important;
+    margin-right: auto !important;
+    margin-top: 12px;
+    margin-bottom: 180px !important;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    overflow: visible !important;
 }
-
 
 .full-width-results {
     border-radius: 16px;
@@ -954,73 +762,6 @@ body, html {
     box-shadow: none;
 }
 
-
-/* Result sections for multi-part results */
-.result-section {
-    margin-bottom: 20px;
-    background: white;
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 4px 14px rgba(76, 100, 226, 0.05);
-}
-
-.section-title {
-    font-size: 16px;
-    font-weight: 500;
-    color: #374151;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #eef1ff;
-}
-
-/* Footer */
-.page-footer {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 16px 0;
-  text-align: center;
-  font-size: 13px;
-  color: #5d6b8a;
-  background: white;
-  box-shadow: 0 -2px 10px rgba(0,0,0,0.03);
-  z-index: 50;
-}
-
-
-.footer-content {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-}
-
-.branded-link {
-    color: #4C64E2;
-    text-decoration: none;
-    font-weight: 500;
-}
-
-.disclaimer {
-    color: #7d8bb2;
-    margin-left: 4px;
-}
-
-/* Loading redesign */
-.loading-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-}
-
-
-
 /* Enhanced loading indicator */
 .inline-loading-indicator {
     position: fixed;
@@ -1028,21 +769,21 @@ body, html {
     left: 50%;
     transform: translate(-50%, -50%);
     background: white;
-    border-radius: 18px;  /* Reduced from 24px */
+    border-radius: 18px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15),
-                0 6px 12px rgba(76, 100, 226, 0.08);
-    padding: 18px 24px;   /* Reduced from 28px 40px */
+        0 6px 12px rgba(76, 100, 226, 0.08);
+    padding: 18px 24px;
     display: flex;
     align-items: center;
-    gap: 16px;            /* Reduced from 20px */
+    gap: 16px;
     z-index: 1000;
-    min-width: 240px;     /* Reduced from 320px */
+    min-width: 240px;
     border: 1px solid rgba(76, 100, 226, 0.1);
 }
 
 .loading-pulse {
-    width: 20px;          /* Reduced from 28px */
-    height: 20px;         /* Reduced from 28px */
+    width: 20px;
+    height: 20px;
     border-radius: 50%;
     background: #4C64E2;
     position: relative;
@@ -1068,8 +809,8 @@ body, html {
 }
 
 .inline-loading-indicator span {
-    font-size: 15px;      /* Reduced from default */
-    font-weight: 400;     /* Lighter weight */
+    font-size: 15px;
+    font-weight: 400;
 }
 
 @keyframes pulse {
@@ -1133,10 +874,6 @@ body, html {
     .content-area {
         max-width: 95% !important;
     }
-
-    .floating-header {
-        max-width: 95%;
-    }
 }
 
 @media (max-width: 992px) {
@@ -1148,15 +885,6 @@ body, html {
 @media (max-width: 768px) {
     .content-area {
         padding: 0 16px;
-    }
-
-    .floating-header {
-        width: calc(100% - 20px);
-        top: 10px;
-    }
-
-    .header-content {
-        padding: 10px 16px;
     }
 
     .search-container {
@@ -1180,15 +908,15 @@ body, html {
         min-width: 220px;
         gap: 14px;
     }
-    
+
     .loading-pulse {
         width: 18px;
         height: 18px;
     }
-    
+
     .inline-loading-indicator span {
         font-size: 14px;
-    }    
+    }
 }
 
 @media (max-width: 480px) {
@@ -1213,14 +941,14 @@ body, html {
         min-width: 200px;
         border-radius: 14px;
     }
-    
+
     .loading-pulse {
         width: 16px;
         height: 16px;
     }
-    
+
     .inline-loading-indicator span {
         font-size: 13px;
-    }    
+    }
 }
 </style>

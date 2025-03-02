@@ -1,0 +1,250 @@
+<template>
+    <div class="app-page">
+        <!-- Header -->
+        <header class="floating-header">
+            <div class="header-content">
+                <div class="brand">
+                    <img src="@/assets/fctr-logo.png" alt="Okta Logo" height="24" />
+                    <div class="brand-divider"></div>
+                    <div class="title-with-badge">
+                        <span>AI Agent for Okta</span>
+                        <div class="beta-badge">BETA</div>
+                    </div>
+                </div>
+
+                <button v-if="showLogout" class="logout-btn" aria-label="Logout" @click="handleLogout">
+                    <v-icon>mdi-logout</v-icon>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content" :class="contentClass">
+            <slot></slot>
+        </main>
+
+        <!-- Footer -->
+        <footer class="page-footer">
+            <div class="footer-content">
+                <span>Powered by </span>
+                <a href="https://fctr.io" target="_blank" class="branded-link">
+                    Fctr Identity
+                </a>
+                <span class="disclaimer">• Responses may require verification</span>
+            </div>
+        </footer>
+    </div>
+</template>
+
+<script setup>
+import { useAuth } from '@/composables/useAuth'
+import { useRouter } from 'vue-router'
+
+const props = defineProps({
+    showLogout: {
+        type: Boolean,
+        default: true
+    },
+    contentClass: {
+        type: String,
+        default: ''
+    }
+})
+
+const auth = useAuth()
+const router = useRouter()
+
+const handleLogout = async () => {
+    await auth.logout()
+    router.push('/login')
+}
+</script>
+
+<style lang="scss">
+@import '@/styles/variables.scss';
+
+// Page layout
+.app-page {
+    min-height: 100vh;
+    background: $bg-gradient;
+    position: relative;
+    overflow-y: auto;
+
+    &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 100px;
+        background: linear-gradient(to bottom,
+                rgba($primary, 0.03) 0%,
+                rgba($primary, 0.01) 70%,
+                transparent 100%);
+        z-index: 1;
+    }
+}
+
+// Header
+.floating-header {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    width: calc(100% - 40px);
+    max-width: $max-width;
+}
+
+.header-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: white;
+    backdrop-filter: blur(15px);
+    border-radius: $border-radius;
+    padding: 16px 24px;
+    box-shadow: $shadow-light;
+    position: relative;
+    border: none;
+    z-index: 2;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-weight: 500;
+    color: $text-primary;
+}
+
+.title-with-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.brand-divider {
+    height: 20px;
+    width: 1px;
+    background: #e0e0e0;
+}
+
+.beta-badge {
+    background: $primary-light;
+    color: $primary;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+}
+
+.logout-btn {
+    background: transparent;
+    border: none;
+    color: #777;
+    cursor: pointer;
+    padding: 8px;
+    border-radius: 8px;
+    transition: all 0.2s ease;
+
+    &:hover {
+        background: #f5f5f5;
+        color: #333;
+    }
+}
+
+// Main content area
+.main-content {
+    width: calc(100% - 40px);
+    max-width: $max-width;
+    margin: 0 auto;
+    padding-top: 80px;
+    padding-bottom: 60px; // For footer
+}
+
+// For auth pages - centered boxes
+.auth-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: calc(100vh - 140px);
+}
+
+// Footer
+.page-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 16px 0;
+    text-align: center;
+    font-size: 13px;
+    color: $text-muted;
+    background: white;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.03);
+    z-index: 50;
+}
+
+.footer-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.branded-link {
+    color: $primary;
+    text-decoration: none;
+    font-weight: 500;
+
+    &:hover {
+        color: $primary-dark;
+        text-decoration: underline;
+    }
+}
+
+.disclaimer {
+    color: #7d8bb2;
+    margin-left: 4px;
+}
+
+// Common card styles
+.app-card {
+    background: white;
+    border-radius: $border-radius;
+    box-shadow: $shadow-medium;
+    padding: 40px;
+    animation: cardEntry 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+
+    @media (max-width: 480px) {
+        padding: 30px 20px;
+    }
+}
+
+// Animation
+@keyframes cardEntry {
+    0% {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+// Responsive adjustments
+@media (max-width: 768px) {
+    .floating-header {
+        width: calc(100% - 20px);
+        top: 10px;
+    }
+
+    .header-content {
+        padding: 12px 16px;
+    }
+}
+</style>

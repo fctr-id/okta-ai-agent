@@ -21,7 +21,8 @@ const routes = [
     meta: { requiresAuth: false }
   },
   {
-    path: '/agentChat',
+    path: '/',
+    alias: ['/agentChat', '/agentUI'],
     name: 'Home',
     component: ChatInterfaceV2,
     meta: { requiresAuth: true }
