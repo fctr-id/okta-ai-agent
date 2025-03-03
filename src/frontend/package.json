@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:windows": "set SASS_SILENCE_DEPRECATION_WARNINGS=true && vite build",
     "preview": "vite preview",
     "lint": "eslint . --fix"
   },

@@ -1,7 +1,16 @@
 import subprocess
+import threading
+import sys
+
+def stream_output(stream, prefix):
+    """Stream output from a pipe to stdout"""
+    for line in iter(stream.readline, ""):
+        if line:
+            print(f"{prefix}: {line.strip()}")
+    stream.close()
 
 def run_command(command):
-    """Run a shell command and print output"""
+    """Run a shell command and print output from both stdout and stderr"""
     print(f"Executing: {command}")
     
     process = subprocess.Popen(
@@ -9,26 +18,35 @@ def run_command(command):
         shell=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True
+        text=True,
+        bufsize=1  # Line buffered
     )
     
-    # Stream output in real time
-    while True:
-        output = process.stdout.readline()
-        if output == '' and process.poll() is not None:
-            break
-        if output:
-            print(output.strip())
-            
-    # Get any remaining output
-    stdout, stderr = process.communicate()
+    # Set up threads to stream both stdout and stderr
+    stdout_thread = threading.Thread(target=stream_output, args=(process.stdout, "OUT"))
+    stderr_thread = threading.Thread(target=stream_output, args=(process.stderr, "ERR"))
     
-    if process.returncode != 0:
-        print(f"Error executing command: {stderr}")
+    # Set as daemon threads so they exit when main thread exits
+    stdout_thread.daemon = True
+    stderr_thread.daemon = True
+    
+    # Start the threads
+    stdout_thread.start()
+    stderr_thread.start()
+    
+    # Wait for the process to complete
+    return_code = process.wait()
+    
+    # Give the threads a moment to finish printing any remaining output
+    stdout_thread.join(1)
+    stderr_thread.join(1)
+    
+    if return_code != 0:
+        print(f"Command exited with return code {return_code}")
         return False
     
     return True
 
 # Run the FastAPI server
 print("Starting server...")
-run_command("python -m uvicorn src.backend.app.main:app --reload --host 0.0.0.0 --port 8001")
+run_command("python -m uvicorn src.backend.app.main:app --reload --host 0.0.0.0 --port 8001 --log-level info")

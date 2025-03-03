@@ -14,10 +14,14 @@
                     <div class="integrated-search-bar">
                         <!-- Reset button (only when results are showing) -->
                         <transition name="fade">
-                            <button v-if="hasResults" class="action-btn reset-btn" @click="resetInterface"
-                                aria-label="Reset search">
-                                <v-icon>mdi-refresh</v-icon>
-                            </button>
+                            <v-tooltip v-if="hasResults" text="Start over" location="top">
+                                <template v-slot:activator="{ props }">
+                                    <button v-bind="props" class="action-btn reset-btn" @click="resetInterface"
+                                        aria-label="Reset search">
+                                        <v-icon>mdi-refresh</v-icon>
+                                    </button>
+                                </template>
+                            </v-tooltip>
                         </transition>
 
                         <!-- Search input with dynamic placeholder -->
@@ -28,10 +32,15 @@
                             :clearable="true" />
 
                         <!-- Send button -->
-                        <button class="action-btn send-btn" :disabled="!userInput || !(userInput?.trim?.())"
-                            @click="sendQuery" aria-label="Send query">
-                            <v-icon>mdi-send</v-icon>
-                        </button>
+                        <v-tooltip text="Send query" location="top">
+                            <template v-slot:activator="{ props }">
+                                <button v-bind="props" class="action-btn send-btn"
+                                    :disabled="!userInput || !(userInput?.trim?.())" @click="sendQuery"
+                                    aria-label="Send query">
+                                    <v-icon>mdi-send</v-icon>
+                                </button>
+                            </template>
+                        </v-tooltip>
                     </div>
                 </div>
 
@@ -90,6 +99,7 @@
  */
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
+import { useSanitize } from '@/composables/useSanitize'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
 import { MessageType } from '@/components/messages/messageTypes'
 import { useAuth } from '@/composables/useAuth'
@@ -109,6 +119,9 @@ const isFocused = ref(false) // Tracks if the search input is focused
 const hasResults = ref(false) // Whether there are results to display
 const auth = useAuth()
 const router = useRouter()
+
+// Initialize sanitization utilities
+const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
 
 /**
  * Response data state
@@ -133,11 +146,19 @@ const getCurrentTime = () => {
 }
 
 /**
- * Ensures userInput is always a string
+ * Ensures userInput is always a string and applies basic sanitization
  * @param {*} val - The new input value
  */
 const handleUserInputChange = (val) => {
-    userInput.value = val === null ? '' : val
+    // Ensure we always have a string
+    const rawInput = val === null ? '' : val
+
+    // Apply lightweight sanitization (not full, as user is still typing)
+    userInput.value = sanitizeText(rawInput, {
+        maxLength: 2000,
+        removeHtml: true,
+        trim: false // Don't trim while typing
+    })
 }
 
 /**
@@ -159,7 +180,7 @@ const getContentClass = (type) => {
  * Query suggestions for users
  */
 const suggestions = ref([
-    'List all my users along with their creation dates',
+    'List all  users along with their creation dates',
     'Show users with PUSH factor registered',
     'Find users withs SMS  registered with phone number ending with 2364',
     'How many users were created last month?',
@@ -182,7 +203,6 @@ const { postStream } = useFetchStream()
  * Handles keyboard input to trigger query submission
  * @param {KeyboardEvent} e - Keyboard event
  */
-// Add this function to handle keyboard navigation
 const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
@@ -193,13 +213,16 @@ const handleKeyDown = (e) => {
         e.preventDefault()
         if (historyIndex.value < messageHistory.value.length - 1) {
             historyIndex.value++
-            userInput.value = messageHistory.value[historyIndex.value]
+            // Sanitize when retrieving from history
+            userInput.value = sanitizeQuery(messageHistory.value[historyIndex.value])
         }
     } else if (e.key === 'ArrowDown') {
         e.preventDefault()
         if (historyIndex.value > -1) {
             historyIndex.value--
-            userInput.value = historyIndex.value === -1 ? '' : messageHistory.value[historyIndex.value]
+            // Sanitize when retrieving from history
+            userInput.value = historyIndex.value === -1 ? '' :
+                sanitizeQuery(messageHistory.value[historyIndex.value])
         }
     }
 }
@@ -216,7 +239,8 @@ const clearInput = () => {
  * @param {string} query - The query to use
  */
 const useQuery = (query) => {
-    userInput.value = query
+    // Sanitize even predefined queries
+    userInput.value = sanitizeQuery(query)
     sendQuery()
 }
 
@@ -238,7 +262,8 @@ const resetInterface = () => {
  * @param {string} suggestion - The selected suggestion
  */
 const selectSuggestion = (suggestion) => {
-    userInput.value = suggestion;
+    // Sanitize suggestion before populating field
+    userInput.value = sanitizeQuery(suggestion);
 
     // Focus the input field after populating
     nextTick(() => {
@@ -247,8 +272,6 @@ const selectSuggestion = (suggestion) => {
             inputElement.focus();
         }
     });
-
-    // Don't send query automatically - let user edit if desired
 }
 
 /**
@@ -257,16 +280,21 @@ const selectSuggestion = (suggestion) => {
 const sendQuery = async () => {
     if (!userInput.value.trim() || isLoading.value) return
 
-    const query = userInput.value.trim()
-    lastQuestion.value = query
+    // Apply full sanitization before sending query
+    const rawQuery = userInput.value.trim()
+    const sanitizedQuery = sanitizeQuery(rawQuery, { maxLength: 2000 })
+
+    lastQuestion.value = sanitizedQuery
     isLoading.value = true
     hasResults.value = true
     userInput.value = ''
 
-    updateMessageHistory(query)
+    // Store sanitized query in history
+    updateMessageHistory(sanitizedQuery)
 
     try {
-        const streamResponse = await postStream('/api/query', { query })
+        // Send sanitized query to API
+        const streamResponse = await postStream('/api/query', { query: sanitizedQuery })
         let currentData = []
         let headers = []
 
@@ -287,7 +315,7 @@ const sendQuery = async () => {
                     // Store headers from metadata
                     headers = data.content?.headers || []
                     currentResponse.value = {
-                        type: MessageType.STREAM, // Important: Use STREAM type
+                        type: MessageType.STREAM,
                         content: [],
                         metadata: data.content
                     }
@@ -353,7 +381,8 @@ onMounted(() => {
     try {
         const savedHistory = localStorage.getItem('messageHistory')
         if (savedHistory) {
-            messageHistory.value = JSON.parse(savedHistory)
+            // Sanitize history from localStorage before using
+            messageHistory.value = JSON.parse(savedHistory).map(item => sanitizeQuery(item))
         }
     } catch (error) {
         console.error('Failed to load message history:', error)
@@ -367,15 +396,17 @@ onMounted(() => {
  */
 const updateMessageHistory = (query) => {
     try {
-        const existingIndex = messageHistory.value.indexOf(query)
+        // Ensure the query is sanitized
+        const sanitizedQuery = sanitizeQuery(query)
+        const existingIndex = messageHistory.value.indexOf(sanitizedQuery)
 
         if (existingIndex === -1) {
             // New message - add to front of history
-            messageHistory.value = [query, ...messageHistory.value.slice(0, CONFIG.MAX_HISTORY - 1)]
+            messageHistory.value = [sanitizedQuery, ...messageHistory.value.slice(0, CONFIG.MAX_HISTORY - 1)]
         } else {
             // Existing message - move to front of history
             messageHistory.value = [
-                query,
+                sanitizedQuery,
                 ...messageHistory.value.slice(0, existingIndex),
                 ...messageHistory.value.slice(existingIndex + 1)
             ]
@@ -404,8 +435,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-@import '@/styles/variables.scss';
-
 /* Search container */
 .chat-content {
     background: transparent;
@@ -464,7 +493,7 @@ onMounted(() => {
     height: 4px;
     width: 100px;
     margin: 0 auto;
-    background: linear-gradient(90deg, #4C64E2, #6373E5);
+    background: linear-gradient(90deg, var(--primary), #6373E5);
     border-radius: 2px;
     display: none;
 }
@@ -472,7 +501,7 @@ onMounted(() => {
 /* Main content area */
 .content-area {
     width: calc(100% - 40px);
-    max-width: 1280px;
+    max-width: var(--max-width);
     margin: 0 auto;
     padding: 0;
     transition: all 0.3s ease;
@@ -500,13 +529,13 @@ onMounted(() => {
     transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
-    border: 1px solid #4C64E2;
+    border: 1px solid var(--primary);
 }
 
 .integrated-search-bar:has(.v-field--focused) {
     box-shadow: 0 8px 28px rgba(76, 100, 226, 0.15);
     transform: translateY(-2px);
-    border: 1.5px solid #4C64E2;
+    border: 1.5px solid var(--primary);
 }
 
 /* Add a subtle side accent when focused */
@@ -566,6 +595,17 @@ onMounted(() => {
     color: #666;
 }
 
+:deep(.v-tooltip .v-overlay__content) {
+  background-color: var(--primary-dark);
+  color: white;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 4px;
+  opacity: 0.95;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
 /* Action buttons */
 .action-btn {
     display: flex;
@@ -592,12 +632,12 @@ onMounted(() => {
 
 .send-btn {
     color: white;
-    background: #4C64E2;
+    background: var(--primary);
     margin-left: 4px;
 }
 
 .send-btn:hover:not(:disabled) {
-    background: #3b4fd9;
+    background: var(--primary-dark);
     transform: translateY(-1px);
 }
 
@@ -628,9 +668,9 @@ onMounted(() => {
     position: relative;
     background: #fff !important;
     border: none !important;
-    border-radius: 16px !important;
+    border-radius: var(--border-radius) !important;
     transition: all 0.2s ease;
-    color: #333 !important;
+    color: var(--text-primary) !important;
     font-weight: 400 !important;
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
     padding: 0 12px !important;
@@ -647,10 +687,10 @@ onMounted(() => {
     content: '';
     position: absolute;
     inset: 0;
-    border-radius: 16px;
+    border-radius: var(--border-radius);
     padding: 1.5px;
     background: linear-gradient(90deg,
-            #4C64E2,
+            var(--primary),
             #5e72e4,
             #8e54e9,
             #d442f5);
@@ -671,7 +711,7 @@ onMounted(() => {
 
 /* Centered question header with blue background */
 .question-header-container {
-    max-width: 1280px;
+    max-width: var(--max-width);
     width: calc(100% - 40px);
     margin: 24px auto 20px;
     display: flex;
@@ -680,7 +720,7 @@ onMounted(() => {
 }
 
 .question-header {
-    background-color: #4C64E2;
+    background-color: var(--primary);
     color: white;
     padding: 12px 20px;
     border-radius: 12px;
@@ -733,7 +773,7 @@ onMounted(() => {
 
 /* Results containers */
 .results-container {
-    max-width: 1280px;
+    max-width: var(--max-width);
     width: calc(100% - 40px);
     margin-left: auto !important;
     margin-right: auto !important;
@@ -746,8 +786,8 @@ onMounted(() => {
 }
 
 .full-width-results {
-    border-radius: 16px;
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-medium);
     background: white;
     overflow: hidden;
     width: 100%;
@@ -755,7 +795,7 @@ onMounted(() => {
 
 .compact-results {
     width: fit-content;
-    max-width: 1280px;
+    max-width: var(--max-width);
     margin-left: 0;
     margin-right: auto;
     background: transparent;
@@ -785,7 +825,7 @@ onMounted(() => {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: #4C64E2;
+    background: var(--primary);
     position: relative;
     animation: pulse 1.5s ease infinite;
 }
@@ -818,7 +858,7 @@ onMounted(() => {
     0%,
     100% {
         transform: scale(0.9);
-        background-color: #4C64E2;
+        background-color: var(--primary);
     }
 
     50% {

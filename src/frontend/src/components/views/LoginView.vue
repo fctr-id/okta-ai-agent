@@ -6,8 +6,8 @@
 
       <form @submit.prevent="handleLogin" class="auth-form">
         <transition name="fade-slide">
-          <div v-if="auth.error.value" class="error-alert">
-            {{ auth.error.value }}
+          <div v-if="auth.error.value || validationError" class="error-alert">
+            {{ auth.error.value || validationError }}
           </div>
         </transition>
 
@@ -16,8 +16,13 @@
           <div class="input-wrapper">
             <v-icon class="field-icon">mdi-account</v-icon>
             <input type="text" id="username" v-model="username" placeholder="Enter your username"
-              autocomplete="username" required :disabled="auth.loading.value" />
+              autocomplete="username" required :disabled="auth.loading.value" @input="sanitizeUsernameInput" />
           </div>
+          <transition name="fade">
+            <small v-if="usernameModified" class="input-modified-hint">
+              Username was adjusted to remove invalid characters
+            </small>
+          </transition>
         </div>
 
         <div class="form-field">
@@ -25,10 +30,9 @@
           <div class="input-wrapper">
             <v-icon class="field-icon">mdi-lock</v-icon>
             <input :type="showPassword ? 'text' : 'password'" id="password" v-model="password"
-              placeholder="Enter your password" autocomplete="current-password" required
-              :disabled="auth.loading.value" />
-            <button type="button" class="password-toggle" @click="showPassword = !showPassword"
-              tabindex="-1">
+              placeholder="Enter your password" autocomplete="current-password" required :disabled="auth.loading.value"
+              @input="sanitizePasswordInput" />
+            <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
               <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
             </button>
           </div>
@@ -48,40 +52,85 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
+import { useSanitize } from '@/composables/useSanitize'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const router = useRouter()
 const auth = useAuth()
+const { username: sanitizeUsername, text: sanitizeText } = useSanitize()
 
 // Form data
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const animationReady = ref(false)
+const validationError = ref('')
+const usernameModified = ref(false)
 
 // Animation setup
 onMounted(() => {
   animationReady.value = true
 })
 
+// Input sanitization
+const sanitizeUsernameInput = () => {
+  const originalValue = username.value;
+  username.value = sanitizeUsername(username.value, {
+    maxLength: 20,
+    allowedPattern: /^[a-zA-Z0-9_-]$/
+  });
+
+  // Track if username was modified to provide user feedback
+  usernameModified.value = (originalValue !== username.value);
+
+  // Clear the modified flag after 3 seconds
+  if (usernameModified.value) {
+    setTimeout(() => {
+      usernameModified.value = false;
+    }, 3000);
+  }
+};
+
+const sanitizePasswordInput = () => {
+  // For password, we primarily want to prevent XSS but keep special characters
+  password.value = sanitizeText(password.value, {
+    maxLength: 50,
+    removeHtml: true,
+    trim: false // Don't trim passwords as spaces might be intentional
+  });
+};
+
 // Form submission
 const handleLogin = async () => {
-  if (!username.value || !password.value) return
+  validationError.value = '';
 
-  const success = await auth.login(username.value, password.value)
+  if (!username.value || !password.value) {
+    validationError.value = "Please enter both username and password";
+    return;
+  }
+
+  // Apply final sanitization before submission
+  const sanitizedUsername = sanitizeUsername(username.value);
+  const sanitizedPassword = sanitizeText(password.value, {
+    removeHtml: true,
+    trim: false
+  });
+
+  // Use sanitized credentials for login
+  const success = await auth.login(sanitizedUsername, sanitizedPassword);
   if (success) {
-    router.push('/agentChat')
+    router.push('/agentChat');
   }
 }
 </script>
 
+
 <style scoped>
-@import '@/styles/variables.scss';
 
 .auth-box {
   background: white;
-  border-radius: 16px;
-  box-shadow: 0 6px 30px rgba(76, 100, 226, 0.08);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-medium);
   padding: 40px;
   width: 100%;
   max-width: 440px;
@@ -110,12 +159,12 @@ const handleLogin = async () => {
 .auth-title {
   font-size: 28px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary);
   margin-bottom: 8px;
 }
 
 .text-highlight {
-  color: #4C64E2;
+  color: var(--primary);
   position: relative;
   display: inline-block;
 }
@@ -136,7 +185,7 @@ const handleLogin = async () => {
   font-size: 16px;
   color: #666;
   margin-bottom: 32px;
-  background: linear-gradient(90deg, #5d6b8a 0%, #4C64E2 100%);
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--primary) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -183,7 +232,7 @@ const handleLogin = async () => {
 }
 
 .form-field:focus-within label {
-  color: #4C64E2;
+  color: var(--primary);
 }
 
 .input-wrapper {
@@ -201,7 +250,7 @@ const handleLogin = async () => {
 }
 
 .input-wrapper:focus-within {
-  border-color: #4C64E2;
+  border-color: var(--primary);
   box-shadow: 0 0 0 3px rgba(76, 100, 226, 0.15);
 }
 
@@ -263,6 +312,24 @@ const handleLogin = async () => {
   animation: shimmer 2s infinite;
 }
 
+.input-modified-hint {
+  color: #b45309;
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
+}
+
+/* Fade transition for hints */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
 @keyframes shimmer {
   0% {
     transform: translateX(-100%);
@@ -288,7 +355,7 @@ const handleLogin = async () => {
 .auth-button {
   width: 100%;
   padding: 14px;
-  background: #4C64E2;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 10px;
@@ -307,7 +374,7 @@ const handleLogin = async () => {
 }
 
 .auth-button:hover:not(:disabled) {
-  background: #3b4fd9;
+  background: var(--primary-dark);
   transform: translateY(-2px);
   box-shadow: 0 8px 20px rgba(76, 100, 226, 0.25);
 }

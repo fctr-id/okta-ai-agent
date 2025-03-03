@@ -21,8 +21,11 @@
           <div class="input-wrapper">
             <v-icon class="field-icon">mdi-account</v-icon>
             <input type="text" id="username" v-model="username" placeholder="Choose an admin username"
-              autocomplete="username" required :disabled="auth.loading.value" />
+              autocomplete="username" required :disabled="auth.loading.value" @input="sanitizeUsernameInput" />
           </div>
+          <small v-if="usernameModified" class="input-modified-hint">
+            Username was adjusted to remove invalid characters
+          </small>
         </div>
 
         <div class="form-field">
@@ -30,10 +33,9 @@
           <div class="input-wrapper">
             <v-icon class="field-icon">mdi-lock</v-icon>
             <input :type="showPassword ? 'text' : 'password'" id="password" v-model="password"
-              placeholder="Create a secure password" autocomplete="new-password" required
-              :disabled="auth.loading.value" />
-            <button type="button" class="password-toggle" @click="showPassword = !showPassword"
-              tabindex="-1">
+              placeholder="Create a secure password" autocomplete="new-password" required :disabled="auth.loading.value"
+              @input="sanitizePasswordInput" />
+            <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
               <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
             </button>
           </div>
@@ -75,9 +77,9 @@
           <label for="confirmPassword">Confirm Password</label>
           <div class="input-wrapper">
             <v-icon class="field-icon">mdi-lock-check</v-icon>
-            <input :type="showPassword ? 'text' : 'password'" id="confirmPassword"
-              v-model="confirmPassword" placeholder="Confirm your password"
-              autocomplete="new-password" required :disabled="auth.loading.value" />
+            <input :type="showPassword ? 'text' : 'password'" id="confirmPassword" v-model="confirmPassword"
+              placeholder="Confirm your password" autocomplete="new-password" required :disabled="auth.loading.value"
+              @input="sanitizeConfirmPasswordInput" />
           </div>
         </div>
 
@@ -95,10 +97,12 @@
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
+import { useSanitize } from '@/composables/useSanitize'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const router = useRouter()
 const auth = useAuth()
+const { username: sanitizeUsername, text: sanitizeText } = useSanitize()
 
 // Form data
 const username = ref('')
@@ -106,6 +110,44 @@ const password = ref('')
 const confirmPassword = ref('')
 const showPassword = ref(false)
 const validationError = ref('')
+const usernameModified = ref(false)
+
+// Sanitization functions
+const sanitizeUsernameInput = () => {
+  const originalValue = username.value;
+  username.value = sanitizeUsername(username.value, {
+    maxLength: 20,
+    allowedPattern: /^[a-zA-Z0-9_-]$/
+  });
+  // Track if username was modified to provide user feedback
+  usernameModified.value = (originalValue !== username.value);
+
+  // Clear the modified flag after 3 seconds
+  if (usernameModified.value) {
+    setTimeout(() => {
+      usernameModified.value = false;
+    }, 3000);
+  }
+};
+
+const sanitizePasswordInput = () => {
+  // For password, we primarily want to prevent XSS but keep special characters
+  // We only remove control characters and HTML tags
+  password.value = sanitizeText(password.value, {
+    maxLength: 50,
+    removeHtml: true,
+    trim: false // Don't trim passwords as spaces might be intentional
+  });
+};
+
+const sanitizeConfirmPasswordInput = () => {
+  // Same sanitization for confirm password field
+  confirmPassword.value = sanitizeText(confirmPassword.value, {
+    maxLength: 50,
+    removeHtml: true,
+    trim: false
+  });
+};
 
 // Password validation
 const passwordLength = computed(() => password.value.length >= 12)
@@ -130,45 +172,58 @@ const formIsValid = computed(() =>
 
 // Form submission
 const handleSetup = async () => {
-  validationError.value = ''
+  validationError.value = '';
 
-  if (username.value.length < 3) {
-    validationError.value = 'Username must be at least 3 characters'
-    return
+  // Final sanitization before submission
+  const finalUsername = sanitizeUsername(username.value);
+  const finalPassword = sanitizeText(password.value, {
+    removeHtml: true,
+    trim: false
+  });
+
+  // Validate final sanitized inputs
+  if (finalUsername.length < 3) {
+    validationError.value = 'Username must be at least 3 characters';
+    return;
   }
 
   if (!passwordIsValid.value) {
-    validationError.value = 'Please meet all password requirements'
-    return
+    validationError.value = 'Please meet all password requirements';
+    return;
   }
 
-  if (password.value !== confirmPassword.value) {
-    validationError.value = 'Passwords do not match'
-    return
+  if (finalPassword !== sanitizeText(confirmPassword.value, { removeHtml: true, trim: false })) {
+    validationError.value = 'Passwords do not match';
+    return;
   }
 
-  const success = await auth.setupAdmin(username.value, password.value)
+  // Submit sanitized values
+  const success = await auth.setupAdmin(finalUsername, finalPassword);
   if (success) {
-    router.push('/agentChat')
+    router.push('/agentChat');
   }
-}
+};
 
 // Show password match error in real-time once both fields have content
 watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   // Only show error if both fields have content and don't match
   if (newPassword && newConfirmPassword && newPassword !== newConfirmPassword) {
-    validationError.value = 'Passwords do not match'
+    validationError.value = 'Passwords do not match';
   } else {
     // Clear the error if they match or fields are empty
     if (validationError.value === 'Passwords do not match') {
-      validationError.value = ''
+      validationError.value = '';
     }
   }
-})
+});
 </script>
 
 <style lang="scss">
-@import '@/styles/variables.scss';
+@use '@/styles/variables' as v;
+
+// Then update variable references like:
+// From: $primary
+// To: v.$primary
 
 .setup-card {
   width: 100%;
@@ -179,7 +234,24 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: #F0F3FF;
+  background: v.$primary-light;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+}
+</style><style>
+/* Consolidated styles using CSS variables */
+.setup-card {
+  width: 100%;
+  max-width: 480px;
+}
+
+.setup-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--primary-light);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -189,14 +261,14 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 .auth-title {
   font-size: 28px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary);
   margin-bottom: 8px;
   text-align: center;
 }
 
 .auth-subtitle {
   font-size: 16px;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 32px;
   text-align: center;
 }
@@ -228,7 +300,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 }
 
 .input-wrapper:focus-within {
-  border-color: #4C64E2;
+  border-color: var(--primary);
   box-shadow: 0 0 0 2px rgba(76, 100, 226, 0.1);
 }
 
@@ -258,7 +330,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 }
 
 .password-toggle:hover {
-  color: #4C64E2;
+  color: var(--primary);
 }
 
 .error-alert {
@@ -304,7 +376,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 .auth-button {
   width: 100%;
   padding: 14px;
-  background: #4C64E2;
+  background: var(--primary);
   color: white;
   border: none;
   border-radius: 10px;
@@ -319,7 +391,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 }
 
 .auth-button:hover:not(:disabled) {
-  background: #3b4fd9;
+  background: var(--primary-dark);
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15);
 }
@@ -332,6 +404,13 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 .auth-button.loading {
   background: #cfd7f9;
   cursor: wait;
+}
+
+.input-modified-hint {
+  color: #b45309;
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
 }
 
 .button-loader {

@@ -23,12 +23,10 @@ const router = useRouter()
 </script>
 
 <style scoped>
-@import '@/styles/variables.scss';
-
 .auth-box {
   background: white;
-  border-radius: 16px;
-  box-shadow: 0 6px 30px rgba(76, 100, 226, 0.08);
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-medium);
   padding: 40px;
   width: 100%;
   max-width: 480px;
@@ -54,7 +52,7 @@ const router = useRouter()
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: #F0F3FF;
+  background: var(--primary-light);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -64,20 +62,20 @@ const router = useRouter()
 .auth-title {
   font-size: 28px;
   font-weight: 600;
-  color: #333;
+  color: var(--text-primary);
   margin-bottom: 8px;
 }
 
 .auth-subtitle {
   font-size: 16px;
-  color: #666;
+  color: var(--text-secondary);
   margin-bottom: 32px;
 }
 
 .auth-button {
   width: 100%;
   padding: 14px;
-  background: #4C64E2 !important;
+  background: var(--primary) !important;
   color: white !important;
   border: none;
   border-radius: 10px;
@@ -93,7 +91,7 @@ const router = useRouter()
 }
 
 .auth-button:hover {
-  background: #3b4fd9 !important;
+  background: var(--primary-dark) !important;
   transform: translateY(-1px) !important;
   box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15) !important;
 }

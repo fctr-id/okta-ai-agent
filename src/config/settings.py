@@ -21,12 +21,14 @@ class Settings(BaseSettings):
     # JWT Settings
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "CHANGE-THIS-KEY-IN-PRODUCTION-ENVIRONMENTS")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))  # make sure it matches the cookie_max_age_minutes
+    JWT_ISSUER: str = os.getenv("JWT_ISSUER", "fctr-okta-ai-agent")
+    JWT_AUDIENCE: str = os.getenv("JWT_AUDIENCE", "ui-user") 
     
     # Cookie Settings
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE", "True").lower() == "true"
     COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax")
-    COOKIE_MAX_AGE_SECONDS: int = int(os.getenv("COOKIE_MAX_AGE_SECONDS", "1800"))  # 30 minutes
+    COOKIE_MAX_AGE_MINUTES: int = int(os.getenv("COOKIE_MAX_AGE_MINUTES", "30"))  # 30 minutes
     
     # SQLite path (used by auth migration)
     SQLITE_PATH: str = str(DB_FILE)

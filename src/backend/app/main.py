@@ -1,27 +1,48 @@
+import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-import os
+from starlette.middleware.base import BaseHTTPMiddleware
+from contextlib import asynccontextmanager
 from .routers import query, auth
 from src.utils.logging import logger
 from src.okta_db_sync.db.operations import DatabaseOperations
 from src.okta_db_sync.db.models import AuthUser
 from sqlalchemy import inspect, create_engine
-import asyncio
 
-app = FastAPI(
-    title="Okta AI Agent",
-    description="API for Okta AI Agent with SQL Generation capabilities",
-    version="1.0.0"
-)
+# Security Headers Middleware
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Add security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        
+        # CSP - Content Security Policy with Google Fonts support
+        csp = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "  # Allow inline scripts for Vue
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "  # Added Google Fonts
+            "img-src 'self' data:; "
+            "font-src 'self' https://fonts.gstatic.com data:; "  # Added Google Fonts
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        )
+        response.headers["Content-Security-Policy"] = csp
+        
+        # Additional security headers
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        
+        return response
 
-# Log application startup
-logger.info("Initializing Okta AI Agent API")
-
-# Initialize auth database on startup
-@app.on_event("startup")
-async def initialize_auth_database():
+# Modern lifespan approach (replacing on_event)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup code - runs on application startup
+    logger.info("Initializing Okta AI Agent API")
     logger.info("Initializing authentication database...")
     db = DatabaseOperations()
     
@@ -29,9 +50,7 @@ async def initialize_auth_database():
     await db.init_db()
     
     # Check if we need to create the AuthUser table specifically
-    # This is a fallback in case only the auth tables need to be created
     from src.config.settings import settings
-    import os
     
     engine = create_engine(f"sqlite:///{settings.SQLITE_PATH}")
     inspector = inspect(engine)
@@ -44,14 +63,33 @@ async def initialize_auth_database():
         logger.info("Auth users table created successfully")
     else:
         logger.info("Auth users table already exists")
+    
+    yield  # This is where FastAPI serves requests
+    
+    # Shutdown code (if any) would go here
+    logger.info("Shutting down Okta AI Agent API")
 
-# Configure CORS
+# Create FastAPI app with lifespan manager
+app = FastAPI(
+    title="Okta AI Agent",
+    description="API for Okta AI Agent with SQL Generation capabilities",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Add security headers middleware (add this before CORS middleware)
+app.add_middleware(SecurityHeadersMiddleware)
+
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://127.0.0.1:*").split(",")
+logger.info(f"Configuring CORS with allowed origins: {allowed_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:[0-9]+)?",  # Regex for any localhost port
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-CSRF-Token"],  # Add CSRF token header support
 )
 
 # Register router for API endpoints

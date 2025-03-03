@@ -2,7 +2,7 @@
     <v-app class="bg-custom">
         <div class="d-flex justify-center">
             <div class="chat-wrapper">
-                <!-- Header -->
+                <!-- Header - No changes -->
                 <v-toolbar color="white" flat border class="px-4" height="64">
                     <div class="d-flex align-center w-100">
                         <div class="d-flex align-center">
@@ -22,7 +22,7 @@
                     </div>
                 </v-toolbar>
 
-                <!-- Chat Messages Area -->
+                <!-- Chat Messages Area - No changes to structure -->
                 <v-main class="chat-area">
                     <div class="messages-container d-flex flex-column gap-4 py-4 px-0" ref="messagesContainer">
                         <template v-for="(message, index) in messages" :key="index">
@@ -70,7 +70,7 @@
                         <div class="d-flex align-center gap-2">
                             <v-text-field v-model="userInput" placeholder="What do you want to find?" variant="outlined"
                                 color="#9DA8F5" hide-details class="chat-input text-grey-darken-2" density="comfortable"
-                                @keyup.enter="sendMessage" @keydown="handleKeyDown" />
+                                @keyup.enter="sendMessage" @keydown="handleKeyDown" @input="handleInputChange" />
                             <v-btn icon @click="sendMessage" class="send-button" variant="outlined">
                                 <v-icon color="#FFF" size="20">mdi-send-outline</v-icon>
                             </v-btn>
@@ -82,7 +82,7 @@
                                 style="color: #4C6EF5">
                                 Fctr Identity
                             </a>
-                            *(Some reponses may be incorrect. Please verify)
+                            *(Some responses may be incorrect. Please verify)
                         </div>
                     </div>
                 </v-footer>
@@ -94,6 +94,7 @@
 <script setup>
 import { computed, ref, watch, onMounted, nextTick } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
+import { useSanitize } from '@/composables/useSanitize'
 import DataDisplay from './messages/DataDisplay.vue'
 
 // Configuration
@@ -109,9 +110,20 @@ const messagesContainer = ref(null)
 const messageHistory = ref([])
 const historyIndex = ref(-1)
 
-// Input sanitization
-const sanitizeInput = (input) => {
-    return input.replace(/<[^>]*>/g, '')
+// Initialize sanitization utilities
+const { text: sanitizeText, query: sanitizeQuery } = useSanitize()
+
+// Handle input change with sanitization
+const handleInputChange = () => {
+    // Apply lightweight sanitization during typing (full sanitization at submission)
+    if (userInput.value !== null && userInput.value !== undefined) {
+        // Basic sanitization while typing for better UX
+        userInput.value = sanitizeText(userInput.value, {
+            maxLength: 2000,
+            removeHtml: true,
+            trim: false // Don't trim while typing
+        })
+    }
 }
 
 // Add this utility function for delays
@@ -137,7 +149,9 @@ onMounted(() => {
     try {
         const savedHistory = localStorage.getItem('messageHistory')
         if (savedHistory) {
-            messageHistory.value = JSON.parse(savedHistory)
+            // Sanitize history loaded from localStorage
+            const parsedHistory = JSON.parse(savedHistory)
+            messageHistory.value = parsedHistory.map(item => sanitizeQuery(item))
         }
     } catch (error) {
         console.error('Failed to load message history:', error)
@@ -150,13 +164,16 @@ const handleKeyDown = (e) => {
         e.preventDefault()
         if (historyIndex.value < messageHistory.value.length - 1) {
             historyIndex.value++
-            userInput.value = messageHistory.value[historyIndex.value]
+            // Sanitize when retrieving from history
+            userInput.value = sanitizeQuery(messageHistory.value[historyIndex.value])
         }
     } else if (e.key === 'ArrowDown') {
         e.preventDefault()
         if (historyIndex.value > -1) {
             historyIndex.value--
-            userInput.value = historyIndex.value === -1 ? '' : messageHistory.value[historyIndex.value]
+            // Sanitize when retrieving from history
+            userInput.value = historyIndex.value === -1 ? '' :
+                sanitizeQuery(messageHistory.value[historyIndex.value])
         }
     }
 }
@@ -177,7 +194,8 @@ const handleStreamResponse = async (streamResponse) => {
                     removeTypingIndicator();
                     messages.value.push({
                         type: 'assistant',
-                        content: data.content,
+                        // Sanitize response text to prevent reflected XSS
+                        content: sanitizeText(data.content),
                         isError: false
                     });
                     await scrollToBottom();
@@ -224,9 +242,14 @@ const handleStreamResponse = async (streamResponse) => {
 
                 case 'error':
                     removeTypingIndicator();
+                    // Sanitize error message to prevent XSS
+                    const errorContent = typeof data.content === 'object' ?
+                        sanitizeText(data.content.message || 'Error occurred') :
+                        sanitizeText(data.content);
+
                     messages.value.push({
                         type: 'assistant',
-                        content: typeof data.content === 'object' ? data.content.message : data.content,
+                        content: errorContent,
                         isError: true
                     });
                     await scrollToBottom();
@@ -236,7 +259,8 @@ const handleStreamResponse = async (streamResponse) => {
     } catch (error) {
         console.error('Stream processing error:', error);
         removeTypingIndicator();
-        addErrorMessage(error);
+        // Sanitize error message
+        addErrorMessage(typeof error === 'string' ? sanitizeText(error) : error);
     } finally {
         if (currentMessage) {
             currentMessage.isLoading = false;
@@ -247,7 +271,8 @@ const handleStreamResponse = async (streamResponse) => {
 
 
 const sendMessage = async () => {
-    const sanitizedInput = sanitizeInput(userInput.value.trim())
+    // Apply full sanitization on submission
+    const sanitizedInput = sanitizeQuery(userInput.value.trim(), { maxLength: 2000 })
 
     if (!sanitizedInput || isLoading.value) {
         console.warn('Message sending prevented:', !sanitizedInput ? 'empty input' : 'loading state')
@@ -258,7 +283,7 @@ const sendMessage = async () => {
         userInput.value = ''
         isLoading.value = true
 
-        // Handle message history
+        // Handle message history with sanitized input
         try {
             const existingIndex = messageHistory.value.indexOf(sanitizedInput)
 
@@ -274,7 +299,7 @@ const sendMessage = async () => {
                 ]
             }
 
-            // Save to localStorage and reset index
+            // Save sanitized history to localStorage and reset index
             localStorage.setItem('messageHistory', JSON.stringify(messageHistory.value))
             historyIndex.value = -1
         } catch (historyError) {
@@ -299,7 +324,7 @@ const sendMessage = async () => {
         })
         await scrollToBottom()
 
-        // Make API call and handle stream
+        // Make API call and handle stream with sanitized input
         const streamResponse = await postStream('/api/query', { query: sanitizedInput })
         await handleStreamResponse(streamResponse)
 
@@ -307,11 +332,15 @@ const sendMessage = async () => {
         console.error('Error:', error)
         removeTypingIndicator()
         await delay(500)
+
+        // Sanitize error message
+        const errorMessage = error.message || 'Sorry, I encountered an error processing your request.'
+
         messages.value.push({
             type: 'assistant',
             dataType: 'error',
             content: {
-                message: error.message || 'Sorry, I encountered an error processing your request.',
+                message: sanitizeText(errorMessage),
                 timestamp: new Date().toISOString()
             },
             isError: true

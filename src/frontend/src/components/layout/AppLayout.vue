@@ -11,10 +11,14 @@
                         <div class="beta-badge">BETA</div>
                     </div>
                 </div>
-
-                <button v-if="showLogout" class="logout-btn" aria-label="Logout" @click="handleLogout">
-                    <v-icon>mdi-logout</v-icon>
-                </button>
+                <v-tooltip text="Logout" location="bottom">
+                    <template v-slot:activator="{ props }">
+                        <button v-if="showLogout" v-bind="props" class="logout-btn" aria-label="Logout"
+                            @click="handleLogout">
+                            <v-icon>mdi-logout</v-icon>
+                        </button>
+                    </template>
+                </v-tooltip>
             </div>
         </header>
 
@@ -60,32 +64,30 @@ const handleLogout = async () => {
 }
 </script>
 
-<style lang="scss">
-@import '@/styles/variables.scss';
-
-// Page layout
+<style>
+/* Page layout */
 .app-page {
     min-height: 100vh;
-    background: $bg-gradient;
+    background: var(--bg-gradient);
     position: relative;
     overflow-y: auto;
-
-    &::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 100px;
-        background: linear-gradient(to bottom,
-                rgba($primary, 0.03) 0%,
-                rgba($primary, 0.01) 70%,
-                transparent 100%);
-        z-index: 1;
-    }
 }
 
-// Header
+.app-page::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100px;
+    background: linear-gradient(to bottom,
+            rgba(76, 100, 226, 0.03) 0%,
+            rgba(76, 100, 226, 0.01) 70%,
+            transparent 100%);
+    z-index: 1;
+}
+
+/* Header */
 .floating-header {
     position: fixed;
     top: 20px;
@@ -93,7 +95,7 @@ const handleLogout = async () => {
     transform: translateX(-50%);
     z-index: 100;
     width: calc(100% - 40px);
-    max-width: $max-width;
+    max-width: var(--max-width);
 }
 
 .header-content {
@@ -102,9 +104,9 @@ const handleLogout = async () => {
     justify-content: space-between;
     background: white;
     backdrop-filter: blur(15px);
-    border-radius: $border-radius;
+    border-radius: var(--border-radius);
     padding: 16px 24px;
-    box-shadow: $shadow-light;
+    box-shadow: var(--shadow-light);
     position: relative;
     border: none;
     z-index: 2;
@@ -115,7 +117,7 @@ const handleLogout = async () => {
     align-items: center;
     gap: 12px;
     font-weight: 500;
-    color: $text-primary;
+    color: var(--text-primary);
 }
 
 .title-with-badge {
@@ -131,8 +133,8 @@ const handleLogout = async () => {
 }
 
 .beta-badge {
-    background: $primary-light;
-    color: $primary;
+    background: var(--primary-light);
+    color: var(--primary);
     font-size: 11px;
     font-weight: 600;
     padding: 4px 8px;
@@ -148,23 +150,24 @@ const handleLogout = async () => {
     padding: 8px;
     border-radius: 8px;
     transition: all 0.2s ease;
-
-    &:hover {
-        background: #f5f5f5;
-        color: #333;
-    }
 }
 
-// Main content area
+.logout-btn:hover {
+    background: #f5f5f5;
+    color: #333;
+}
+
+/* Main content area */
 .main-content {
     width: calc(100% - 40px);
-    max-width: $max-width;
+    max-width: var(--max-width);
     margin: 0 auto;
     padding-top: 80px;
-    padding-bottom: 60px; // For footer
+    padding-bottom: 60px;
+    /* For footer */
 }
 
-// For auth pages - centered boxes
+/* For auth pages - centered boxes */
 .auth-content {
     display: flex;
     justify-content: center;
@@ -172,7 +175,7 @@ const handleLogout = async () => {
     min-height: calc(100vh - 140px);
 }
 
-// Footer
+/* Footer */
 .page-footer {
     position: fixed;
     bottom: 0;
@@ -181,7 +184,7 @@ const handleLogout = async () => {
     padding: 16px 0;
     text-align: center;
     font-size: 13px;
-    color: $text-muted;
+    color: var(--text-muted);
     background: white;
     box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.03);
     z-index: 50;
@@ -195,14 +198,14 @@ const handleLogout = async () => {
 }
 
 .branded-link {
-    color: $primary;
+    color: var(--primary);
     text-decoration: none;
     font-weight: 500;
+}
 
-    &:hover {
-        color: $primary-dark;
-        text-decoration: underline;
-    }
+.branded-link:hover {
+    color: var(--primary-dark);
+    text-decoration: underline;
 }
 
 .disclaimer {
@@ -210,20 +213,27 @@ const handleLogout = async () => {
     margin-left: 4px;
 }
 
-// Common card styles
-.app-card {
-    background: white;
-    border-radius: $border-radius;
-    box-shadow: $shadow-medium;
-    padding: 40px;
-    animation: cardEntry 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-
-    @media (max-width: 480px) {
-        padding: 30px 20px;
-    }
+.v-tooltip .v-overlay__content {
+  background-color: var(--primary-dark) !important;
+  color: white !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  padding: 5px 10px !important;
+  border-radius: 4px !important;
+  opacity: 0.95 !important;
 }
 
-// Animation
+
+/* Common card styles */
+.app-card {
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow-medium);
+    padding: 40px;
+    animation: cardEntry 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Animation */
 @keyframes cardEntry {
     0% {
         opacity: 0;
@@ -236,7 +246,7 @@ const handleLogout = async () => {
     }
 }
 
-// Responsive adjustments
+/* Responsive adjustments */
 @media (max-width: 768px) {
     .floating-header {
         width: calc(100% - 20px);
@@ -245,6 +255,12 @@ const handleLogout = async () => {
 
     .header-content {
         padding: 12px 16px;
+    }
+}
+
+@media (max-width: 480px) {
+    .app-card {
+        padding: 30px 20px;
     }
 }
 </style>
