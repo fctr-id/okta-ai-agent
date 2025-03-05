@@ -4,7 +4,7 @@ services:
   okta-ai-agent:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: fctrid/ai-agent-for-okta:latest
     container_name: okta-ai-agent
     ports:
       - "8001:8001"  # Expose HTTPS port

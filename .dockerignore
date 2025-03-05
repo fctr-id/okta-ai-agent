@@ -39,14 +39,8 @@ htmlcov/
 .github
 .gitignore
 
-# Frontend source (since we're copying the built version)
-src/frontend/src/
+# Only ignore node_modules - we need the rest for the build
 src/frontend/node_modules/
-src/frontend/public/
-src/frontend/*.json
-src/frontend/*.js
-src/frontend/*.md
-src/frontend/.vite/
 
 # Docker related
 .dockerignore

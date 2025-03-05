@@ -1,4 +1,16 @@
-# Use lightweight Python image
+# Stage 1: Build the frontend
+FROM node:18-slim AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Copy frontend source code
+COPY src/frontend/ ./
+
+# Install dependencies and build the frontend
+RUN npm ci && \
+    npm run build
+
+# Stage 2: Python application with built frontend
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -14,8 +26,11 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all source code (frontend source excluded via .dockerignore)
+# Copy Python source code
 COPY src /app/src
+
+# Copy built frontend assets from the frontend builder stage
+COPY --from=frontend-builder /app/backend/app/static/ /app/src/backend/app/static/
 
 # Create necessary directories
 RUN mkdir -p /app/src/backend/certs /app/sqlite_db /app/logs
