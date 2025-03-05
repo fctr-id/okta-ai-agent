@@ -1,6 +1,9 @@
 import subprocess
 import threading
 import sys
+import os
+# Change to project root directory
+os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def stream_output(stream, prefix):
     """Stream output from a pipe to stdout"""

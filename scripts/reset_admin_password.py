@@ -18,6 +18,9 @@ import getpass
 import sqlite3
 from pathlib import Path
 from datetime import datetime
+import os
+# Change to project root directory
+os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 # Make sure we can import from src
 script_dir = Path(__file__).resolve().parent
