@@ -52,3 +52,5 @@ okta.yaml
 
 results/*
 src/backend/app/static/*
+
+certs/
