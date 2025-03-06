@@ -203,7 +203,7 @@ class OktaClientWrapper:
             'group_memberships': group_memberships
         }
         
-        logger.info(
+        logger.debug(
             f"User {user_okta_id} processed with {len(app_links)} app links, "
             f"{len(group_memberships)} groups, and {len(factors)} factors"
         )

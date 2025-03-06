@@ -2,7 +2,7 @@
   <AppLayout :showLogout="false" contentClass="auth-content">
     <div class="auth-box animate-entry">
       <h1 class="auth-title">Welcome </h1>
-      <div class="auth-subtitle">Sign in to Okta AI Agent</div>
+      <div class="auth-subtitle">Sign in to AI agent for Okta</div>
 
       <form @submit.prevent="handleLogin" class="auth-form">
         <transition name="fade-slide">
@@ -38,10 +38,14 @@
           </div>
         </div>
 
-        <button type="submit" class="auth-button glow-effect" :class="{ 'loading': auth.loading.value }"
-          :disabled="auth.loading.value || !username || !password">
+        <!-- In the template, inside your button -->
+        <button type="submit" class="auth-button glow-effect" :disabled="auth.loading.value || !username || !password">
           <span v-if="!auth.loading.value">Sign In</span>
-          <div v-else class="button-loader"></div>
+          <div v-else class="three-dots-loader">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
         </button>
       </form>
     </div>
@@ -126,17 +130,39 @@ const handleLogin = async () => {
 
 
 <style scoped>
+/* Enhanced background - only needed if you're controlling the page background here */
 
 .auth-box {
   background: white;
-  border-radius: var(--border-radius);
-  box-shadow: var(--shadow-medium);
-  padding: 40px;
+  border-radius: 16px;
+  padding: 2rem;
   width: 100%;
-  max-width: 440px;
-  text-align: center;
+  max-width: 420px;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.05),
+    0 5px 15px rgba(76, 100, 226, 0.04),
+    0 2px 5px rgba(0, 0, 0, 0.02);
+  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
   position: relative;
-  z-index: 5;
+  overflow: hidden;
+  border: 1px solid rgba(76, 100, 226, 0.08);
+}
+
+/* Add subtle entry animation */
+@keyframes card-appear {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.auth-box {
+  animation: card-appear 0.5s ease-out forwards;
 }
 
 /* Animation for card entry */
@@ -159,8 +185,11 @@ const handleLogin = async () => {
 .auth-title {
   font-size: 28px;
   font-weight: 600;
-  color: var(--text-primary);
   margin-bottom: 8px;
+  background: linear-gradient(90deg, var(--primary), #5e72e4);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
 }
 
 .text-highlight {
@@ -254,6 +283,24 @@ const handleLogin = async () => {
   box-shadow: 0 0 0 3px rgba(76, 100, 226, 0.15);
 }
 
+/* Add side accent bar on focus like ChatInterfaceV2 */
+.input-wrapper::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 0;
+  background: linear-gradient(180deg, var(--primary), #5e72e4);
+  transition: height 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.input-wrapper:focus-within::before {
+  height: 100%;
+}
+
 .field-icon {
   color: #999;
   margin: 0 12px;
@@ -290,7 +337,7 @@ const handleLogin = async () => {
 
 /* Error alert with animation */
 .error-alert {
-  background: rgba(220, 38, 38, 0.05);
+  background: linear-gradient(135deg, rgba(244, 67, 54, 0.02), rgba(244, 67, 54, 0.08));
   color: #dc2626;
   padding: 12px 16px;
   border-radius: 10px;
@@ -355,7 +402,7 @@ const handleLogin = async () => {
 .auth-button {
   width: 100%;
   padding: 14px;
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), #5e72e4);
   color: white;
   border: none;
   border-radius: 10px;
@@ -371,10 +418,10 @@ const handleLogin = async () => {
   animation: fadeIn 0.5s ease-out;
   animation-delay: 0.3s;
   animation-fill-mode: both;
+  box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15);
 }
 
 .auth-button:hover:not(:disabled) {
-  background: var(--primary-dark);
   transform: translateY(-2px);
   box-shadow: 0 8px 20px rgba(76, 100, 226, 0.25);
 }
@@ -410,18 +457,48 @@ const handleLogin = async () => {
   cursor: wait;
 }
 
-.button-loader {
-  width: 20px;
+/* Clean, centered 3-dot animation */
+.three-dots-loader {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
   height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+.three-dots-loader .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: white;
+  display: inline-block;
+}
+
+.three-dots-loader .dot:nth-child(1) {
+  animation: bounce 1.4s ease-in-out 0s infinite;
+}
+
+.three-dots-loader .dot:nth-child(2) {
+  animation: bounce 1.4s ease-in-out 0.2s infinite;
+}
+
+.three-dots-loader .dot:nth-child(3) {
+  animation: bounce 1.4s ease-in-out 0.4s infinite;
+}
+
+@keyframes bounce {
+
+  0%,
+  80%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+
+  40% {
+    transform: scale(1.2);
+    opacity: 1;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.3);
   }
 }
 

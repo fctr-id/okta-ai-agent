@@ -83,7 +83,7 @@
           </div>
         </div>
 
-        <button type="submit" class="auth-button" :class="{ 'loading': auth.loading.value }"
+        <button type="submit" class="auth-button glow-effect" :class="{ 'loading': auth.loading.value }"
           :disabled="auth.loading.value || !formIsValid">
           <span v-if="!auth.loading.value">Complete Setup</span>
           <div v-else class="button-loader"></div>
@@ -218,67 +218,109 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 });
 </script>
 
-<style lang="scss">
-@use '@/styles/variables' as v;
-
-// Then update variable references like:
-// From: $primary
-// To: v.$primary
-
+<style>
+/* Enhanced setup card with animations */
 .setup-card {
   width: 100%;
   max-width: 480px;
+  background: white;
+  border-radius: 16px;
+  padding: 2rem;
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.05),
+    0 5px 15px rgba(76, 100, 226, 0.04),
+    0 2px 5px rgba(0, 0, 0, 0.02);
+  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(76, 100, 226, 0.08);
+  animation: card-appear 0.5s ease-out forwards;
 }
 
+@keyframes card-appear {
+  0% {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Enhanced setup icon with gradient */
 .setup-icon {
   width: 64px;
   height: 64px;
   border-radius: 50%;
-  background: v.$primary-light;
+  background: linear-gradient(135deg, var(--primary-light), rgba(94, 114, 228, 0.1));
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 24px;
-}
-</style><style>
-/* Consolidated styles using CSS variables */
-.setup-card {
-  width: 100%;
-  max-width: 480px;
+  animation: fadeIn 0.5s ease-out forwards;
+  box-shadow: 0 4px 10px rgba(76, 100, 226, 0.1);
 }
 
-.setup-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: var(--primary-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 24px;
-}
-
+/* Gradient title */
 .auth-title {
   font-size: 28px;
   font-weight: 600;
-  color: var(--text-primary);
   margin-bottom: 8px;
+  background: linear-gradient(90deg, var(--primary), #5e72e4);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
   text-align: center;
 }
 
+/* Gradient subtitle */
 .auth-subtitle {
   font-size: 16px;
-  color: var(--text-secondary);
+  color: #666;
   margin-bottom: 32px;
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--primary) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   text-align: center;
+  display: inline-block;
 }
 
 .auth-form {
   text-align: left;
 }
 
+/* Enhanced form fields with animations */
 .form-field {
   margin-bottom: 24px;
+  animation: fadeIn 0.5s ease-out;
+  animation-fill-mode: both;
+}
+
+.form-field:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.form-field:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+.form-field:nth-child(4) {
+  animation-delay: 0.3s;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .form-field label {
@@ -287,27 +329,60 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   font-weight: 500;
   color: #444;
   margin-bottom: 8px;
+  transition: color 0.2s;
 }
 
+.form-field:focus-within label {
+  color: var(--primary);
+}
+
+/* Enhanced input styling */
 .input-wrapper {
   position: relative;
   border: 1px solid #ddd;
   border-radius: 10px;
   overflow: hidden;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
   display: flex;
   align-items: center;
 }
 
+.input-wrapper:hover {
+  border-color: #bbc4f3;
+}
+
 .input-wrapper:focus-within {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(76, 100, 226, 0.1);
+  box-shadow: 0 0 0 3px rgba(76, 100, 226, 0.15);
+}
+
+/* Side accent bar on focus */
+.input-wrapper::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 0;
+  background: linear-gradient(180deg, var(--primary), #5e72e4);
+  transition: height 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+  border-top-left-radius: 10px;
+  border-bottom-left-radius: 10px;
+}
+
+.input-wrapper:focus-within::before {
+  height: 100%;
 }
 
 .field-icon {
   color: #999;
   margin: 0 12px;
   font-size: 20px;
+  transition: color 0.3s ease;
+}
+
+.input-wrapper:focus-within .field-icon {
+  color: var(--primary);
 }
 
 .input-wrapper input {
@@ -319,6 +394,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   background: transparent;
 }
 
+/* Enhanced password toggle */
 .password-toggle {
   background: transparent;
   border: none;
@@ -333,26 +409,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   color: var(--primary);
 }
 
-.error-alert {
-  background: rgba(220, 38, 38, 0.05);
-  color: #dc2626;
-  padding: 12px 16px;
-  border-radius: 10px;
-  margin-bottom: 24px;
-  font-size: 14px;
-  border-left: 3px solid #dc2626;
-}
-
-.warning-alert {
-  background: rgba(234, 179, 8, 0.05);
-  color: #b45309;
-  padding: 12px 16px;
-  border-radius: 10px;
-  margin-bottom: 24px;
-  font-size: 14px;
-  border-left: 3px solid #eab308;
-}
-
+/* Enhanced password requirements */
 .password-requirements {
   margin-top: 12px;
   display: grid;
@@ -360,40 +417,124 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   gap: 8px;
   font-size: 12px;
   color: #6b7280;
+  opacity: 0;
+  animation: fadeIn 0.5s ease-out forwards;
+  animation-delay: 0.4s;
 }
 
 .requirement {
   display: flex;
   align-items: center;
   gap: 6px;
-  transition: color 0.2s ease;
+  transition: all 0.3s ease;
 }
 
 .requirement.met {
   color: #10b981;
 }
 
+/* Enhanced alert messages */
+.error-alert {
+  background: linear-gradient(135deg, rgba(244, 67, 54, 0.02), rgba(244, 67, 54, 0.08));
+  color: #dc2626;
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  border-left: 3px solid #dc2626;
+  position: relative;
+  overflow: hidden;
+}
+
+.error-alert::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(220, 38, 38, 0.1), transparent);
+  animation: shimmer 2s infinite;
+}
+
+.warning-alert {
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.02), rgba(234, 179, 8, 0.08));
+  color: #b45309;
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-bottom: 24px;
+  font-size: 14px;
+  border-left: 3px solid #eab308;
+  position: relative;
+  overflow: hidden;
+}
+
+.warning-alert::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(234, 179, 8, 0.1), transparent);
+  animation: shimmer 2s infinite;
+}
+
+.input-modified-hint {
+  color: #b45309;
+  font-size: 12px;
+  margin-top: 4px;
+  display: block;
+}
+
+/* Enhanced button with gradient and glow */
 .auth-button {
   width: 100%;
   padding: 14px;
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), #5e72e4);
   color: white;
   border: none;
   border-radius: 10px;
   font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.3s ease;
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+  overflow: hidden;
+  animation: fadeIn 0.5s ease-out;
+  animation-delay: 0.3s;
+  animation-fill-mode: both;
+  box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15);
   margin-top: 8px;
 }
 
 .auth-button:hover:not(:disabled) {
-  background: var(--primary-dark);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(76, 100, 226, 0.25);
+}
+
+.auth-button:active:not(:disabled) {
+  transform: translateY(0);
   box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15);
+}
+
+.glow-effect:not(:disabled)::after {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+
+.glow-effect:not(:disabled):hover::after {
+  opacity: 1;
 }
 
 .auth-button:disabled {
@@ -406,31 +547,75 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   cursor: wait;
 }
 
-.input-modified-hint {
-  color: #b45309;
-  font-size: 12px;
-  margin-top: 4px;
-  display: block;
+/* Enhanced loading animation */
+.button-loader {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+.button-loader::before,
+.button-loader::after,
+.button-loader {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: white;
+  opacity: 0.8;
+  content: '';
 }
 
 .button-loader {
-  width: 20px;
-  height: 20px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: white;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  animation: pulse 1.2s ease-in-out 0s infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
+.button-loader::before {
+  animation: pulse 1.2s ease-in-out 0.4s infinite;
+}
+
+.button-loader::after {
+  animation: pulse 1.2s ease-in-out 0.8s infinite;
+}
+
+@keyframes pulse {
+
+  0%,
+  100% {
+    transform: scale(0.8);
+    opacity: 0.6;
   }
+
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Fade transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 /* Responsive adjustments */
 @media (max-width: 480px) {
-  .app-card {
+  .setup-card {
     padding: 30px 20px;
   }
 

@@ -14,7 +14,7 @@ from sqlalchemy import select, and_, not_, update, func
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
-from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole
+from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus
 from src.core.helpers.argon2_hash import hash_password, verify_password, check_password_needs_rehash, calculate_lockout_time
 from src.config.settings import settings
 from src.utils.logging import logger
@@ -194,6 +194,7 @@ class DatabaseOperations:
             logger.error(f"Mark deleted error for {model.__name__}: {str(e)}")
             raise
 
+        # Fix the get_last_sync_time method to use end_time instead of sync_end_time
     async def get_last_sync_time(
         self,
         session: AsyncSession,
@@ -202,39 +203,29 @@ class DatabaseOperations:
     ) -> Optional[datetime]:
         """
         Get timestamp of last successful sync for incremental updates.
-        
-        Args:
-            session: Active database session  
-            model: SQLAlchemy model class
-            tenant_id: Tenant identifier
-            
-        Returns:
-            datetime: Last successful sync time or None
-            
-        Notes:
-            Only returns time from successful syncs with records
         """
         try:
             from .models import SyncHistory, SyncStatus
             
-            # Only get time from successful syncs
-            stmt = select(SyncHistory.sync_end_time)\
+            # Handle both SUCCESS and COMPLETED status values
+            stmt = select(SyncHistory.end_time)\
                 .where(
                     and_(
                         SyncHistory.tenant_id == tenant_id,
                         SyncHistory.entity_type == model.__name__,
-                        SyncHistory.status == SyncStatus.SUCCESS,
-                        SyncHistory.records_processed > 0  # Ensure records were processed
+                        SyncHistory.status.in_([SyncStatus.SUCCESS, SyncStatus.COMPLETED]),
+                        SyncHistory.records_processed > 0
                     )
                 )\
-                .order_by(SyncHistory.sync_end_time.desc())
+                .order_by(SyncHistory.end_time.desc())
                 
             result = await session.execute(stmt)
             return result.scalar()
             
         except Exception as e:
-            logger.error(f"Get last sync time error for {model.__name__}: {str(e)}")
-            raise
+            logger.error(f"Get last sync time error for {model.__name__}: {str(e)}", 
+                         extra={"tenant_id": tenant_id} if hasattr(self, "tenant_id") else {})
+            return None
         
     async def _process_user_factors(
         self,
@@ -452,3 +443,89 @@ class DatabaseOperations:
                 
             await session.commit()
             return None        
+        
+    # Add these methods to the existing DatabaseOperations class
+
+    async def get_active_sync(self):
+        """
+        Get currently running sync if any
+        Returns SyncHistory object or None
+        """
+        query = select(SyncHistory).where(
+            and_(
+                SyncHistory.tenant_id == self.tenant_id,
+                SyncHistory.status.in_([SyncStatus.RUNNING, SyncStatus.IDLE])
+            )
+        ).order_by(SyncHistory.start_time.desc()).limit(1)
+        
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def get_last_completed_sync(self):
+        """
+        Get the most recently completed sync
+        Returns SyncHistory object or None
+        """
+        query = select(SyncHistory).where(
+            and_(
+                SyncHistory.tenant_id == self.tenant_id,
+                SyncHistory.status.in_([SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELED])
+            )
+        ).order_by(SyncHistory.end_time.desc()).limit(1)
+        
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def create_sync_history(self):
+        """
+        Create a new sync history entry
+        Returns the created SyncHistory object
+        """
+        sync_history = SyncHistory(
+            tenant_id=self.tenant_id,
+            status=SyncStatus.IDLE,
+            start_time=datetime.utcnow()
+        )
+        
+        self.session.add(sync_history)
+        await self.session.commit()
+        await self.session.refresh(sync_history)
+        return sync_history
+
+    async def update_sync_history(self, sync_id, data):
+        """
+        Update an existing sync history entry
+        Returns the updated SyncHistory object
+        """
+        query = select(SyncHistory).where(
+            and_(
+                SyncHistory.id == sync_id,
+                SyncHistory.tenant_id == self.tenant_id
+            )
+        )
+        
+        result = await self.session.execute(query)
+        sync_history = result.scalars().first()
+        
+        if not sync_history:
+            raise ValueError(f"Sync history with ID {sync_id} not found")
+            
+        for key, value in data.items():
+            if hasattr(sync_history, key):
+                setattr(sync_history, key, value)
+        
+        await self.session.commit()
+        await self.session.refresh(sync_history)
+        return sync_history
+
+    async def get_sync_history(self, limit=5):
+        """
+        Get recent sync history entries
+        Returns a list of SyncHistory objects
+        """
+        query = select(SyncHistory).where(
+            SyncHistory.tenant_id == self.tenant_id
+        ).order_by(SyncHistory.start_time.desc()).limit(limit)
+        
+        result = await self.session.execute(query)
+        return result.scalars().all()        

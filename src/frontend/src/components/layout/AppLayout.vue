@@ -11,14 +11,18 @@
                         <div class="beta-badge">BETA</div>
                     </div>
                 </div>
-                <v-tooltip text="Logout" location="bottom">
-                    <template v-slot:activator="{ props }">
-                        <button v-if="showLogout" v-bind="props" class="logout-btn" aria-label="Logout"
-                            @click="handleLogout">
-                            <v-icon>mdi-logout</v-icon>
-                        </button>
-                    </template>
-                </v-tooltip>
+                <div class="header-actions">
+                    <!-- Add SyncStatusButton here -->
+                    <SyncStatusButton v-if="showLogout" />
+                    <v-tooltip text="Logout" location="bottom">
+                        <template v-slot:activator="{ props }">
+                            <button v-if="showLogout" v-bind="props" class="logout-btn" aria-label="Logout"
+                                @click="handleLogout">
+                                <v-icon>mdi-logout</v-icon>
+                            </button>
+                        </template>
+                    </v-tooltip>
+                </div>
             </div>
         </header>
 
@@ -43,6 +47,7 @@
 <script setup>
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
+import SyncStatusButton from '@/components/sync/SyncStatusButton.vue'
 
 const props = defineProps({
     showLogout: {
@@ -65,10 +70,11 @@ const handleLogout = async () => {
 </script>
 
 <style>
-/* Page layout */
 .app-page {
     min-height: 100vh;
-    background: var(--bg-gradient);
+    background: linear-gradient(135deg, 
+                #f9fbff 0%, 
+                #f5f8ff 100%);
     position: relative;
     overflow-y: auto;
 }
@@ -79,10 +85,10 @@ const handleLogout = async () => {
     top: 0;
     left: 0;
     right: 0;
-    height: 100px;
+    height: 150px; /* Middle ground between 100px and 180px */
     background: linear-gradient(to bottom,
-            rgba(76, 100, 226, 0.03) 0%,
-            rgba(76, 100, 226, 0.01) 70%,
+            rgba(76, 100, 226, 0.04) 0%,
+            rgba(76, 100, 226, 0.015) 70%,
             transparent 100%);
     z-index: 1;
 }
@@ -110,6 +116,12 @@ const handleLogout = async () => {
     position: relative;
     border: none;
     z-index: 2;
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .brand {
@@ -214,13 +226,13 @@ const handleLogout = async () => {
 }
 
 .v-tooltip .v-overlay__content {
-  background-color: var(--primary-dark) !important;
-  color: white !important;
-  font-size: 12px !important;
-  font-weight: 500 !important;
-  padding: 5px 10px !important;
-  border-radius: 4px !important;
-  opacity: 0.95 !important;
+    background-color: var(--primary-dark) !important;
+    color: white !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    padding: 5px 10px !important;
+    border-radius: 4px !important;
+    opacity: 0.95 !important;
 }
 
 

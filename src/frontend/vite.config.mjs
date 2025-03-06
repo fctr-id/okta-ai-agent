@@ -75,6 +75,13 @@ export default defineConfig({
     outDir: '../backend/app/static',
     emptyOutDir: true,
     assetsDir: 'assets',
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true
+      }
+    },
     rollupOptions: {
       output: {
         manualChunks: {
