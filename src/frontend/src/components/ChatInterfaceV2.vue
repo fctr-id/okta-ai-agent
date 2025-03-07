@@ -14,14 +14,16 @@
                     <div class="integrated-search-bar">
                         <!-- Reset button (only when results are showing) -->
                         <transition name="fade">
-                            <v-tooltip v-if="hasResults" text="Start over" location="top">
-                                <template v-slot:activator="{ props }">
-                                    <button v-bind="props" class="action-btn reset-btn" @click="resetInterface"
-                                        aria-label="Reset search">
-                                        <v-icon>mdi-refresh</v-icon>
-                                    </button>
-                                </template>
-                            </v-tooltip>
+                            <div v-if="hasResults" class="reset-btn-container">
+                                <v-tooltip text="Start over" location="top">
+                                    <template v-slot:activator="{ props }">
+                                        <button v-bind="props" class="action-btn reset-btn" @click="resetInterface"
+                                            aria-label="Reset search">
+                                            <v-icon>mdi-refresh</v-icon>
+                                        </button>
+                                    </template>
+                                </v-tooltip>
+                            </div>
                         </transition>
 
                         <!-- Search input with dynamic placeholder -->
@@ -596,14 +598,14 @@ onMounted(() => {
 }
 
 :deep(.v-tooltip .v-overlay__content) {
-  background-color: var(--primary-dark);
-  color: white;
-  font-size: 12px;
-  font-weight: 500;
-  padding: 5px 10px;
-  border-radius: 4px;
-  opacity: 0.95;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    background-color: var(--primary-dark);
+    color: white;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 10px;
+    border-radius: 4px;
+    opacity: 0.95;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* Action buttons */

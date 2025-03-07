@@ -133,16 +133,20 @@
     position: relative;
 }
 
-/* Enhanced Sync Button with subtle hover effects */
 .sync-button {
-    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-    border-radius: 10px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.04);
+  background: linear-gradient(135deg, var(--primary), #5e72e4) !important;
+  color: white !important;
+  box-shadow: 0 3px 8px rgba(76, 100, 226, 0.2) !important;
+  border: none !important;
 }
 
 .sync-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(76, 100, 226, 0.15);
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 10px rgba(76, 100, 226, 0.12) !important;
+}
+
+.sync-button .status-indicator {
+  border: 2px solid white !important;
 }
 
 /* Enhanced status indicator with better animations */

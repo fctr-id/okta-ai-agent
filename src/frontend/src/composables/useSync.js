@@ -99,7 +99,7 @@ export function useSync() {
 
                 // If counts changed, update the timestamp
                 if (hasChanged) {
-                    console.log("Entity counts changed, updating timestamp");
+                    //console.log("Entity counts changed, updating timestamp");
                     lastEntityCountChange = Date.now();
                     previousCounts = { ...data.entity_counts };
                 }

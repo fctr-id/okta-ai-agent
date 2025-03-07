@@ -70,11 +70,12 @@ const handleLogout = async () => {
 </script>
 
 <style>
+
 .app-page {
     min-height: 100vh;
     background: linear-gradient(135deg, 
-                #f9fbff 0%, 
-                #f5f8ff 100%);
+                #eef2fa 0%, 
+                #e9eef7 100%);
     position: relative;
     overflow-y: auto;
 }
@@ -85,13 +86,14 @@ const handleLogout = async () => {
     top: 0;
     left: 0;
     right: 0;
-    height: 150px; /* Middle ground between 100px and 180px */
+    height: 200px;
     background: linear-gradient(to bottom,
-            rgba(76, 100, 226, 0.04) 0%,
-            rgba(76, 100, 226, 0.015) 70%,
+            rgba(76, 100, 226, 0.05) 0%,
+            rgba(76, 100, 226, 0.02) 75%,
             transparent 100%);
     z-index: 1;
 }
+
 
 /* Header */
 .floating-header {
@@ -187,37 +189,72 @@ const handleLogout = async () => {
     min-height: calc(100vh - 140px);
 }
 
-/* Footer */
+/* Full-width footer fixed to bottom */
 .page-footer {
     position: fixed;
     bottom: 0;
     left: 0;
-    right: 0;
-    padding: 16px 0;
+    width: 100%;
+    padding: 14px 0;
     text-align: center;
     font-size: 13px;
     color: var(--text-muted);
     background: white;
-    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 -1px 0 rgba(76, 100, 226, 0.08);
     z-index: 50;
+}
+
+/* Add subtle gradient top border */
+.page-footer::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, 
+                rgba(76, 100, 226, 0.01), 
+                rgba(76, 100, 226, 0.1) 40%, 
+                rgba(76, 100, 226, 0.1) 60%,
+                rgba(76, 100, 226, 0.01));
 }
 
 .footer-content {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 5px;
+    max-width: var(--max-width);
+    margin: 0 auto;
 }
 
 .branded-link {
     color: var(--primary);
     text-decoration: none;
     font-weight: 500;
+    position: relative;
+    transition: all 0.2s ease;
+    padding: 0 3px;
 }
 
 .branded-link:hover {
     color: var(--primary-dark);
-    text-decoration: underline;
+}
+
+/* Add subtle underline animation on hover */
+.branded-link::after {
+    content: '';
+    position: absolute;
+    bottom: -2px;
+    left: 0;
+    width: 0;
+    height: 1px;
+    background: linear-gradient(90deg, var(--primary), #5e72e4);
+    transition: width 0.2s ease;
+}
+
+.branded-link:hover::after {
+    width: 100%;
 }
 
 .disclaimer {

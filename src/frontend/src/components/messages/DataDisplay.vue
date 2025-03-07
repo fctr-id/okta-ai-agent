@@ -31,7 +31,7 @@
 
                                     <div class="sync-info">
                                         <v-icon class="sync-icon" size="small">mdi-update</v-icon>
-                                        <span>Updated at: {{ getLastSyncTime }}</span>
+                                        <span>Last Updated: {{ getLastSyncTime }}</span>
                                     </div>
                                 </div>
 
@@ -157,29 +157,79 @@ const formattedJson = computed(() => {
 })
 
 const getLastSyncTime = computed(() => {
-    // Check multiple possible locations
-    if (props.metadata?.last_sync) {
-        return props.metadata.last_sync;
+  // Get timestamp from the correct nested path
+  let timestampStr = 'Never';
+  
+  // Handle the nested structure we identified
+  if (props.metadata?.last_sync?.last_sync) {
+    timestampStr = props.metadata.last_sync.last_sync;
+  } else if (props.metadata?.last_sync && typeof props.metadata.last_sync === 'string') {
+    timestampStr = props.metadata.last_sync;
+  }
+  
+  if (timestampStr && timestampStr !== 'Never' && timestampStr !== 'Error') {
+    try {
+      // Parse timestamp as UTC (same approach as in useSync.js)
+      const utcTimeStr = timestampStr.endsWith("Z") ? timestampStr : timestampStr + "Z";
+      const date = new Date(utcTimeStr);
+      
+      // Format exactly like in formattedLastSyncTime()
+      if (!isNaN(date.getTime())) {
+        const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const month = months[date.getMonth()];
+        const day = date.getDate();
+        const year = date.getFullYear();
+        
+        let hours = date.getHours();
+        const ampm = hours >= 12 ? "PM" : "AM";
+        hours = hours % 12;
+        hours = hours ? hours : 12;
+        const minutes = date.getMinutes().toString().padStart(2, "0");
+        
+        return `${month} ${day}, ${year}, ${hours}:${minutes} ${ampm}`;
+      }
+      
+      return timestampStr.split('.')[0];
+    } catch (e) {
+      console.error('Error formatting timestamp:', e);
+      return timestampStr;
     }
-    
-    // Check with brackets notation (case sensitive)
-    if (props.metadata?.['last_sync']) {
-        return props.metadata['last_sync'];
-    }
-    
-    // Check if it might be inside a nested structure
-    if (props.metadata?.headers && 
-        props.metadata?.timestamp && 
-        props.metadata?.query) {
-        // This appears to be the backend metadata structure
-        return props.metadata.last_sync || 'Never';
-    }
-    
-    // Log what we have for debugging
-    console.log('Last sync not found in:', props.metadata);
-    
-    return 'Never';
+  }
+  
+  return timestampStr;
 });
+
+// Helper function to format timestamps consistently
+const formatTimestamp = (timestamp) => {
+    if (!timestamp || timestamp === 'Never' || timestamp === 'Error') {
+        return timestamp;
+    }
+    
+    try {
+        const date = new Date(timestamp);
+        if (!isNaN(date.getTime())) {
+            const options = {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true
+            };
+            return new Intl.DateTimeFormat('en-US', options).format(date);
+        }
+        
+        // For timestamps with milliseconds, remove them for cleaner display
+        if (typeof timestamp === 'string' && timestamp.includes('.')) {
+            return timestamp.split('.')[0];
+        }
+        
+        return timestamp;
+    } catch (e) {
+        console.error('Error formatting timestamp:', e);
+        return timestamp;
+    }
+}
 
 //Display error content
 const getErrorContent = computed(() => {
@@ -338,19 +388,26 @@ watch(() => props.content, (newContent) => {
     padding: 0 16px !important;
     height: 36px;
     border: 1px solid #eef1ff !important;
+    transition: all 0.2s ease;
+    margin-right: 10px;
 }
 
 .download-btn:hover {
-    background: #f8f9ff !important;
+    background: #f0f4ff !important;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 5px rgba(76, 100, 226, 0.1);
 }
 
 .sync-info {
     display: flex;
     align-items: center;
     gap: 8px;
-    color: #5d6b8a;
+    color: #444;
     font-size: 0.813rem;
     white-space: nowrap;
+    padding: 4px 8px;
+    background: rgba(76, 100, 226, 0.04);
+    border-radius: 4px;
 }
 
 .sync-icon {
@@ -468,7 +525,7 @@ watch(() => props.content, (newContent) => {
 :deep(.v-data-table__wrapper) {
     overflow-x: auto;
     border: 1px solid #eef1ff;
-    border-radius: 8px;
+    border-radius: 12px; /* Increased from 8px for more modern look */
 }
 
 /* More aggressive table header styling */
@@ -531,7 +588,7 @@ watch(() => props.content, (newContent) => {
     padding: 12px 16px !important;
     font-size: 0.875rem;
     color: #374151;
-    border-bottom: 1px solid #f5f7ff;
+    border-bottom: 1px solid rgba(245, 247, 255, 0.5); /* More subtle */
 }
 
 /* Simplified Pagination */

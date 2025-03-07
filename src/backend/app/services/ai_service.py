@@ -8,6 +8,8 @@ from src.core.helpers.okta_pre_reasoning_agent import expand_query
 from src.core.helpers.okta_generate_sql import sql_agent, extract_json_from_text
 from src.okta_db_sync.db.operations import DatabaseOperations
 from src.utils.logging import logger
+from datetime import timezone, datetime, timedelta
+from src.config.settings import settings 
 
 class SQLExecutor:
     def __init__(self):
@@ -66,41 +68,45 @@ class AIService:
     BATCH_SIZE = 100
     
     @staticmethod
-    async def get_last_sync_info(executor: SQLExecutor) -> str:
-        """Get last successful sync time for users entity in local timezone"""
+    async def get_last_sync_info(executor: SQLExecutor) -> Dict[str, Any]:
+        """Get sync timestamp for the most recent successful sync"""
+        from src.utils.logging import logger
+        
         try:
-            logger.debug("Fetching last sync information")
-            
-            sql = """
-            SELECT sync_end_time as last_sync
-            FROM sync_history 
-            WHERE status = 'SUCCESS'
-            AND entity_type = 'User'
-            ORDER BY sync_end_time DESC
+            # Simple query that just gets the timestamp
+            query = """
+            SELECT 
+                end_time
+            FROM sync_history
+            WHERE tenant_id = :tenant_id
+            AND success = 1
+            ORDER BY start_time DESC
             LIMIT 1
             """
             
-            result = await executor.execute_query(sql)
-            if result.get("error"):
-                return "Not available"
-                
-            if result and result["results"] and len(result["results"]) > 0:
-                sync_info = result["results"][0]
-                
-                utc_dt = datetime.fromisoformat(str(sync_info['last_sync']))
-                if utc_dt.tzinfo is None:
-                    utc_dt = utc_dt.replace(tzinfo=pytz.UTC)
-                
-                local_tz = datetime.now().astimezone().tzinfo
-                local_time = utc_dt.astimezone(local_tz)
-                
-                return local_time.strftime("%Y-%m-%d %I:%M:%S %p %Z")
+            # Execute query with parameters
+            params = {"tenant_id": settings.tenant_id}
             
-            return "No sync history available"
+            # Use session to execute query
+            async with executor.db.get_session() as session:
+                sql_text = text(query)
+                result = await session.execute(sql_text, params)
+                row = result.fetchone()
+                
+                # Default response if no data
+                if not row or not row[0]:
+                    return {"last_sync": "No data"}
+                
+                # Get timestamp as string from result
+                timestamp_str = row[0]
+                
+                # Return the timestamp as-is - frontend will handle formatting
+                return {"last_sync": timestamp_str}
             
         except Exception as e:
-            logger.error(f"Error fetching sync info: {str(e)}", exc_info=True)
-            return "Not available"
+            # Keep error logging (always important)
+            logger.error(f"Error retrieving sync timestamp: {str(e)}")
+            return {"last_sync": "Error"}
 
     @staticmethod
     async def process_query(query: str) -> AsyncGenerator[str, None]:

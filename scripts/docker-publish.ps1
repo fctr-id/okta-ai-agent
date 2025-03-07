@@ -1,7 +1,7 @@
 # docker-publish.ps1
 param(
     [Parameter()]
-    [string]$Version = "0.2.0",
+    [string]$Version = "",
     [Parameter()]
     [string]$Registry = "fctrid",
     [Parameter()]
@@ -9,6 +9,18 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# Always ask for version if not provided or empty
+if ([string]::IsNullOrEmpty($Version)) {
+    # Keep asking until a valid version is provided
+    do {
+        $Version = Read-Host "Enter version number (format: x.y.z)"
+        if (![string]::IsNullOrEmpty($Version) -and $Version -match '^\d+\.\d+\.\d+$') {
+            break
+        }
+        Write-Host "Invalid version format. Please use format: x.y.z (e.g., 1.0.0)" -ForegroundColor Yellow
+    } while ($true)
+}
 
 Write-Host "========================================="
 Write-Host "Docker Image Build and Publish Script"
