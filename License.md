@@ -1,6 +1,6 @@
 # Okta AI Agent License
 
-© 2024 Fctr. All rights reserved.
+© 2025 Fctr. All rights reserved.
 
 ## Open Source Terms
 
