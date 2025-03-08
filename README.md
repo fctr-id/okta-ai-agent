@@ -4,7 +4,7 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">AI Agent for Okta (BETA)</h2>
+<h2 style="margin-left: 10px" align="center">AI Agent for Okta (v0.2.0 BETA)</h2>
 
 This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers, IT GRC teams and audit teams, powered by enterprise AI models. The vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
@@ -15,16 +15,14 @@ This AI agent is the first of its kind that lets you use natural language to que
   <img src="docs/agent-new-web-ui.gif" alt="Okta AI Agent Demo" width="800" height="auto">
 </p>
 
+## 📋 Table of Contents
+
+- [📋 Table of Contents](#-table-of-contents)
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start](#-quick-start)
   - [Prerequisites](#prerequisites)
-  - [Installation \& demo video (Youtube Link)](#installation--demo-video-youtube-link)
-  - [Get Started](#get-started)
-    - [Windows Setup](#windows-setup)
-    - [Linux/MacOS Setup](#linuxmacos-setup)
-  - [🎯 Usage](#-usage)
-  - [Usage Examples \& Community Queries](#usage-examples--community-queries)
-  - [Share Your Queries!](#share-your-queries)
+  - [Basic Usage](#basic-usage)
+- [🆕 What's New in v0.2.0](#-whats-new-in-v020)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
   - [Data Privacy](#data-privacy)
@@ -49,81 +47,27 @@ This AI agent is the first of its kind that lets you use natural language to que
 
 * 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLlite DB
 * 💡 **Natural Language Queries** - Talk to your Okta data in simple english
-*  ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
+* ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
      -  Google Vertex AI (Gemini 1.5 Pro)
      -  OpenAI (GPT-4)
      -  Azure OpenAI (GPT-4)
      -  Ollama (Local, Self-hosted, use 32B+ models)
      -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
+* 🖥️ **Web Interface** - Modern UI for easier interaction with your Okta data
   
 
 ## 🚀 Quick Start
 
+See our [Installation Wiki](https://github.com/fctr-id/okta-ai-agent/wiki/Installation) for detailed setup instructions.
+
 ### Prerequisites
 * Python 3.12+
-* Okta tenant superadmin acess
-* Access to any supported AI provider mentioned above
+* Okta tenant superadmin access
+* Access to any supported AI provider
 
-### Installation & demo video (Youtube Link)
+### Basic Usage
 
-[![Demo video](https://img.youtube.com/vi/mEg_TqMjOvM/0.jpg)](https://www.youtube.com/watch?v=mEg_TqMjOvM)
-
-
-### Get Started
-
-1. **Clone & Navigate**
-```bash
-git clone https://github.com/fctr-id/okta-ai-agent
-cd okta-ai-agent
-```
-
-2. **Set Up Python Virtual Environment**
-
-#### Windows Setup
-```batch
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-.\venv\Scripts\activate
-
-# Install requirements
-pip install -r requirements.txt
-```
-
-#### Linux/MacOS Setup
-```bash
-# Create virtual environment
-python3 -m venv venv
-
-# Activate virtual environment
-source venv/bin/activate
-
-# Install requirements
-pip install -r requirements.txt
-```
-
-3. **Configure Your .env file** (`.env`)
-```bash
-cp .env.sample .env
-```
-Modify these as needed
-```ini
-# 🔐 Okta Configuration
-OKTA_CLIENT_ORGURL=https://your-dev-instance.okta.com
-OKTA_CLIENT_TOKEN=your-okta-api-token
-
-# 🧠 AI Settings
-AI_PROVIDER=vertex_ai
-USE_PRE_REASONING=True
-
-# 🌐 Vertex AI Configuration
-VERTEX_AI_SERVICE_ACCOUNT_FILE=path/to/service-account.json
-VERTEX_AI_REASONING_MODEL=gemini-1.5-pro
-VERTEX_AI_CODING_MODEL=gemini-1.5-pro
-```
-
-### 🎯 Usage
+After installation (see wiki for details):
 
 1. **Sync Your Data**
 ```bash
@@ -135,23 +79,15 @@ python Fetch_Okta_Data.py
 python Okta_AI_Agent.py
 ```
 
-### Usage Examples & Community Queries
+For detailed usage instructions, configuration options, and advanced setup, please refer to our [Wiki](https://github.com/fctr-id/okta-ai-agent/wiki).
 
-Try these example queries to get started:
+## 🆕 What's New in v0.2.0
 
-* 👥 "Who are my active users?"
-* 🎯 "Show me users in the 'Sales' application"
-* 📱 "List everyone with PUSH authentication"
-
-### Share Your Queries!
-
-We're building a community knowledge base! Explore and contribute:
-
-| Action | Link |
-|--------|------|
-| 📝 Submit Query | [Share your examples](https://messy-heath-9e9.notion.site/19cc111b8adc80f9889bdc9badf1ee89?pvs=105) |
-| 🔍 View Examples | [Browse community queries](https://messy-heath-9e9.notion.site/19cc111b8adc80718a40e59d1c41b30f?v=19cc111b8adc8013b94e000ce7e23638&pvs=4) |
-
+- **Web Interface Beta** - Modern web UI for interacting with the agent
+- **Improved Query Processing** - Better handling of complex natural language queries
+- **Enhanced Data Sync** - More efficient and reliable Okta data synchronization
+- **Additional AI Provider Support** - Expanded model options and configurations
+- **Bug Fixes and Performance Improvements** - Enhanced stability and response quality
 
 ## 🛡️ Security & Privacy 
 
