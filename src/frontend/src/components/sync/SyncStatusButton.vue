@@ -42,17 +42,19 @@
                     </div>
 
                     <!-- Enhanced Sync Progress with gradient background -->
+                    <!-- Change in the progress-section -->
                     <div v-if="isSyncing" class="progress-section">
                         <div class="progress-info">
                             <div class="sync-status-text">
                                 <div class="pulse-dot"></div>
                                 <span>Syncing data from Okta...</span>
                             </div>
-                            <span class="progress-percentage">{{ syncProgress }}%</span>
+                            <!-- Remove percentage display -->
                         </div>
                         <div class="progress-bar-container">
                             <div class="progress-bar-background"></div>
-                            <div class="progress-bar-filled" :style="{ width: `${syncProgress}%` }"></div>
+                            <!-- Replace fixed width with indeterminate progress bar -->
+                            <div class="progress-bar-indeterminate"></div>
                         </div>
                     </div>
 
@@ -134,19 +136,19 @@
 }
 
 .sync-button {
-  background: linear-gradient(135deg, var(--primary), #5e72e4) !important;
-  color: white !important;
-  box-shadow: 0 3px 8px rgba(76, 100, 226, 0.2) !important;
-  border: none !important;
+    background: linear-gradient(135deg, var(--primary), #5e72e4) !important;
+    color: white !important;
+    box-shadow: 0 3px 8px rgba(76, 100, 226, 0.2) !important;
+    border: none !important;
 }
 
 .sync-button:hover {
-  transform: translateY(-2px) !important;
-  box-shadow: 0 4px 10px rgba(76, 100, 226, 0.12) !important;
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 10px rgba(76, 100, 226, 0.12) !important;
 }
 
 .sync-button .status-indicator {
-  border: 2px solid white !important;
+    border: 2px solid white !important;
 }
 
 /* Enhanced status indicator with better animations */
@@ -561,17 +563,19 @@ const isStarting = ref(false);
 
 // Computed properties
 const statusColor = computed(() => {
-    if (syncStatus.value === 'running' || syncStatus.value === 'idle') return 'orange';
-    if (syncStatus.value === 'completed') return 'green';
-    if (syncStatus.value === 'failed' || syncStatus.value === 'canceled') return 'red';
+    if (syncStatus.value === 'running') return 'orange';  // In-progress
+    if (syncStatus.value === 'completed') return 'green'; // Success
+    if (syncStatus.value === 'failed' || syncStatus.value === 'canceled') return 'red'; // Error
+    if (syncStatus.value === 'idle') return 'blue'; // Ready but not active
     return 'grey'; // Default for 'none' or unknown
 });
 
 const statusText = computed(() => {
-    if (syncStatus.value === 'running' || syncStatus.value === 'idle') return 'Syncing';
+    if (syncStatus.value === 'running') return 'Syncing';
     if (syncStatus.value === 'completed') return 'Synced';
     if (syncStatus.value === 'failed') return 'Failed';
     if (syncStatus.value === 'canceled') return 'Canceled';
+    if (syncStatus.value === 'idle') return 'Ready'; // Or "Not synced"
     return 'Not synced';
 });
 

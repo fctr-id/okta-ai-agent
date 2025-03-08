@@ -19,9 +19,9 @@ This AI agent is the first of its kind that lets you use natural language to que
 
 - [📋 Table of Contents](#-table-of-contents)
 - [✨ What's Special?](#-whats-special)
-- [🚀 Quick Start](#-quick-start)
+- [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
-  - [Basic Usage](#basic-usage)
+  - [Docker Compose](#docker-compose)
 - [🆕 What's New in v0.2.0](#-whats-new-in-v020)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
@@ -56,36 +56,59 @@ This AI agent is the first of its kind that lets you use natural language to que
 * 🖥️ **Web Interface** - Modern UI for easier interaction with your Okta data
   
 
-## 🚀 Quick Start
+## 🚀 Quick Start (The No-Frills Docker Way)
 
-See our [Installation Wiki](https://github.com/fctr-id/okta-ai-agent/wiki/Installation) for detailed setup instructions.
+<div align="left">
+  <h3>💡 Looking for alternative installation instructions?</h3>
+  <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides which do not rely on docker</h4>
+</div>
 
 ### Prerequisites
-* Python 3.12+
-* Okta tenant superadmin access
-* Access to any supported AI provider
 
-### Basic Usage
+✅ Docker installed on your machine  
+✅ Okta tenant with superadmin access  
+✅ Access to any of the supported AI providers  
 
-After installation (see wiki for details):
+### Docker Compose
 
-1. **Sync Your Data**
+The easiest way to get started is with Docker Compose:
+
+1. **Create a project directory and navigate to it**
 ```bash
-python Fetch_Okta_Data.py
+mkdir okta-ai-agent && cd okta-ai-agent
 ```
 
-2. **Start the AI Magic**
+2. **Download the docker-compose.yml file**
 ```bash
-python Okta_AI_Agent.py
+curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml
 ```
 
-For detailed usage instructions, configuration options, and advanced setup, please refer to our [Wiki](https://github.com/fctr-id/okta-ai-agent/wiki).
+3. **Create a .env file with your configuration**
+```bash
+curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
+mv .env.sample .env
+# ✏️ Edit the .env file with your settings and save ✏️
+```
+
+4. **Launch the application**
+```bash
+docker compose up -d
+```
+
+5. **Access the web interface**
+   - 🌐 Open your browser and go to: https://localhost:8001 🌐
 
 ## 🆕 What's New in v0.2.0
 
-- **Web Interface Beta** - Modern web UI for interacting with the agent
+- **Web Interface** - Modern web UI for interacting with the agent, including:
+  - Natural language query capabilities
+  - Okta data synchronization controls
+  - Entity counts and statistics dashboard
+  - CSV export functionality
+  - Advanced filtering and sorting of results
+- **Improved Data Sync Versioning & Maintenance** - Better versioning control and maintenance of synchronized data
+- **Enhanced Logging System** - More comprehensive and detailed logging for better troubleshooting
 - **Improved Query Processing** - Better handling of complex natural language queries
-- **Enhanced Data Sync** - More efficient and reliable Okta data synchronization
 - **Additional AI Provider Support** - Expanded model options and configurations
 - **Bug Fixes and Performance Improvements** - Enhanced stability and response quality
 
@@ -213,7 +236,7 @@ Interested in contributing? We'd love to have you! Reach out to dan@fctr.io
 
 ## ⚖️ Legal Stuff
 
-Check out [`License.md`](License.md) for the fine print.
+Check out [`License.md`](LICENSE) for the fine print.
 
 ---
 

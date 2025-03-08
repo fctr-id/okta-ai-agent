@@ -104,6 +104,9 @@ async def run_sync(tenant_id: str, db: DatabaseOperations):
                 sync_history.apps_count = apps_count
                 sync_history.policies_count = policies_count
                 await session.commit()
+                
+            #  clean up old sync history records
+            await db.cleanup_sync_history(tenant_id, keep_count=30)    
             
         logger.info(f"Sync completed successfully for tenant: {tenant_id}")
         logger.info(f"Synced: {users_count} users, {groups_count} groups, {apps_count} apps, {policies_count} policies")

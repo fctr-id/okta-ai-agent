@@ -10,7 +10,7 @@
     --text-muted: #5d6b8a;
     
     /* Backgrounds */
-    --bg-gradient: linear-gradient(180deg, #fafbff 0%, #f8f9ff 100%);
+    --bg-gradient: linear-gradient(135deg, #1942c9 0%, #fafbff 100%);
     
     /* Layout */
     --border-radius: 16px;

@@ -24,17 +24,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Referrer policy
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         
+        # HTTPS enforcement with HSTS header
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        
         # Permissions policy (formerly Feature-Policy)
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=(), payment=()"
         
-        # Content Security Policy - carefully configured for your application
+        # Content Security Policy - updated to prefer HTTPS
         csp = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "  # Allow inline scripts for Vue
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "img-src 'self' data:; "
             "font-src 'self' https://fonts.gstatic.com data:; "
-            "connect-src 'self'; "
+            "connect-src 'self' https:; "  # Only allow HTTPS connections
             "frame-ancestors 'none';"
         )
         response.headers["Content-Security-Policy"] = csp
@@ -79,14 +82,15 @@ app = FastAPI(
 # Add security headers middleware first
 app.add_middleware(SecurityHeadersMiddleware)
 
-# Configure CORS
-allowed_origins = os.environ.get("ALLOWED_ORIGINS", "http://localhost:*,http://127.0.0.1:*").split(",")
+# Configure CORS - update default to HTTPS
+default_origins = "https://localhost:*,https://127.0.0.1:*"
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", default_origins).split(",")
 logger.info(f"Configuring CORS with allowed origins: {allowed_origins}")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:[0-9]+)?",
+    allow_origin_regex=r"https://(localhost|127\.0\.0\.1)(:[0-9]+)?",  # Only allow HTTPS
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

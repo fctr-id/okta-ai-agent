@@ -7,6 +7,7 @@ import VueRouter from "unplugin-vue-router/vite";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import path from 'path';
+import fs from 'fs';
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -43,11 +44,16 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    // Enable HTTPS
+    https: {
+      key: fs.readFileSync('../backend/certs/key.pem'),
+      cert: fs.readFileSync('../backend/certs/cert.pem'),
+    },
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8001",
+        target: "https://127.0.0.1:8001",  // Changed to HTTPS
         changeOrigin: true,
-        secure: false,
+        secure: false,  // Even though target is HTTPS, we accept self-signed certs
         configure: (proxy, options) => {
           proxy.on("error", (err, req, res) => {
             console.log("proxy error", err);

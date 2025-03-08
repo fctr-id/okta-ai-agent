@@ -73,9 +73,8 @@ const handleLogout = async () => {
 
 .app-page {
     min-height: 100vh;
-    background: linear-gradient(135deg, 
-                #eef2fa 0%, 
-                #e9eef7 100%);
+    background:  linear-gradient(180deg, #e5eaf5 0%, #f0f4fb 100%);
+
     position: relative;
     overflow-y: auto;
 }

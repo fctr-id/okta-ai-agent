@@ -57,3 +57,5 @@ sqlite_db/
 
 # Local certificates
 src/backend/certs/
+
+wiki.md

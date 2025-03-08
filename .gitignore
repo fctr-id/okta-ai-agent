@@ -54,3 +54,4 @@ results/*
 src/backend/app/static/*
 
 certs/
+wiki.md

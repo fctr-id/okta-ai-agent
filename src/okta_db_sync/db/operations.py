@@ -10,7 +10,7 @@ Key features:
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, and_, not_, update, func
+from sqlalchemy import select, and_, not_, update, func, text
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
@@ -529,3 +529,46 @@ class DatabaseOperations:
         
         result = await self.session.execute(query)
         return result.scalars().all()        
+    
+        # Clean up sync history table
+    async def cleanup_sync_history(self, tenant_id: str, keep_count: int = 30):
+        """
+        Keep only the most recent sync history entries per tenant.
+        Groups by day and entity_type to maintain a complete picture of recent syncs.
+        
+        Args:
+            tenant_id: The tenant ID to clean up
+            keep_count: Number of days of history to keep per entity type
+        """
+        async with self.get_session() as session:
+            # First, identify the dates we want to keep (most recent N days with sync activity)
+            from sqlalchemy import func, select, delete, distinct
+            
+            # Get the distinct dates (truncated to day) with sync activity, ordered by most recent
+            date_query = select(
+                distinct(func.date(SyncHistory.start_time)).label("sync_date")
+            ).where(
+                SyncHistory.tenant_id == tenant_id
+            ).order_by(
+                text("sync_date DESC")
+            ).limit(keep_count)
+            
+            result = await session.execute(date_query)
+            dates_to_keep = [row[0] for row in result]
+            
+            if not dates_to_keep:
+                return  # No sync history to clean up
+            
+            # Get the cutoff date (oldest date we want to keep)
+            cutoff_date = min(dates_to_keep)
+            
+            # Delete all records older than the cutoff date
+            delete_stmt = delete(SyncHistory).where(
+                SyncHistory.tenant_id == tenant_id,
+                func.date(SyncHistory.start_time) < cutoff_date
+            )
+            
+            await session.execute(delete_stmt)
+            await session.commit()
+            
+            logger.info(f"Cleaned up sync history for tenant {tenant_id}, keeping records since {cutoff_date}")
