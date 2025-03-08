@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 class Settings(BaseSettings):
     OKTA_CLIENT_ORGURL: str
-    OKTA_CLIENT_TOKEN: str
+    OKTA_API_TOKEN: str
     
     # Database settings with sensible defaults
     DB_DIR: str = str(os.getenv("DB_DIR", str(BASE_DIR / "sqlite_db")))
@@ -20,7 +20,6 @@ class Settings(BaseSettings):
     DATABASE_URL: Optional[str] = None  
     SQLITE_PATH: Optional[str] = None   
     
-    SYNC_INTERVAL_HOURS: int = 1
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     NUM_OF_THREADS: int = int(os.getenv("NUM_OF_THREADS", "4"))
     

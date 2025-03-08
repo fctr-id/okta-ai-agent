@@ -136,7 +136,7 @@ async def run_sync(tenant_id: str, db: DatabaseOperations):
 async def startup_checks():
     """Verify all required configurations"""
     try:
-        required_settings = ['OKTA_CLIENT_ORGURL', 'OKTA_CLIENT_TOKEN']
+        required_settings = ['OKTA_CLIENT_ORGURL', 'OKTA_API_TOKEN']
         missing = [setting for setting in required_settings if not getattr(settings, setting, None)]
         if missing:
             raise ValueError(f"Missing required settings: {', '.join(missing)}")

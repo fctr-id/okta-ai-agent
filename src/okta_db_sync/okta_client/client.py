@@ -67,7 +67,7 @@ class OktaClientWrapper:
         self.tenant_id = tenant_id
         self.config = {
             'orgUrl': settings.OKTA_CLIENT_ORGURL,
-            'token': settings.OKTA_CLIENT_TOKEN,
+            'token': settings.OKTA_API_TOKEN,
             'requestTimeout': 30,
             'rateLimit': {
                 'maxRetries': 3
