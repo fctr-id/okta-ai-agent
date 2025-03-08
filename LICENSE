@@ -1,9 +1,6 @@
 # Okta AI Agent License
 
 © 2025 Fctr. All rights reserved.
-# Okta AI Agent License
-
-© 2025 Fctr. All rights reserved.
 
 ## Open Source Terms
 
@@ -11,7 +8,7 @@ This Okta AI Agent is licensed under the Apache License 2.0, with the following 
 
 ### 1. Commercial Usage
 
-The Okta AI Agent may be used commercially within an organization's environment, subject to the following conditions:
+The Okta AI Agent may be used within an organization's environment, subject to the following conditions:
 
 a. **Single Tenant Usage**: This tool is designed for single-tenant deployments only. Each installation must be tied to a single Okta tenant.
 
