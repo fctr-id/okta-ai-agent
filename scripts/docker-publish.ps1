@@ -14,11 +14,12 @@ $ErrorActionPreference = "Stop"
 if ([string]::IsNullOrEmpty($Version)) {
     # Keep asking until a valid version is provided
     do {
-        $Version = Read-Host "Enter version number (format: x.y.z)"
-        if (![string]::IsNullOrEmpty($Version) -and $Version -match '^\d+\.\d+\.\d+$') {
+        $Version = Read-Host "Enter version number (format: x.y.z or x.y.z-beta.n)"
+        # Updated regex to allow semantic versioning with pre-release tags
+        if (![string]::IsNullOrEmpty($Version) -and $Version -match '^\d+\.\d+\.\d+(?:-(?:beta|alpha|rc)(?:\.\d+)?)?$') {
             break
         }
-        Write-Host "Invalid version format. Please use format: x.y.z (e.g., 1.0.0)" -ForegroundColor Yellow
+        Write-Host "Invalid version format. Please use format: x.y.z (e.g., 1.0.0) or x.y.z-beta (e.g., 1.0.0-beta, 1.0.0-beta.1)" -ForegroundColor Yellow
     } while ($true)
 }
 
@@ -49,7 +50,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-# Tag as latest
+# Always tag as latest, even for beta versions
 Write-Host "Tagging as latest"
 docker tag "$Registry/$ImageName`:$Version" "$Registry/$ImageName`:latest"
 
@@ -71,7 +72,7 @@ if (!$loginStatus) {
     }
 }
 
-# Push both tags
+# Push versioned tag
 Write-Host "Pushing image with version tag: $Registry/$ImageName`:$Version"
 docker push "$Registry/$ImageName`:$Version"
 
@@ -80,6 +81,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# Always push latest tag
 Write-Host "Pushing image with latest tag: $Registry/$ImageName`:latest"
 docker push "$Registry/$ImageName`:latest"
 
@@ -88,10 +90,11 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-# Create VERSION.md in the parent directory
-$versionFile = Join-Path -Path $contextPath -ChildPath "VERSION.md"
-$versionContent = "# Version History`r`n`r`n## Current Latest: v$Version ($(Get-Date -Format 'yyyy-MM-dd'))"
-$versionContent | Out-File -FilePath $versionFile -Encoding utf8
+# Create VERSION.md in the parent directory with proper formatting
+#$versionFile = Join-Path -Path $contextPath -ChildPath "VERSION.md"
+#$releaseType = if ($Version -match '-') { "Beta" } else { "Stable" }
+#$versionContent = "# Version History`r`n`r`n## Current Latest: v$Version ($releaseType, $(Get-Date -Format 'yyyy-MM-dd'))"
+#$versionContent | Out-File -FilePath $versionFile -Encoding utf8
 
 Write-Host "=========== Success ============"
 Write-Host "Images successfully published:"
