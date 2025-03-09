@@ -30,9 +30,13 @@ export function useSanitize() {
 
         // Remove HTML tags
         if (removeHtml) {
-            const originalLength = result.length;
-            result = result.replace(/<[^>]*>/g, "");
-            if (result.length !== originalLength) {
+            let previous;
+            do {
+                previous = result;
+                result = result.replace(/<[^>]*>/g, "");
+            } while (result !== previous);
+            
+            if (result !== input) {
                 logSanitization("text", "removed HTML", input, result);
             }
         }
@@ -132,10 +136,14 @@ export function useSanitize() {
             logSanitization("query", "truncated", input, result);
         }
 
-        // Remove HTML tags
-        const originalLength = result.length;
-        result = result.replace(/<[^>]*>/g, "");
-        if (result.length !== originalLength) {
+        // Remove HTML tags - apply repeatedly until no more changes
+        let previous;
+        do {
+            previous = result;
+            result = result.replace(/<[^>]*>/g, "");
+        } while (result !== previous);
+
+        if (result !== input) {
             logSanitization("query", "removed HTML", input, result);
         }
 
