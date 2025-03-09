@@ -4,29 +4,30 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">AI Agent for Okta (BETA)</h2>
+<h2 style="margin-left: 10px" align="center">AI Agent for Okta (v0.2.0 BETA)</h2>
 
 This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers, IT GRC teams and audit teams, powered by enterprise AI models. The vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
-
 <div align="center">
-<h3>A new web interface! (coming very soon)</h3>
+<h3>A new web interface!</h3>
 </div>
 <p align="center">
   
   <img src="docs/agent-new-web-ui.gif" alt="Okta AI Agent Demo" width="800" height="auto">
+  <img src="docs/agent-new-web-ui.gif" alt="Okta AI Agent Demo" width="800" height="auto">
 </p>
 
+## 📋 Table of Contents
+
+- [📋 Table of Contents](#-table-of-contents)
 - [✨ What's Special?](#-whats-special)
-- [🚀 Quick Start](#-quick-start)
+- [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
-  - [Installation \& demo video (Youtube Link)](#installation--demo-video-youtube-link)
-  - [Get Started](#get-started)
-    - [Windows Setup](#windows-setup)
-    - [Linux/MacOS Setup](#linuxmacos-setup)
-  - [🎯 Usage](#-usage)
-  - [Usage Examples \& Community Queries](#usage-examples--community-queries)
-  - [Share Your Queries!](#share-your-queries)
+  - [Docker Compose](#docker-compose)
+    - [Bash Instructions](#bash-instructions)
+    - [PowerShell Instructions](#powershell-instructions)
+    - [Access the Web Interface](#access-the-web-interface)
+- [🆕 What's New in v0.2.0](#-whats-new-in-v020)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
   - [Data Privacy](#data-privacy)
@@ -51,109 +52,101 @@ This AI agent is the first of its kind that lets you use natural language to que
 
 * 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLlite DB
 * 💡 **Natural Language Queries** - Talk to your Okta data in simple english
-*  ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
+* ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
      -  Google Vertex AI (Gemini 1.5 Pro)
      -  OpenAI (GPT-4)
      -  Azure OpenAI (GPT-4)
      -  Ollama (Local, Self-hosted, use 32B+ models)
      -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
+* 🖥️ **Web Interface** - Modern UI for easier interaction with your Okta data
   
 
-## 🚀 Quick Start
+## 🚀 Quick Start (The No-Frills Docker Way)
+
+<div align="left">
+  <h3>💡 Looking for alternative installation instructions?</h3>
+  <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides which do not rely on docker</h4>
+</div>
 
 ### Prerequisites
-* Python 3.12+
-* Okta tenant superadmin acess
-* Access to any supported AI provider mentioned above
 
-### Installation & demo video (Youtube Link)
+✅ Docker installed on your machine  
+✅ Okta tenant with superadmin access  
+✅ Access to any of the supported AI providers  
 
-[![Demo video](https://img.youtube.com/vi/mEg_TqMjOvM/0.jpg)](https://www.youtube.com/watch?v=mEg_TqMjOvM)
+### Docker Compose
 
+The easiest way to get started is with Docker Compose:
 
-### Get Started
+#### Bash Instructions
 
-1. **Clone & Navigate**
 ```bash
-git clone https://github.com/fctr-id/okta-ai-agent
+# 1. Create a project directory and navigate to it
+mkdir okta-ai-agent 
 cd okta-ai-agent
+
+# 2. Create required directories for data persistence
+### Upload your own key and cert pem files to certs directory if you need them
+mkdir -p sqlite_db logs certs
+
+# 3. Download the docker-compose.yml file
+curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml
+
+# 4. Create a .env file with your configuration
+curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
+mv .env.sample .env
+
+# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
+# The app will not work without properly configured environment variables
+# nano .env (or use your favorite editor)
+
+# 5. Launch the application
+docker compose up -d
 ```
 
-2. **Set Up Python Virtual Environment**
+#### PowerShell Instructions
 
-#### Windows Setup
-```batch
-# Create virtual environment
-python -m venv venv
+```powershell
+# 1. Create a project directory and navigate to it
+New-Item -ItemType Directory -Path okta-ai-agent
+Set-Location okta-ai-agent
 
-# Activate virtual environment
-.\venv\Scripts\activate
+# 2. Create required directories for data persistence
+### Upload your own key and cert pem files to certs directory if you need them
+New-Item -ItemType Directory -Path sqlite_db, logs, certs -Force
 
-# Install requirements
-pip install -r requirements.txt
+# 3. Download the docker-compose.yml file
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml" -OutFile "docker-compose.yml"
+
+# 4. Create a .env file with your configuration
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample" -OutFile ".env.sample"
+Rename-Item -Path ".env.sample" -NewName ".env"
+
+# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
+# The app will not work without properly configured environment variables
+# notepad .env (or use your favorite editor)
+
+# 5. Launch the application
+docker compose up -d
 ```
 
-#### Linux/MacOS Setup
-```bash
-# Create virtual environment
-python3 -m venv venv
+#### Access the Web Interface
+- 🌐 Open your browser and go to: https://localhost:8001 🌐
+- 📋 To view logs in real-time, run: `docker compose logs -f`
 
-# Activate virtual environment
-source venv/bin/activate
+## 🆕 What's New in v0.2.0
 
-# Install requirements
-pip install -r requirements.txt
-```
-
-3. **Configure Your .env file** (`.env`)
-```bash
-cp .env.sample .env
-```
-Modify these as needed
-```ini
-# 🔐 Okta Configuration
-OKTA_CLIENT_ORGURL=https://your-dev-instance.okta.com
-OKTA_CLIENT_TOKEN=your-okta-api-token
-
-# 🧠 AI Settings
-AI_PROVIDER=vertex_ai
-USE_PRE_REASONING=True
-
-# 🌐 Vertex AI Configuration
-VERTEX_AI_SERVICE_ACCOUNT_FILE=path/to/service-account.json
-VERTEX_AI_REASONING_MODEL=gemini-1.5-pro
-VERTEX_AI_CODING_MODEL=gemini-1.5-pro
-```
-
-### 🎯 Usage
-
-1. **Sync Your Data**
-```bash
-python Fetch_Okta_Data.py
-```
-
-2. **Start the AI Magic**
-```bash
-python Okta_AI_Agent.py
-```
-
-### Usage Examples & Community Queries
-
-Try these example queries to get started:
-
-* 👥 "Who are my active users?"
-* 🎯 "Show me users in the 'Sales' application"
-* 📱 "List everyone with PUSH authentication"
-
-### Share Your Queries!
-
-We're building a community knowledge base! Explore and contribute:
-
-| Action | Link |
-|--------|------|
-| 📝 Submit Query | [Share your examples](https://messy-heath-9e9.notion.site/19cc111b8adc80f9889bdc9badf1ee89?pvs=105) |
-| 🔍 View Examples | [Browse community queries](https://messy-heath-9e9.notion.site/19cc111b8adc80718a40e59d1c41b30f?v=19cc111b8adc8013b94e000ce7e23638&pvs=4) |
-
+- **Web Interface** - Modern web UI for interacting with the agent, including:
+  - Natural language query capabilities
+  - Okta data synchronization controls
+  - Entity counts and statistics dashboard
+  - CSV export functionality
+  - Advanced filtering and sorting of results
+- **Improved Data Sync Versioning & Maintenance** - Better versioning control and maintenance of synchronized data
+- **Enhanced Logging System** - More comprehensive and detailed logging for better troubleshooting
+- **Improved Query Processing** - Better handling of complex natural language queries
+- **Additional AI Provider Support** - Expanded model options and configurations
+- **Bug Fixes and Performance Improvements** - Enhanced stability and response quality
 
 ## 🛡️ Security & Privacy 
 
@@ -279,7 +272,7 @@ Interested in contributing? We'd love to have you! Reach out to dan@fctr.io
 
 ## ⚖️ Legal Stuff
 
-Check out [`License.md`](License.md) for the fine print.
+Check out [`License.md`](LICENSE) for the fine print.
 
 ---
 

@@ -311,22 +311,81 @@ class UserFactor(BaseModel):
     )
     
 class SyncStatus(enum.Enum):
-    STARTED = "STARTED"
-    SUCCESS = "SUCCESS"
-    FAILED = "FAILED"
+    """Status of a sync operation"""
+    IDLE = "idle"
+    RUNNING = "running" 
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+    SUCCESS = "completed"   
 
-class SyncHistory(SyncBase):
-    __tablename__ = 'sync_history'
+# Add these fields to your SyncHistory class
+class SyncHistory(Base):
+    __tablename__ = "sync_history"
     
-    entity_type = Column(String, nullable=False, index=True)
-    sync_start_time = Column(DateTime(timezone=True), default=func.now())
-    sync_end_time = Column(DateTime(timezone=True))
-    status = Column(SQLEnum(SyncStatus), nullable=False, default=SyncStatus.STARTED)
-    records_processed = Column(Integer, default=0)
-    last_successful_sync = Column(DateTime(timezone=True))
-    error_message = Column(String)
-
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    entity_type = Column(String, nullable=True)  # Add this field for SyncOrchestrator compatibility
+    last_successful_sync = Column(DateTime(timezone=True), nullable=True)  # Add this field
+    start_time = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=True)
+    sync_end_time = Column(DateTime(timezone=True), nullable=True)  # Add alias for end_time
+    status = Column(SQLEnum(SyncStatus), default=SyncStatus.IDLE, nullable=False)
+    success = Column(Boolean, default=False)
+    error_details = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)  # Add alias for error_details
+    
+    # Entity counts
+    users_count = Column(Integer, default=0)
+    groups_count = Column(Integer, default=0)
+    apps_count = Column(Integer, default=0)
+    policies_count = Column(Integer, default=0)
+    records_processed = Column(Integer, default=0)  # Add this field for tracking records
+    
+    # Progress tracking
+    progress_percentage = Column(Integer, default=0)
+    
+    # Process tracking (for cancellation)
+    process_id = Column(String, nullable=True)
+    
+    # Indexes for frequent queries
     __table_args__ = (
-        Index('idx_sync_tenant_entity', 'tenant_id', 'entity_type'),
-        {'extend_existing': True}
-    )  
+        Index('idx_sync_history_tenant_status', 'tenant_id', 'status'),
+        Index('idx_sync_history_tenant_time', 'tenant_id', 'start_time'),
+        Index('idx_sync_history_entity_type', 'entity_type'),  # Add index for entity_type
+    )
+
+    # Add this property to handle the SUCCESS vs COMPLETED mismatch
+    @property
+    def SUCCESS(self):
+        return SyncStatus.COMPLETED 
+    
+    
+# Authentication Models
+class UserRole(str, enum.Enum):
+    ADMIN = "admin"
+    USER = "user"
+
+class AuthUser(Base):
+    """User model for authentication"""
+    __tablename__ = "auth_users"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(SQLEnum(UserRole), default=UserRole.ADMIN, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=get_utc_now, nullable=False)
+    updated_at = Column(DateTime, default=get_utc_now, onupdate=get_utc_now, nullable=False)
+    
+    # Keep track of whether initial setup has been completed
+    setup_completed = Column(Boolean, default=False, nullable=False)
+    
+    # For security, add login tracking
+    last_login = Column(DateTime, nullable=True)
+    login_attempts = Column(Integer, default=0, nullable=False)
+    locked_until = Column(DateTime, nullable=True)
+
+    def __repr__(self):
+        return f"<AuthUser username={self.username}, role={self.role}>"    

@@ -1,3 +1,8 @@
+### THIS FILE IS NO LONGER NEEDED as of March 08, 2025 - Pydantic AI version 0.0.36####
+#                     provider=openai_provider
+#                 )
+
+
 from pydantic_ai.models.openai import OpenAIModel, ModelMessage, ModelSettings
 from openai.types.chat import ChatCompletion, ChatCompletionChunk
 from openai import NOT_GIVEN

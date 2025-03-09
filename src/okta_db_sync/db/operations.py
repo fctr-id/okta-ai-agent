@@ -10,13 +10,15 @@ Key features:
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, and_, not_
+from sqlalchemy import select, and_, not_, update, func, text
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import List, Type, TypeVar, Optional, Dict, Any
-from .models import Base, User, UserFactor, group_application_assignments
+from datetime import datetime, timezone
+from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
+from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus
+from src.core.helpers.argon2_hash import hash_password, verify_password, check_password_needs_rehash, calculate_lockout_time
 from src.config.settings import settings
 from src.utils.logging import logger
+
 
 ModelType = TypeVar('ModelType', bound=Base)
 
@@ -57,7 +59,7 @@ class DatabaseOperations:
             await self.engine.dispose()            
 
     @asynccontextmanager    
-    async def get_session(self) -> AsyncSession:
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
         """
         Get async database session with automatic commit/rollback.
         
@@ -192,6 +194,7 @@ class DatabaseOperations:
             logger.error(f"Mark deleted error for {model.__name__}: {str(e)}")
             raise
 
+        # Fix the get_last_sync_time method to use end_time instead of sync_end_time
     async def get_last_sync_time(
         self,
         session: AsyncSession,
@@ -200,39 +203,29 @@ class DatabaseOperations:
     ) -> Optional[datetime]:
         """
         Get timestamp of last successful sync for incremental updates.
-        
-        Args:
-            session: Active database session  
-            model: SQLAlchemy model class
-            tenant_id: Tenant identifier
-            
-        Returns:
-            datetime: Last successful sync time or None
-            
-        Notes:
-            Only returns time from successful syncs with records
         """
         try:
             from .models import SyncHistory, SyncStatus
             
-            # Only get time from successful syncs
-            stmt = select(SyncHistory.sync_end_time)\
+            # Handle both SUCCESS and COMPLETED status values
+            stmt = select(SyncHistory.end_time)\
                 .where(
                     and_(
                         SyncHistory.tenant_id == tenant_id,
                         SyncHistory.entity_type == model.__name__,
-                        SyncHistory.status == SyncStatus.SUCCESS,
-                        SyncHistory.records_processed > 0  # Ensure records were processed
+                        SyncHistory.status.in_([SyncStatus.SUCCESS, SyncStatus.COMPLETED]),
+                        SyncHistory.records_processed > 0
                     )
                 )\
-                .order_by(SyncHistory.sync_end_time.desc())
+                .order_by(SyncHistory.end_time.desc())
                 
             result = await session.execute(stmt)
             return result.scalar()
             
         except Exception as e:
-            logger.error(f"Get last sync time error for {model.__name__}: {str(e)}")
-            raise
+            logger.error(f"Get last sync time error for {model.__name__}: {str(e)}", 
+                         extra={"tenant_id": tenant_id} if hasattr(self, "tenant_id") else {})
+            return None
         
     async def _process_user_factors(
         self,
@@ -356,3 +349,226 @@ class DatabaseOperations:
         except Exception as e:
             logger.error(f"Error processing group relationships: {str(e)}")
             raise               
+        
+
+
+    #Authentication methods:
+
+    async def get_auth_user(self, session: AsyncSession, username: str) -> Optional[AuthUser]:
+        """Get a user by username"""
+        result = await session.execute(select(AuthUser).where(AuthUser.username == username))
+        return result.scalars().first()
+
+    async def create_auth_user(self, session: AsyncSession, username: str, password: str, 
+                            role: UserRole = UserRole.ADMIN) -> AuthUser:
+        """Create a new authentication user"""
+        password_hash = hash_password(password)
+        
+        user = AuthUser(
+            username=username,
+            password_hash=password_hash,
+            role=role,
+            setup_completed=True
+        )
+        
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user
+
+    async def check_setup_completed(self, session: AsyncSession) -> bool:
+        """Check if the initial setup has been completed"""
+        result = await session.execute(select(func.count(AuthUser.id)).where(AuthUser.setup_completed == True))
+        count = result.scalar()
+        return count > 0
+
+    async def update_password(self, session: AsyncSession, username: str, new_password: str) -> bool:
+        """Update a user's password"""
+        password_hash = hash_password(new_password)
+        
+        stmt = (
+            update(AuthUser)
+            .where(AuthUser.username == username)
+            .values(
+                password_hash=password_hash,
+                updated_at=datetime.now(timezone.utc)
+            )
+        )
+        
+        result = await session.execute(stmt)
+        await session.commit()
+        
+        return result.rowcount > 0
+
+    async def verify_user_credentials(self, session: AsyncSession, username: str, 
+                                    password: str) -> Union[AuthUser, None]:
+        """Verify user credentials and handle login attempts"""
+        user = await self.get_auth_user(session, username)
+        
+        if not user:
+            logger.warning(f"Login attempt for non-existent user: {username}")
+            return None
+        
+        if not user.is_active:
+            logger.warning(f"Login attempt for inactive user: {username}")
+            return None
+            
+        # Check if the account is temporarily locked
+        now = datetime.now(timezone.utc)
+        if user.locked_until and user.locked_until > now:
+            logger.warning(f"Login attempt for locked account: {username}")
+            return None
+        
+        # Verify password
+        if verify_password(user.password_hash, password):
+            # Successful login - reset attempts and update last login
+            user.login_attempts = 0
+            user.last_login = now
+            user.locked_until = None
+            
+            # Check if password needs rehashing
+            if check_password_needs_rehash(user.password_hash):
+                user.password_hash = hash_password(password)
+                
+            await session.commit()
+            return user
+        else:
+            # Failed login - increment attempts and possibly lock account
+            user.login_attempts += 1
+            
+            # After 5 failed attempts, lock the account temporarily
+            if user.login_attempts >= 5:
+                user.locked_until = calculate_lockout_time(user.login_attempts)
+                logger.warning(f"Account locked due to failed attempts: {username}")
+                
+            await session.commit()
+            return None        
+        
+    # Add these methods to the existing DatabaseOperations class
+
+    async def get_active_sync(self):
+        """
+        Get currently running sync if any
+        Returns SyncHistory object or None
+        """
+        query = select(SyncHistory).where(
+            and_(
+                SyncHistory.tenant_id == self.tenant_id,
+                SyncHistory.status.in_([SyncStatus.RUNNING, SyncStatus.IDLE])
+            )
+        ).order_by(SyncHistory.start_time.desc()).limit(1)
+        
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def get_last_completed_sync(self):
+        """
+        Get the most recently completed sync
+        Returns SyncHistory object or None
+        """
+        query = select(SyncHistory).where(
+            and_(
+                SyncHistory.tenant_id == self.tenant_id,
+                SyncHistory.status.in_([SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELED])
+            )
+        ).order_by(SyncHistory.end_time.desc()).limit(1)
+        
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def create_sync_history(self):
+        """
+        Create a new sync history entry
+        Returns the created SyncHistory object
+        """
+        sync_history = SyncHistory(
+            tenant_id=self.tenant_id,
+            status=SyncStatus.IDLE,
+            start_time=datetime.utcnow()
+        )
+        
+        self.session.add(sync_history)
+        await self.session.commit()
+        await self.session.refresh(sync_history)
+        return sync_history
+
+    async def update_sync_history(self, sync_id, data):
+        """
+        Update an existing sync history entry
+        Returns the updated SyncHistory object
+        """
+        query = select(SyncHistory).where(
+            and_(
+                SyncHistory.id == sync_id,
+                SyncHistory.tenant_id == self.tenant_id
+            )
+        )
+        
+        result = await self.session.execute(query)
+        sync_history = result.scalars().first()
+        
+        if not sync_history:
+            raise ValueError(f"Sync history with ID {sync_id} not found")
+            
+        for key, value in data.items():
+            if hasattr(sync_history, key):
+                setattr(sync_history, key, value)
+        
+        await self.session.commit()
+        await self.session.refresh(sync_history)
+        return sync_history
+
+    async def get_sync_history(self, limit=5):
+        """
+        Get recent sync history entries
+        Returns a list of SyncHistory objects
+        """
+        query = select(SyncHistory).where(
+            SyncHistory.tenant_id == self.tenant_id
+        ).order_by(SyncHistory.start_time.desc()).limit(limit)
+        
+        result = await self.session.execute(query)
+        return result.scalars().all()        
+    
+        # Clean up sync history table
+    async def cleanup_sync_history(self, tenant_id: str, keep_count: int = 30):
+        """
+        Keep only the most recent sync history entries per tenant.
+        Groups by day and entity_type to maintain a complete picture of recent syncs.
+        
+        Args:
+            tenant_id: The tenant ID to clean up
+            keep_count: Number of days of history to keep per entity type
+        """
+        async with self.get_session() as session:
+            # First, identify the dates we want to keep (most recent N days with sync activity)
+            from sqlalchemy import func, select, delete, distinct
+            
+            # Get the distinct dates (truncated to day) with sync activity, ordered by most recent
+            date_query = select(
+                distinct(func.date(SyncHistory.start_time)).label("sync_date")
+            ).where(
+                SyncHistory.tenant_id == tenant_id
+            ).order_by(
+                text("sync_date DESC")
+            ).limit(keep_count)
+            
+            result = await session.execute(date_query)
+            dates_to_keep = [row[0] for row in result]
+            
+            if not dates_to_keep:
+                return  # No sync history to clean up
+            
+            # Get the cutoff date (oldest date we want to keep)
+            cutoff_date = min(dates_to_keep)
+            
+            # Delete all records older than the cutoff date
+            delete_stmt = delete(SyncHistory).where(
+                SyncHistory.tenant_id == tenant_id,
+                func.date(SyncHistory.start_time) < cutoff_date
+            )
+            
+            await session.execute(delete_stmt)
+            await session.commit()
+            
+            logger.info(f"Cleaned up sync history for tenant {tenant_id}, keeping records since {cutoff_date}")

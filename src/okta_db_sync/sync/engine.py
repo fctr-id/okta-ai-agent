@@ -85,9 +85,15 @@ class SyncOrchestrator:
         error_message: str = None
     ):
         sync_history.status = status
-        sync_history.sync_end_time = datetime.utcnow()
+        # Set both end_time and sync_end_time for compatibility
+        now = datetime.utcnow()
+        sync_history.end_time = now
+        sync_history.sync_end_time = now
         sync_history.records_processed = records_processed
-        sync_history.error_message = error_message
+        # Set both error_details and error_message
+        if error_message:
+            sync_history.error_details = error_message
+            sync_history.error_message = error_message
         await session.commit()
 
 
