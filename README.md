@@ -75,7 +75,8 @@ The easiest way to get started is with Docker Compose:
 
 1. **Create a project directory and navigate to it**
 ```bash
-mkdir okta-ai-agent && cd okta-ai-agent
+mkdir okta-ai-agent 
+cd okta-ai-agent
 ```
 
 2. **Download the docker-compose.yml file**
