@@ -93,7 +93,10 @@ curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-comp
 # 4. Create a .env file with your configuration
 curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
 mv .env.sample .env
-# ✏️ Edit the .env file with your settings and save ✏️
+
+# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
+# The app will not work without properly configured environment variables
+# nano .env (or use your favorite editor)
 
 # 5. Launch the application
 docker compose up -d
@@ -116,7 +119,10 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/
 # 4. Create a .env file with your configuration
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample" -OutFile ".env.sample"
 Rename-Item -Path ".env.sample" -NewName ".env"
-# ✏️ Edit the .env file with your settings and save ✏️
+
+# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
+# The app will not work without properly configured environment variables
+# notepad .env (or use your favorite editor)
 
 # 5. Launch the application
 docker compose up -d
