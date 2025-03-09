@@ -12,3 +12,4 @@ uvicorn
 argon2-cffi
 python-jose[cryptography]
 python-multipart
+html-sanitizer

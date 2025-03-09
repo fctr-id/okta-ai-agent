@@ -5,8 +5,17 @@ import json
 import re
 from src.utils.logging import logger
 from src.backend.app.services.ai_service import AIService
+from html_sanitizer import Sanitizer
 
 router = APIRouter()
+
+# Configure sanitizer with strict settings for natural language context
+sanitizer_config = Sanitizer.default_settings.copy()
+# Disable all tags for our natural language context
+sanitizer_config['tags'] = {}
+sanitizer_config['attributes'] = {}
+sanitizer_config['empty'] = {}
+custom_sanitizer = Sanitizer(sanitizer_config)
 
 def sanitize_query(query: str) -> Tuple[str, List[str]]:
     """
@@ -35,19 +44,17 @@ def sanitize_query(query: str) -> Tuple[str, List[str]]:
         warnings.append("Control characters removed from query")
     
     # Detect patterns that shouldn't be in natural language queries
+    # We keep these checks to warn about suspicious input even though sanitizer will handle HTML
     suspicious_patterns = [
         # Code blocks
         (r'```.*?```', "code block"),
         
-        # Script injection attempts - Enhanced patterns
-        (r'<\s*script\b[^>]*>.*?<\s*/\s*script\s*>', "script tag"),
+        # Script injection attempts
+        (r'<\s*script\b[^>]*>', "script tag"),
         (r'javascript\s*:', "JavaScript protocol"),
         
         # SQL in what should be natural language
         (r'(?i)(?:select|insert|update|delete|drop|alter|create)\s+(?:from|into|table|database)', "SQL-like syntax"),
-        
-        # HTML/XML-like syntax - Enhanced patterns
-        (r'<\s*[a-z]+\b[^>]*>', "HTML-like tag"),
         
         # Common injection techniques
         (r'\{\{.*?\}\}', "template expression"),
@@ -65,18 +72,10 @@ def sanitize_query(query: str) -> Tuple[str, List[str]]:
             match_preview = matches[0][:20] + "..." if len(matches[0]) > 20 else matches[0]
             warnings.append(f"Suspicious {description} detected: '{match_preview}'")
     
-    # Enhanced script tag removal
-    # This handles variations like <script>, < script>, </script >, etc.
-    query = re.sub(r'<\s*script\b[^>]*>.*?<\s*/\s*script\s*>', '', query, flags=re.IGNORECASE | re.DOTALL)
+    # Use html-sanitizer to strip ALL HTML tags securely
+    query = custom_sanitizer.sanitize(query)
     
-    # Also handle unclosed script tags
-    query = re.sub(r'<\s*script\b[^>]*>', '', query, flags=re.IGNORECASE)
-    
-    # Enhanced event handler removal that handles more variations
-    query = re.sub(r'\bon\w+\s*=\s*([\'"]|&quot;|&#39;).*?\1', '', query, flags=re.IGNORECASE)
-    query = re.sub(r'\bon\w+\s*=\s*[^\s>]+', '', query, flags=re.IGNORECASE)  # Unquoted handlers
-    
-    # Remove data: URIs which can contain JavaScript
+    # Remove data: URIs which can contain JavaScript (sanitizer might miss these)
     query = re.sub(r'data\s*:\s*\w+/\w+\s*;\s*base64', 'data-removed', query, flags=re.IGNORECASE)
     
     return query.strip(), warnings
