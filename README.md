@@ -22,6 +22,9 @@ This AI agent is the first of its kind that lets you use natural language to que
 - [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
   - [Docker Compose](#docker-compose)
+    - [Bash Instructions](#bash-instructions)
+    - [PowerShell Instructions](#powershell-instructions)
+    - [Access the Web Interface](#access-the-web-interface)
 - [🆕 What's New in v0.2.0](#-whats-new-in-v020)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
@@ -73,31 +76,54 @@ This AI agent is the first of its kind that lets you use natural language to que
 
 The easiest way to get started is with Docker Compose:
 
-1. **Create a project directory and navigate to it**
+#### Bash Instructions
+
 ```bash
+# 1. Create a project directory and navigate to it
 mkdir okta-ai-agent 
 cd okta-ai-agent
-```
 
-2. **Download the docker-compose.yml file**
-```bash
+# 2. Create required directories for data persistence
+### Upload your own key and cert pem files to certs directory if you need them
+mkdir -p sqlite_db logs certs
+
+# 3. Download the docker-compose.yml file
 curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml
-```
 
-3. **Create a .env file with your configuration**
-```bash
+# 4. Create a .env file with your configuration
 curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
 mv .env.sample .env
 # ✏️ Edit the .env file with your settings and save ✏️
-```
 
-4. **Launch the application**
-```bash
+# 5. Launch the application
 docker compose up -d
 ```
 
-5. **Access the web interface**
-   - 🌐 Open your browser and go to: https://localhost:8001 🌐
+#### PowerShell Instructions
+
+```powershell
+# 1. Create a project directory and navigate to it
+New-Item -ItemType Directory -Path okta-ai-agent
+Set-Location okta-ai-agent
+
+# 2. Create required directories for data persistence
+### Upload your own key and cert pem files to certs directory if you need them
+New-Item -ItemType Directory -Path sqlite_db, logs, certs -Force
+
+# 3. Download the docker-compose.yml file
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml" -OutFile "docker-compose.yml"
+
+# 4. Create a .env file with your configuration
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample" -OutFile ".env.sample"
+Rename-Item -Path ".env.sample" -NewName ".env"
+# ✏️ Edit the .env file with your settings and save ✏️
+
+# 5. Launch the application
+docker compose up -d
+```
+
+#### Access the Web Interface
+- 🌐 Open your browser and go to: https://localhost:8001 🌐
 
 ## 🆕 What's New in v0.2.0
 
