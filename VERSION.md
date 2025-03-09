@@ -1,4 +1,6 @@
-## Current Latest: v0.2.0-beta (2025-03-08)
+# Version History
+
+## Current Latest: v0.2.0-beta (2025-03-09)
 Web Interface: Modern, responsive UI for better query experience
 Fast API and Vue JS
 Docker Support: Easy deployment with containerization
