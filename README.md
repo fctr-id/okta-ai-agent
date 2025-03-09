@@ -124,6 +124,7 @@ docker compose up -d
 
 #### Access the Web Interface
 - 🌐 Open your browser and go to: https://localhost:8001 🌐
+- 📋 To view logs in real-time, run: `docker compose logs -f`
 
 ## 🆕 What's New in v0.2.0
 
