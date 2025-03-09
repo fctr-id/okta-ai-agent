@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 from .routers import query, auth, sync
@@ -111,11 +111,35 @@ async def health_check():
         "service": "Okta AI Agent API"
     }
 
-# Serve the frontend app for all other routes
 @app.get("/{full_path:path}")
 async def serve_frontend(request: Request, full_path: str):
-    static_file_path = f"src/backend/app/static/{full_path}"
-    if os.path.isfile(static_file_path):
-        return FileResponse(static_file_path)
+    # Define the base directory for static files (using absolute path)
+    static_dir = os.path.abspath("src/backend/app/static")
     
-    return FileResponse("src/backend/app/static/index.html")
+    # Clean the path to prevent directory traversal
+    # Remove any '..' path segments and normalize
+    sanitized_path = os.path.normpath(full_path)
+    
+    # If path attempts to traverse up directories or is absolute, reject it
+    if sanitized_path.startswith("..") or sanitized_path.startswith("/") or "\\" in sanitized_path:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Access denied"}
+        )
+    
+    # Securely join paths and resolve to absolute path
+    file_path = os.path.abspath(os.path.join(static_dir, sanitized_path))
+    
+    # Ensure the final path is still within the static directory
+    if not file_path.startswith(static_dir):
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "Access denied"}
+        )
+    
+    # Finally serve the file if it exists
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    
+    # Default to index.html
+    return FileResponse(os.path.join(static_dir, "index.html"))
