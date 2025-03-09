@@ -42,19 +42,10 @@
                     </div>
 
                     <!-- Enhanced Sync Progress with gradient background -->
-                    <!-- Change in the progress-section -->
                     <div v-if="isSyncing" class="progress-section">
-                        <div class="progress-info">
-                            <div class="sync-status-text">
-                                <div class="pulse-dot"></div>
-                                <span>Syncing data from Okta...</span>
-                            </div>
-                            <!-- Remove percentage display -->
-                        </div>
-                        <div class="progress-bar-container">
-                            <div class="progress-bar-background"></div>
-                            <!-- Replace fixed width with indeterminate progress bar -->
-                            <div class="progress-bar-indeterminate"></div>
+                        <div class="sync-status-text">
+                            <div class="pulse-dot"></div>
+                            <span>Syncing data from Okta...</span>
                         </div>
                     </div>
 
@@ -276,8 +267,11 @@
 
 /* Enhanced progress section with animation */
 .progress-section {
-    padding: 16px 18px;
-    background: linear-gradient(135deg, rgba(76, 100, 226, 0.02), rgba(76, 100, 226, 0.05));
+    padding: 18px;
+    background: linear-gradient(135deg, rgba(76, 100, 226, 0.04), rgba(76, 100, 226, 0.08));
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .progress-info {
@@ -290,31 +284,38 @@
 .sync-status-text {
     display: flex;
     align-items: center;
-    gap: 8px;
+}
+
+.sync-status-text span {
+    font-size: 14px;
+    font-weight: 500;
+    color: #555;
 }
 
 .pulse-dot {
-    width: 8px;
-    height: 8px;
+    width: 14px;
+    height: 14px;
     border-radius: 50%;
-    background-color: var(--primary);
-    animation: pulse-small 1.5s infinite cubic-bezier(0.45, 0, 0.55, 1);
+    background: linear-gradient(135deg, #FF9800, #F57C00);
+    box-shadow: 0 0 15px rgba(255, 152, 0, 0.5);
+    animation: pulse-animation 1.5s infinite cubic-bezier(0.45, 0, 0.55, 1);
+    margin-right: 12px;
 }
 
-@keyframes pulse-small {
+@keyframes pulse-animation {
     0% {
-        transform: scale(0.8);
-        opacity: 0.8;
+        transform: scale(0.85);
+        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7);
     }
-
+    
     50% {
         transform: scale(1.2);
-        opacity: 1;
+        box-shadow: 0 0 20px 10px rgba(255, 152, 0, 0.1);
     }
-
+    
     100% {
-        transform: scale(0.8);
-        opacity: 0.8;
+        transform: scale(0.85);
+        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
     }
 }
 
