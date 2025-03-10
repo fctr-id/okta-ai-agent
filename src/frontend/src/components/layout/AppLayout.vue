@@ -73,10 +73,11 @@ const handleLogout = async () => {
 
 .app-page {
     min-height: 100vh;
-    background:  linear-gradient(180deg, #e5eaf5 0%, #f0f4fb 100%);
-
+    background: linear-gradient(180deg, #e5eaf5 0%, #f0f4fb 100%);
     position: relative;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
 .app-page::before {
@@ -96,15 +97,12 @@ const handleLogout = async () => {
 
 /* Header */
 .floating-header {
-    position: fixed;
-    top: 20px;
-    left: 50%;
-    transform: translateX(-50%);
+    position: relative; /* Changed from fixed */
+    margin: 20px auto; /* Instead of positioning with top/left/transform */
     z-index: 100;
     width: calc(100% - 40px);
     max-width: var(--max-width);
 }
-
 .header-content {
     display: flex;
     align-items: center;
@@ -175,25 +173,27 @@ const handleLogout = async () => {
     width: calc(100% - 40px);
     max-width: var(--max-width);
     margin: 0 auto;
-    padding-top: 80px;
-    padding-bottom: 60px;
-    /* For footer */
+    padding-top: 0; 
+    padding-bottom: 30px; /* Reduced from 80px */
+    flex-grow: 1; /* Add this to make it expand and fill space */
 }
+
 
 /* For auth pages - centered boxes */
 .auth-content {
     display: flex;
+    flex-direction: column; /* Add this */
     justify-content: center;
     align-items: center;
-    min-height: calc(100vh - 140px);
+    flex-grow: 1; /* Add this to make it expand */
+    padding: 20px 0;
 }
+
 
 /* Full-width footer fixed to bottom */
 .page-footer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
+    position: relative;
+    margin-top: auto; /* Add this to push to the bottom */
     padding: 14px 0;
     text-align: center;
     font-size: 13px;

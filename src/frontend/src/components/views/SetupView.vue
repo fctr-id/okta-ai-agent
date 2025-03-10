@@ -94,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import { useSanitize } from '@/composables/useSanitize'
@@ -219,6 +219,23 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 </script>
 
 <style>
+
+html, body {
+  height: 100%;
+  overflow: auto;
+}
+
+/* Make the AppLayout's content area scrollable */
+.auth-content {
+  min-height: 100vh;
+  padding: 40px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto; /* Enable vertical scrolling */
+}
+
 /* Enhanced setup card with animations */
 .setup-card {
   width: 100%;
@@ -232,9 +249,10 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
     0 2px 5px rgba(0, 0, 0, 0.02);
   transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgba(76, 100, 226, 0.08);
   animation: card-appear 0.5s ease-out forwards;
+  margin: auto;
 }
 
 @keyframes card-appear {
@@ -625,6 +643,21 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 
   .password-requirements {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-height: 800px) {
+  .auth-content {
+    padding: 20px 16px;
+    justify-content: flex-start; /* Align to top on small screens */
+  }
+  
+  .setup-icon {
+    margin-bottom: 16px; /* Reduce vertical spacing */
+  }
+  
+  .auth-subtitle {
+    margin-bottom: 24px; /* Reduce spacing */
   }
 }
 </style>

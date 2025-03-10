@@ -780,7 +780,7 @@ onMounted(() => {
     margin-left: auto !important;
     margin-right: auto !important;
     margin-top: 12px;
-    margin-bottom: 180px !important;
+    margin-bottom: 120px !important;
     display: flex;
     flex-direction: column;
     align-items: center;
