@@ -9,13 +9,13 @@ from html_sanitizer import Sanitizer
 
 router = APIRouter()
 
-# Configure sanitizer with strict settings for natural language context
-sanitizer_config = Sanitizer.default_settings.copy()
-# Disable all tags for our natural language context
-sanitizer_config['tags'] = {}
-sanitizer_config['attributes'] = {}
-sanitizer_config['empty'] = {}
-custom_sanitizer = Sanitizer(sanitizer_config)
+custom_sanitizer = Sanitizer({
+    'tags': ('__nonexistent_tag__',),  # Using a tag that will never exist in real content
+    'attributes': {},                  # No attributes allowed
+    'empty': set(),                    # No empty elements allowed
+    'separate': set()                  # No separate elements needed
+})
+
 
 def sanitize_query(query: str) -> Tuple[str, List[str]]:
     """
@@ -32,19 +32,21 @@ def sanitize_query(query: str) -> Tuple[str, List[str]]:
         
     warnings = []
     
+    # Convert to string if not already
+    query = str(query)
+    
     # Limit length to prevent DoS
     if len(query) > 2000:
         query = query[:2000]
         warnings.append("Query truncated due to excessive length")
         
-    # Remove control characters except newlines and tabs
+    # More efficient control character removal using regex
     original_length = len(query)
-    query = ''.join(char for char in query if ord(char) >= 32 or char in '\n\t')
+    query = re.sub(r'[\x00-\x08\x0B-\x1F\x7F]', '', query)
     if len(query) != original_length:
         warnings.append("Control characters removed from query")
     
     # Detect patterns that shouldn't be in natural language queries
-    # We keep these checks to warn about suspicious input even though sanitizer will handle HTML
     suspicious_patterns = [
         # Code blocks
         (r'```.*?```', "code block"),
@@ -73,12 +75,12 @@ def sanitize_query(query: str) -> Tuple[str, List[str]]:
             warnings.append(f"Suspicious {description} detected: '{match_preview}'")
     
     # Use html-sanitizer to strip ALL HTML tags securely
-    query = custom_sanitizer.sanitize(query)
+    sanitized_query = custom_sanitizer.sanitize(query)
     
     # Remove data: URIs which can contain JavaScript (sanitizer might miss these)
-    query = re.sub(r'data\s*:\s*\w+/\w+\s*;\s*base64', 'data-removed', query, flags=re.IGNORECASE)
+    sanitized_query = re.sub(r'data\s*:\s*\w+/\w+\s*;\s*base64', 'data-removed', sanitized_query, flags=re.IGNORECASE)
     
-    return query.strip(), warnings
+    return sanitized_query.strip(), warnings
 
 @router.post("/query")
 async def process_query(request: Request):
