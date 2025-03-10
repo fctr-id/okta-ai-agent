@@ -23,8 +23,9 @@ This AI agent is the first of its kind that lets you use natural language to que
 - [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
   - [Docker Compose](#docker-compose)
-    - [Bash Instructions](#bash-instructions)
-    - [PowerShell Instructions](#powershell-instructions)
+    - [Linux/macOS Instructions](#linuxmacos-instructions)
+    - [Windows Instructions](#windows-instructions)
+    - [Launching the Application](#launching-the-application)
     - [Access the Web Interface](#access-the-web-interface)
 - [🆕 What's New in v0.2.0](#-whats-new-in-v020)
 - [🛡️ Security \& Privacy](#️-security--privacy)
@@ -49,8 +50,8 @@ This AI agent is the first of its kind that lets you use natural language to que
 
 ## ✨ What's Special?
 
-* 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLlite DB
-* 💡 **Natural Language Queries** - Talk to your Okta data in simple english
+* 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLite DB
+* 💡 **Natural Language Queries** - Talk to your Okta data in simple English
 * ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
      -  Google Vertex AI (Gemini 1.5 Pro)
      -  OpenAI (GPT-4)
@@ -77,7 +78,7 @@ This AI agent is the first of its kind that lets you use natural language to que
 
 The easiest way to get started is with Docker Compose:
 
-#### Bash Instructions
+#### Linux/macOS Instructions
 
 ```bash
 # 1. Create a project directory and navigate to it
@@ -91,19 +92,16 @@ mkdir -p sqlite_db logs certs
 # 3. Download the docker-compose.yml file
 curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml
 
-# 4. Create a .env file with your configuration
+# 4. Download and modify the .env file with your configuration
 curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
 mv .env.sample .env
 
 # ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
 # The app will not work without properly configured environment variables
 # nano .env (or use your favorite editor)
-
-# 5. Launch the application
-docker compose up -d
 ```
 
-#### PowerShell Instructions
+#### Windows Instructions
 
 ```powershell
 # 1. Create a project directory and navigate to it
@@ -117,15 +115,20 @@ New-Item -ItemType Directory -Path sqlite_db, logs, certs -Force
 # 3. Download the docker-compose.yml file
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml" -OutFile "docker-compose.yml"
 
-# 4. Create a .env file with your configuration
+# 4. Download and modify the .env file with your configuration
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample" -OutFile ".env.sample"
 Rename-Item -Path ".env.sample" -NewName ".env"
 
 # ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
 # The app will not work without properly configured environment variables
 # notepad .env (or use your favorite editor)
+```
 
-# 5. Launch the application
+#### Launching the Application
+
+After configuring your .env file with your specific settings, launch the application:
+
+```bash
 docker compose up -d
 ```
 
@@ -195,7 +198,7 @@ The relationship data for users -> factors, users -> groups, users -> applicatio
 
 Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 
-> **Note**: You can view the data saved to your SqlLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
+> **Note**: You can view the data saved to your SQLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
 
 
 ## ⚠️ Good to Know
@@ -222,7 +225,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 ### Phase 1: Data Access & Insights
 - [x] Natural language queries for Okta data
 - [x] Multi-provider AI support
-- [x] Save details for users, apps, groups, factors, polcies and their relationships
+- [x] Save details for users, apps, groups, factors, policies and their relationships
 
 ### Phase 2: Real-time Operations
 - [ ] Live user summary
@@ -275,4 +278,4 @@ Check out [`License.md`](LICENSE) for the fine print.
 
 ---
 
-🌟 © 2025 Fctr. All rights reserved. Made with ❤️ for the Okta community.
+🌟 © 2024 Fctr. All rights reserved. Made with ❤️ for the Okta community.
