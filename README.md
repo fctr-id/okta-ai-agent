@@ -12,9 +12,18 @@ This AI agent is the first of its kind that lets you use natural language to que
 <h3>A new web interface!</h3>
 </div>
 <p align="center">
-  
-  <img src="docs/agent-new-web-ui.gif" alt="Okta AI Agent Demo" width="800" height="auto">
+  <img src="docs/agent-new-web-ui.gif" alt="Okta AI Agent Demo" width="1024px" height="auto">
 </p>
+
+<div align="center">
+<h3>Installation and Demo Video</h3>
+<p>Watch our step-by-step installation guide and feature demonstration:</p>
+<div align="center">
+      <a href="https://www.youtube.com/watch?v=RATRWq476js">
+         <img src="https://img.youtube.com/vi/RATRWq476js/0.jpg" style="width:500px">
+      </a>
+</div>
+</div>
 
 ## 📋 Table of Contents
 
