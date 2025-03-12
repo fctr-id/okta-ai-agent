@@ -19,8 +19,8 @@ This AI agent is the first of its kind that lets you use natural language to que
 <h3>Installation and Demo Video</h3>
 <p>Watch our step-by-step installation guide and feature demonstration:</p>
 <div align="center">
-      <a href="https://www.youtube.com/watch?v=RATRWq476js">
-         <img src="https://img.youtube.com/vi/RATRWq476js/0.jpg" style="width:500px">
+      <a href="https://www.youtube.com/watch?v=PC8arYq5kZk">
+         <img src="https://img.youtube.com/vi/PC8arYq5kZk/0.jpg" style="width:500px">
       </a>
 </div>
 </div>
