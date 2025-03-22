@@ -23,33 +23,33 @@ from src.utils.logging import logger
 ModelType = TypeVar('ModelType', bound=Base)
 
 class DatabaseOperations:
-    """
-    Handles all database operations for Okta entity synchronization.
-    Uses SQLAlchemy async engine with SQLite backend.
-    
-    Usage:
-        db = DatabaseOperations()
-        await db.init_db()
-        
-        async with db.get_session() as session:
-            await db.bulk_upsert(session, User, users_data, tenant_id)
-    """    
     def __init__(self):
-        """Initialize async database engine and session factory"""
-        self.engine = create_async_engine(settings.DATABASE_URL)
-        self.SessionLocal = async_sessionmaker(self.engine, expire_on_commit=False)
+        """Initialize async database engine with WAL mode"""
+        self.engine = create_async_engine(
+            settings.DATABASE_URL,
+            connect_args={
+                "timeout": 30,
+                "check_same_thread": False,
+            },
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True
+        )
+        self.SessionLocal = async_sessionmaker(
+            self.engine,
+            expire_on_commit=False
+        )
         self._initialized = False
 
     async def init_db(self):
-        """
-        Initialize database by creating all defined tables.
-        Should be called once at application startup.
-        
-        Raises:
-            SQLAlchemyError: If table creation fails
-        """
+        """Initialize database with WAL mode and optimized settings"""
         if not self._initialized:
             async with self.engine.begin() as conn:
+                # Enable WAL mode
+                await conn.execute(text("PRAGMA journal_mode=WAL"))
+                # Set synchronous mode for better performance
+                await conn.execute(text("PRAGMA synchronous=NORMAL"))
+                # Create tables
                 await conn.run_sync(Base.metadata.create_all)
             self._initialized = True
             
