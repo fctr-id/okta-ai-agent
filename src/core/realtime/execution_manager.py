@@ -1,4 +1,3 @@
-# filepath: c:\Users\Dharanidhar\Desktop\github-repos\okta-ai-agent\src\core\realtime\execution_manager.py
 from typing import Dict, List, Any, Optional, Union
 import logging, json
 from pydantic import BaseModel, Field
@@ -15,12 +14,21 @@ from src.core.realtime.tools.user_tools import get_user_tool_prompt, get_all_use
 
 logger = logging.getLogger(__name__)
 
+class StepError(BaseModel):
+    """Error information for a specific execution step."""
+    step: str = Field(description="Name of the step where the error occurred")
+    error: str = Field(description="Error message")
+    critical: bool = Field(default=False, description="Whether this was a critical error")
+    entity_type: str = Field(default="unknown", description="Type of entity involved in the error")
+
 class ExecutionResult(BaseModel):
     """Result of executing an entire plan."""
     results: Dict[str, Any] = Field(description="Results from each executed step")
     entities_queried: List[str] = Field(description="Entity types that were queried")
-    errors: Optional[List[str]] = Field(None, description="Errors encountered during execution")
+    errors: Optional[List[StepError]] = Field(None, description="Errors encountered during execution")
     metadata: Dict[str, Any] = Field(description="Additional metadata about execution")
+    final_result: Any = Field(default=None, description="The final processed result")
+    status: str = Field(default="success", description="Overall execution status")
 
 class ExecutionManager:
     """
@@ -105,6 +113,25 @@ class ExecutionManager:
                         extra_context=step_context
                     )
                     
+                    # Check if result indicates an error
+                    if self._is_error_result(step_result):
+                        error_msg = self._extract_error_message(step_result)
+                        errors.append(StepError(
+                            step=step.tool_name,
+                            error=error_msg,
+                            critical=step.critical,
+                            entity_type=entity_type
+                        ))
+                        logger.warning(f"Step {step.tool_name} returned error: {error_msg}")
+                        print(f"Error in step {i+1}: {error_msg}")
+                        
+                        if step.critical:
+                            return EntityError(
+                                message=f"Critical step failed: {step.tool_name} - {error_msg}",
+                                error_type="execution_error",
+                                entity=entity_type
+                            )
+                    
                     # Store results for this step
                     results[step.tool_name] = step_result
                     
@@ -115,6 +142,10 @@ class ExecutionManager:
                         logger.debug("Variables after step %d:", i+1)
                         for var_name, var_value in step_result['variables'].items():
                             logger.debug("  %s: %s", var_name, str(var_value)[:80] + ('...' if len(str(var_value)) > 80 else ''))
+                    
+                    # Add the primary result to the context with the step name for easy reference
+                    if 'result' in step_result:
+                        step_context[step.tool_name] = step_result['result']
                     
                     # Show step result
                     if step_result.get('result'):
@@ -130,7 +161,13 @@ class ExecutionManager:
                     
                 except Exception as e:
                     logger.error(f"Error executing step {step.tool_name}: {str(e)}")
-                    errors.append({"step": step.tool_name, "error": str(e)})
+                    error = StepError(
+                        step=step.tool_name,
+                        error=str(e),
+                        critical=step.critical,
+                        entity_type=self._tool_entity_map.get(step.tool_name, "unknown")
+                    )
+                    errors.append(error)
                     print(f"Error in step {i+1}: {str(e)}")
                     
                     if step.critical:
@@ -140,14 +177,21 @@ class ExecutionManager:
                             entity=self._tool_entity_map.get(step.tool_name, "unknown")
                         )
             
+            # Process the final result
+            final_result = self._process_final_result(results, plan)
+            status = "success" if not errors else "partial_success"
+            
             # Add the required metadata field
             return ExecutionResult(
                 results=results,
                 entities_queried=list(entities_queried),
                 errors=errors if errors else None,
+                final_result=final_result,
+                status=status,
                 metadata={
                     "steps_completed": len(results),
-                    "steps_total": len(plan.steps)
+                    "steps_total": len(plan.steps),
+                    "has_errors": len(errors) > 0
                 }
             )
             
@@ -167,3 +211,68 @@ class ExecutionManager:
         """Get the entity type for a tool based on tool registry."""
         # Use the cached mapping with fallback to unknown
         return self._tool_entity_map.get(tool_name, "unknown")
+    
+    def _is_error_result(self, step_result: Dict[str, Any]) -> bool:
+        """Check if a step result indicates an error."""
+        # Check for standard error indicator in result
+        if not step_result or 'result' not in step_result:
+            return False
+            
+        result = step_result['result']
+        
+        if isinstance(result, dict) and 'status' in result:
+            if result['status'] in ['error', 'not_found', 'dependency_failed']:
+                return True
+                
+        return False
+    
+    def _extract_error_message(self, step_result: Dict[str, Any]) -> str:
+        """Extract a human-readable error message from a step result."""
+        if not step_result or 'result' not in step_result:
+            return "Unknown error (no result)"
+            
+        result = step_result['result']
+        
+        if isinstance(result, dict):
+            if 'error' in result:
+                return str(result['error'])
+            elif 'message' in result:
+                return str(result['message'])
+            elif 'status' in result and result['status'] in ['error', 'not_found', 'dependency_failed']:
+                return f"Operation failed with status: {result['status']}"
+                
+        return "Unknown error (couldn't extract message)"
+    
+    def _process_final_result(self, results: Dict[str, Any], plan: ExecutionPlan) -> Any:
+        """
+        Process results from all steps to create a final result.
+        By default, returns the result of the last step.
+        """
+        # Simple strategy: return the result of the last step that produced a result
+        for step in reversed(plan.steps):
+            if step.tool_name in results and 'result' in results[step.tool_name]:
+                return results[step.tool_name]['result']
+        
+        # If no results were found, return an empty dict
+        return {}
+    
+    def _format_result_for_output(self, execution_result: ExecutionResult) -> Dict[str, Any]:
+        """Format the execution result for API output."""
+        # Start with the final result as the main output
+        output = {
+            "data": execution_result.final_result,
+            "metadata": {
+                "status": execution_result.status,
+                "entities_queried": execution_result.entities_queried,
+                "step_count": execution_result.metadata.get("steps_completed", 0)
+            }
+        }
+        
+        # Add error information if present
+        if execution_result.errors:
+            output["errors"] = [
+                {"step": err.step, "message": err.error, "entity_type": err.entity_type}
+                for err in execution_result.errors
+            ]
+            
+        return output

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from pydantic_ai import Agent
 from src.core.model_picker import ModelConfig, ModelType
 from src.utils.logging import logger
@@ -14,11 +14,17 @@ class PlanStep(BaseModel):
     query_context: str = Field(description="Specific context or parameters for this step")
     critical: bool = Field(default=True, description="Whether this step is critical for success")
     reason: str = Field(description="Why this step is needed")
+    error_handling: Optional[str] = Field(default=None, 
+                                        description="How to handle errors in this step")
+    fallback_action: Optional[str] = Field(default=None, 
+                                        description="Action to take if this step fails")
 
 class ExecutionPlan(BaseModel):
     """A structured plan for executing multiple steps."""
     steps: List[PlanStep] = Field(description="Ordered steps to execute")
     reasoning: str = Field(description="Overall reasoning for the plan")
+    partial_success_acceptable: bool = Field(default=False, 
+                                           description="Whether partial success is acceptable")
 
 class RoutingResult(BaseModel):
     """Result from the routing agent's reasoning."""
@@ -67,11 +73,14 @@ You must respond with a valid JSON object containing an execution plan with the 
         "tool_name": "[name of the tool to use]",
         "query_context": "[specific parameters for this step]", 
         "critical": true/false,
-        "reason": "[why this step is needed]"
+        "reason": "[why this step is needed]",
+        "error_handling": "[how to handle errors in this step]",
+        "fallback_action": "[action to take if this step fails]"
       }},
       // additional steps as needed
     ],
-    "reasoning": "[overall explanation of the plan]"
+    "reasoning": "[overall explanation of the plan]",
+    "partial_success_acceptable": true/false
   }},
   "confidence": 85  // 0-100 indicating confidence
 }}
@@ -83,7 +92,24 @@ IMPORTANT GUIDELINES:
 4. Mark steps as critical=true if they're essential for the plan to succeed
 5. When a tool requires an ID, you must include a previous step to retrieve that ID first
 6. When referencing results from previous steps, be specific about which field to use (e.g., "Get user with ID from the first user's id field in step 1's results")
-7. Make sure you understand the question and then provide the necessary steps to achive the exact answer the user is looking for.
+7. Make sure you understand the question and then provide the necessary steps to achieve the exact answer the user is looking for.
+
+ERROR HANDLING GUIDELINES:
+1. For each step, consider what should happen if it fails:
+   - Add "error_handling" field with a description of how to handle the error
+   - Add "fallback_action" if there's an alternative approach that can be taken
+
+2. For multi-entity operations (searching for multiple users, etc.):
+   - Set "critical" to false if the overall plan can continue even if some entities aren't found
+   - Include steps that check for and handle empty results
+
+3. For dependent operations (getting details for multiple users):
+   - Consider if the operation should fail completely or continue with partial results
+   - Set "partial_success_acceptable" in the plan to true if partial results are acceptable
+
+4. For searches that might return empty results:
+   - Include explicit handling of empty result sets
+   - Consider adding validation steps to check if entities exist
 
 EXAMPLE:
 For the query "Get all groups for the user john.smith@company.com", the execution plan would be:
@@ -95,18 +121,76 @@ For the query "Get all groups for the user john.smith@company.com", the executio
         "tool_name": "search_users",
         "query_context": "Find the user with email john.smith@company.com",
         "critical": true,
-        "reason": "Need to find the user ID before we can get their groups"
+        "reason": "Need to find the user ID before we can get their groups",
+        "error_handling": "If no user is found, return a clear 'user not found' message",
+        "fallback_action": "Try searching by username if email search fails"
       }},
       {{
         "tool_name": "list_user_groups",
         "query_context": "Get all groups for the user using the 'id' field from the first user in step 1's results",
         "critical": true,
-        "reason": "Retrieve all groups that john.smith@company.com belongs to"
+        "reason": "Retrieve all groups that john.smith@company.com belongs to",
+        "error_handling": "If API call fails, report the error with the user ID",
+        "fallback_action": null
       }}
     ],
-    "reasoning": "This query requires finding the user first, then retrieving their group memberships."
+    "reasoning": "This query requires finding the user first, then retrieving their group memberships.",
+    "partial_success_acceptable": false
   }},
   "confidence": 95
+}}
+
+EXAMPLE 2:
+For the query "Get emails for users Noah and Ava and their group memberships", the execution plan would be:
+
+{{
+  "plan": {{
+    "steps": [
+      {{
+        "tool_name": "search_users",
+        "query_context": "Find users with first name Noah",
+        "critical": false,
+        "reason": "Need to find Noah's user ID",
+        "error_handling": "If no user with first name Noah is found, continue with a message that Noah was not found",
+        "fallback_action": null
+      }},
+      {{
+        "tool_name": "search_users",
+        "query_context": "Find users with first name Ava",
+        "critical": false,
+        "reason": "Need to find Ava's user ID",
+        "error_handling": "If no user with first name Ava is found, continue with a message that Ava was not found",
+        "fallback_action": null
+      }},
+      {{
+        "tool_name": "get_user_details",
+        "query_context": "For each user found in steps 1 and 2, get their email address",
+        "critical": false,
+        "reason": "Get email addresses for all users found",
+        "error_handling": "Skip users where details can't be retrieved, but continue processing others",
+        "fallback_action": null
+      }},
+      {{
+        "tool_name": "get_group_memberships",
+        "query_context": "For each user found in steps 1 and 2, get their group memberships",
+        "critical": false,
+        "reason": "Get group information for all users found",
+        "error_handling": "Include error information for each user where group retrieval fails",
+        "fallback_action": null
+      }},
+      {{
+        "tool_name": "combine_results",
+        "query_context": "Combine the email and group information for all users",
+        "critical": true,
+        "reason": "Create a final result structure with all gathered information",
+        "error_handling": "Ensure the final result includes both successful and failed operations",
+        "fallback_action": null
+      }}
+    ],
+    "reasoning": "This query requires finding multiple users and retrieving their emails and group memberships.",
+    "partial_success_acceptable": true
+  }},
+  "confidence": 90
 }}
 
 Your task is to create the most efficient execution plan using the available tools.
@@ -141,9 +225,65 @@ async def create_execution_plan(query: str) -> Tuple[RoutingResult, str]:
         logger.error(f"Failed to create execution plan: {str(e)}")
         raise ValueError(f"Failed to create execution plan: {str(e)}")
 
+def analyze_query_entities(query: str) -> List[str]:
+    """Analyze a query to identify which entity types it involves."""
+    entity_keywords = {
+        "user": ["user", "member", "employee", "person", "people", "login", "email"],
+        "group": ["group", "team", "role", "department"],
+        "app": ["app", "application", "integration", "service"],
+        "event": ["event", "log", "activity", "audit"],
+        "policy": ["policy", "rule", "permission", "access"]
+    }
+    
+    query_lower = query.lower()
+    entities = []
+    
+    for entity, keywords in entity_keywords.items():
+        if any(keyword in query_lower for keyword in keywords):
+            entities.append(entity)
+    
+    return entities or ["unknown"]
+
+def analyze_query_complexity(query: str) -> dict:
+    """Analyze query complexity to determine if partial success is appropriate."""
+    # Check for indicators of multiple entities
+    query_lower = query.lower()
+    
+    # Multiple entity indicators
+    multiple_indicators = ["all", "each", "every", "multiple", "users", "groups", 
+                          "applications", "many", "several", "list"]
+    
+    # Specific entity indicators (single targets)
+    specific_indicators = ["specific", "single", "one", "particular", "exact", "named"]
+    
+    # Name patterns that might indicate specific entities
+    name_pattern = re.compile(r'\b[A-Z][a-z]+\b')  # Simple pattern for proper names
+    email_pattern = re.compile(r'\S+@\S+\.\S+')    # Simple email pattern
+    
+    # Count potential entities
+    names = name_pattern.findall(query)
+    emails = email_pattern.findall(query)
+    
+    # Analysis results
+    results = {
+        "has_multiple_indicators": any(indicator in query_lower for indicator in multiple_indicators),
+        "has_specific_indicators": any(indicator in query_lower for indicator in specific_indicators),
+        "entity_count": len(names) + len(emails),
+        "potential_names": names,
+        "potential_emails": emails,
+        "likely_multi_entity": False,
+    }
+    
+    # Determine if this is likely a multi-entity query
+    if results["has_multiple_indicators"] or results["entity_count"] > 1:
+        results["likely_multi_entity"] = True
+        
+    return results
+
 # For interactive testing
 if __name__ == "__main__":
     import asyncio
+    import re
     
     async def test():
         query = "Get all groups for the user john.smith@company.com"
@@ -152,9 +292,15 @@ if __name__ == "__main__":
             print(f"Raw response: {raw}")
             print(f"Plan confidence: {plan.confidence}%")
             print(f"Reasoning: {plan.plan.reasoning}")
+            print(f"Partial success acceptable: {plan.plan.partial_success_acceptable}")
             for i, step in enumerate(plan.plan.steps):
                 print(f"Step {i+1}: {step.tool_name}")
                 print(f"  Context: {step.query_context}")
+                print(f"  Critical: {step.critical}")
+                if step.error_handling:
+                    print(f"  Error handling: {step.error_handling}")
+                if step.fallback_action:
+                    print(f"  Fallback: {step.fallback_action}")
         except Exception as e:
             print(f"Error: {e}")
     

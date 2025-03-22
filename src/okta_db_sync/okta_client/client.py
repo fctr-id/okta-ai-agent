@@ -57,7 +57,7 @@ class OktaClientWrapper:
     POLICY_PAGE_SIZE: Final[int] = 200
     AUTH_PAGE_SIZE: Final[int] = 100
     FACTOR_PAGE_SIZE: Final[int] = 50
-    FACTOR_RATE_LIMIT: Final[float] = 0  # 200ms between factor requests
+    FACTOR_RATE_LIMIT: Final[float] = 0  
 
     
     # Rate limit delay between requests
@@ -94,7 +94,7 @@ class OktaClientWrapper:
         query_params: Optional[Dict] = None
     ) -> List[Dict]:
         """
-        Handle API pagination with configurable page sizes.
+        Handle API pagination following Okta SDK patterns.
         
         Args:
             method: Okta API method to call
@@ -104,11 +104,6 @@ class OktaClientWrapper:
             
         Returns:
             List of API response dictionaries
-            
-        Handles:
-        - Rate limiting between pages
-        - Error checking
-        - Response transformation
         """
         all_results = []
         params = query_params or {}
@@ -116,35 +111,76 @@ class OktaClientWrapper:
         
         try:
             logger.debug(f"Starting pagination with page_size={page_size}, params={params}")
-            results, resp, err = await method(params)
             
-            if err:
-                logger.error(f"Okta API error: {err}")
-                raise Exception(f"Okta API error: {err}")
+            # Initial API call - always returns (results, resp, err) or (results, resp)
+            response = await method(params)
             
-            all_results.extend([r.as_dict() for r in results])
-            logger.debug(f"Retrieved page 1 with {len(results)} records")
+            # Handle different response formats
+            if isinstance(response, tuple):
+                if len(response) == 3:
+                    results, resp, err = response
+                    if err:
+                        logger.error(f"API error: {err}")
+                        return []
+                elif len(response) == 2:
+                    results, resp = response
+                    err = None
+                else:
+                    logger.error(f"Unexpected response tuple length: {len(response)}")
+                    return []
+            else:
+                results = response
+                resp = getattr(response, 'response', None)
+                err = None
+    
+            # Process first page results
+            if results:
+                all_results.extend([
+                    r.as_dict() if hasattr(r, 'as_dict') else r 
+                    for r in results
+                ])
+                logger.debug(f"Retrieved page 1 with {len(results)} records. Has next: {resp.has_next() if resp else False}")
             
+            # Handle pagination using SDK pattern
             page = 1
-            while resp and resp.has_next():
-                await asyncio.sleep(self.RATE_LIMIT_DELAY)
-                
-                page += 1
-                results, resp, err = await resp.next()
-                
-                if err:
-                    logger.error(f"Pagination error on page {page}: {err}")
-                    raise Exception(f"Pagination error: {err}")
+            while resp and hasattr(resp, 'has_next') and resp.has_next():
+                try:
+                    page += 1
+                    logger.debug(f"Fetching page {page}...")
                     
-                all_results.extend([r.as_dict() for r in results])
-                logger.debug(f"Retrieved page {page} with {len(results)} records")
+                    # Get next page with response included (True parameter)
+                    next_results, err, next_resp = await resp.next(True)
+                    logger.debug(f"Page {page} response received. Type: {type(next_results)}")
+                    
+                    if err:
+                        logger.error(f"Error on page {page}: {err}")
+                        break
+                    
+                    if next_results:
+                        page_results = [
+                            r.as_dict() if hasattr(r, 'as_dict') else r 
+                            for r in next_results
+                        ]
+                        all_results.extend(page_results)
+                        logger.debug(f"Retrieved page {page} with {len(page_results)} records")
+                    
+                    # Update response for next iteration
+                    resp = next_resp
+                    await asyncio.sleep(self.RATE_LIMIT_DELAY)
+                    
+                except StopAsyncIteration:
+                    logger.info(f"Pagination complete after {page} pages")
+                    break
+                except Exception as page_error:
+                    logger.error(f"Error retrieving page {page}: {str(page_error)}")
+                    break
             
             logger.info(f"Total records retrieved: {len(all_results)}")
             return all_results
             
         except Exception as e:
-            logger.error(f"Error in pagination: {str(e)}")
-            raise     
+            logger.error(f"Error in pagination: {str(e)}", exc_info=True)
+            raise  
         
    
     async def list_users(self, since: Optional[datetime] = None) -> List[Dict]:
@@ -685,3 +721,7 @@ class OktaClientWrapper:
         except Exception as e:
             logger.error(f"Error getting apps for group {group_okta_id}: {str(e)}")
             return []    
+        
+
+
+     

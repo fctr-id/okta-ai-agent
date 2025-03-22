@@ -307,6 +307,8 @@ class UserFactor(BaseModel):
         Index('idx_factor_okta_id', 'okta_id'),
         Index('idx_factor_type_status', 'factor_type', 'status'),
         Index('idx_factor_provider_status', 'provider', 'status'),
+        UniqueConstraint('tenant_id', 'user_okta_id', 'okta_id', 
+                        name='uix_factor_tenant_user_okta'),
         {'extend_existing': True}
     )
     

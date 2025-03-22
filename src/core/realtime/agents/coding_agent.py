@@ -81,7 +81,7 @@ class CodingAgent:
         steps_text = "\n".join(steps_description)
         
         return f"""
-        You are an expert at writing Python code for Okta SDK operations.
+        You are an expert at writing Python code for Okta SDK operations with robust error handling.
         
         I need you to write code for a multi-step workflow that interacts with Okta.
         
@@ -97,9 +97,27 @@ class CodingAgent:
         3. Each step should explicitly RETURN its final result
         4. Later steps can use variables from earlier steps directly
         5. Use proper error handling for each step
+
+        ERROR HANDLING REQUIREMENTS:
+        - For single entity operations:
+          - If entity not found: return {{"status": "not_found", "entity": "user|group|etc", "id": entity_id}}
+          - If error occurs: return {{"status": "error", "error": str(err)}}
+          - If successful: return processed data with no special wrapper
+        
+        - For multiple entity operations (like lists or searches):
+          - If no entities found: return empty list/dict (not an error)
+          - If error occurs: return {{"status": "error", "error": str(err)}}
+          - For foreach operations on multiple entities, continue processing even if some fail
+          - Track failures for individual entities: [{{"id": "123", "status": "success", "data": {...}}}, {{"id": "456", "status": "error", "error": "..."}}]
+        
+        - For dependent operations (e.g., get user groups):
+          - If prerequisite failed: return {{"status": "dependency_failed", "dependency": "step_name", "error": "Reason"}}
+          - Handle both empty and error cases appropriately
+        
+        TECHNICAL REQUIREMENTS:
         6. Use client.X for Okta SDK calls (not okta_client)
         7. Always use the tuple unpacking pattern: object, resp, err = await client.X
-        8. Always check for errors with: if err: return {{"error": str(err)}}
+        8. Always check for errors with: if err: return {{"status": "error", "error": str(err)}}
         9. Use as_dict() (not to_dict()) to convert Okta objects to dictionaries
         10. For list operations, use: [item.as_dict() for item in items]
         11. For collecting results, use list comprehensions instead of append: emails = [user["profile"]["email"] for user in users_list]
@@ -110,21 +128,41 @@ class CodingAgent:
         # First step code (finding users)
         users, resp, err = await client.list_users(query_params={{"search": "profile.firstName eq \\"John\\""}})
         if err:
-            return {{"error": str(err)}}
+            return {{"status": "error", "error": str(err)}}
         # Process results
         users_list = [user.as_dict() for user in users]
+        if not users_list:
+            # Not an error, just no matching users found
+            return []
         return users_list
         </STEP-1>
         
         <STEP-2>
         # Second step code (using results from step 1)
-        user_id = users_list[0]["id"]
-        groups, resp, err = await client.list_user_groups(user_id)
-        if err:
-            return {{"error": str(err)}}
-        # Process and return results
-        groups_list = [group.as_dict() for group in groups]
-        return groups_list
+        # Handle case where step 1 returned an error
+        if isinstance(users_list, dict) and "status" in users_list and users_list["status"] == "error":
+            return {{"status": "dependency_failed", "dependency": "search_users", "error": users_list["error"]}}
+        
+        # Handle case where no users were found
+        if not users_list:
+            return []
+            
+        # Process each user
+        result = []
+        for user in users_list:
+            user_id = user["id"]
+            groups, resp, err = await client.list_user_groups(user_id)
+            
+            if err:
+                # Add error result for this user
+                result.append({{"id": user_id, "status": "error", "error": str(err)}})
+                continue
+                
+            # Add success result for this user
+            groups_list = [group.as_dict() for group in groups]
+            result.append({{"id": user_id, "status": "success", "groups": groups_list}})
+            
+        return result
         </STEP-2>
         
         Please generate all {len(plan.steps)} steps now, with clear code for each step.

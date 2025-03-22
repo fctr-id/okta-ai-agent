@@ -121,6 +121,54 @@ def extract_code_from_llm_response(response: str) -> str:
     # Otherwise return the whole response
     return response.strip()
 
+def is_error_result(result: Any) -> bool:
+    """
+    Check if a result represents an error condition.
+    
+    Args:
+        result: Any result object to check
+        
+    Returns:
+        True if the result indicates an error, False otherwise
+    """
+    # Check dictionary with standard error structure
+    if isinstance(result, dict):
+        if "status" in result and result["status"] in ["error", "not_found", "dependency_failed"]:
+            return True
+        if "error" in result:
+            return True
+            
+    return False
+
+def normalize_result(result: Any) -> Dict[str, Any]:
+    """
+    Normalize a result into a standard structure.
+    
+    Args:
+        result: Any result value
+        
+    Returns:
+        A standardized result dictionary
+    """
+    # Already properly structured
+    if isinstance(result, dict) and "status" in result:
+        return result
+        
+    # Error dictionary without status
+    if isinstance(result, dict) and "error" in result:
+        return {
+            "status": "error",
+            "error": result["error"],
+            "data": None
+        }
+        
+    # Regular success result
+    return {
+        "status": "success",
+        "data": result,
+        "error": None
+    }
+
 async def execute_okta_code(
     code: str, 
     okta_client: Any, 
@@ -128,7 +176,19 @@ async def execute_okta_code(
     query_id: str = "unknown",
     extra_context: Dict[str, Any] = None
 ) -> Dict[str, Any]:
-    """Execute generated Okta SDK code in a secure environment."""
+    """
+    Execute generated Okta SDK code in a secure environment.
+    
+    Args:
+        code: The Python code to execute
+        okta_client: The Okta client instance
+        okta_domain: The Okta domain for validation
+        query_id: Identifier for the query/flow
+        extra_context: Variables from previous steps
+        
+    Returns:
+        Dictionary with execution results and metadata
+    """
     start_time = time.time()
     logger.info(f"[FLOW:{query_id}] Validating and executing generated code")
     
@@ -136,7 +196,16 @@ async def execute_okta_code(
     validation_result = CodeValidator.validate_code(code, okta_domain)
     if validation_result is not True:
         logger.warning(f"[FLOW:{query_id}] Code validation failed: {validation_result}")
-        raise ValueError(f"Code validation failed: {validation_result}")
+        return {
+            "result": {
+                "status": "error",
+                "error": f"Code validation failed: {validation_result}",
+                "data": None
+            },
+            "execution_time_ms": 0,
+            "code": code,
+            "success": False
+        }
     
     # Execution environment
     namespace = {
@@ -150,9 +219,8 @@ async def execute_okta_code(
     
     # Add any variables from previous steps
     if extra_context:
-        # Check if this is a structured results dict or flat variables dict
         if isinstance(extra_context, dict):
-            # Extract variables directly or from nested structure
+            # Extract variables from extra_context
             for key, value in extra_context.items():
                 if isinstance(value, dict) and 'variables' in value:
                     # This is a structured result from a previous step
@@ -181,7 +249,7 @@ async def execute_okta_code(
         replacement = f"raise ReturnValueException({return_expr})"
         modified_code = modified_code.replace(f"return {return_expr}", replacement)
     
-    # Wrap the modified code in a function
+    # Wrap the modified code in a function with better error trapping
     func_code = f"""
 async def _execute_step():
     # Make context variables available
@@ -192,6 +260,9 @@ async def _execute_step():
 {textwrap.indent(modified_code, '        ')}
     except ReturnValueException as rv:
         result = rv.value
+    except Exception as exec_error:
+        # Trap exceptions inside the execution function
+        result = {{"status": "error", "error": str(exec_error)}}
         
     # Return all local variables
     return_dict = locals()
@@ -217,23 +288,31 @@ async def _execute_step():
             if not k.startswith('_') and k not in ['client', 'okta_client', 'asyncio', 'json', 'datetime', 'logger', 'ReturnValueException']:
                 variables[k] = v
         
-        # Try to find the most likely result value
+        # Determine the result value, prioritizing explicit returns
         result = local_vars.get('result')
         
-        # First check for Okta errors if using tuple unpacking
+        # Check for Okta errors if using tuple unpacking
         if has_tuple_unpacking and 'err' in variables and variables['err'] is not None:
-            result = {"error": str(variables['err'])}
+            result = {
+                "status": "error", 
+                "error": str(variables['err']),
+                "data": None
+            }
         
         # If no explicit result from return statement, try to infer from common variable names
         if result is None:
-            for name in ['user_details', 'result', 'users_list', 'user', 'users', 'groups', 'applications', 'email']:
+            for name in ['user_details', 'result', 'users_list', 'user', 'users', 'groups', 'applications', 'email', 'combined_results']:
                 if name in variables:
                     # Check if this is actually a tuple from unpacking
                     if isinstance(variables[name], tuple) and len(variables[name]) == 3:
                         # It's a tuple from Okta SDK - extract the data part
                         data, resp, err = variables[name]
                         if err:
-                            result = {"error": str(err)}
+                            result = {
+                                "status": "error",
+                                "error": str(err),
+                                "data": None
+                            }
                         else:
                             result = data
                     else:
@@ -241,10 +320,26 @@ async def _execute_step():
                         result = variables[name]
                     break
         
+        # Check for empty results (e.g., [], {}) and differentiate from None
+        if result is None and any(name in variables and variables[name] == [] for name in ['users_list', 'users', 'groups', 'results']):
+            # Empty list is a valid result, not an error
+            result = []
+        
+        # Normalize the result structure
+        if result is not None and not isinstance(result, (str, int, float, bool)):
+            if is_error_result(result):
+                # Already contains error information, make sure it's properly structured
+                if isinstance(result, dict) and "status" not in result and "error" in result:
+                    result = {
+                        "status": "error",
+                        "error": result["error"],
+                        "data": None
+                    }
+        
         elapsed = time.time() - start_time
         logger.info(f"[FLOW:{query_id}] Code execution completed in {elapsed:.2f}ms")
         
-        # Log variables at debug level instead of printing
+        # Log variables at debug level
         logger.debug("Executed code:\n%s", code)
         logger.debug("Variables:")
         for var_name, var_value in variables.items():
@@ -254,13 +349,14 @@ async def _execute_step():
                 var_preview = str(var_value)[:100] + '...' if len(str(var_value)) > 100 else str(var_value)
                 logger.debug("%s = %s = %s", var_name, type(var_value).__name__, var_preview)
         
-        # Return execution results
+        # Return execution results with normalized result format
         return {
             "result": result,
             "execution_time_ms": int(elapsed * 1000),
             "code": code,
-            "success": True,
-            "variables": variables
+            "success": not is_error_result(result),
+            "variables": variables,
+            "error": result["error"] if is_error_result(result) and isinstance(result, dict) and "error" in result else None
         }
         
     except Exception as e:
@@ -268,9 +364,13 @@ async def _execute_step():
         logger.error(f"[FLOW:{query_id}] Code execution failed: {str(e)}", exc_info=True)
         
         return {
-            "result": None,
-            "error": str(e),
+            "result": {
+                "status": "error",
+                "error": str(e),
+                "data": None
+            },
             "execution_time_ms": int(elapsed * 1000),
             "code": code,
-            "success": False
+            "success": False,
+            "error": str(e)
         }
