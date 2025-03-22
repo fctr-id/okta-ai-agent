@@ -103,33 +103,12 @@ class SyncOrchestrator:
         session: AsyncSession,
         user_data: Dict,
     ) -> None:
-        """Process all user relationships with cleanup and logging"""
+        """Process all user relationships with upsert handling"""
         try:
             user_okta_id = user_data['okta_id']
             logger.debug(f"Starting relationship sync for user {user_okta_id}")
-            
-            # Delete existing app assignments
-            del_apps = await session.execute(
-                text("DELETE FROM user_application_assignments WHERE tenant_id = :tenant_id AND user_okta_id = :user_okta_id"),
-                {'tenant_id': self.tenant_id, 'user_okta_id': user_okta_id}
-            )
-            logger.debug(f"Cleaned up {del_apps.rowcount} app assignments")
     
-            # Delete existing group memberships
-            del_groups = await session.execute(
-                text("DELETE FROM user_group_memberships WHERE tenant_id = :tenant_id AND user_okta_id = :user_okta_id"),
-                {'tenant_id': self.tenant_id, 'user_okta_id': user_okta_id}
-            )
-            logger.debug(f"Cleaned up {del_groups.rowcount} group memberships")
-    
-            # Delete existing factors
-            del_factors = await session.execute(
-                text("DELETE FROM user_factors WHERE tenant_id = :tenant_id AND user_okta_id = :user_okta_id"),
-                {'tenant_id': self.tenant_id, 'user_okta_id': user_okta_id}
-            )
-            logger.debug(f"Cleaned up {del_factors.rowcount} factors")
-    
-            # Insert current app assignments
+            # Handle app assignments with upsert
             app_links = user_data.pop('app_links', [])
             if app_links:
                 for link in app_links:
@@ -139,6 +118,13 @@ class SyncOrchestrator:
                         app_instance_id, credentials_setup, hidden, created_at, updated_at)
                         VALUES (:tenant_id, :user_okta_id, :application_okta_id, :assignment_id,
                                 :app_instance_id, :credentials_setup, :hidden, :created_at, :updated_at)
+                        ON CONFLICT (tenant_id, user_okta_id, application_okta_id) 
+                        DO UPDATE SET
+                            assignment_id = excluded.assignment_id,
+                            app_instance_id = excluded.app_instance_id,
+                            credentials_setup = excluded.credentials_setup,
+                            hidden = excluded.hidden,
+                            updated_at = excluded.updated_at
                     """)
                     
                     now = datetime.utcnow()
@@ -154,7 +140,7 @@ class SyncOrchestrator:
                         'updated_at': now
                     })
     
-            # Insert current group memberships
+            # Handle group memberships with upsert
             group_memberships = user_data.pop('group_memberships', [])
             if group_memberships:
                 for membership in group_memberships:
@@ -162,6 +148,9 @@ class SyncOrchestrator:
                         INSERT INTO user_group_memberships 
                         (tenant_id, user_okta_id, group_okta_id, created_at, updated_at)
                         VALUES (:tenant_id, :user_okta_id, :group_okta_id, :created_at, :updated_at)
+                        ON CONFLICT (tenant_id, user_okta_id, group_okta_id) 
+                        DO UPDATE SET
+                            updated_at = excluded.updated_at
                     """)
                     
                     now = datetime.utcnow()
@@ -173,7 +162,7 @@ class SyncOrchestrator:
                         'updated_at': now
                     })
     
-            # Insert current factors
+            # Handle factors with upsert
             factors = user_data.pop('factors', [])
             if factors:
                 for factor in factors:
@@ -187,6 +176,18 @@ class SyncOrchestrator:
                             :email, :phone_number, :device_type, :device_name, :platform,
                             :created_at, :last_updated_at, :updated_at
                         )
+                        ON CONFLICT (tenant_id, user_okta_id, okta_id) 
+                        DO UPDATE SET
+                            factor_type = excluded.factor_type,
+                            provider = excluded.provider,
+                            status = excluded.status,
+                            email = excluded.email,
+                            phone_number = excluded.phone_number,
+                            device_type = excluded.device_type,
+                            device_name = excluded.device_name,
+                            platform = excluded.platform,
+                            last_updated_at = excluded.last_updated_at,
+                            updated_at = excluded.updated_at
                     """)
                     
                     now = datetime.utcnow()
@@ -206,9 +207,9 @@ class SyncOrchestrator:
                         'last_updated_at': factor.get('last_updated_at'),
                         'updated_at': now
                     })
-
+    
             await session.commit()
-            #logger.info(f"Completed relationship sync for user {user_okta_id}: {len(app_links)} apps, {len(group_memberships)} groups, {len(factors)} factors")
+            logger.debug(f"Completed relationship sync for user {user_okta_id}")
                 
         except Exception as e:
             logger.error(f"Error processing user relationships for {user_okta_id}: {str(e)}")
@@ -317,6 +318,56 @@ class SyncOrchestrator:
                 error_message=str(e)
             )
             raise
+        
+    async def _clean_entity_data(self, session: AsyncSession, model: Type[ModelType]) -> None:
+        """Clean existing data for entity type"""
+        try:
+            # Delete data based on model type
+            if model == User:
+                # Clean user-related tables first
+                await session.execute(text("""
+                    DELETE FROM user_factors 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+                await session.execute(text("""
+                    DELETE FROM user_application_assignments 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+                await session.execute(text("""
+                    DELETE FROM user_group_memberships 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+                await session.execute(text("""
+                    DELETE FROM users 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+            elif model == Group:
+                await session.execute(text("""
+                    DELETE FROM group_application_assignments 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+                await session.execute(text("""
+                    DELETE FROM groups 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+            elif model == Application:
+                await session.execute(text("""
+                    DELETE FROM applications 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+            await session.commit()
+            logger.info(f"Cleaned {model.__name__} data for tenant {self.tenant_id}")
+            
+        except Exception as e:
+            logger.error(f"Error cleaning {model.__name__} data: {str(e)}")
+            raise        
 
     async def sync_model(
         self,
@@ -346,6 +397,10 @@ class SyncOrchestrator:
                 sync_history = await self._create_sync_history(session, model.__name__, last_sync)
 
                 try:
+                    # Clean existing data first
+                    await self._clean_entity_data(session, model)
+                    logger.info(f"Cleaned existing {model.__name__} data")
+                                    
                     # Get records from Okta
                     records = await list_method(since=last_sync)
                     await self._process_records(session, model, records, sync_history)
