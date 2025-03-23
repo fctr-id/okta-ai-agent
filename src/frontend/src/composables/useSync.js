@@ -1,11 +1,14 @@
 import { ref, onMounted, onBeforeUnmount } from "vue";
 import { useFetchStream } from "./useFetchStream";
+import { useAuth } from "./useAuth";
+
 
 /**
  * Composable for managing Okta data synchronization
  */
 export function useSync() {
     const { streamFetch } = useFetchStream();
+    const auth = useAuth();
 
     // State
     const isSyncing = ref(false);
@@ -81,6 +84,29 @@ export function useSync() {
         }
     };
 
+    const handleAuthError = async (status) => {
+        if (status === 401 || status === 403) {
+            console.warn(`Authentication error (${status}), redirecting to login`);
+            stopPolling();
+            
+            try {
+                // Use the proper logout method from auth composable
+                await auth.logout();
+                
+                // After logout completes, force navigation
+                setTimeout(() => {
+                    window.location.href = '/login';
+                }, 100);
+            } catch (error) {
+                console.error("Error during logout:", error);
+                // Force navigation even if logout fails
+                window.location.href = '/login';
+            }
+            return true;
+        }
+        return false;
+    };
+
     const checkSyncStatus = async () => {
         try {
             const response = await fetch("/api/sync/status");
@@ -135,7 +161,10 @@ export function useSync() {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
             });
-
+            if (response.status === 401 || response.status === 403) {
+                await handleAuthError(response.status);
+                return null;
+            }
             const data = await response.json();
 
             if (data.status === "started" || data.status === "already_running") {

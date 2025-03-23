@@ -122,6 +122,7 @@ const hasResults = ref(false) // Whether there are results to display
 const auth = useAuth()
 const router = useRouter()
 
+
 // Initialize sanitization utilities
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
 
@@ -174,6 +175,31 @@ const getContentClass = (type) => {
     } else {
         return 'compact-results';
     }
+}
+
+/**
+ * Handle authentication errors by redirecting to login
+ */
+ const handleAuthError = async (status) => {
+    if (status === 401 || status === 403) {
+        console.warn(`Authentication error (${status}), redirecting to login`);
+        
+        try {
+            // Use the proper logout method from auth composable
+            await auth.logout();
+            
+            // After logout completes, force navigation
+            setTimeout(() => {
+                window.location.href = '/login';
+            }, 100);
+        } catch (error) {
+            console.error("Error during logout:", error);
+            // Force navigation even if logout fails
+            window.location.href = '/login';
+        }
+        return true;
+    }
+    return false;
 }
 
 // ---------- PREDEFINED CONTENT ----------
@@ -296,6 +322,19 @@ const sendQuery = async () => {
 
     try {
         // Send sanitized query to API
+
+        const initialResponse = await fetch('/api/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: sanitizedQuery })
+        });
+        
+        // Check for auth errors before proceeding
+        if (await handleAuthError(initialResponse.status)) {
+            isLoading.value = false;
+            return;
+        }
+                
         const streamResponse = await postStream('/api/query', { query: sanitizedQuery })
         let currentData = []
         let headers = []

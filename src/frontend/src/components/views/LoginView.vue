@@ -146,6 +146,7 @@ const handleLogin = async () => {
   position: relative;
   overflow: hidden;
   border: 1px solid rgba(76, 100, 226, 0.08);
+  margin-top: -10% !important;
 }
 
 /* Add subtle entry animation */
