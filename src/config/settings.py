@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE", "lax")
     COOKIE_MAX_AGE_MINUTES: int = int(os.getenv("COOKIE_MAX_AGE_MINUTES", "30"))
     
+    #Okta API concurrent limits setting
+    # Get concurrent limit from environment variable (default to 15 - free tier)
+    OKTA_CONCURRENT_LIMIT: int = int(os.environ.get("OKTA_CONCURRENT_LIMIT", "15"))
+
+    
     # AI Provider
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "openai_compatible")
     USE_PRE_REASONING: bool = os.getenv("USE_PRE_REASONING", "true").lower() == "true"
@@ -62,6 +67,11 @@ class Settings(BaseSettings):
         """Extract tenant ID from OKTA_CLIENT_ORGURL"""
         parsed_url = urlparse(self.OKTA_CLIENT_ORGURL)
         return parsed_url.netloc.split('.')[0]
+    
+    @property
+    def MAX_CONCURRENT_USERS(self) -> int:
+        """Calculate the maximum number of concurrent users based on rate limit"""
+        return max(1, int(self.OKTA_CONCURRENT_LIMIT / 3))    
 
     class Config:
         env_file = ".env"

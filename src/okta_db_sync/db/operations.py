@@ -223,8 +223,7 @@ class DatabaseOperations:
             return result.scalar()
             
         except Exception as e:
-            logger.error(f"Get last sync time error for {model.__name__}: {str(e)}", 
-                         extra={"tenant_id": tenant_id} if hasattr(self, "tenant_id") else {})
+            logger.error(f"Get last sync time error for {model.__name__}: {str(e)}")
             return None
         
     async def _process_user_factors(
@@ -309,6 +308,7 @@ class DatabaseOperations:
         self,
         session: AsyncSession,
         group_data: Dict,
+        tenant_id: str  # Added tenant_id parameter
     ) -> None:
         """
         Process group application assignments.
@@ -316,6 +316,7 @@ class DatabaseOperations:
         Args:
             session: Active database session
             group_data: Group data with relationships
+            tenant_id: Tenant identifier
             
         Raises:
             Exception: On database errors
@@ -331,7 +332,7 @@ class DatabaseOperations:
             if app_assignments:
                 for assignment in app_assignments:
                     stmt = group_application_assignments.insert().values(
-                        tenant_id=self.tenant_id,
+                        tenant_id=tenant_id,  # Using the passed tenant_id parameter
                         group_okta_id=assignment['group_okta_id'],
                         application_okta_id=assignment['application_okta_id'],
                         assignment_id=assignment['assignment_id']
@@ -343,15 +344,11 @@ class DatabaseOperations:
                         )
                     )
                     await session.execute(stmt)
-
-            await session.commit()
             
         except Exception as e:
             logger.error(f"Error processing group relationships: {str(e)}")
             raise               
         
-
-
     #Authentication methods:
 
     async def get_auth_user(self, session: AsyncSession, username: str) -> Optional[AuthUser]:
@@ -444,93 +441,117 @@ class DatabaseOperations:
             await session.commit()
             return None        
         
-    # Add these methods to the existing DatabaseOperations class
+    # Fixed sync history methods to take session and tenant_id as parameters
 
-    async def get_active_sync(self):
+    async def get_active_sync(self, session: AsyncSession, tenant_id: str) -> Optional[SyncHistory]:
         """
         Get currently running sync if any
         Returns SyncHistory object or None
+        
+        Args:
+            session: Active database session
+            tenant_id: Tenant identifier
         """
         query = select(SyncHistory).where(
             and_(
-                SyncHistory.tenant_id == self.tenant_id,
+                SyncHistory.tenant_id == tenant_id,
                 SyncHistory.status.in_([SyncStatus.RUNNING, SyncStatus.IDLE])
             )
         ).order_by(SyncHistory.start_time.desc()).limit(1)
         
-        result = await self.session.execute(query)
+        result = await session.execute(query)
         return result.scalars().first()
 
-    async def get_last_completed_sync(self):
+    async def get_last_completed_sync(self, session: AsyncSession, tenant_id: str) -> Optional[SyncHistory]:
         """
         Get the most recently completed sync
         Returns SyncHistory object or None
+        
+        Args:
+            session: Active database session
+            tenant_id: Tenant identifier
         """
         query = select(SyncHistory).where(
             and_(
-                SyncHistory.tenant_id == self.tenant_id,
+                SyncHistory.tenant_id == tenant_id,
                 SyncHistory.status.in_([SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELED])
             )
         ).order_by(SyncHistory.end_time.desc()).limit(1)
         
-        result = await self.session.execute(query)
+        result = await session.execute(query)
         return result.scalars().first()
 
-    async def create_sync_history(self):
+    async def create_sync_history(self, session: AsyncSession, tenant_id: str) -> SyncHistory:
         """
         Create a new sync history entry
         Returns the created SyncHistory object
+        
+        Args:
+            session: Active database session
+            tenant_id: Tenant identifier
         """
         sync_history = SyncHistory(
-            tenant_id=self.tenant_id,
+            tenant_id=tenant_id,
             status=SyncStatus.IDLE,
             start_time=datetime.utcnow()
         )
         
-        self.session.add(sync_history)
-        await self.session.commit()
-        await self.session.refresh(sync_history)
+        session.add(sync_history)
+        await session.commit()
+        await session.refresh(sync_history)
         return sync_history
 
-    async def update_sync_history(self, sync_id, data):
+    async def update_sync_history(self, session: AsyncSession, sync_id: int, tenant_id: str, data: Dict) -> Optional[SyncHistory]:
         """
         Update an existing sync history entry
         Returns the updated SyncHistory object
+        
+        Args:
+            session: Active database session
+            sync_id: ID of the sync history entry
+            tenant_id: Tenant identifier
+            data: Dictionary of fields to update
         """
         query = select(SyncHistory).where(
             and_(
                 SyncHistory.id == sync_id,
-                SyncHistory.tenant_id == self.tenant_id
+                SyncHistory.tenant_id == tenant_id
             )
         )
         
-        result = await self.session.execute(query)
+        result = await session.execute(query)
         sync_history = result.scalars().first()
         
         if not sync_history:
-            raise ValueError(f"Sync history with ID {sync_id} not found")
+            logger.error(f"Sync history with ID {sync_id} not found for tenant {tenant_id}")
+            return None
             
         for key, value in data.items():
             if hasattr(sync_history, key):
                 setattr(sync_history, key, value)
         
-        await self.session.commit()
-        await self.session.refresh(sync_history)
+        await session.commit()
+        await session.refresh(sync_history)
         return sync_history
 
-    async def get_sync_history(self, limit=5):
+    async def get_sync_history(self, session: AsyncSession, tenant_id: str, limit: int = 5) -> List[SyncHistory]:
         """
         Get recent sync history entries
         Returns a list of SyncHistory objects
+        
+        Args:
+            session: Active database session
+            tenant_id: Tenant identifier
+            limit: Maximum number of entries to return
         """
         query = select(SyncHistory).where(
-            SyncHistory.tenant_id == self.tenant_id
+            SyncHistory.tenant_id == tenant_id
         ).order_by(SyncHistory.start_time.desc()).limit(limit)
         
-        result = await self.session.execute(query)
+        result = await session.execute(query)
         return result.scalars().all()        
     
-        # Clean up sync history table
+    # Clean up sync history table
     async def cleanup_sync_history(self, tenant_id: str, keep_count: int = 30):
         """
         Keep only the most recent sync history entries per tenant.
