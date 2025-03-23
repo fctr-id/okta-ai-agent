@@ -88,9 +88,19 @@ def sanitize_query(query: str) -> Tuple[str, List[str]]:
 async def process_query(
     request: Request,
     session: AsyncSession = Depends(get_db_session),
-    current_user: Any = Depends(get_current_user)  # Add authentication dependency
+    current_user: Any = Depends(get_current_user)
 ):
     try:
+        # Extract auth_check query parameter (if this is just an auth check)
+        auth_check = request.query_params.get("auth_check") == "true"
+        
+        # If this is just an auth check, return early with success
+        if auth_check:
+            return JSONResponse(
+                status_code=200, 
+                content={"authenticated": True}
+            )
+            
         # Validate JSON schema
         try:
             data = await request.json()

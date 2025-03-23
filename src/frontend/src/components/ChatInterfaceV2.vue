@@ -321,20 +321,19 @@ const sendQuery = async () => {
     updateMessageHistory(sanitizedQuery)
 
     try {
-        // Send sanitized query to API
-
-        const initialResponse = await fetch('/api/query', {
+        
+        // First check authentication only (lightweight call) 
+        const authCheckResponse = await fetch('/api/query?auth_check=true', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: sanitizedQuery })
+            headers: { 'Content-Type': 'application/json' }
         });
         
         // Check for auth errors before proceeding
-        if (await handleAuthError(initialResponse.status)) {
+        if (await handleAuthError(authCheckResponse.status)) {
             isLoading.value = false;
             return;
         }
-                
+        // Send sanitized query to API
         const streamResponse = await postStream('/api/query', { query: sanitizedQuery })
         let currentData = []
         let headers = []
