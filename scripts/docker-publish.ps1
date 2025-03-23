@@ -62,15 +62,15 @@ if ($pushConfirm -ne "y") {
 }
 
 # Check if user is logged in
-$loginStatus = docker info 2>&1 | Select-String "Username"
-if (!$loginStatus) {
-    Write-Host "Not logged into Docker Hub. Please login:"
-    docker login
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Login failed. Aborting publish."
-        exit 1
-    }
-}
+#$loginStatus = docker info 2>&1 | Select-String "Username"
+#if (!$loginStatus) {
+#    Write-Host "Not logged into Docker Hub. Please login:"
+#    docker login
+#    if ($LASTEXITCODE -ne 0) {
+#        Write-Error "Login failed. Aborting publish."
+#        exit 1
+#    }
+#}
 
 # Push versioned tag
 Write-Host "Pushing image with version tag: $Registry/$ImageName`:$Version"
