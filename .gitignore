@@ -55,3 +55,4 @@ src/backend/app/static/*
 
 certs/
 wiki.md
+mcp.txt
