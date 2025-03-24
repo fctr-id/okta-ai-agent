@@ -35,6 +35,7 @@ This AI agent is the first of its kind that lets you use natural language to que
   - [Docker Compose](#docker-compose)
     - [Linux/macOS Instructions](#linuxmacos-instructions)
     - [Windows Instructions](#windows-instructions)
+  - [🚨 Optimal API settings for sync 🚨](#-optimal-api-settings-for-sync-)
     - [Launching the Application](#launching-the-application)
     - [Tailing docker logs](#tailing-docker-logs)
     - [Access the Web Interface](#access-the-web-interface)
@@ -141,6 +142,23 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 # The app will not work without properly configured environment variables
 # notepad .env (or use your favorite editor)
 ```
+
+### 🚨 Optimal API settings for sync 🚨
+<p>
+<img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
+</p>
+
+
+For the best sync times, please set the API rate limit to 100% as shown above. In case you cannot set it to 100%, refer the table below to help you set the optimal `OKTA_CONCURRENT_LIMIT` setting in the `.env` file 
+
+| Tenant Type | API Rate Limit %  | OKTA_CONCURRENT_LIMIT |
+|-----------|---------|------------|
+| Free / Developer | 50% | 6 |
+| Free / Developer  | 100% | 15 |
+| Enterprise  | 50% | 36 |
+| Enterprise  | 100% | 75 |
+
+If you are experiencing too many API rate limits and need assistance optimizing your deployment, please contact support@fctr.io.
 
 #### Launching the Application
 
