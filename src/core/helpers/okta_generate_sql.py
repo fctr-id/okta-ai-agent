@@ -383,16 +383,43 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
 def extract_json_from_text(text: str) -> dict:
     """Extract JSON from text response"""
     try:
+        # First try direct JSON parsing
         return json.loads(text)
     except json.JSONDecodeError:
-        json_pattern = r'\{(?:[^{}]|(?R))*\}'
-        matches = re.findall(json_pattern, text)
-        if matches:
-            try:
-                return json.loads(matches[0])
-            except json.JSONDecodeError:
-                raise ValueError("Found JSON-like structure but couldn't parse it")
-        raise ValueError("No valid JSON found in response")
+        # Look for JSON in code blocks
+        try:
+            code_block_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
+            matches = re.findall(code_block_pattern, text)
+            if matches:
+                for match in matches:
+                    try:
+                        return json.loads(match)
+                    except json.JSONDecodeError:
+                        continue
+        except re.error:
+            pass
+        
+        # Try to find the first valid JSON object using bracket counting
+        try:
+            start_idx = text.find('{')
+            if start_idx >= 0:
+                level = 0
+                for i in range(start_idx, len(text)):
+                    if text[i] == '{':
+                        level += 1
+                    elif text[i] == '}':
+                        level -= 1
+                        if level == 0:
+                            json_str = text[start_idx:i+1]
+                            try:
+                                return json.loads(json_str)
+                            except json.JSONDecodeError:
+                                pass
+        except Exception:
+            pass
+            
+        # If we get here, we couldn't find valid JSON
+        raise ValueError(f"No valid JSON found in response: {text[:100]}...")
 
 async def main():
     print("\nWelcome to Okta Query Assistant!")
