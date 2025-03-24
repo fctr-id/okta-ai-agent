@@ -144,7 +144,7 @@ class DatabaseOperations:
                     await self._process_user_factors(session, existing, factors, tenant_id)
     
             if model == User:
-                logger.info(f"Processed {len(records)} users with {total_factors} factors")
+                logger.debug(f"Processed {len(records)} users with {total_factors} factors")
             else:
                 logger.info(f"Processed {len(records)} {model.__name__} records")
             return True
