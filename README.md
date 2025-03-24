@@ -35,10 +35,10 @@ This AI agent is the first of its kind that lets you use natural language to que
   - [Docker Compose](#docker-compose)
     - [Linux/macOS Instructions](#linuxmacos-instructions)
     - [Windows Instructions](#windows-instructions)
-  - [🚨 Optimal API settings for sync 🚨](#-optimal-api-settings-for-sync-)
-    - [Launching the Application](#launching-the-application)
-    - [Tailing docker logs](#tailing-docker-logs)
-    - [Access the Web Interface](#access-the-web-interface)
+    - [🚨 Optimal API settings for sync 🚨](#-optimal-api-settings-for-sync-)
+  - [Launching the Application](#launching-the-application)
+  - [Tailing docker logs](#tailing-docker-logs)
+  - [Access the Web Interface](#access-the-web-interface)
 - [🆕 What's New in v0.3.0](#-whats-new-in-v030)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
@@ -143,7 +143,7 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 # notepad .env (or use your favorite editor)
 ```
 
-### 🚨 Optimal API settings for sync 🚨
+#### 🚨 Optimal API settings for sync 🚨
 <p>
 <img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
 </p>
@@ -160,7 +160,7 @@ For the best sync times, please set the API rate limit to 100% as shown above. I
 
 If you are experiencing too many API rate limits and need assistance optimizing your deployment, please contact support@fctr.io.
 
-#### Launching the Application
+### Launching the Application
 
 After configuring your .env file with your specific settings, launch the application:
 
@@ -168,12 +168,12 @@ After configuring your .env file with your specific settings, launch the applica
 docker compose up -d
 ```
 
-#### Tailing docker logs
+### Tailing docker logs
 ```bash
 docker compose logs -f
 ```
 
-#### Access the Web Interface
+### Access the Web Interface
 - 🌐 Open your browser and go to: https://localhost:8001 🌐
 
 
