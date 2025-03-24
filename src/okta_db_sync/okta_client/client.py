@@ -59,7 +59,8 @@ class OktaClientWrapper:
   
     
     # Rate limit delay between requests
-    RATE_LIMIT_DELAY: Final[float] = 0.2
+    RATE_LIMIT_DELAY: Final[float] = 0
+    USER_PROCESSING_DELAY: Final[float] = 0
 
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
@@ -231,12 +232,16 @@ class OktaClientWrapper:
                     for i in range(0, len(batch), settings.MAX_CONCURRENT_USERS):
                         small_batch = batch[i:i + settings.MAX_CONCURRENT_USERS]
                         
-                        # Process this smaller batch concurrently
-                        batch_tasks = [self._process_single_user(user) for user in small_batch]
-                        batch_results = await asyncio.gather(*batch_tasks)
-                        
-                        # Filter out failures
-                        valid_results = [r for r in batch_results if r]
+                        # Process users one by one with delay instead of concurrently
+                        valid_results = []
+                        for user in small_batch:
+                            # Process a single user
+                            user_result = await self._process_single_user(user)
+                            if user_result:
+                                valid_results.append(user_result)
+                                
+                            # Add delay between users
+                            await asyncio.sleep(self.USER_PROCESSING_DELAY)
                         
                         # Process this batch immediately
                         await processor_func(valid_results)

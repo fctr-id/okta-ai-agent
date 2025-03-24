@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import urlparse
 from pathlib import Path
-import os
+import os, math
 
 # Get absolute paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -70,8 +70,8 @@ class Settings(BaseSettings):
     
     @property
     def MAX_CONCURRENT_USERS(self) -> int:
-        """Calculate the maximum number of concurrent users based on rate limit"""
-        return max(1, int(self.OKTA_CONCURRENT_LIMIT / 3))    
+        """Calculate the maximum number of concurrent users based on rate limit (rounded down)"""
+        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT / 3))    
 
     class Config:
         env_file = ".env"
