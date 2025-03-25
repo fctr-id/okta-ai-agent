@@ -12,14 +12,39 @@
                 <!-- Modern integrated search -->
                 <div class="search-wrapper">
                     <div class="integrated-search-bar">
-                        <!-- Reset button (only when results are showing) -->
+                        <!-- Reset button (only when results are showing and not loading) -->
                         <transition name="fade">
-                            <div v-if="hasResults" class="reset-btn-container">
+                            <div v-if="hasResults && !isLoading" class="reset-btn-container">
                                 <v-tooltip text="Start over" location="top">
                                     <template v-slot:activator="{ props }">
                                         <button v-bind="props" class="action-btn reset-btn" @click="resetInterface"
                                             aria-label="Reset search">
                                             <v-icon>mdi-refresh</v-icon>
+                                        </button>
+                                    </template>
+                                </v-tooltip>
+                            </div>
+                        </transition>
+
+                        <!-- Stop button with progress (when loading) -->
+                        <transition name="fade">
+                            <div v-if="isLoading" class="stop-btn-container">
+                                <v-tooltip text="Stop processing" location="top">
+                                    <template v-slot:activator="{ props }">
+                                        <button v-bind="props" @click="stopProcessing" class="action-btn stop-btn "
+                                            aria-label="Stop processing">
+                                            <!-- Progress circle - thinner spinner only -->
+                                            <div class="circular-progress-container">
+                                                <div v-if="!isStreaming" class="indeterminate-progress"></div>
+                                                <svg v-else class="determinate-progress" viewBox="0 0 36 36">
+                                                    <circle class="progress-background" cx="18" cy="18" r="16"
+                                                        fill="none" />
+                                                    <circle class="progress-value" cx="18" cy="18" r="16" fill="none"
+                                                        :stroke-dasharray="`${progress * 0.98}, 100`" />
+                                                </svg>
+                                            </div>
+                                            <!-- Larger stop icon -->
+                                            <v-icon size="large" color="#4C64E2">mdi-stop</v-icon>
                                         </button>
                                     </template>
                                 </v-tooltip>
@@ -86,7 +111,7 @@
         <transition name="fade">
             <div v-if="isLoading" class="inline-loading-indicator">
                 <div class="loading-pulse"></div>
-                <span>Processing your query...</span>
+                <span>{{ isStreaming ? `Processing data (${progress}%)...` : 'Processing your query...' }}</span>
             </div>
         </transition>
     </AppLayout>
@@ -122,6 +147,9 @@ const hasResults = ref(false) // Whether there are results to display
 const auth = useAuth()
 const router = useRouter()
 
+// Add new refs to store stream controller and track streaming progress
+const streamController = ref(null)
+const { postStream, isStreaming, progress } = useFetchStream()
 
 // Initialize sanitization utilities
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
@@ -139,6 +167,17 @@ const currentResponse = ref({
 })
 
 // ---------- UTILITY FUNCTIONS ----------
+
+/**
+ * Stops the current query processing and aborts the stream
+ */
+const stopProcessing = () => {
+    if (streamController.value) {
+        streamController.value.abort();
+        streamController.value = null;
+        isLoading.value = false;
+    }
+}
 
 /**
  * Get the current time formatted as HH:MM
@@ -180,14 +219,14 @@ const getContentClass = (type) => {
 /**
  * Handle authentication errors by redirecting to login
  */
- const handleAuthError = async (status) => {
+const handleAuthError = async (status) => {
     if (status === 401 || status === 403) {
         console.warn(`Authentication error (${status}), redirecting to login`);
-        
+
         try {
             // Use the proper logout method from auth composable
             await auth.logout();
-            
+
             // After logout completes, force navigation
             setTimeout(() => {
                 window.location.href = '/login';
@@ -220,10 +259,6 @@ const suggestions = ref([
 
 // ---------- API INTERACTION ----------
 
-/**
- * Stream API utilities
- */
-const { postStream } = useFetchStream()
 
 // ---------- EVENT HANDLERS ----------
 
@@ -321,13 +356,13 @@ const sendQuery = async () => {
     updateMessageHistory(sanitizedQuery)
 
     try {
-        
+
         // First check authentication only (lightweight call) 
         const authCheckResponse = await fetch('/api/query?auth_check=true', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
-        
+
         // Check for auth errors before proceeding
         if (await handleAuthError(authCheckResponse.status)) {
             isLoading.value = false;
@@ -335,6 +370,8 @@ const sendQuery = async () => {
         }
         // Send sanitized query to API
         const streamResponse = await postStream('/api/query', { query: sanitizedQuery })
+        streamController.value = streamResponse
+
         let currentData = []
         let headers = []
 
@@ -381,12 +418,19 @@ const sendQuery = async () => {
                     }
                     break
 
+                case 'complete':
+                    isLoading.value = false
+                    streamController.value = null
+                    break
+
                 case 'error':
                     currentResponse.value = {
                         type: MessageType.ERROR,
                         content: data.content || 'An error occurred',
                         metadata: {}
                     }
+                    isLoading.value = false
+                    streamController.value = null
                     break
             }
         }
@@ -396,8 +440,11 @@ const sendQuery = async () => {
             content: error.message || 'Unknown error occurred',
             metadata: {}
         }
+        isLoading.value = false
+        streamController.value = null
     } finally {
         isLoading.value = false
+        streamController.value = null
         setTimeout(() => {
             const inputElement = document.querySelector('.search-input input');
             if (inputElement) {
@@ -662,7 +709,12 @@ onMounted(() => {
 }
 
 .reset-btn {
-    margin-right: 4px;
+    width: 38px !important; /* Match stop button width */
+    height: 38px !important; /* Match stop button height */
+    margin-right: 0; /* Remove extra margin */
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .reset-btn:hover {
@@ -685,6 +737,94 @@ onMounted(() => {
     background: #e0e0e0;
     color: #999;
     cursor: not-allowed;
+}
+
+/* Stop button styling */
+.stop-btn {
+    position: relative;
+    width: 38px !important;
+    height: 38px !important;
+    background-color: white;
+    color: #4C64E2;
+    border: none;
+    border-radius: 50%;
+    z-index: 2;
+    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.15);
+    cursor: pointer;
+    margin-right: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+
+
+
+/* Container styles for the button containers */
+.reset-btn-container,
+.stop-btn-container {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+}
+
+/* Progress indicators */
+.circular-progress-container {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    pointer-events: none;
+
+}
+
+.indeterminate-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 1px solid rgba(76, 100, 226, 0.2);
+    border-top: 1px solid #4C64E2;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.determinate-progress {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.progress-background {
+    stroke: rgba(76, 100, 226, 0.2);
+    stroke-width: 1.5px;
+    /* Thinner stroke: 2px → 1.5px */
+}
+
+.progress-value {
+    stroke: #4C64E2;
+    stroke-linecap: round;
+    stroke-width: 1.5px;
+    /* Thinner stroke: 2px → 1.5px */
+    transition: stroke-dasharray 0.3s ease;
 }
 
 /* Update the suggestions CSS */
@@ -927,10 +1067,29 @@ onMounted(() => {
     }
 }
 
+/* Button container to consistently hold space */
+.button-container {
+    width: 48px;
+    height: 48px;
+    position: relative;
+    flex-shrink: 0;
+}
+
+/* Empty container for when neither button is showing */
+.empty-btn-container {
+    width: 48px;
+    height: 48px;
+}
+
 /* Transitions */
 .fade-enter-active,
 .fade-leave-active {
-    transition: opacity 0.3s ease;
+    transition: opacity 0.3s ease-out;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 48px;
+    height: 48px;
 }
 
 .fade-enter-from,
@@ -1006,14 +1165,6 @@ onMounted(() => {
 
     .main-title {
         font-size: 24px;
-    }
-
-    .inline-loading-indicator {
-        padding: 12px 20px;
-    }
-
-    .inline-loading-indicator span {
-        font-size: 14px;
     }
 
     .inline-loading-indicator {

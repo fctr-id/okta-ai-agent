@@ -1,4 +1,4 @@
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator, Optional
 import json
 from datetime import datetime
 import pytz
@@ -14,7 +14,28 @@ from src.config.settings import settings
 class SQLExecutor:
     def __init__(self):
         self.db = DatabaseOperations()
+        self._current_session = None  # Track current active session
+        self._cancelled = False       # Track cancellation state
         logger.info("Initialized SQLExecutor")
+    
+    def cancel(self):
+        """Cancel any ongoing operation"""
+        logger.info("Cancelling ongoing SQL execution")
+        self._cancelled = True
+        # Close the session if it's active
+        if self._current_session:
+            asyncio.create_task(self._close_session())
+    
+    async def _close_session(self):
+        """Close the current session safely"""
+        try:
+            if self._current_session:
+                await self._current_session.close()
+                logger.info("Database session closed due to cancellation")
+        except Exception as e:
+            logger.error(f"Error closing session: {str(e)}")
+        finally:
+            self._current_session = None
     
     @staticmethod
     async def validate_sql(sql: str) -> bool:
@@ -44,13 +65,41 @@ class SQLExecutor:
             
             if not await self.validate_sql(sql):
                 raise Exception("Invalid query type")
-                
+            
+            # Reset cancellation flag before starting
+            self._cancelled = False
+            
             async with self.db.get_session() as session:
+                # Store the session for potential cancellation
+                self._current_session = session
+                
+                # Check if already cancelled
+                if self._cancelled:
+                    logger.info("Query execution cancelled before SQL execution")
+                    return {"error": "Query cancelled", "cancelled": True}
+                
                 logger.debug("Database session created")
                 sql_text = text(sql)
-                query_result = await session.execute(sql_text)
-                rows = query_result.fetchall()
                 
+                # Execute with timeout to prevent extremely long-running queries
+                try:
+                    query_result = await asyncio.wait_for(
+                        session.execute(sql_text),
+                        timeout=60.0  # 60 second timeout for query execution
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"Query execution timed out: {sql}")
+                    return {"error": "Query timed out. Please try a more specific query."}
+                
+                # Clear session reference after successful execution
+                self._current_session = None
+                
+                # Check if cancelled during execution
+                if self._cancelled:
+                    logger.info("Query execution cancelled after SQL execution")
+                    return {"error": "Query cancelled", "cancelled": True}
+                
+                rows = query_result.fetchall()
                 columns = query_result.keys()
                 data = [dict(zip(columns, row)) for row in rows]
                 
@@ -61,11 +110,16 @@ class SQLExecutor:
                 }
         except Exception as e:
             logger.error(f"Query execution failed: {str(e)}", exc_info=True)
+            if self._cancelled:
+                return {"error": "Query cancelled", "cancelled": True}
             return {"error": "Error processing request. Please try again."}
+        finally:
+            # Always clear the session reference
+            self._current_session = None
 
 class AIService:
     
-    BATCH_SIZE = 100
+    BATCH_SIZE = 500
     
     @staticmethod
     async def get_last_sync_info(executor: SQLExecutor) -> Dict[str, Any]:
@@ -109,8 +163,15 @@ class AIService:
             return {"last_sync": "Error"}
 
     @staticmethod
-    async def process_query(query: str) -> AsyncGenerator[str, None]:
-        """Process a natural language query about Okta data with batch streaming."""
+    async def process_query(query: str, request_alive_callback: Optional[callable] = None) -> AsyncGenerator[str, None]:
+        """
+        Process a natural language query about Okta data with batch streaming.
+        
+        Args:
+            query: The natural language query to process
+            request_alive_callback: Callback function that returns False if request is cancelled
+        """
+        executor = None
         try:
             logger.info(f"Starting query processing: {query}")
             
@@ -122,12 +183,41 @@ class AIService:
                 return
     
             executor = SQLExecutor()
+            
+            # Helper function to check if request is still alive
+            def is_cancelled():
+                if request_alive_callback and not request_alive_callback():
+                    return True
+                return False
+    
+            # Get last sync info
             last_sync = await AIService.get_last_sync_info(executor)
             
+            # Check if cancelled
+            if is_cancelled():
+                logger.info("Request cancelled before query expansion")
+                yield json.dumps({
+                    "type": "error",
+                    "content": "Request cancelled by user.",
+                    "cancelled": True
+                })
+                return
+            
+            # Expand query
             logger.info("Expanding query...")
             reasoning_result = await expand_query(query)
             expanded_query = reasoning_result.get('expanded_query', '')
             logger.info(f"Expanded query: {expanded_query}")
+            
+            # Check if cancelled
+            if is_cancelled():
+                logger.info("Request cancelled after query expansion")
+                yield json.dumps({
+                    "type": "error",
+                    "content": "Request cancelled by user.",
+                    "cancelled": True
+                })
+                return
             
             if not expanded_query:
                 yield json.dumps({
@@ -136,9 +226,20 @@ class AIService:
                 })
                 return
     
+            # Generate SQL
             logger.info("Generating SQL...")
             sql_response = await sql_agent.run(expanded_query)
             sql_result = extract_json_from_text(str(sql_response.data))
+            
+            # Check if cancelled
+            if is_cancelled():
+                logger.info("Request cancelled after SQL generation")
+                yield json.dumps({
+                    "type": "error",
+                    "content": "Request cancelled by user.",
+                    "cancelled": True
+                })
+                return
             
             if not sql_result or not sql_result.get("sql"):
                 yield json.dumps({
@@ -147,16 +248,29 @@ class AIService:
                 })
                 return
     
+            # Execute SQL
             logger.info(f"Executing SQL: {sql_result['sql']}")
             query_results = await executor.execute_query(sql_result["sql"])
+            
+            # Check if cancelled or if query execution failed due to cancellation
+            if is_cancelled() or (query_results.get("cancelled")):
+                logger.info("Request cancelled during or after SQL execution")
+                executor.cancel()  # Ensure any ongoing operations are cancelled
+                yield json.dumps({
+                    "type": "error",
+                    "content": "Request cancelled by user.",
+                    "cancelled": True
+                })
+                return
             
             if query_results.get("error"):
                 yield json.dumps({
                     "type": "error",
-                    "content": "Error processing request. Please try again."
+                    "content": query_results.get("error")
                 })
                 return
 
+            # Process results
             results = query_results.get("results", [])
             total_records = len(results)
             
@@ -168,6 +282,7 @@ class AIService:
                     "align": 'start'
                 } for key in results[0].keys()]
 
+            # Send metadata
             yield json.dumps({
                 "type": "metadata",
                 "content": {
@@ -183,7 +298,18 @@ class AIService:
                 }
             })
 
+            # Stream results in batches
             for i in range(0, total_records, AIService.BATCH_SIZE):
+                # Check if cancelled before sending each batch
+                if is_cancelled():
+                    logger.info(f"Request cancelled during batch streaming (at batch {i // AIService.BATCH_SIZE + 1})")
+                    yield json.dumps({
+                        "type": "error",
+                        "content": "Request cancelled by user.",
+                        "cancelled": True
+                    })
+                    return
+                
                 batch = results[i:i + AIService.BATCH_SIZE]
                 batch_number = i // AIService.BATCH_SIZE + 1
                 
@@ -198,8 +324,10 @@ class AIService:
                     }
                 })
                 
+                # Small delay between batches
                 await asyncio.sleep(0.1)
 
+            # Complete message
             yield json.dumps({
                 "type": "complete",
                 "content": {
@@ -214,3 +342,8 @@ class AIService:
                 "type": "error",
                 "content": "Error processing request. Please try again."
             })
+        finally:
+            # Always ensure cleanup happens
+            if executor and hasattr(executor, 'cancel') and is_cancelled():
+                logger.info("SQL request cancelled by user")
+                executor.cancel()

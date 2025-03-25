@@ -8,6 +8,7 @@ from src.backend.app.services.ai_service import AIService
 from html_sanitizer import Sanitizer
 from src.core.auth.dependencies import get_current_user, get_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
+import sys
 
 router = APIRouter()
 
@@ -137,6 +138,8 @@ async def process_query(
         logger.info(f"Processing query from user {user_id} (IP {client_ip}): {sanitized_query[:100]}...")
             
         async def generate_stream():
+            # We rely on FastAPI's automatic client disconnect detection
+            # When client disconnects, the generator will be stopped automatically
             async for response in AIService.process_query(sanitized_query):
                 yield response + "\n"
 
