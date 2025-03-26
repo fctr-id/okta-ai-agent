@@ -34,17 +34,6 @@ def get_utc_now():
     """Return current UTC datetime with timezone info"""
     return datetime.now(timezone.utc)
 
-# Set up dedicated sync logger
-#sync_logger = logging.getLogger("okta_sync")
-#if not sync_logger.handlers:
-#    sync_log_file = os.path.join(settings.LOG_DIR, "okta_sync.log")
-#    file_handler = logging.FileHandler(sync_log_file)
-#    file_handler.setFormatter(logging.Formatter(
-#        '%(asctime)s - %(name)s - tenant:[%(tenant_id)s] - %(levelname)s - %(message)s'
-#    ))
-#    sync_logger.addHandler(file_handler)
-#    sync_logger.setLevel(logging.INFO)
-#    sync_logger.propagate = False
 
 router = APIRouter(prefix="/sync", tags=["sync"])
 
@@ -64,14 +53,10 @@ class SyncResponse(BaseModel):
 def get_tenant_id():
     return settings.tenant_id
 
-# Create a database operations instance with tenant ID
-async def get_db_ops(session: AsyncSession):
-    """Get a database operations instance with tenant ID set"""
+# Create a database operations instance
+async def get_db_ops():
+    """Get a database operations instance"""
     db_ops = DatabaseOperations()
-    # We need to set tenant_id as an attribute since the methods use self.tenant_id
-    db_ops.tenant_id = get_tenant_id()
-    # Also set the session since the methods use self.session
-    db_ops.session = session
     return db_ops
 
 # Modify the active_syncs global to store task objects
@@ -96,11 +81,13 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
     try:
         # Update sync history with process ID and status
         async with db_session as session:
-            db = await get_db_ops(session)
-            await db.update_sync_history(sync_id, {
+            db = await get_db_ops()
+            data = {
                 "status": SyncStatus.RUNNING,
                 "process_id": process_id
-            })
+            }
+            # Fix: Pass session and tenant_id explicitly
+            await db.update_sync_history(session, sync_id, tenant_id, data)
         
         # Store process info for potential cancellation
         active_syncs[sync_id] = {
@@ -178,8 +165,8 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
             
         # Update final status with counts from database
         async with db_session as session:
-            db = await get_db_ops(session)
-            await db.update_sync_history(sync_id, {
+            db = await get_db_ops()
+            data = {
                 "status": SyncStatus.COMPLETED,
                 "end_time": get_utc_now(),
                 "success": True,
@@ -188,9 +175,11 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
                 "groups_count": groups_count,
                 "apps_count": apps_count,
                 "policies_count": policies_count
-            })
+            }
+            # Fix: Pass session and tenant_id explicitly
+            await db.update_sync_history(session, sync_id, tenant_id, data)
            
-            #  clean up old sync history records
+            # Clean up old sync history records
             await db.cleanup_sync_history(tenant_id, keep_count=30)
         
         sync_logger.info("Sync completed successfully", extra=extra)
@@ -198,24 +187,28 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
     except CancelledError as ce:
         sync_logger.info(f"Sync was cancelled: {str(ce)}", extra=extra)
         async with db_session as session:
-            db = await get_db_ops(session)
-            await db.update_sync_history(sync_id, {
+            db = await get_db_ops()
+            data = {
                 "status": SyncStatus.CANCELED,
                 "end_time": get_utc_now(),
                 "success": False,
                 "error_details": f"Sync operation was cancelled: {str(ce)}"
-            })
+            }
+            # Fix: Pass session and tenant_id explicitly
+            await db.update_sync_history(session, sync_id, tenant_id, data)
     except Exception as e:
         sync_logger.error(f"Sync failed: {str(e)}", extra=extra)
         # Update sync history with error
         async with db_session as session:
-            db = await get_db_ops(session)
-            await db.update_sync_history(sync_id, {
+            db = await get_db_ops()
+            data = {
                 "status": SyncStatus.FAILED,
                 "end_time": get_utc_now(),
                 "success": False,
                 "error_details": str(e)
-            })
+            }
+            # Fix: Pass session and tenant_id explicitly
+            await db.update_sync_history(session, sync_id, tenant_id, data)
     
     finally:
         # Clean up resources
@@ -230,19 +223,21 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
 # Add this helper function to implement the cancellation checks
 async def run_sync_with_cancellation_check(orchestrator, sync_id):
     """Run the sync operation with periodic cancellation checks"""
-    # Create a wrapper for the sync_model method that checks for cancellation
-    original_sync_model = orchestrator.sync_model
     
-    async def sync_model_with_cancellation_check(*args, **kwargs):
-        # Check if sync has been cancelled
-        if sync_cancellation_flags.get(sync_id, False):
-            raise CancelledError(f"Sync {sync_id} was cancelled during operation")
-        return await original_sync_model(*args, **kwargs)
+    # Only wrap the streaming method since we've moved to pure streaming implementation
+    if hasattr(orchestrator, 'sync_model_streaming'):
+        original_sync_model_streaming = orchestrator.sync_model_streaming
+        
+        async def sync_model_streaming_with_cancellation(*args, **kwargs):
+            # Check if sync has been cancelled
+            if sync_cancellation_flags.get(sync_id, False):
+                raise CancelledError(f"Sync {sync_id} was cancelled during streaming operation")
+            return await original_sync_model_streaming(*args, **kwargs)
+        
+        # Replace with cancellation-aware version
+        orchestrator.sync_model_streaming = sync_model_streaming_with_cancellation
     
-    # Replace the method with our cancellation-aware version
-    orchestrator.sync_model = sync_model_with_cancellation_check
-    
-    # Now run the sync
+    # Run sync operation only ONCE
     await orchestrator.run_sync()
 
 @router.post("/start", response_model=SyncResponse)
@@ -252,10 +247,12 @@ async def start_sync(
     current_user: Any = Depends(get_current_user)  # Keep for auth check
 ):
     """Start Okta data synchronization"""
-    db = await get_db_ops(session)
+    tenant_id = get_tenant_id()
+    db = await get_db_ops()
     
     # Check if sync is already running
-    active_sync = await db.get_active_sync()
+    # Fix: Pass session and tenant_id explicitly
+    active_sync = await db.get_active_sync(session, tenant_id)
     
     if active_sync:
         return SyncResponse(
@@ -266,7 +263,8 @@ async def start_sync(
         )
     
     # Create new sync history record
-    sync_history = await db.create_sync_history()
+    # Fix: Pass session and tenant_id explicitly
+    sync_history = await db.create_sync_history(session, tenant_id)
     sync_id = sync_history.id
     
     # Start sync process in background
@@ -289,10 +287,13 @@ async def get_sync_status(
     current_user: Any = Depends(get_current_user)  # Keep for auth check
 ):
     """Get current sync status or last completed sync"""
-    db = await get_db_ops(session)
+    tenant_id = get_tenant_id()
+    db = await get_db_ops()
     
     # First check for active sync
-    active_sync = await db.get_active_sync()
+    # Fix: Pass session and tenant_id explicitly 
+    active_sync = await db.get_active_sync(session, tenant_id)
+    
     if active_sync:
         return SyncResponse(
             status=active_sync.status.value,
@@ -309,7 +310,9 @@ async def get_sync_status(
         )
     
     # If no active sync, get last completed sync
-    last_sync = await db.get_last_completed_sync()
+    # Fix: Pass session and tenant_id explicitly
+    last_sync = await db.get_last_completed_sync(session, tenant_id)
+    
     if last_sync:
         return SyncResponse(
             status=last_sync.status.value,
@@ -337,10 +340,13 @@ async def cancel_sync(
     current_user: Any = Depends(get_current_user)  # Keep for auth check
 ):
     """Cancel currently running sync operation"""
-    db = await get_db_ops(session)
+    tenant_id = get_tenant_id()
+    db = await get_db_ops()
     
     # Get active sync
-    active_sync = await db.get_active_sync()
+    # Fix: Pass session and tenant_id explicitly
+    active_sync = await db.get_active_sync(session, tenant_id)
+    
     if not active_sync:
         return SyncResponse(
             status="not_running",
@@ -354,12 +360,14 @@ async def cancel_sync(
     sync_logger.info(f"Cancellation requested for sync {sync_id}")
     
     # Update sync history to mark as cancellation requested
-    await db.update_sync_history(sync_id, {
+    data = {
         "status": SyncStatus.CANCELED,
         "end_time": get_utc_now(),
         "success": False,
         "error_details": "Cancellation requested by user"
-    })
+    }
+    # Fix: Pass session, sync_id and tenant_id explicitly
+    await db.update_sync_history(session, sync_id, tenant_id, data)
     
     return SyncResponse(
         status="canceled",
@@ -374,9 +382,12 @@ async def get_sync_history(
     current_user: Any = Depends(get_current_user)  # Keep for auth check
 ):
     """Get sync history for the tenant"""
-    db = await get_db_ops(session)
+    tenant_id = get_tenant_id()
+    db = await get_db_ops()
     
-    history = await db.get_sync_history(limit)
+    # Fix: Pass session, tenant_id and limit explicitly
+    history = await db.get_sync_history(session, tenant_id, limit)
+    
     return [
         SyncResponse(
             status=entry.status.value,

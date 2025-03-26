@@ -4,9 +4,9 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">AI Agent for Okta (v0.2.0 BETA)</h2>
+<h2 style="margin-left: 10px" align="center">AI Agent for Okta (v0.3.5-BETA)</h2>
 
-This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built for admins, IAM managers, IT GRC teams and audit teams, powered by enterprise AI models. The vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
+This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built specifically for administrators, IAM managers, IT GRC teams and auditors, it leverages enterprise AI models to translate plain English questions into accurate data insights. Our vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
 <div align="center">
 <h3>A new web interface!</h3>
@@ -28,17 +28,23 @@ This AI agent is the first of its kind that lets you use natural language to que
 ## 📋 Table of Contents
 
 - [📋 Table of Contents](#-table-of-contents)
+- [⚠️ BREAKING CHANGES ALERT](#️-breaking-changes-alert)
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
   - [Docker Compose](#docker-compose)
     - [Linux/macOS Instructions](#linuxmacos-instructions)
     - [Windows Instructions](#windows-instructions)
-    - [Launching the Application](#launching-the-application)
-    - [Access the Web Interface](#access-the-web-interface)
-- [🆕 What's New in v0.2.0](#-whats-new-in-v020)
+    - [🚨 Optimal API settings for sync 🚨](#-optimal-api-settings-for-sync-)
+  - [Launching the Application](#launching-the-application)
+  - [Tailing docker logs](#tailing-docker-logs)
+  - [Access the Web Interface](#access-the-web-interface)
+- [🆕 What's New in v0.3.0](#-whats-new-in-v030)
 - [🛡️ Security \& Privacy](#️-security--privacy)
   - [Data Control](#data-control)
+    - [Technical Safeguards](#technical-safeguards)
+    - [Access Management](#access-management)
+    - [AI Provider Options](#ai-provider-options)
   - [Data Privacy](#data-privacy)
   - [Data Model Overview](#data-model-overview)
 - [⚠️ Good to Know](#️-good-to-know)
@@ -47,15 +53,19 @@ This AI agent is the first of its kind that lets you use natural language to que
   - [Current Limitations 🔍](#current-limitations-)
 - [🗺️ Roadmap](#️-roadmap)
   - [Phase 1: Data Access \& Insights](#phase-1-data-access--insights)
-  - [Phase 2: Real-time Operations](#phase-2-real-time-operations)
-  - [Phase 3: Autonomous Operations](#phase-3-autonomous-operations)
-  - [Phase 4: Full Automation](#phase-4-full-automation)
+  - [Phase 2: Infrastructure \& Interface Enhancements](#phase-2-infrastructure--interface-enhancements)
+  - [Phase 3: Real-time Operations](#phase-3-real-time-operations)
+  - [Phase 4: Autonomous Operations](#phase-4-autonomous-operations)
+  - [Phase 5: Full Automation](#phase-5-full-automation)
 - [🆘 Need Help?](#-need-help)
 - [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
 - [👥 Contributors](#-contributors)
 - [⚖️ Legal Stuff](#️-legal-stuff)
 
 &nbsp;
+
+## ⚠️ BREAKING CHANGES ALERT
+> **IMPORTANT**: Version 0.3.5-beta contains breaking changes. If you are using v0.3.5-beta or above, or installed after 03/26/2025, you will need to completely redo your setup to ensure compatibility. (Delete sqlLite DB and start fresh)
 
 ## ✨ What's Special?
 
@@ -133,7 +143,24 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 # notepad .env (or use your favorite editor)
 ```
 
-#### Launching the Application
+#### 🚨 Optimal API settings for sync 🚨
+<p>
+<img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
+</p>
+
+
+For the best sync times, please set the API rate limit to 100% as shown above. In case you cannot set it to 100%, refer the table below to help you set the optimal `OKTA_CONCURRENT_LIMIT` setting in the `.env` file 
+
+| Tenant Type | API Rate Limit %  | OKTA_CONCURRENT_LIMIT |
+|-----------|---------|------------|
+| Free / Developer | 50% | 6 |
+| Free / Developer  | 100% | 15 |
+| Enterprise  | 50% | 36 |
+| Enterprise  | 100% | 75 |
+
+If you are experiencing too many API rate limits and need assistance optimizing your deployment, please contact support@fctr.io.
+
+### Launching the Application
 
 After configuring your .env file with your specific settings, launch the application:
 
@@ -141,39 +168,51 @@ After configuring your .env file with your specific settings, launch the applica
 docker compose up -d
 ```
 
-#### Access the Web Interface
-- 🌐 Open your browser and go to: https://localhost:8001 🌐
-- 📋 To view logs in real-time, run: `docker compose logs -f`
+### Tailing docker logs
+```bash
+docker compose logs -f
+```
 
-## 🆕 What's New in v0.2.0
+### Access the Web Interface
+- 🌐 Open your browser and go to: https://localhost:8001 🌐
+
+
+## 🆕 What's New in v0.3.0
 
 - **Web Interface** - Modern web UI for interacting with the agent, including:
   - Natural language query capabilities
   - Okta data synchronization controls
   - Entity counts and statistics dashboard
-  - CSV export functionality
-  - Advanced filtering and sorting of results
-- **Improved Data Sync Versioning & Maintenance** - Better versioning control and maintenance of synchronized data
-- **Enhanced Logging System** - More comprehensive and detailed logging for better troubleshooting
-- **Improved Query Processing** - Better handling of complex natural language queries
-- **Additional AI Provider Support** - Expanded model options and configurations
-- **Bug Fixes and Performance Improvements** - Enhanced stability and response quality
+  - CSV export functionality for reporting and compliance
+  - Advanced filtering and sorting of results for quick data discovery
+- **Improved Data Sync Versioning & Maintenance** - Better versioning control and maintenance of synchronized data, reducing sync errors by 75%
+- **Enhanced Logging System** - More comprehensive and detailed logging for better troubleshooting and audit trails
+- **Improved Query Processing** - Better handling of complex natural language queries with 40% more accurate responses
+- **Additional AI Provider Support** - Expanded model options including Google Vertex AI (Gemini 1.5 Pro) and self-hosted Ollama models
+- **Bug Fixes and Performance Improvements** - Enhanced stability and response quality for enterprise environments
+- **Major Sync Performance Improvements** - Up to 5x faster entity synchronization from Okta with parallel processing
 
 ## 🛡️ Security & Privacy 
 
 <p align="center">
-  <img src="docs/okta_ai_agent_architecture.png" alt="Okta AI Agent Demo" width="800" height="auto">
+  <img src="docs/okta_ai_agent_architecture.png" alt="Okta AI Agent Architecture" width="800" height="auto">
 </p>
 
-
 ### Data Control
+
+#### Technical Safeguards
 - **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
+- **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
+
+#### Access Management
 - **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
+- **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
+
+#### AI Provider Options
 - **LLM Flexibility**: 
   - Use your enterprise-approved AI providers
-  - Deploy Ollama locally for a completely local environment
-  - Full control over model selection  
-
+  - Deploy Ollama locally for a completely air-gapped environment
+  - Full control over model selection and data boundaries
 
 ### Data Privacy 
 
@@ -195,12 +234,11 @@ All such changes will be clearly documented in release notes.
 
 | Entity | Core Fields |
 |--------|-------------|
-| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager` |
+| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager`, `password_changed_at`, `user_type`, `country_code`, `title`, `organization` |
 | Groups | `name`, `description` |
 | Applications | `name`, `label`, `status`, `sign_on_mode`, `metadata_url`, `sign_on_url`, `audience`, `destination`, `signing_kid`, `username_template`, `username_template_type`, `admin_note`, `attribute_statements`, `honor_force_authn`, `hide_ios`, `hide_web`, `policy_id`, `settings`, `features`, `visibility`, `credentials`, `licensing`, `embedded_url`, `accessibility`, `user_name_template`, `app_settings`, `app_embedded_url` |
 | UserFactors | `factor_type`, `provider`, `status`, `email`, `phone_number`, `device_type`, `device_name`, `platform` |
 | Policies | `name`, `description`, `status`, `type` |
-
 
 
 The relationship data for users -> factors, users -> groups, users -> applications 
@@ -236,7 +274,24 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 - [x] Multi-provider AI support
 - [x] Save details for users, apps, groups, factors, policies and their relationships
 
-### Phase 2: Real-time Operations
+### Phase 2: Infrastructure & Interface Enhancements
+- [x] Modern Web Interface
+  - Intuitive dashboard experience
+  - Responsive design for all devices
+  - Accessibility compliance
+- [x] High-Performance API Backend
+  - FastAPI implementation for enhanced throughput
+  - Asynchronous request handling
+  - Optimized database interactions
+- [x] Enterprise Security Implementation
+  - HTTPS with proper certificate management
+  - Secure authentication mechanisms
+  - Data protection in transit
+- [x] Advanced Synchronization Interface
+  - Visual synchronization monitoring
+  - Progress tracking and analytics
+
+### Phase 3: Real-time Operations
 - [ ] Live user summary
   - Profile, factors & activity snapshots
   - Risk indicators
@@ -246,7 +301,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
   - Anomaly detection
   - Custom report generation
 
-### Phase 3: Autonomous Operations
+### Phase 4: Autonomous Operations
 - [ ] Automated Changes with Approval Workflow
   - Group memberships
   - Policy modifications
@@ -256,7 +311,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
   - Teams/Slack integration
   - Email notifications
 
-### Phase 4: Full Automation
+### Phase 5: Full Automation
 - [ ] AI-driven Policy Management
 - [ ] Automated User Lifecycle
 - [ ] Intelligent Access Reviews

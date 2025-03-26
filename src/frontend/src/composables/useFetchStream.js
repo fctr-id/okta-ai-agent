@@ -1,18 +1,28 @@
 import { ref } from "vue";
 
 const CONFIG = {
-    CONNECTION_TIMEOUT: 10000,
-    CHUNK_TIMEOUT: 10000,
-    TOTAL_TIMEOUT: 300000,
+    CONNECTION_TIMEOUT: 10000,  // Keep initial connection timeout
+    TOTAL_TIMEOUT: 300000,      // Keep total timeout as a safety measure
 };
 
 export function useFetchStream() {
     const isLoading = ref(false);
     const error = ref(null);
+    // Add new reactive references for tracking stream progress
+    const isStreaming = ref(false);
+    const progress = ref(0);
+    const totalBatches = ref(0);
+    const currentBatch = ref(0);
 
     const streamFetch = async (url, options = {}) => {
         isLoading.value = true;
         error.value = null;
+        // Reset stream tracking values
+        isStreaming.value = false;
+        progress.value = 0;
+        totalBatches.value = 0;
+        currentBatch.value = 0;
+        
         const startTime = Date.now();
         let partialChunk = "";
 
@@ -46,77 +56,87 @@ export function useFetchStream() {
 
             return {
                 async *getStream() {
-                    let lastChunkTime = Date.now();
-
                     try {
                         while (true) {
+                            // Only keep the total timeout check as a safety valve
                             if (Date.now() - startTime > CONFIG.TOTAL_TIMEOUT) {
-                                throw new Error(
-                                    `Stream exceeded maximum duration of ${CONFIG.TOTAL_TIMEOUT / 1000} seconds`
-                                );
+                                throw new Error(`Request timed out after ${CONFIG.TOTAL_TIMEOUT / 1000} seconds`);
                             }
 
                             const { value, done } = await reader.read();
                             if (done) {
-                                // Process any remaining partial chunk
-                                if (partialChunk.trim()) {
-                                    try {
-                                        yield JSON.parse(partialChunk);
-                                    } catch (parseError) {
-                                        console.error("Final chunk parse error:", parseError);
-                                    }
-                                }
                                 break;
                             }
-
-                            const now = Date.now();
-                            if (now - lastChunkTime > CONFIG.CHUNK_TIMEOUT) {
-                                throw new Error(`No data received for ${CONFIG.CHUNK_TIMEOUT / 1000} seconds`);
-                            }
-                            lastChunkTime = now;
 
                             // Combine partial chunk with new data and split by newlines
                             const chunkText = decoder.decode(value, { stream: true });
                             const chunks = (partialChunk + chunkText).split("\n");
-
-                            // Last item might be incomplete, save it for next iteration
+                            
+                            // Process all complete chunks
                             partialChunk = chunks.pop() || "";
-
-                            // Process complete chunks
+                            
                             for (const chunk of chunks) {
                                 if (chunk.trim()) {
                                     try {
-                                        yield JSON.parse(chunk);
-                                    } catch (parseError) {
-                                        console.error("Chunk parse error:", parseError);
-                                        yield {
-                                            type: "error",
-                                            content: "Error processing stream data",
-                                        };
+                                        const parsedChunk = JSON.parse(chunk);
+                                        
+                                        // Handle metadata to start streaming state
+                                        if (parsedChunk.type === 'metadata' && parsedChunk.content) {
+                                            isStreaming.value = true;
+                                            totalBatches.value = parsedChunk.content.total_batches || 0;
+                                        }
+                                        
+                                        // Handle batch data to update progress
+                                        if (parsedChunk.type === 'batch' && parsedChunk.metadata) {
+                                            currentBatch.value = parsedChunk.metadata.batch_number || 0;
+                                            if (totalBatches.value > 0) {
+                                                progress.value = Math.floor((currentBatch.value / totalBatches.value) * 100);
+                                            }
+                                        }
+                                        
+                                        // Handle completion
+                                        if (parsedChunk.type === 'complete') {
+                                            progress.value = 100;
+                                        }
+                                        
+                                        yield parsedChunk;
+                                    } catch (e) {
+                                        console.error('Failed to parse JSON chunk:', e);
+                                        yield { type: 'error', content: 'Failed to parse response' };
                                     }
                                 }
                             }
                         }
                     } catch (e) {
-                        error.value = e;
-                        throw e;
+                        if (e.name === 'AbortError') {
+                            console.log('Stream aborted by user');
+                        } else {
+                            console.error('Stream error:', e);
+                            error.value = e;
+                        }
                     } finally {
-                        reader.releaseLock();
+                        isLoading.value = false;
+                        isStreaming.value = false;
                     }
                 },
 
                 abort() {
                     controller.abort();
-                    reader?.cancel(); // Add null check
-                    error.value = new Error("Stream aborted"); // Add error state
-                    isLoading.value = false; // Ensure loading state is cleared
+                    if (reader) {
+                        reader.cancel().catch(e => console.error('Error cancelling reader:', e));
+                    }
+                    error.value = new Error("Stream aborted");
+                    isLoading.value = false;
+                    isStreaming.value = false;
+                    progress.value = 0;
                 },
             };
         } catch (e) {
             error.value = e.name === "AbortError" ? new Error("Connection timeout") : e;
-            throw error.value;
-        } finally {
             isLoading.value = false;
+            isStreaming.value = false;
+            progress.value = 0;
+            throw error.value;
         }
     };
 
@@ -129,6 +149,8 @@ export function useFetchStream() {
 
     return {
         isLoading,
+        isStreaming,
+        progress,
         error,
         streamFetch,
         postStream,

@@ -1,11 +1,14 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
-from typing import Dict, AsyncGenerator, Tuple, List
+from typing import Dict, AsyncGenerator, Tuple, List, Any
 import json
 import re
 from src.utils.logging import logger
 from src.backend.app.services.ai_service import AIService
 from html_sanitizer import Sanitizer
+from src.core.auth.dependencies import get_current_user, get_db_session
+from sqlalchemy.ext.asyncio import AsyncSession
+import sys
 
 router = APIRouter()
 
@@ -83,8 +86,22 @@ def sanitize_query(query: str) -> Tuple[str, List[str]]:
     return sanitized_query.strip(), warnings
 
 @router.post("/query")
-async def process_query(request: Request):
+async def process_query(
+    request: Request,
+    session: AsyncSession = Depends(get_db_session),
+    current_user: Any = Depends(get_current_user)
+):
     try:
+        # Extract auth_check query parameter (if this is just an auth check)
+        auth_check = request.query_params.get("auth_check") == "true"
+        
+        # If this is just an auth check, return early with success
+        if auth_check:
+            return JSONResponse(
+                status_code=200, 
+                content={"authenticated": True}
+            )
+            
         # Validate JSON schema
         try:
             data = await request.json()
@@ -112,14 +129,17 @@ async def process_query(request: Request):
         
         # Enhanced security logging
         client_ip = request.client.host if request.client else "unknown"
+        user_id = getattr(current_user, "id", "unknown")
         
         # Log security warnings if any were found
         if warnings:
-            logger.warning(f"Security warnings for query from IP {client_ip}: {', '.join(warnings)}")
+            logger.warning(f"Security warnings for query from user {user_id} (IP {client_ip}): {', '.join(warnings)}")
         
-        logger.info(f"Processing query from {client_ip}: {sanitized_query[:100]}...")
+        logger.info(f"Processing query from user {user_id} (IP {client_ip}): {sanitized_query[:100]}...")
             
         async def generate_stream():
+            # We rely on FastAPI's automatic client disconnect detection
+            # When client disconnects, the generator will be stopped automatically
             async for response in AIService.process_query(sanitized_query):
                 yield response + "\n"
 

@@ -28,7 +28,7 @@ reasoning_agent = Agent(
     
     ### Input Validation ###:
     - Make sure that the question asked by the user is relevant to the schema provided below and can be answered using the schema
-    -  For irrelevant queries which don't pertain to Okta's Identity and access management entitites like users, groups, appicatioons, policies, rules, authenticators, etc, 
+    -  For irrelevant queries which don't pertain to Okta's Identity and access management entitites like users, groups, appicatioons, policies, rules, authenticators,password_changes, dates etc, 
       - Set expanded_query to empty string
       - Provide helpful explanation about valid query formats
     - Since this involves users and groups, please tend to provide common names in the query. Request to provide the exact login or email if possible for users
@@ -61,6 +61,7 @@ reasoning_agent = Agent(
     
                 ##Key Columns to use in the queries##
             - Always use the following columns when answering queries unless more ore less are asked
+            - Always say 'list users of all statuses' unless asked for a specific status
             - For user related query Users: email, login, first_name, last_name, status
             - groups: name, description
             - applications: label, name, status
@@ -69,7 +70,7 @@ reasoning_agent = Agent(
     ### Example ###:
     User Query: "show support@fctr.io apps"
     Output: {
-        "expanded_query": "list all active applications assigned to any user with 'support' in their email or login, including both direct assignments and group-based assignments. Show only active applications",
+        "expanded_query": "list all  applications assigned to any user with 'support' in their email or login, including both direct assignments and group-based assignments. Show only  applications",
         "explanation": "Added context about: user identification by email/login, both assignment types"
     }
     
@@ -101,9 +102,12 @@ reasoning_agent = Agent(
         - Always consider both direct and group-based access
         - Use email/login for user identification
         - Use labels for application names
-        - Consider deletion status in queries    
-    
+        - Consider deletion status in queries  
+    IMPORTANT:
+    - Always show users and groups of all statuses(list users of all statuses)  unless specifically asked for a particular status
     """
+    f"{os.getenv('PRE_REASON_EXT_SYS_PROMPT')}"
+    
 )
 
 

@@ -13,11 +13,10 @@ Usage:
         users = await client.list_users()
 """
 
-import os
 import asyncio
 from okta.client import Client as OktaClient
 from datetime import datetime
-from typing import List, Any, Optional, Tuple, TypeVar, Type, Dict, Final
+from typing import List, Any, Optional, Tuple, TypeVar, Type, Dict, Final, Callable, Union
 from src.config.settings import settings
 from src.utils.logging import logger    
 from okta.models import User, Group, Policy, Application
@@ -57,11 +56,11 @@ class OktaClientWrapper:
     POLICY_PAGE_SIZE: Final[int] = 200
     AUTH_PAGE_SIZE: Final[int] = 100
     FACTOR_PAGE_SIZE: Final[int] = 50
-    FACTOR_RATE_LIMIT: Final[float] = 0  
-
+  
     
     # Rate limit delay between requests
-    RATE_LIMIT_DELAY: Final[float] = 2
+    RATE_LIMIT_DELAY: Final[float] = 0
+    USER_PROCESSING_DELAY: Final[float] = 0
 
     def __init__(self, tenant_id: str):
         self.tenant_id = tenant_id
@@ -70,7 +69,7 @@ class OktaClientWrapper:
             'token': settings.OKTA_API_TOKEN,
             'requestTimeout': 30,
             'rateLimit': {
-                'maxRetries': 3
+                'maxRetries': 1
             },
             'logging': {
                 'enabled': True,
@@ -81,6 +80,8 @@ class OktaClientWrapper:
 
     async def __aenter__(self):
         self.client = OktaClient(self.config)
+        logger.info(f"Okta concurrent limit: {settings.OKTA_CONCURRENT_LIMIT}, "
+               f"max concurrent users: {settings.MAX_CONCURRENT_USERS}")        
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -91,21 +92,25 @@ class OktaClientWrapper:
         method, 
         response_type: Type[T], 
         page_size: int,
-        query_params: Optional[Dict] = None
-    ) -> List[Dict]:
+        query_params: Optional[Dict] = None,
+        processor_func: Optional[Callable] = None  # New parameter
+    ) -> Union[List[Dict], int]:  # Return type can now be List or count
         """
-        Handle API pagination following Okta SDK patterns.
+        Handle API pagination following Okta SDK patterns with optional streaming.
         
         Args:
             method: Okta API method to call
             response_type: Expected response model type
             page_size: Number of records per page
             query_params: Additional query parameters
-            
+            processor_func: Optional function to process each batch immediately
+                
         Returns:
-            List of API response dictionaries
+            List of API response dictionaries if no processor_func,
+            Otherwise returns total count of processed records
         """
         all_results = []
+        total_processed = 0
         params = query_params or {}
         params['limit'] = page_size
         
@@ -121,13 +126,13 @@ class OktaClientWrapper:
                     results, resp, err = response
                     if err:
                         logger.error(f"API error: {err}")
-                        return []
+                        return [] if not processor_func else 0
                 elif len(response) == 2:
                     results, resp = response
                     err = None
                 else:
                     logger.error(f"Unexpected response tuple length: {len(response)}")
-                    return []
+                    return [] if not processor_func else 0
             else:
                 results = response
                 resp = getattr(response, 'response', None)
@@ -135,11 +140,21 @@ class OktaClientWrapper:
     
             # Process first page results
             if results:
-                all_results.extend([
+                page_results = [
                     r.as_dict() if hasattr(r, 'as_dict') else r 
                     for r in results
-                ])
-                logger.debug(f"Retrieved page 1 with {len(results)} records. Has next: {resp.has_next() if resp else False}")
+                ]
+                
+                page_count = len(page_results)
+                total_processed += page_count
+                
+                # Either process immediately or accumulate
+                if processor_func:
+                    await processor_func(page_results)
+                else:
+                    all_results.extend(page_results)
+                    
+                logger.debug(f"Retrieved page 1 with {page_count} records. Has next: {resp.has_next() if resp else False}")
             
             # Handle pagination using SDK pattern
             page = 1
@@ -161,8 +176,17 @@ class OktaClientWrapper:
                             r.as_dict() if hasattr(r, 'as_dict') else r 
                             for r in next_results
                         ]
-                        all_results.extend(page_results)
-                        logger.debug(f"Retrieved page {page} with {len(page_results)} records")
+                        
+                        page_count = len(page_results)
+                        total_processed += page_count
+                        
+                        # Either process immediately or accumulate
+                        if processor_func:
+                            await processor_func(page_results)
+                        else:
+                            all_results.extend(page_results)
+                            
+                        logger.debug(f"Retrieved page {page} with {page_count} records")
                     
                     # Update response for next iteration
                     resp = next_resp
@@ -175,37 +199,92 @@ class OktaClientWrapper:
                     logger.error(f"Error retrieving page {page}: {str(page_error)}")
                     break
             
-            logger.info(f"Total records retrieved: {len(all_results)}")
-            return all_results
+            if processor_func:
+                logger.info(f"Total records processed: {total_processed}")
+                return total_processed
+            else:
+                logger.info(f"Total records retrieved: {len(all_results)}")
+                return all_results
             
         except Exception as e:
             logger.error(f"Error in pagination: {str(e)}", exc_info=True)
-            raise  
+            raise 
         
    
-    async def list_users(self, since: Optional[datetime] = None) -> List[Dict]:
+    async def list_users(
+        self, 
+        since: Optional[datetime] = None,
+        processor_func: Optional[Callable] = None
+    ) -> Union[List[Dict], int]:
+        """List users with direct API-to-DB streaming support."""
         try:
-            users = await self._paginate_results(
-                self.client.list_users,  
-                User,
-                self.USER_PAGE_SIZE
-            )
-            logger.info(f"Retrieved {len(users)} total users")
-            transformed_users = []
-            
-            for i in range(0, len(users), settings.NUM_OF_THREADS):
-                batch = users[i:i + settings.NUM_OF_THREADS]
-                logger.info(f"Processing batch {i//settings.NUM_OF_THREADS + 1} with {len(batch)} users")
+            if processor_func:
+                # Direct streaming mode
+                total_processed = 0
                 
-                # Process batch concurrently
-                batch_tasks = [self._process_single_user(user) for user in batch]
-                batch_results = await asyncio.gather(*batch_tasks)
-                transformed_users.extend(batch_results)
+                # Process function that transforms and forwards data
+                async def transform_and_process(batch):
+                    nonlocal total_processed
+                    
+                    logger.info(f"Processing batch of {len(batch)} users")
+                    
+                    # Use settings.MAX_CONCURRENT_USERS instead of settings.NUM_OF_THREADS
+                    for i in range(0, len(batch), settings.MAX_CONCURRENT_USERS):
+                        small_batch = batch[i:i + settings.MAX_CONCURRENT_USERS]
+                        
+                        # Process users one by one with delay instead of concurrently
+                        valid_results = []
+                        for user in small_batch:
+                            # Process a single user
+                            user_result = await self._process_single_user(user)
+                            if user_result:
+                                valid_results.append(user_result)
+                                
+                            # Add delay between users
+                            await asyncio.sleep(self.USER_PROCESSING_DELAY)
+                        
+                        # Process this batch immediately
+                        await processor_func(valid_results)
+                        
+                        # Update count
+                        total_processed += len(valid_results)
+                    
+                    logger.info(f"Completed processing batch with {len(batch)} users")
                 
-                logger.info(f"Completed batch {i//settings.NUM_OF_THREADS + 1}")
-            
-            return transformed_users
+                await self._paginate_results(
+                    self.client.list_users,
+                    User,
+                    self.USER_PAGE_SIZE,
+                    processor_func=transform_and_process
+                )
                 
+                return total_processed
+                
+            else:
+                # Original batch collection mode
+                users = await self._paginate_results(
+                    self.client.list_users,  
+                    User,
+                    self.USER_PAGE_SIZE
+                )
+                
+                logger.info(f"Retrieved {len(users)} total users")
+                transformed_users = []
+                
+                # In the else branch for batch collection mode
+                for i in range(0, len(users), settings.MAX_CONCURRENT_USERS):  # Changed from NUM_OF_THREADS
+                    batch = users[i:i + settings.MAX_CONCURRENT_USERS]         # Changed from NUM_OF_THREADS
+                    logger.info(f"Processing batch {i//settings.MAX_CONCURRENT_USERS + 1} with {len(batch)} users") 
+                    
+                    # Process batch concurrently
+                    batch_tasks = [self._process_single_user(user) for user in batch]
+                    batch_results = await asyncio.gather(*batch_tasks)
+                    transformed_users.extend(batch_results)
+                    
+                    logger.info(f"Completed batch {i//settings.MAX_CONCURRENT_USERS + 1}")
+                
+                return transformed_users
+                    
         except Exception as e:
             logger.error(f"Error listing users with relationships: {str(e)}")
             raise
@@ -233,7 +312,12 @@ class OktaClientWrapper:
             'department': user.get('profile', {}).get('department'),
             'manager': user.get('profile', {}).get('manager'),
             'created_at': parse_timestamp(user.get('created')),
-            'last_updated_at': parse_timestamp(user.get('lastUpdated')),            
+            'last_updated_at': parse_timestamp(user.get('lastUpdated')),
+            'password_changed_at': parse_timestamp(user.get('passwordChanged')),
+            'user_type': user.get('profile', {}).get('userType'),
+            'country_code': user.get('profile', {}).get('countryCode'),
+            'title': user.get('profile', {}).get('title'),
+            'organization': user.get('profile', {}).get('organization'),            
             'factors': factors,
             'app_links': app_links,
             'group_memberships': group_memberships
@@ -245,54 +329,93 @@ class OktaClientWrapper:
         )
         return transformed_user          
 
-    async def list_groups(self, since: Optional[datetime] = None) -> List[Dict]:
+    async def list_groups(
+        self, 
+        since: Optional[datetime] = None,
+        processor_func: Optional[Callable] = None
+    ) -> Union[List[Dict], int]:
         """
-        Fetch groups with app assignments in parallel batches.
+        Fetch groups with app assignments with optional streaming.
         
         Args:
             since: Optional timestamp for incremental sync
+            processor_func: Optional function to process batches immediately
             
         Returns:
-            List of group dictionaries with:
-            - Basic group data
-            - Application assignments
-            
-        Handles parallel processing of app assignments.
+            If processor_func is provided: Count of processed records
+            Otherwise: List of group dictionaries with relationships
         """
         try:
-            query_params = None
-            if since:
-                since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                #query_params = {"filter": f"lastUpdated gt \"{since_str}\""}
-            
-            # Get initial groups list
-            results = await self._paginate_results(
-                self.client.list_groups,
-                Group,
-                self.GROUP_PAGE_SIZE,
-                query_params
-            )
-            
-            transformed_groups = []
-            # Process in batches
-            for i in range(0, len(results), settings.NUM_OF_THREADS):
-                batch = results[i:i + settings.NUM_OF_THREADS]
-                tasks = [self._transform_group_with_apps(group) for group in batch]
+            if processor_func:
+                # Direct streaming mode
+                total_processed = 0
                 
-                # Execute batch
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Process function that transforms and forwards data
+                async def transform_and_process(batch):
+                    nonlocal total_processed
+                    
+                    logger.info(f"Processing batch of {len(batch)} groups")
+                    
+                    # Process batch concurrently
+                    batch_tasks = [self._transform_group_with_apps(group) for group in batch]
+                    batch_results = await asyncio.gather(*batch_tasks)
+                    
+                    # Filter out failures
+                    valid_results = [r for r in batch_results if r]
+                    
+                    # Process this batch immediately
+                    await processor_func(valid_results)
+                    
+                    # Update count
+                    total_processed += len(valid_results)
+                    
+                    logger.info(f"Completed processing batch with {len(valid_results)} groups")
                 
-                # Process results
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Error processing group: {result}")
-                        continue
-                    transformed_groups.append(result)
+                # Use streaming pagination with processor
+                await self._paginate_results(
+                    self.client.list_groups,
+                    Group,
+                    self.GROUP_PAGE_SIZE,
+                    processor_func=transform_and_process
+                )
                 
-                logger.info(f"Processed batch of {len(batch)} groups")
-            
-            return transformed_groups
-            
+                return total_processed
+                
+            else:
+                # Original batch collection mode
+                query_params = None
+                if since:
+                    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    #query_params = {"filter": f"lastUpdated gt \"{since_str}\""}
+                
+                # Get initial groups list
+                results = await self._paginate_results(
+                    self.client.list_groups,
+                    Group,
+                    self.GROUP_PAGE_SIZE,
+                    query_params
+                )
+                
+                transformed_groups = []
+                # Process in batches
+                for i in range(0, len(results), settings.MAX_CONCURRENT_USERS):
+                    batch = results[i:i + settings.MAX_CONCURRENT_USERS]
+                    tasks = [self._transform_group_with_apps(group) for group in batch]
+                    
+                    # Execute batch
+                    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Process results
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            logger.error(f"Error processing group: {result}")
+                            continue
+                        transformed_groups.append(result)
+                    
+                    logger.info(f"Processed batch of {len(batch)} groups")
+                
+                return transformed_groups
+                
         except Exception as e:
             logger.error(f"Error listing groups: {str(e)}")
             raise
@@ -317,51 +440,87 @@ class OktaClientWrapper:
             logger.error(f"Error transforming group with apps: {str(e)}")
             raise
 
-    async def list_applications(self, since: Optional[datetime] = None) -> List[Dict]:
+    async def list_applications(
+        self, 
+        since: Optional[datetime] = None,
+        processor_func: Optional[Callable] = None
+    ) -> Union[List[Dict], int]:
         """
-        Transform raw application data to normalized format.
+        List applications with optional direct streaming to DB.
         
         Args:
-            app: Raw application data from API
+            since: Optional timestamp for incremental sync (not used)
+            processor_func: Function to process batches immediately
             
         Returns:
-            Normalized application dictionary with:
-            - Basic app data
-            - SSO settings
-            - Security settings
-            - UI settings
-            - Timestamps
-            
-        Handles nested data extraction safely.
+            If processor_func is provided: Count of processed records
+            Otherwise: List of transformed application dictionaries
         """
         try:
-            # Get initial applications list
-            results = await self._paginate_results(
-                self.client.list_applications,
-                Application,
-                self.APP_PAGE_SIZE
-            )
-            
-            transformed_apps = []
-            # Process in batches
-            for i in range(0, len(results), settings.NUM_OF_THREADS):
-                batch = results[i:i + settings.NUM_OF_THREADS]
-                tasks = [self._transform_application(app) for app in batch]
+            if processor_func:
+                # Direct streaming mode
+                total_processed = 0
                 
-                # Execute batch
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Process function that transforms and forwards data
+                async def transform_and_process(batch):
+                    nonlocal total_processed
+                    
+                    logger.info(f"Processing batch of {len(batch)} applications")
+                    
+                    # Process batch concurrently
+                    batch_tasks = [self._transform_application(app) for app in batch]
+                    batch_results = await asyncio.gather(*batch_tasks)
+                    
+                    # Filter out failures
+                    valid_results = [r for r in batch_results if r]
+                    
+                    # Process this batch immediately
+                    await processor_func(valid_results)
+                    
+                    # Update count
+                    total_processed += len(valid_results)
+                    
+                    logger.info(f"Completed processing batch with {len(valid_results)} applications")
                 
-                # Process results
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        logger.error(f"Error processing application: {result}")
-                        continue
-                    transformed_apps.append(result)
+                # Use streaming pagination with processor
+                await self._paginate_results(
+                    self.client.list_applications,
+                    Application,
+                    self.APP_PAGE_SIZE,
+                    processor_func=transform_and_process
+                )
                 
-                logger.info(f"Processed batch of {len(batch)} applications")
+                return total_processed
             
-            return transformed_apps
-            
+            else:
+                # Original batch collection mode
+                # Get initial applications list
+                results = await self._paginate_results(
+                    self.client.list_applications,
+                    Application,
+                    self.APP_PAGE_SIZE
+                )
+                
+                transformed_apps = []
+                # Process in batches
+                for i in range(0, len(results), settings.MAX_CONCURRENT_USERS):
+                    batch = results[i:i + settings.MAX_CONCURRENT_USERS]
+                    tasks = [self._transform_application(app) for app in batch]
+                    
+                    # Execute batch
+                    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    # Process results
+                    for result in batch_results:
+                        if isinstance(result, Exception):
+                            logger.error(f"Error processing application: {result}")
+                            continue
+                        transformed_apps.append(result)
+                    
+                    logger.info(f"Processed batch of {len(batch)} applications")
+                
+                return transformed_apps
+                
         except Exception as e:
             logger.error(f"Error listing applications: {str(e)}")
             raise
@@ -429,8 +588,22 @@ class OktaClientWrapper:
             return None
 
 
-    async def list_policies(self, since: Optional[datetime] = None) -> List[Dict]:
-        """List policies with proper object handling"""
+    async def list_policies(
+        self, 
+        since: Optional[datetime] = None,
+        processor_func: Optional[Callable] = None
+    ) -> Union[List[Dict], int]:
+        """
+        List policies with optional API-to-DB streaming support.
+        
+        Args:
+            since: Optional timestamp filter
+            processor_func: Function to process batches immediately
+            
+        Returns:
+            If processor_func is provided: Count of processed records
+            Otherwise: List of policy dictionaries
+        """
         try:
             # Basic policy types
             base_policies = [
@@ -440,128 +613,229 @@ class OktaClientWrapper:
                 'ACCESS_POLICY'    # IdP discovery
             ]
             
-            all_policies = []
-            
-            for policy_type in base_policies:
-                logger.info(f"Fetching policies of type: {policy_type}")
-                query_params = {
-                    "type": policy_type,
-                    "limit": 200
-                }
+            if processor_func:
+                # Direct streaming mode
+                total_processed = 0
                 
-                if since:
-                    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                    query_params["filter"] = f"lastUpdated gt \"{since_str}\""
+                for policy_type in base_policies:
+                    logger.info(f"Fetching policies of type: {policy_type}")
+                    query_params = {
+                        "type": policy_type,
+                        "limit": 200
+                    }
+                    
+                    if since:
+                        since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                        query_params["filter"] = f"lastUpdated gt \"{since_str}\""
+                    
+                    # Define processor for this policy type
+                    async def transform_and_process_policies(batch):
+                        nonlocal total_processed
+                        
+                        transformed = []
+                        for policy in batch:
+                            if isinstance(policy, dict):
+                                policy_dict = {
+                                    'okta_id': policy.get('id'),
+                                    'name': policy.get('name'),
+                                    'description': policy.get('description'),
+                                    'status': policy.get('status'),
+                                    'type': policy_type,
+                                    'created_at': parse_timestamp(policy.get('created')),
+                                    'last_updated_at': parse_timestamp(policy.get('lastUpdated'))
+                                }
+                            else:
+                                policy_dict = {
+                                    'okta_id': getattr(policy, 'id', None),
+                                    'name': getattr(policy, 'name', None),
+                                    'description': getattr(policy, 'description', None),
+                                    'status': getattr(policy, 'status', None),
+                                    'type': policy_type,
+                                    'created_at': parse_timestamp(getattr(policy, 'created', None)),
+                                    'last_updated_at': parse_timestamp(getattr(policy, 'lastUpdated', None))
+                                }
+                            transformed.append(policy_dict)
+                        
+                        if transformed:
+                            # Process this batch immediately
+                            await processor_func(transformed)
+                            
+                            # Update count
+                            batch_count = len(transformed)
+                            total_processed += batch_count
+                            
+                            logger.info(f"Processed {batch_count} {policy_type} policies, total: {total_processed}")
+                    
+                    try:
+                        # Stream this policy type
+                        await self._paginate_results(
+                            self.client.list_policies,
+                            Policy,
+                            self.POLICY_PAGE_SIZE,
+                            query_params,
+                            processor_func=transform_and_process_policies
+                        )
+                    except Exception as e:
+                        logger.error(f"Error processing {policy_type} policies: {str(e)}")
+                        continue
                 
-                try:
-                    response = await self.client.list_policies(query_params)
-                    policies = response[0] if isinstance(response, tuple) else response
-                    
-                    # Convert policy objects to dict
-                    transformed = []
-                    for policy in policies:
-                        policy_dict = {
-                            'okta_id': policy.id,
-                            'name': policy.name,
-                            'description': policy.description,
-                            'status': policy.status,
-                            'type': policy_type,
-                            'created_at': parse_timestamp(getattr(policy, 'created', None)),
-                            'last_updated_at': parse_timestamp(getattr(policy, 'lastUpdated', None))                            
-                        }
-                        transformed.append(policy_dict)
-                    
-                    all_policies.extend(transformed)
-                    logger.info(f"Retrieved {len(transformed)} {policy_type} policies")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing {policy_type} policies: {str(e)}")
-                    continue
-            
-            return all_policies
+                return total_processed
                 
+            else:
+                # Original batch collection mode
+                all_policies = []
+                
+                for policy_type in base_policies:
+                    logger.info(f"Fetching policies of type: {policy_type}")
+                    query_params = {
+                        "type": policy_type,
+                        "limit": 200
+                    }
+                    
+                    if since:
+                        since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                        query_params["filter"] = f"lastUpdated gt \"{since_str}\""
+                    
+                    try:
+                        response = await self.client.list_policies(query_params)
+                        policies = response[0] if isinstance(response, tuple) else response
+                        
+                        # Convert policy objects to dict
+                        transformed = []
+                        for policy in policies:
+                            policy_dict = {
+                                'okta_id': policy.id,
+                                'name': policy.name,
+                                'description': policy.description,
+                                'status': policy.status,
+                                'type': policy_type,
+                                'created_at': parse_timestamp(getattr(policy, 'created', None)),
+                                'last_updated_at': parse_timestamp(getattr(policy, 'lastUpdated', None))
+                            }
+                            transformed.append(policy_dict)
+                        
+                        all_policies.extend(transformed)
+                        logger.info(f"Retrieved {len(transformed)} {policy_type} policies")
+                        
+                    except Exception as e:
+                        logger.error(f"Error processing {policy_type} policies: {str(e)}")
+                        continue
+                
+                return all_policies
+                    
         except Exception as e:
             logger.error(f"Error listing policies: {str(e)}")
             raise
     
 
-    async def list_authenticators(self, since: Optional[datetime] = None) -> List[Dict]:
-        """List authenticators with pagination"""
-        try:
-            results = await self._paginate_results(
-                self.client.list_authenticators,
-                Any,
-                self.AUTH_PAGE_SIZE
-            )
+    async def list_authenticators(
+        self, 
+        since: Optional[datetime] = None,
+        processor_func: Optional[Callable] = None
+    ) -> Union[List[Dict], int]:
+        """
+        List authenticators with optional API-to-DB streaming support.
+        
+        Args:
+            since: Optional timestamp filter (not used)
+            processor_func: Function to process batches immediately
             
-            return [{
-                'okta_id': r['id'],
-                'name': r.get('name'),
-                'status': r.get('status'),
-                'type': r.get('type')
-            } for r in results]
+        Returns:
+            If processor_func is provided: Count of processed records
+            Otherwise: List of authenticator dictionaries
+        """
+        try:
+            if processor_func:
+                # Direct streaming mode
+                total_processed = 0
+                
+                # Process function that transforms and forwards data
+                async def transform_and_process(batch):
+                    nonlocal total_processed
+                    
+                    logger.info(f"Processing batch of {len(batch)} authenticators")
+                    
+                    # Transform authenticators
+                    transformed_batch = [{
+                        'okta_id': r['id'],
+                        'name': r.get('name'),
+                        'status': r.get('status'),
+                        'type': r.get('type')
+                    } for r in batch]
+                    
+                    # Process this batch immediately
+                    await processor_func(transformed_batch)
+                    
+                    # Update count
+                    total_processed += len(transformed_batch)
+                    
+                    logger.info(f"Completed processing batch with {len(transformed_batch)} authenticators")
+                
+                # Use streaming pagination with processor
+                await self._paginate_results(
+                    self.client.list_authenticators,
+                    Any,
+                    self.AUTH_PAGE_SIZE,
+                    processor_func=transform_and_process
+                )
+                
+                return total_processed
+                
+            else:
+                # Original batch collection mode
+                results = await self._paginate_results(
+                    self.client.list_authenticators,
+                    Any,
+                    self.AUTH_PAGE_SIZE
+                )
+                
+                return [{
+                    'okta_id': r['id'],
+                    'name': r.get('name'),
+                    'status': r.get('status'),
+                    'type': r.get('type')
+                } for r in results]
+                
         except Exception as e:
             logger.error(f"Error listing authenticators: {str(e)}")
             raise
         
     async def list_user_factors(self, user_ids: List[str]) -> List[Dict]:
-        """
-        Fetch MFA factors for users in parallel batches.
-        
-        Args:
-            user_ids: List of Okta user IDs
-            
-        Returns:
-            List of factor dictionaries with:
-            - Factor type and provider
-            - Status and configuration
-            - Device details for push factors
-            
-        Handles:
-        - Parallel batch processing
-        - Rate limiting
-        - Error handling per user
-        """        
+        """Fetch MFA factors for users - sequential processing to avoid rate limits"""
         try:
-            logger.info(f"Starting list_user_factors for {len(user_ids)} users")
             if not user_ids:
                 return []
         
             all_factors = []
             valid_ids = [uid for uid in user_ids if isinstance(uid, str) and len(uid) > 10]
     
-            for i in range(0, len(valid_ids), settings.NUM_OF_THREADS):
-                batch = valid_ids[i:i + settings.NUM_OF_THREADS]
-                logger.info(f"Processing batch of {len(batch)} users")
-                tasks = [self.client.list_factors(user_id) for user_id in batch]
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-                for user_id, result in zip(batch, batch_results):
-                    if isinstance(result, Exception):
-                        logger.error(f"Error fetching factors for user {user_id}: {result}")
-                        continue
-    
+            # Process sequentially - no batching
+            for user_id in valid_ids:
+                try:
+                    result = await self.client.list_factors(user_id)
                     factors, resp, err = result
                     if err:
                         logger.error(f"API error for user {user_id}: {err}")
                         continue
     
-                    #logger.info(f"Found {len(factors)} raw factors for user {user_id}")
                     transformed_factors = []
                     for factor in factors:
-                        logger.debug(f"Processing factor: {vars(factor)} for user {user_id}")
                         transformed = await self._transform_factor(factor, user_id)
                         if transformed:
                             transformed_factors.append(transformed)
-                            logger.debug(f"Transformed factor: {transformed}")
     
                     all_factors.extend(transformed_factors)
-                    logger.debug(f"Added {len(transformed_factors)} factors for user {user_id}")
+                    
+                    # Small delay between users
+                    await asyncio.sleep(0.1)
+                    
+                except Exception as e:
+                    logger.error(f"Error fetching factors for user {user_id}: {str(e)}")
+                    continue
     
             return all_factors
-    
         except Exception as e:
-            logger.error(f"Error in batch factor processing: {str(e)}", exc_info=True)
+            logger.error(f"Error in factor processing: {str(e)}", exc_info=True)
             return []
         
     async def _transform_factor(self, factor, user_id: str) -> Dict:
