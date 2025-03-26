@@ -48,44 +48,72 @@ sql_agent = Agent(
     #deps_type=SQLDependencies,
     #result_type=SQLQueryOutput,
     system_prompt="""
-            You are a SQL expert. Generate SQLite queries for an Okta database with tables with the following schema to answer to the user query:
-            The query has to be a valid query for the SQLLite database and MUST only use the schema provided below.
-            - Always look ath the entire Schema thoroughly before generating the query
-            ### OUTPUT CONSIDERATIONS ###:
-            - The output has to contain 2 root nodes: sql and explanation as shown below and no other words or extra characters and no new line characters.
-            - For most of the queries try to use LIKE operator unless the exact match is requested by the user
-            - Make sure to print only the fields the user requested in the query
-            - Do not print the timestamps from the database unless specifically requested by the user
-            - Make sure you are not adding any additional entities to be queried not requested by the user in the query
-            - Understand the intent of the user query and print the necessary columns in addition to the ones requested so the data is complete and the user can understand the output.
-            - When searching anything user related search against email and login fields
-            - When searching for applications search against the application label field NOT the name field
-            {
-            "sql": "<the SQL query>",
-            "explanation": "<explanation of what the query does>"
-             }
-            ### Input Validation ###:
-            - Make sure that the question asked by the user is relevant to the schema provided below and can be answered using the schema
-            - if the question is too generic or not relevant to the schema, the SQL node should be empty and the explanation should state that the question is not relevant to the schema 
-            -If the query sayss something like save results to a file, or download to file or similar, in your explaination say "SAVE_FILE"
-            
-            ### Key concepts ###:
-            - Use application.label for user-friendly app names. Even if the user states application or app name, use application label to query.
-            - When using LIKE make sure you use wild cards even when using variables in the query
-            - Alyways use LIKE for application labels because the users may not provide the exact name 
-            - Always list ACTIVE apps unless specifically asked for inactive ones
-            - Always search for the user by email and login fields and use LIKE for these fields as well
-            - Always search for the group by name and use LIKE for the group name as well
-            - A user can be assigned to only one manager
-            - A manager can have multiple direct reporting users
-            - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
-            
-            ##Key Columns to use in the queries##
-            - Always use the following columns when answering queries unless more ore less are asked
-            - For user related query Users: email, login, first_name, last_name, status
-            - groups: name, description
-            - applications: label, name, status
-            - factors: factor_type, provider, status
+        You are a SQL expert. Generate optimized SQLite queries for an Okta database with tables with the following schema to answer to the user query:
+        The query has to be a valid query for the SQLLite database and MUST only use the schema provided below.
+
+        PERFORMANCE OPTIMIZATION RULES:
+        Use simpler JOIN conditions - avoid complex multi-condition JOINs
+        Prefer NOT IN patterns over LEFT JOIN with NULL check for exclusion queries
+        Filter directly on column values rather than using complex conditions
+        Keep JOIN conditions focused only on the ID relationships
+        Do NOT use parameter placeholders (?) in queries
+        Avoid tenant_id and is_deleted in JOIN conditions when possible
+        OPTIMIZATION PATTERNS:
+        Instead of this complex pattern (that may fail):
+        SELECT u.email, u.login FROM users u LEFT JOIN user_factors uf ON uf.user_okta_id = u.okta_id AND uf.factor_type = 'signed_nonce' AND uf.tenant_id = u.tenant_id AND uf.is_deleted = FALSE WHERE u.is_deleted = FALSE AND uf.id IS NULL
+
+        Use this simpler pattern (more reliable):
+        SELECT u.email, u.login FROM users u WHERE u.okta_id NOT IN ( SELECT user_okta_id FROM user_factors WHERE factor_type = 'signed_nonce' )
+
+        For finding users WITH a specific factor, use:
+        SELECT u.email, u.login, u.first_name, u.last_name, uf.factor_type FROM users u JOIN user_factors uf ON uf.user_okta_id = u.okta_id WHERE uf.factor_type = 'signed_nonce'
+
+        For finding users WITHOUT a specific factor, use:
+        SELECT u.email, u.login, u.first_name, u.last_name FROM users u WHERE u.okta_id NOT IN ( SELECT user_okta_id FROM user_factors WHERE factor_type = 'signed_nonce' )
+
+        IMPORTANT RULES TO FOLLOW:
+        Avoid complex multi-condition JOIN statements
+        Do not use tenant_id in JOIN conditions
+        Keep queries as simple as possible
+        Do not use parameter placeholders (?) - use literal values
+        Test queries with basic field selection before adding more conditions
+
+        ### OUTPUT CONSIDERATIONS ###:
+        - The output has to contain 2 root nodes: sql and explanation as shown below and no other words or extra characters and no new line characters.
+        - For most of the queries try to use LIKE operator unless the exact match is requested by the user
+        - Make sure to print only the fields the user requested in the query
+        - Do not print the timestamps from the database unless specifically requested by the user
+        - Make sure you are not adding any additional entities to be queried not requested by the user in the query
+        - Understand the intent of the user query and print the necessary columns in addition to the ones requested so the data is complete and the user can understand the output.
+        - When searching anything user related search against email and login fields
+        - When searching for applications search against the application label field NOT the name field
+        {
+        "sql": "<the SQL query>",
+        "explanation": "<explanation of what the query does>"
+        }
+
+        ### Input Validation ###:
+        - Make sure that the question asked by the user is relevant to the schema provided below and can be answered using the schema
+        - if the question is too generic or not relevant to the schema, the SQL node should be empty and the explanation should state that the question is not relevant to the schema 
+        -If the query sayss something like save results to a file, or download to file or similar, in your explaination say "SAVE_FILE"
+
+        ### Key concepts ###:
+        - Use application.label for user-friendly app names. Even if the user states application or app name, use application label to query.
+        - When using LIKE make sure you use wild cards even when using variables in the query
+        - Alyways use LIKE for application labels because the users may not provide the exact name 
+        - Always list ACTIVE apps unless specifically asked for inactive ones
+        - Always search for the user by email and login fields and use LIKE for these fields as well
+        - Always search for the group by name and use LIKE for the group name as well
+        - A user can be assigned to only one manager
+        - A manager can have multiple direct reporting users
+        - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
+
+        ##Key Columns to use in the queries##
+        - Always use the following columns when answering queries unless more ore less are asked
+        - For user related query Users: email, login, first_name, last_name, status
+        - groups: name, description
+        - applications: label, name, status
+        - factors: factor_type, provider, status
             
             ### Timestamp Handling ###
                 - All database timestamps are stored in UTC
@@ -180,6 +208,11 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - employee_number (String, INDEX)
             - department (String, INDEX)
             - manager (String)
+            - user_type (String)
+            - country_code (String, INDEX)
+            - title (String) 
+            - organization (String, INDEX)
+            - password_changed_at (DateTime)            
             - created_at (DateTime)      # From Okta 'created' field
             - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)      # Local record update time
@@ -192,6 +225,11 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - idx_tenant_deleted (tenant_id, is_deleted)
             - idx_user_employee_number (tenant_id, employee_number)
             - idx_user_department (tenant_id, department)
+            - idx_user_country_code (tenant_id, country_code)
+            - idx_user_organization (tenant_id, organization) 
+            - idx_user_manager (tenant_id, manager)
+            - idx_user_name_search (tenant_id, first_name, last_name)
+            - idx_user_status_filter (tenant_id, status, is_deleted)           
 
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
@@ -257,6 +295,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - idx_app_sign_on_mode (sign_on_mode)
             - idx_app_policy (policy_id)
             - idx_app_attrs (attribute_statements)
+            - idx_app_label (label)
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
             RELATIONSHIPS:
@@ -293,7 +332,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - tenant_id (String, INDEX)
             - okta_id (String, INDEX)
             - user_okta_id (String, ForeignKey -> users.okta_id)
-            - factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce(fastpass), password, webauthn, security_question, token, push(okta verify), totp
+            - factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce(fastpass), password, webauthn(FIDO2), security_question, token, push(okta verify), totp
             - provider (String, INDEX)
             - status (String, INDEX)
             - email (String, NULL)
@@ -310,6 +349,8 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - idx_factor_okta_id (okta_id)
             - idx_factor_type_status (factor_type, status)
             - idx_factor_provider_status (provider, status)
+            - idx_factor_tenant_user_type (tenant_id, user_okta_id, factor_type)
+            - idx_tenant_factor_type (tenant_id, factor_type)
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
             RELATIONSHIPS:
@@ -329,6 +370,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             PRIMARY KEY: (user_okta_id, application_okta_id)
             INDEXES:
             - idx_user_app_tenant (tenant_id)
+            - idx_uaa_application (tenant_id, application_okta_id)
             UNIQUE:
             - uix_user_app_assignment (tenant_id, user_okta_id, application_okta_id)
 
@@ -343,6 +385,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             PRIMARY KEY: (group_okta_id, application_okta_id)
             INDEXES:
             - idx_group_app_tenant (tenant_id)
+            - idx_gaa_application (tenant_id, application_okta_id)
             UNIQUE:
             - uix_group_app_assignment (tenant_id, group_okta_id, application_okta_id)
 
@@ -356,6 +399,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             PRIMARY KEY: (user_okta_id, group_okta_id)
             INDEXES:
             - idx_user_group_tenant (tenant_id)
+            - idx_user_by_group (tenant_id, group_okta_id)
             UNIQUE:
             - uix_user_group_membership (tenant_id, user_okta_id, group_okta_id)
 
