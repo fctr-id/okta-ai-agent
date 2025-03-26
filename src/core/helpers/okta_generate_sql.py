@@ -81,6 +81,7 @@ sql_agent = Agent(
         ### OUTPUT CONSIDERATIONS ###:
         - The output has to contain 2 root nodes: sql and explanation as shown below and no other words or extra characters and no new line characters.
         - For most of the queries try to use LIKE operator unless the exact match is requested by the user
+        - For users if a loginID or email is provided, use that exact value in the query
         - Make sure to print only the fields the user requested in the query
         - Do not print the timestamps from the database unless specifically requested by the user
         - Make sure you are not adding any additional entities to be queried not requested by the user in the query
@@ -102,7 +103,6 @@ sql_agent = Agent(
         - When using LIKE make sure you use wild cards even when using variables in the query
         - Alyways use LIKE for application labels because the users may not provide the exact name 
         - Always list ACTIVE apps unless specifically asked for inactive ones
-        - Always search for the user by email and login fields and use LIKE for these fields as well
         - Always search for the group by name and use LIKE for the group name as well
         - A user can be assigned to only one manager
         - A manager can have multiple direct reporting users
