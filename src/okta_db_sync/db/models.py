@@ -76,6 +76,7 @@ user_application_assignments = Table(
     Column('created_at', DateTime(timezone=True), default=get_utc_now),
     Column('updated_at', DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now),
     Index('idx_user_app_tenant', 'tenant_id'),
+    Index('idx_uaa_application', 'tenant_id', 'application_okta_id'),
     UniqueConstraint('tenant_id', 'user_okta_id', 'application_okta_id', name='uix_user_app_assignment')
 )
 
@@ -90,6 +91,7 @@ group_application_assignments = Table(
     Column('created_at', DateTime(timezone=True), default=get_utc_now),
     Column('updated_at', DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now),
     Index('idx_group_app_tenant', 'tenant_id'),
+    Index('idx_gaa_application', 'tenant_id', 'application_okta_id'),
     UniqueConstraint('tenant_id', 'group_okta_id', 'application_okta_id', name='uix_group_app_assignment')
 )
 
@@ -103,6 +105,7 @@ user_group_memberships = Table(
     Column('created_at', DateTime(timezone=True), default=get_utc_now),
     Column('updated_at', DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now),
     Index('idx_user_group_tenant', 'tenant_id'),
+    Index('idx_user_by_group', 'tenant_id', 'group_okta_id'),
     UniqueConstraint('tenant_id', 'user_okta_id', 'group_okta_id', name='uix_user_group_membership')
 )
 
@@ -119,6 +122,11 @@ class User(BaseModel):
     employee_number = Column(String, index=True)
     department = Column(String, index=True)
     manager = Column(String) 
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    user_type = Column(String, nullable=True)
+    country_code = Column(String, nullable=True, index=True)
+    title = Column(String, nullable=True)
+    organization = Column(String, nullable=True, index=True)
     
     #groups = relationship('Group', secondary=user_groups, back_populates='users', passive_deletes=True)
     #authenticators = relationship('Authenticator', secondary=user_authenticators, back_populates='users', passive_deletes=True)
@@ -133,6 +141,11 @@ class User(BaseModel):
         Index('idx_user_tenant_login', 'tenant_id', 'login'),
         Index('idx_user_employee_number', 'tenant_id', 'employee_number'),
         Index('idx_user_department', 'tenant_id', 'department'),
+        Index('idx_user_country_code', 'tenant_id', 'country_code'),
+        Index('idx_user_organization', 'tenant_id', 'organization'),
+        Index('idx_user_manager', 'tenant_id', 'manager'),
+        Index('idx_user_name_search', 'tenant_id', 'first_name', 'last_name'),
+        Index('idx_user_status_filter', 'tenant_id', 'status', 'is_deleted'),
         {'extend_existing': True}
     )
 
@@ -226,6 +239,7 @@ class Application(BaseModel):
         Index('idx_app_status', 'status'),
         Index('idx_app_sign_on_mode', 'sign_on_mode'),
         Index('idx_app_policy', 'policy_id'),
+        Index('idx_app_label', 'label'),
         Index('idx_app_attrs', 'attribute_statements', sqlite_where=text("json_valid(attribute_statements)")),
         {'extend_existing': True}
     )
@@ -307,6 +321,8 @@ class UserFactor(BaseModel):
         Index('idx_factor_okta_id', 'okta_id'),
         Index('idx_factor_type_status', 'factor_type', 'status'),
         Index('idx_factor_provider_status', 'provider', 'status'),
+        Index('idx_factor_tenant_user_type', 'tenant_id', 'user_okta_id', 'factor_type'),
+        Index('idx_tenant_factor_type', 'tenant_id', 'factor_type'),
         UniqueConstraint('tenant_id', 'user_okta_id', 'okta_id', 
                         name='uix_factor_tenant_user_okta'),
         {'extend_existing': True}

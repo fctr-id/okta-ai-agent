@@ -312,7 +312,12 @@ class OktaClientWrapper:
             'department': user.get('profile', {}).get('department'),
             'manager': user.get('profile', {}).get('manager'),
             'created_at': parse_timestamp(user.get('created')),
-            'last_updated_at': parse_timestamp(user.get('lastUpdated')),            
+            'last_updated_at': parse_timestamp(user.get('lastUpdated')),
+            'password_changed_at': parse_timestamp(user.get('passwordChanged')),
+            'user_type': user.get('profile', {}).get('userType'),
+            'country_code': user.get('profile', {}).get('countryCode'),
+            'title': user.get('profile', {}).get('title'),
+            'organization': user.get('profile', {}).get('organization'),            
             'factors': factors,
             'app_links': app_links,
             'group_memberships': group_memberships
