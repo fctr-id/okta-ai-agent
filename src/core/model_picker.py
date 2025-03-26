@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, Dict
 from pydantic import BaseModel
-from pydantic_ai.models.vertexai import GeminiModel
+from pydantic_ai.models.gemini import GeminiModel
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.google_vertex import GoogleVertexProvider  
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -43,12 +43,14 @@ class ModelConfig:
             
             return {
                 ModelType.REASONING: GeminiModel(
-                    provider=vertex_provider,
-                    model_name=reasoning_model_name
+                    reasoning_model_name,
+                    provider=vertex_provider
+                    
                 ),
                 ModelType.CODING: GeminiModel(
-                    provider=vertex_provider,
-                    model_name=coding_model_name
+                    coding_model_name,
+                    provider=vertex_provider
+                    
                 )
             }
         
