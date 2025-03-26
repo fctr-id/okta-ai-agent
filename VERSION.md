@@ -1,5 +1,11 @@
 # Version History
 
+## Current Latest: v0.3.5-beta (2025-03-26)
+- Added new user attributes -  country_code, userType, Title, organization, password_changed_at
+- Added multiple new indexex to speed up queries
+- Tweaks both to reasoning and coding agents to get better outputs from the LLMs
+- Multiple bugfixes and improvements
+
 ## Current Latest: v0.3.0-beta (2025-03-23)
 - Resolved multiple critical bugs in the data synchronization pipeline
 - Significantly enhanced Okta-to-DB synchronization performance and efficiency

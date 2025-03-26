@@ -4,7 +4,7 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">AI Agent for Okta (v0.3.0-BETA)</h2>
+<h2 style="margin-left: 10px" align="center">AI Agent for Okta (v0.3.5-BETA)</h2>
 
 This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built specifically for administrators, IAM managers, IT GRC teams and auditors, it leverages enterprise AI models to translate plain English questions into accurate data insights. Our vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
@@ -65,7 +65,7 @@ This AI agent is the first of its kind that lets you use natural language to que
 &nbsp;
 
 ## ⚠️ BREAKING CHANGES ALERT
-> **IMPORTANT**: Version 0.3.0-beta contains breaking changes. If you are using v0.3.0-beta or above, or installed after 03/23/2025, you will need to completely redo your setup to ensure compatibility.
+> **IMPORTANT**: Version 0.3.5-beta contains breaking changes. If you are using v0.3.5-beta or above, or installed after 03/26/2025, you will need to completely redo your setup to ensure compatibility. (Delete sqlLite DB and start fresh)
 
 ## ✨ What's Special?
 
@@ -234,12 +234,11 @@ All such changes will be clearly documented in release notes.
 
 | Entity | Core Fields |
 |--------|-------------|
-| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager` |
+| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager`, `password_changed_at`, `user_type`, `country_code`, `title`, `organization` |
 | Groups | `name`, `description` |
 | Applications | `name`, `label`, `status`, `sign_on_mode`, `metadata_url`, `sign_on_url`, `audience`, `destination`, `signing_kid`, `username_template`, `username_template_type`, `admin_note`, `attribute_statements`, `honor_force_authn`, `hide_ios`, `hide_web`, `policy_id`, `settings`, `features`, `visibility`, `credentials`, `licensing`, `embedded_url`, `accessibility`, `user_name_template`, `app_settings`, `app_embedded_url` |
 | UserFactors | `factor_type`, `provider`, `status`, `email`, `phone_number`, `device_type`, `device_name`, `platform` |
 | Policies | `name`, `description`, `status`, `type` |
-
 
 
 The relationship data for users -> factors, users -> groups, users -> applications 
