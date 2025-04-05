@@ -1,5 +1,5 @@
 pydantic
-pydantic-ai==0.0.45
+pydantic-ai==0.0.52
 openai
 python-dotenv
 okta
