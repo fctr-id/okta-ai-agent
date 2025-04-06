@@ -13,8 +13,8 @@
                 <div class="search-wrapper">
                     <div class="integrated-search-bar">
                         <!-- Reset button (only when results are showing and not loading) -->
-                        <transition name="fade">
-                            <div v-if="hasResults && !isLoading" class="reset-btn-container">
+                        <transition name="fade" mode="out-in">
+                            <div v-if="hasResults && !isLoading" class="reset-btn-container" key="reset-btn">
                                 <v-tooltip text="Start over" location="top">
                                     <template v-slot:activator="{ props }">
                                         <button v-bind="props" class="action-btn reset-btn" @click="resetInterface"
@@ -539,6 +539,9 @@ onMounted(() => {
     transition: all 0.7s cubic-bezier(0.22, 1, 0.36, 1);
     z-index: 50;
     will-change: transform, top;
+    backface-visibility: hidden; /* Prevent rendering artifacts */
+    -webkit-transform-style: preserve-3d;  /* Prevent rendering artifacts on webkit */
+    transform-style: preserve-3d; /* Prevent rendering artifacts */
 }
 
 .search-container.moved {
@@ -897,6 +900,7 @@ onMounted(() => {
     display: flex;
     justify-content: center;
     position: relative;
+    z-index: 40; /* Lower than search container but higher than results */
 }
 
 .question-header {
@@ -996,9 +1000,11 @@ onMounted(() => {
     display: flex;
     align-items: center;
     gap: 16px;
-    z-index: 1000;
+    z-index: 2000; /* Increased z-index to ensure it's above everything */
     min-width: 240px;
     border: 1px solid rgba(76, 100, 226, 0.1);
+    will-change: opacity, transform; /* Optimize for animation */
+    backface-visibility: hidden; /* Prevent rendering artifacts */
 }
 
 .loading-pulse {
@@ -1084,17 +1090,25 @@ onMounted(() => {
 /* Transitions */
 .fade-enter-active,
 .fade-leave-active {
-    transition: opacity 0.3s ease-out;
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 48px;
-    height: 48px;
+    transition: opacity 0.3s ease-out, transform 0.2s ease-out;
 }
 
 .fade-enter-from,
 .fade-leave-to {
     opacity: 0;
+}
+
+/* Transitions for the main fade - Fix specificity for loading indicator */
+.inline-loading-indicator.fade-enter-active,
+.inline-loading-indicator.fade-leave-active {
+    transition: opacity 0.4s ease-out, transform 0.3s ease-out;
+    transform-origin: center center;
+}
+
+.inline-loading-indicator.fade-enter-from,
+.inline-loading-indicator.fade-leave-to {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.95);
 }
 
 .fade-up-enter-active,
