@@ -4,7 +4,8 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">AI Agent for Okta (v0.3.5-BETA)</h2>
+<h2 style="margin-left: 10px" align="center">Meet Tako, an AI -powered ally for Okta</h2>
+<h2 style="margin-left: 10px" align="center"> (v0.3.6-BETA)</h2>
 
 This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built specifically for administrators, IAM managers, IT GRC teams and auditors, it leverages enterprise AI models to translate plain English questions into accurate data insights. Our vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
