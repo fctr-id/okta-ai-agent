@@ -4,21 +4,20 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Meet Tako, an AI -powered ally for Okta</h2>
-<h2 style="margin-left: 10px" align="center"> (v0.3.6-BETA)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.3.6-BETA)</h2>
 
-This AI agent is the first of its kind that lets you use natural language to query your Okta tenant's details. Built specifically for administrators, IAM managers, IT GRC teams and auditors, it leverages enterprise AI models to translate plain English questions into accurate data insights. Our vision is to evolve this into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
+Meet Tako, the first AI agent of its kind that lets you use natural language to query your Okta tenant's details. Built specifically for administrators, IAM managers, IT GRC teams and auditors, Tako leverages enterprise AI models to translate plain English questions into accurate data insights. Our vision is to evolve Tako into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
 <div align="center">
 <h3>A new web interface!</h3>
 </div>
 <p align="center">
-  <img src="docs/agent-new-web-ui.gif" alt="Okta AI Agent Demo" width="1024px" height="auto">
+  <img src="docs/agent-new-web-ui.gif" alt="Tako AI Agent Demo" width="1024px" height="auto">
 </p>
 
 <div align="center">
 <h3>Installation and Demo Video</h3>
-<p>Watch our step-by-step installation guide and feature demonstration:</p>
+<p>Watch our step-by-step installation guide and Tako feature demonstration:</p>
 <div align="center">
       <a href="https://www.youtube.com/watch?v=PC8arYq5kZk">
          <img src="https://img.youtube.com/vi/PC8arYq5kZk/0.jpg" style="width:500px">
@@ -71,21 +70,21 @@ This AI agent is the first of its kind that lets you use natural language to que
 ## ✨ What's Special?
 
 * 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLite DB
-* 💡 **Natural Language Queries** - Talk to your Okta data in simple English
-* ⚡ **Multiple AI Providers** - Leverage the power of leading AI providers:
+* 💡 **Natural Language Queries** - Talk to your Okta data with Tako using simple English
+* ⚡ **Multiple AI Providers** - Tako leverages the power of leading AI providers:
      -  Google Vertex AI (Gemini 1.5 Pro)
      -  OpenAI (GPT-4)
      -  Azure OpenAI (GPT-4)
      -  Ollama (Local, Self-hosted, use 32B+ models)
      -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
-* 🖥️ **Web Interface** - Modern UI for easier interaction with your Okta data
+* 🖥️ **Web Interface** - Modern UI for easier interaction with Tako and your Okta data
   
 
 ## 🚀 Quick Start (The No-Frills Docker Way)
 
 <div align="left">
   <h3>💡 Looking for alternative installation instructions?</h3>
-  <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides which do not rely on docker</h4>
+  <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides to get Tako running without Docker</h4>
 </div>
 
 ### Prerequisites
@@ -175,12 +174,12 @@ docker compose logs -f
 ```
 
 ### Access the Web Interface
-- 🌐 Open your browser and go to: https://localhost:8001 🌐
+- 🌐 Open your browser and go to: https://localhost:8001 to start using Tako 🌐
 
 
 ## 🆕 What's New in v0.3.0
 
-- **Web Interface** - Modern web UI for interacting with the agent, including:
+- **Web Interface** - Modern web UI for interacting with Tako, including:
   - Natural language query capabilities
   - Okta data synchronization controls
   - Entity counts and statistics dashboard
@@ -188,7 +187,7 @@ docker compose logs -f
   - Advanced filtering and sorting of results for quick data discovery
 - **Improved Data Sync Versioning & Maintenance** - Better versioning control and maintenance of synchronized data, reducing sync errors by 75%
 - **Enhanced Logging System** - More comprehensive and detailed logging for better troubleshooting and audit trails
-- **Improved Query Processing** - Better handling of complex natural language queries with 40% more accurate responses
+- **Improved Query Processing** - Tako now handles complex natural language queries with 40% more accurate responses
 - **Additional AI Provider Support** - Expanded model options including Google Vertex AI (Gemini 1.5 Pro) and self-hosted Ollama models
 - **Bug Fixes and Performance Improvements** - Enhanced stability and response quality for enterprise environments
 - **Major Sync Performance Improvements** - Up to 5x faster entity synchronization from Okta with parallel processing
@@ -196,7 +195,7 @@ docker compose logs -f
 ## 🛡️ Security & Privacy 
 
 <p align="center">
-  <img src="docs/okta_ai_agent_architecture.png" alt="Okta AI Agent Architecture" width="800" height="auto">
+  <img src="docs/okta_ai_agent_architecture.png" alt="Tako Architecture" width="800" height="auto">
 </p>
 
 ### Data Control
@@ -228,7 +227,7 @@ docker compose logs -f
 
 ⚠️ **Future Features Notice** ⚠️
 
-Future releases may introduce optional features that require sending Okta data to LLMs for summarization.
+Future Tako releases may introduce optional features that require sending Okta data to LLMs for summarization.
 All such changes will be clearly documented in release notes.
 
 ### Data Model Overview 
@@ -252,7 +251,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 ## ⚠️ Good to Know
 
 ### Beta Release 🧪
-* Testing grounds - keep it out of production!
+* Tako is still in testing grounds - keep it out of production!
 * Currently focusing on core user fields
 * Large orgs might need a coffee break during sync
 
@@ -271,7 +270,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 ## 🗺️ Roadmap
 
 ### Phase 1: Data Access & Insights
-- [x] Natural language queries for Okta data
+- [x] Tako's natural language queries for Okta data
 - [x] Multi-provider AI support
 - [x] Save details for users, apps, groups, factors, policies and their relationships
 
@@ -321,7 +320,7 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 
 ## 🆘 Need Help?
 
-Before raising an issue, check:
+Before raising an issue with Tako, check:
 1. 📝 `.env` configuration
 2. 🔑 Okta API permissions
 3. 🤖 AI provider setup
@@ -343,4 +342,4 @@ Check out [`License.md`](LICENSE) for the fine print.
 
 ---
 
-🌟 © 2024 Fctr. All rights reserved. Made with ❤️ for the Okta community.
+🌟 © 2025 Fctr. All rights reserved. Meet Tako, made with ❤️ for the Okta community.
