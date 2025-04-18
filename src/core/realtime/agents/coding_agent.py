@@ -52,7 +52,7 @@ class CodingAgent:
         if hasattr(result, 'message'):
             response_text = result.message
         else:
-            response_text = result.data if hasattr(result, 'data') else str(result)
+            response_text = result.output if hasattr(result, 'data') else str(result)
         
         # Extract code blocks for each step
         step_codes = self._extract_step_codes(response_text, len(plan.steps))

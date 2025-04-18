@@ -475,8 +475,8 @@ async def main():
             
         try:
             response = await sql_agent.run(question)
-            print("\nAgent Response:" + (response.data))
-            result = extract_json_from_text(str(response.data))
+            print("\nAgent Response:" + (response.output))
+            result = extract_json_from_text(str(response.output))
             
             print("\nGenerated SQL:")
             print("-" * 40)
@@ -486,7 +486,7 @@ async def main():
             
         except ValueError as ve:
             print(f"\nError parsing response: {str(ve)}")
-            print("Raw response:", str(response.data))
+            print("Raw response:", str(response.output))
         except Exception as e:
             print(f"\nError: {str(e)}")
         

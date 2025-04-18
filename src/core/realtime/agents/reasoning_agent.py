@@ -217,10 +217,10 @@ async def create_execution_plan(query: str) -> Tuple[RoutingResult, str]:
         raw_response = result.message if hasattr(result, 'message') else str(result)
         
         # Log some info about the result
-        logger.info(f"Created execution plan with {len(result.data.plan.steps)} steps")
+        logger.info(f"Created execution plan with {len(result.output.plan.steps)} steps")
         
         # Return both the structured data and raw response
-        return result.data, raw_response
+        return result.output, raw_response
     except Exception as e:
         logger.error(f"Failed to create execution plan: {str(e)}")
         raise ValueError(f"Failed to create execution plan: {str(e)}")

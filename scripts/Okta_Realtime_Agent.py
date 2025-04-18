@@ -74,7 +74,7 @@ async def main():
                 try:
                     # Use run() and make sure to await the coroutine properly
                     response = await routing_agent.run(query)
-                    plan_result = response.data
+                    plan_result = response.output
                     
                     # Log the raw LLM output (debug only)
                     logger.debug("Raw LLM Response: %s", response.message if hasattr(response, 'message') else str(response))

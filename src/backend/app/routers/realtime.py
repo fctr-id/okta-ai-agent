@@ -70,7 +70,7 @@ async def realtime_query(
         
         # Return results with conversation state
         return {
-            "result": result.data,
+            "result": result.output,
             "message_history": conversation_manager.serialize_conversation(user_key)
         }
     except Exception as e:
