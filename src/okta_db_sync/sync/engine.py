@@ -265,59 +265,53 @@ class SyncOrchestrator:
             logger.error(f"Error processing group relationships: {str(e)}")
             raise
 
-    # async def _process_records(
-    #     self,
-    #     session: AsyncSession,
-    #     model: Type[ModelType],
-    #     records: List[Dict],
-    #     sync_history: SyncHistory
-    # ) -> None:
-    #     """
-    #     Process entity records with relationship handling.
-        
-    #     Flow:
-    #     1. Process relationships if User/Group
-    #     2. Bulk upsert main records
-    #     3. Update sync history
-    #     4. Handle errors
-    #     """
-    #     try:
-    #         if records:
-    #             # Process relationships for users and groups
-    #             for record in records:
-    #                 if model == User:
-    #                     await self._process_user_relationships(session, record)
-    #                 elif model == Group:
-    #                     await self._process_group_relationships(session, record)
-
-    #             # Process main records
-    #             await self.db.bulk_upsert(session, model, records, self.tenant_id)
-                
-    #             # Track record count
-    #             total_records = len(records)
-                
-    #             # Update sync history
-    #             await self._update_sync_history(
-    #                 session,
-    #                 sync_history,
-    #                 SyncStatus.SUCCESS,
-    #                 total_records
-    #             )
-    #         else:
-    #             await self._update_sync_history(
-    #                 session,
-    #                 sync_history,
-    #                 SyncStatus.SUCCESS,
-    #                 0
-    #             )
-    #     except Exception as e:
-    #         await self._update_sync_history(
-    #             session,
-    #             sync_history,
-    #             SyncStatus.FAILED,
-    #             error_message=str(e)
-    #         )
-    #         raise
+    async def _process_app_relationships(
+        self,
+        session: AsyncSession,
+        app_data: Dict,
+    ) -> None:
+        """Process application relationships with cleanup of removed assignments"""
+        try:
+            # Get current assignments from Okta response
+            current_group_assignments = app_data.pop('app_group_assignments', [])
+            app_okta_id = str(app_data['okta_id'])
+            
+            # Delete all existing assignments for this application first
+            delete_all_stmt = text("""
+                DELETE FROM group_application_assignments 
+                WHERE tenant_id = :tenant_id 
+                AND application_okta_id = :app_okta_id
+            """)
+            
+            await session.execute(delete_all_stmt, {
+                'tenant_id': str(self.tenant_id),
+                'app_okta_id': app_okta_id
+            })
+    
+            # Insert current assignments
+            if current_group_assignments:
+                for assignment in current_group_assignments:
+                    insert_stmt = text("""
+                        INSERT INTO group_application_assignments 
+                        (tenant_id, group_okta_id, application_okta_id, assignment_id, created_at, updated_at)
+                        VALUES (:tenant_id, :group_okta_id, :application_okta_id, :assignment_id, :created_at, :updated_at)
+                    """)
+                    
+                    now = datetime.now(timezone.utc)
+                    await session.execute(insert_stmt, {
+                        'tenant_id': str(self.tenant_id),
+                        'group_okta_id': str(assignment['group_okta_id']),
+                        'application_okta_id': str(assignment['application_okta_id']),
+                        'assignment_id': str(assignment['assignment_id']),
+                        'created_at': now,
+                        'updated_at': now
+                    })
+    
+            logger.debug(f"Processed {len(current_group_assignments)} group assignments for app {app_okta_id}")
+            
+        except Exception as e:
+            logger.error(f"Error processing app relationships: {str(e)}")
+            raise
         
     async def _clean_entity_data(self, session: AsyncSession, model: Type[ModelType]) -> None:
         """Clean existing data for entity type"""
@@ -369,101 +363,6 @@ class SyncOrchestrator:
             logger.error(f"Error cleaning {model.__name__} data: {str(e)}")
             raise 
         
-    # async def _process_records_in_batches(
-    #     self,
-    #     session: AsyncSession,
-    #     model: Type[ModelType],
-    #     records_batch: List[Dict],
-    #     sync_history: SyncHistory,
-    #     total_processed: int = 0
-    # ) -> int:
-    #     """
-    #     Process a batch of records with relationship handling.
-    #     """
-    #     try:
-    #         if records_batch:
-    #             # Process relationships for users and groups
-    #             for record in records_batch:
-    #                 if model == User:
-    #                     await self._process_user_relationships(session, record)
-    #                 elif model == Group:
-    #                     await self._process_group_relationships(session, record)
-    
-    #             # Process main records
-    #             await self.db.bulk_upsert(session, model, records_batch, self.tenant_id)
-                
-    #             # Increment count
-    #             batch_count = len(records_batch)
-    #             total_processed += batch_count
-                
-    #             # Update sync history with incremental progress
-    #             sync_history.records_processed = total_processed
-    #             await session.commit()
-                
-    #             logger.info(f"Processed {batch_count} {model.__name__} records, total: {total_processed}")
-                
-    #         return total_processed
-            
-    #     except Exception as e:
-    #         logger.error(f"Error processing batch of {model.__name__}: {str(e)}")
-    #         raise            
-
-    # async def sync_model(
-    #     self,
-    #     model: Type[ModelType],
-    #     list_method: Callable,
-    #     batch_size: int = 100
-    # ) -> None:
-    #     """
-    #     Sync specific entity type from Okta with direct streaming to DB.
-    #     """        
-    #     logger.info(f"Starting sync for {model.__name__}")
-    #     try:
-    #         async with self.db.get_session() as session:
-    #             # Get last sync time (but don't use it for API calls)
-    #             last_sync = None
-    #             if model not in [Application]:  # Skip lastUpdated for unsupported models
-    #                 last_sync = await self.db.get_last_sync_time(session, model, self.tenant_id)
-                
-    #             # Create sync history record
-    #             sync_history = await self._create_sync_history(session, model.__name__, last_sync)
-    
-    #             try:
-    #                 # Clean existing data first
-    #                 await self._clean_entity_data(session, model)
-    #                 logger.info(f"Cleaned existing {model.__name__} data")
-                                    
-    #                 # Stream records from Okta directly to DB in batches
-    #                 total_records = 0
-                    
-    #                 # Get records in batches and process immediately
-    #                 async for records_batch in self._get_records_in_batches(model, list_method, batch_size):
-    #                     total_records = await self._process_records_in_batches(
-    #                         session, model, records_batch, sync_history, total_records
-    #                     )
-                    
-    #                 # Update final sync history
-    #                 await self._update_sync_history(
-    #                     session,
-    #                     sync_history,
-    #                     SyncStatus.SUCCESS,
-    #                     total_records
-    #                 )
-                    
-    #                 logger.info(f"Processed {total_records} {model.__name__} records")
-    
-    #             except Exception as e:
-    #                 await self._update_sync_history(
-    #                     session,
-    #                     sync_history,
-    #                     SyncStatus.FAILED,
-    #                     error_message=str(e)
-    #                 )
-    #                 raise
-    
-    #     except Exception as e:
-    #         logger.error(f"Sync error for {model.__name__}: {str(e)}")
-    #         raise
         
     async def sync_model_streaming(self, model: Type[ModelType], list_method: Callable, batch_size: int = 100) -> None:
         """Sync model with direct API-to-DB streaming (no memory accumulation)."""
@@ -559,22 +458,22 @@ class SyncOrchestrator:
             async with OktaClientWrapper(self.tenant_id) as okta:
                 logger.info(f"Starting sync in dependency order for tenant {self.tenant_id}")
                 
-                # 1. Applications first (no dependencies)
-                logger.info("Step 1: Syncing Applications")
-                await self.sync_model_streaming(Application, okta.list_applications)
-                
-                # 2. Groups second (depends on applications)
-                logger.info("Step 2: Syncing Groups")
+                # 1. Groups first (for initial sync)
+                logger.info("Step 1: Syncing Groups")
                 await self.sync_model_streaming(Group, okta.list_groups)
-                
+
+                # 2. Applications second
+                logger.info("Step 2: Syncing Applications")
+                await self.sync_model_streaming(Application, okta.list_applications)
+
                 # 3. Authenticators third (no dependencies)
                 logger.info("Step 3: Syncing Authenticators")
                 await self.sync_model_streaming(Authenticator, okta.list_authenticators)
-                
+
                 # 4. Users last (depends on groups and apps)
                 logger.info("Step 4: Syncing Users")
                 await self.sync_model_streaming(User, okta.list_users)
-                
+
                 # 5. Policies (depends on apps)
                 logger.info("Step 5: Syncing Policies")
                 await self.sync_model_streaming(Policy, okta.list_policies)
@@ -584,84 +483,7 @@ class SyncOrchestrator:
         except Exception as e:
             logger.error(f"Sync orchestration error: {str(e)}")
             raise
-        
-    # async def _get_records_in_batches(
-    #     self,
-    #     model: Type[ModelType], 
-    #     list_method: Callable,
-    #     batch_size: int = 100
-    # ):
-    #     """
-    #     Get records from Okta API in batches.
-        
-    #     Args:
-    #         model: Entity model type
-    #         list_method: Method to call for listing entities
-    #         batch_size: Batch size for processing
-            
-    #     Yields:
-    #         Batches of records
-    #     """
-    #     # Call list method without 'since' parameter to get all records
-    #     all_records = await list_method()
-        
-    #     if not all_records:
-    #         yield []
-    #         return
-            
-    #     # Process in batches
-    #     for i in range(0, len(all_records), batch_size):
-    #         batch = all_records[i:i + batch_size]
-    #         yield batch   
-            
-    # async def _create_entity_count_callback(self, session: AsyncSession, sync_history_id: int, entity_type: str):
-    #     """
-    #     Create a callback to update entity counts during streaming sync.
-    #     """
-    #     async def update_count(count: int):
-    #         # Update the specific entity count in the sync history
-    #         from src.okta_db_sync.db.models import SyncHistory
-            
-    #         sync_history = await session.get(SyncHistory, sync_history_id)
-    #         if not sync_history:
-    #             return
-                
-    #         if entity_type == 'User':
-    #             sync_history.users_count = count
-    #         elif entity_type == 'Group':
-    #             sync_history.groups_count = count
-    #         elif entity_type == 'Application':
-    #             sync_history.apps_count = count
-    #         elif entity_type == 'Policy':
-    #             sync_history.policies_count = count
-                
-    #         # Also update progress percentage based on which stage we're in
-    #         # This is a simplified approach - you might want to make this more sophisticated
-    #         entity_weights = {
-    #             'Application': 0.2,  # 20% of progress
-    #             'Group': 0.2,        # 20% of progress  
-    #             'Authenticator': 0.1, # 10% of progress
-    #             'User': 0.4,         # 40% of progress
-    #             'Policy': 0.1        # 10% of progress
-    #         }
-            
-    #         base_progress = {
-    #             'Application': 0,     # Starts at 0%
-    #             'Group': 20,          # Starts at 20%
-    #             'Authenticator': 40,  # Starts at 40% 
-    #             'User': 50,           # Starts at 50%
-    #             'Policy': 90          # Starts at 90%
-    #         }
-            
-    #         # Update progress percentage
-    #         weight = entity_weights.get(entity_type, 0.2)
-    #         base = base_progress.get(entity_type, 0)
-    #         # We'll use a simple formula where each entity type contributes to overall progress
-    #         sync_history.progress_percentage = min(99, base + int(weight * 100))
-            
-    #         await session.commit()
-            
-    #     return update_count
+    
 
     async def _process_batch_to_db(self, session: AsyncSession, model: Type[ModelType], batch: List[Dict]) -> int:
         """
@@ -685,6 +507,8 @@ class SyncOrchestrator:
                     await self._process_user_relationships(session, record)
                 elif model == Group:
                     await self._process_group_relationships(session, record)
+                elif model == Application:
+                    await self._process_app_relationships(session, record)                    
     
             # Process main records
             await self.db.bulk_upsert(session, model, batch, self.tenant_id)
