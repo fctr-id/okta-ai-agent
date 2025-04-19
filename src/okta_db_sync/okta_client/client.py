@@ -8,9 +8,10 @@ Provides async interface to Okta's API with:
 - Data transformation
 - Error handling
 - Global API request rate limiting with semaphore
+- Cancellation support
 
 Usage:
-    async with OktaClientWrapper(tenant_id) as client:
+    async with OktaClientWrapper(tenant_id, cancellation_flag) as client:
         users = await client.list_users()
 """
 
@@ -91,7 +92,7 @@ class OktaSDKLogHandler(logging.Handler):
         self.target_logger = target_logger  # The logger to forward filtered messages to
         self.last_rate_limit_msg_time = 0
         self.cooldown_seconds = 5
-        self.buffer_seconds = 3  # Add 5 seconds to reported wait time
+        self.buffer_seconds = 3  # Add buffer seconds to reported wait time
         self.rate_limit_pattern = re.compile(r'Hit rate limit\. Retry request in (\d+\.\d+|\d+) seconds\.')
     
     def emit(self, record):
@@ -191,6 +192,7 @@ class OktaClientWrapper:
     - Data transformation to match database models
     - Error handling and logging
     - Global API request rate limiting with semaphore
+    - Cancellation support
     """
     
     # API pagination limits
@@ -204,10 +206,9 @@ class OktaClientWrapper:
     # Rate limit delay between requests
     RATE_LIMIT_DELAY: Final[float] = 0.1
     
-   
-
-    def __init__(self, tenant_id: str):
+    def __init__(self, tenant_id: str, cancellation_flag=None):
         self.tenant_id = tenant_id
+        self.cancellation_flag = cancellation_flag  # Store cancellation flag
         configure_okta_sdk_logging(logger)
         self.config = {
             'orgUrl': settings.OKTA_CLIENT_ORGURL,
@@ -228,8 +229,6 @@ class OktaClientWrapper:
         logger.info(f"Initialized API semaphore with limit: {settings.OKTA_CONCURRENT_LIMIT}")
         
 
-                    
-
     async def __aenter__(self):
         self.client = OktaClient(self.config)
         logger.info(f"Okta concurrent limit: {settings.OKTA_CONCURRENT_LIMIT}, "
@@ -242,16 +241,22 @@ class OktaClientWrapper:
     async def _execute_with_semaphore(self, api_func, *args, **kwargs):
         """
         Execute an API call with semaphore control to respect rate limits.
-        
-        Args:
-            api_func: Async function to call
-            *args: Positional arguments to pass
-            **kwargs: Keyword arguments to pass
-            
-        Returns:
-            The result of the API call
         """
         try:
+            # DIAGNOSTIC: Add detailed logging about the cancellation flag
+            if self.cancellation_flag and self.cancellation_flag.is_set():
+                logger.info(f"Cancellation flag exists in _execute_with_semaphore: type={type(self.cancellation_flag)}")
+                if hasattr(self.cancellation_flag, 'is_set'):
+                    logger.info(f"Cancellation flag is_set()={self.cancellation_flag.is_set()}")
+                else:
+                    logger.info(f"Cancellation flag value={self.cancellation_flag}")
+                    
+                # Check for cancellation before acquiring semaphore
+                if (hasattr(self.cancellation_flag, 'is_set') and self.cancellation_flag.is_set()) or \
+                   (isinstance(self.cancellation_flag, bool) and self.cancellation_flag):
+                    logger.info("Cancellation requested, skipping API call")
+                    raise asyncio.CancelledError("Sync process was cancelled")
+            
             # Acquire semaphore before making API call
             async with self.api_semaphore:
                 # Execute the API call
@@ -261,9 +266,211 @@ class OktaClientWrapper:
                 await asyncio.sleep(self.RATE_LIMIT_DELAY)
                 
                 return result
-                
+                    
+        except asyncio.CancelledError:
+            logger.info("API call cancelled due to cancellation flag")
+            raise
         except Exception as e:
             logger.error(f"Error executing API call with semaphore: {str(e)}")
+            raise
+
+    async def _paginate(
+        self,
+        api_method,
+        query_params,
+        transform_batch_func,
+        processor_func=None,
+        page_size=None,
+        entity_name="items",
+        batch_size=None,
+        concurrent_transform=False,
+        *args, **kwargs
+    ) -> Union[List[Dict], int]:
+        """
+        Common pagination function for all Okta API methods.
+        
+        Args:
+            api_method: Okta API method to call
+            query_params: Query parameters for API call
+            transform_batch_func: Function to transform items in a batch
+            processor_func: Optional function to process transformed items immediately
+            page_size: Page size for logging
+            entity_name: Entity name for logging
+            batch_size: Size of batches for concurrent processing
+            concurrent_transform: If True, transform items in parallel
+            *args, **kwargs: Additional arguments to pass to API method
+            
+        Returns:
+            If processor_func provided: Count of processed records
+            Otherwise: List of transformed items
+        """
+        try:
+            logger.info(f"Starting {entity_name} sync with page size: {page_size}")
+            
+            # Tracking variables
+            total_processed = 0
+            all_items = []
+            
+            # Initial API call
+            api_response = await self._execute_with_semaphore(
+                api_method, *args, query_params=query_params, **kwargs
+            )
+            
+            # Process initial response
+            items, error = normalize_okta_response(api_response)
+            
+            if error:
+                logger.error(f"Error retrieving {entity_name}: {error}")
+                return [] if not processor_func else 0
+            
+            # Get response object for pagination
+            response = api_response[1] if isinstance(api_response, tuple) and len(api_response) > 1 else None
+            
+            # Process first page
+            if items:
+                if batch_size and concurrent_transform:
+                    # Process items in smaller batches with concurrency
+                    for i in range(0, len(items), batch_size):
+                        # Check for cancellation
+                        if self.cancellation_flag and self.cancellation_flag.is_set():
+                            logger.info(f"Cancellation requested, stopping {entity_name} processing")
+                            return [] if not processor_func else total_processed
+                            
+                        small_batch = items[i:i + batch_size]
+                        logger.debug(f"Processing batch of {len(small_batch)} {entity_name} concurrently")
+                        
+                        # Process items with concurrent transformations
+                        batch_tasks = []
+                        for item in small_batch:
+                            if asyncio.iscoroutinefunction(transform_batch_func):
+                                batch_tasks.append(transform_batch_func(item))
+                            else:
+                                batch_tasks.append(asyncio.to_thread(transform_batch_func, item))
+                        
+                        # Gather results and filter failures
+                        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                        transformed_batch = [r for r in batch_results if not isinstance(r, Exception) and r]
+                        
+                        # Process or collect the transformed batch
+                        if processor_func and transformed_batch:
+                            await processor_func(transformed_batch)
+                            total_processed += len(transformed_batch)
+                            logger.info(f"Processed {len(transformed_batch)} {entity_name}, total: {total_processed}")
+                        elif transformed_batch:
+                            all_items.extend(transformed_batch)
+                        
+                        # Short delay between batches
+                        await asyncio.sleep(0.2)
+                else:
+                    # Simple transformation for the whole batch
+                    if asyncio.iscoroutinefunction(transform_batch_func):
+                        transformed_batch = await transform_batch_func(items)
+                    else:
+                        transformed_batch = transform_batch_func(items)
+                    
+                    if processor_func and transformed_batch:
+                        await processor_func(transformed_batch)
+                        total_processed += len(transformed_batch)
+                        logger.info(f"Processed {len(transformed_batch)} {entity_name}, total: {total_processed}")
+                    elif transformed_batch:
+                        all_items.extend(transformed_batch)
+            
+            # Process remaining pages
+            page_num = 1
+            while response and hasattr(response, 'has_next') and response.has_next():
+                # Check for cancellation before fetching next page
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping {entity_name} pagination")
+                    break
+                    
+                page_num += 1
+                logger.info(f"Fetching page {page_num} of {entity_name}")
+                
+                try:
+                    # Get next page
+                    async with self.api_semaphore:
+                        next_response = await response.next()
+                        await asyncio.sleep(self.RATE_LIMIT_DELAY)
+                    
+                    # Process response
+                    items, error = normalize_okta_response(next_response)
+                    
+                    if error:
+                        logger.error(f"Error retrieving page {page_num} of {entity_name}: {error}")
+                        break
+                        
+                    if not items:
+                        logger.info(f"Page {page_num} contained no {entity_name}")
+                        continue
+                    
+                    # Process items using the same logic as the first page
+                    if batch_size and concurrent_transform:
+                        # Process items in smaller batches with concurrency
+                        for i in range(0, len(items), batch_size):
+                            # Check for cancellation
+                            if self.cancellation_flag and self.cancellation_flag.is_set():  # Check is_set() method
+                                logger.info(f"Cancellation requested, stopping {entity_name} pagination")
+                                break
+                                
+                            small_batch = items[i:i + batch_size]
+                            logger.debug(f"Processing batch of {len(small_batch)} {entity_name} from page {page_num} concurrently")
+                            
+                            # Process items with concurrent transformations
+                            batch_tasks = []
+                            for item in small_batch:
+                                if asyncio.iscoroutinefunction(transform_batch_func):
+                                    batch_tasks.append(transform_batch_func(item))
+                                else:
+                                    batch_tasks.append(asyncio.to_thread(transform_batch_func, item))
+                            
+                            # Gather results and filter failures
+                            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                            transformed_batch = [r for r in batch_results if not isinstance(r, Exception) and r]
+                            
+                            # Process or collect the transformed batch
+                            if processor_func and transformed_batch:
+                                await processor_func(transformed_batch)
+                                total_processed += len(transformed_batch)
+                                logger.info(f"Processed {len(transformed_batch)} {entity_name} from page {page_num}, total: {total_processed}")
+                            elif transformed_batch:
+                                all_items.extend(transformed_batch)
+                            
+                            # Short delay between batches
+                            await asyncio.sleep(0.2)
+                    else:
+                        # Simple transformation for the whole batch
+                        if asyncio.iscoroutinefunction(transform_batch_func):
+                            transformed_batch = await transform_batch_func(items)
+                        else:
+                            transformed_batch = transform_batch_func(items)
+                        
+                        if processor_func and transformed_batch:
+                            await processor_func(transformed_batch)
+                            total_processed += len(transformed_batch)
+                            logger.info(f"Processed {len(transformed_batch)} {entity_name} from page {page_num}, total: {total_processed}")
+                        elif transformed_batch:
+                            all_items.extend(transformed_batch)
+                    
+                except StopAsyncIteration:
+                    logger.info(f"Pagination complete after {page_num - 1} pages")
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing page {page_num} of {entity_name}: {str(e)}")
+                    break
+            
+            # Return appropriate result
+            if processor_func:
+                logger.info(f"Completed processing all {total_processed} {entity_name}")
+                return total_processed
+            else:
+                logger.info(f"Retrieved {len(all_items)} {entity_name} total")
+                return all_items
+                
+        except asyncio.CancelledError:
+            logger.info(f"Pagination cancelled for {entity_name}")
+            return [] if not processor_func else total_processed
+        except Exception as e:
+            logger.error(f"Error in pagination for {entity_name}: {str(e)}")
             raise
         
     async def list_groups(
@@ -284,7 +491,7 @@ class OktaClientWrapper:
             Otherwise: List of group dictionaries without relationships
         """
         try:
-            # Set up query parameters with page size
+            # Set up query parameters
             query_params = {"limit": self.GROUP_PAGE_SIZE}
             
             # Add filter for incremental sync if needed
@@ -292,87 +499,15 @@ class OktaClientWrapper:
                 since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 query_params["filter"] = f"lastUpdated gt \"{since_str}\""
             
-            logger.info(f"Starting groups sync with page size: {self.GROUP_PAGE_SIZE}")
-            
-            # Tracking variables
-            total_processed = 0
-            all_groups = []
-            
-            # Initial API call with semaphore protection
-            api_response = await self._execute_with_semaphore(
-                self.client.list_groups,
-                query_params=query_params
+            # Use common pagination function
+            return await self._paginate(
+                api_method=self.client.list_groups,
+                query_params=query_params,
+                transform_batch_func=self._transform_groups_batch,
+                processor_func=processor_func,
+                page_size=self.GROUP_PAGE_SIZE,
+                entity_name="groups"
             )
-            
-            # Process initial response using normalize_okta_response
-            groups, error = normalize_okta_response(api_response)
-            
-            if error:
-                logger.error(f"Error retrieving groups: {error}")
-                return [] if not processor_func else 0
-            
-            # Get response object for pagination
-            response = api_response[1] if isinstance(api_response, tuple) and len(api_response) > 1 else None
-            
-            # Process first page of results
-            if groups:
-                transformed_batch = self._transform_groups_batch(groups)
-                if processor_func:
-                    # Process this batch immediately
-                    await processor_func(transformed_batch)
-                    total_processed += len(transformed_batch)
-                    logger.info(f"Processed {len(transformed_batch)} groups, total: {total_processed}")
-                else:
-                    all_groups.extend(transformed_batch)
-            
-            # Process remaining pages using SDK's pagination
-            page_num = 1
-            while response and hasattr(response, 'has_next') and response.has_next():
-                page_num += 1
-                logger.info(f"Fetching page {page_num} of groups")
-                
-                try:
-                    # Get next page with semaphore protection
-                    async with self.api_semaphore:
-                        next_response = await response.next()
-                        await asyncio.sleep(self.RATE_LIMIT_DELAY)
-                    
-                    # Process response using normalize_okta_response
-                    groups, error = normalize_okta_response(next_response)
-                    
-                    if error:
-                        logger.error(f"Error retrieving page {page_num} of groups: {error}")
-                        break
-                        
-                    if not groups:
-                        logger.info(f"Page {page_num} contained no groups")
-                        continue
-                        
-                    # Transform the batch
-                    transformed_batch = self._transform_groups_batch(groups)
-                    
-                    # Either process or collect
-                    if processor_func:
-                        await processor_func(transformed_batch)
-                        total_processed += len(transformed_batch)
-                        logger.info(f"Processed {len(transformed_batch)} groups, total: {total_processed}")
-                    else:
-                        all_groups.extend(transformed_batch)
-                        
-                except StopAsyncIteration:
-                    logger.info(f"Pagination complete after {page_num - 1} pages")
-                    break
-                except Exception as e:
-                    logger.error(f"Error processing page {page_num} of groups: {str(e)}")
-                    break
-            
-            # Return appropriate result
-            if processor_func:
-                logger.info(f"Completed processing all {total_processed} groups")
-                return total_processed
-            else:
-                logger.info(f"Retrieved {len(all_groups)} groups total")
-                return all_groups
                 
         except Exception as e:
             logger.error(f"Error listing groups: {str(e)}")
@@ -422,7 +557,7 @@ class OktaClientWrapper:
             Otherwise: List of transformed application dictionaries
         """
         try:
-            # Set up query parameters with page size
+            # Set up query parameters
             query_params = {"limit": self.APP_PAGE_SIZE}
             
             # Add filter for incremental sync if needed
@@ -430,125 +565,17 @@ class OktaClientWrapper:
                 since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 query_params["filter"] = f"lastUpdated gt \"{since_str}\""
             
-            logger.info(f"Starting applications sync with page size: {self.APP_PAGE_SIZE}")
-            
-            # Tracking variables
-            total_processed = 0
-            all_applications = []
-            
-            # Initial API call with semaphore protection
-            api_response = await self._execute_with_semaphore(
-                self.client.list_applications,
-                query_params=query_params
+            # Use common pagination function with parallel processing
+            return await self._paginate(
+                api_method=self.client.list_applications,
+                query_params=query_params,
+                transform_batch_func=self._transform_app_with_groups,
+                processor_func=processor_func,
+                page_size=self.APP_PAGE_SIZE,
+                entity_name="applications",
+                batch_size=settings.OKTA_CONCURRENT_LIMIT,
+                concurrent_transform=True
             )
-            
-            # Process initial response using normalize_okta_response
-            apps, error = normalize_okta_response(api_response)
-            
-            # Get response object for pagination
-            response = api_response[1] if isinstance(api_response, tuple) and len(api_response) > 1 else None
-            
-            if error:
-                logger.error(f"Error retrieving applications: {error}")
-                return [] if not processor_func else 0
-            
-            # Process first page of results in smaller batches
-            if apps:
-                # Process in batches of CONCURRENT_LIMIT apps at a time
-                batch_size = settings.OKTA_CONCURRENT_LIMIT
-                for i in range(0, len(apps), batch_size):
-                    small_batch = apps[i:i + batch_size]
-                    logger.debug(f"Processing batch of {len(small_batch)} applications concurrently")
-                    
-                    # Process applications with group relationships in parallel
-                    batch_tasks = [self._transform_app_with_groups(app) for app in small_batch]
-                    batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                    
-                    # Filter out failures
-                    transformed_batch = []
-                    for result in batch_results:
-                        if isinstance(result, Exception):
-                            logger.error(f"Error processing application: {result}")
-                        elif result:
-                            transformed_batch.append(result)
-                    
-                    if processor_func and transformed_batch:
-                        # Process this batch immediately
-                        await processor_func(transformed_batch)
-                        total_processed += len(transformed_batch)
-                        logger.info(f"Processed {len(transformed_batch)} applications, total: {total_processed}")
-                    elif transformed_batch:
-                        all_applications.extend(transformed_batch)
-                    
-                    # Short delay between batches to prevent rate limiting
-                    await asyncio.sleep(0.2)
-            
-            # Process remaining pages using SDK's pagination
-            page_num = 1
-            while response and hasattr(response, 'has_next') and response.has_next():
-                page_num += 1
-                logger.info(f"Fetching page {page_num} of applications")
-                
-                try:
-                    # Get next page with semaphore protection
-                    async with self.api_semaphore:
-                        next_response = await response.next()
-                        await asyncio.sleep(self.RATE_LIMIT_DELAY)
-                    
-                    # Process next_response using normalize_okta_response
-                    apps, error = normalize_okta_response(next_response)
-                    
-                    if error:
-                        logger.error(f"Error retrieving page {page_num} of applications: {error}")
-                        break
-                    
-                    if not apps:
-                        logger.info(f"Page {page_num} contained no applications")
-                        continue
-                        
-                    # Process in batches of CONCURRENT_LIMIT apps at a time
-                    batch_size = settings.OKTA_CONCURRENT_LIMIT
-                    for i in range(0, len(apps), batch_size):
-                        small_batch = apps[i:i + batch_size]
-                        logger.debug(f"Processing batch of {len(small_batch)} applications from page {page_num} concurrently")
-                        
-                        # Process applications with group relationships in parallel
-                        batch_tasks = [self._transform_app_with_groups(app) for app in small_batch]
-                        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                        
-                        # Filter out failures
-                        transformed_batch = []
-                        for result in batch_results:
-                            if isinstance(result, Exception):
-                                logger.error(f"Error processing application: {result}")
-                            elif result:
-                                transformed_batch.append(result)
-                        
-                        if processor_func and transformed_batch:
-                            # Process this batch immediately
-                            await processor_func(transformed_batch)
-                            total_processed += len(transformed_batch)
-                            logger.info(f"Processed {len(transformed_batch)} applications, total: {total_processed}")
-                        elif transformed_batch:
-                            all_applications.extend(transformed_batch)
-                        
-                        # Short delay between batches to prevent rate limiting
-                        await asyncio.sleep(0.2)
-                        
-                except StopAsyncIteration:
-                    logger.info(f"Pagination complete after {page_num - 1} pages")
-                    break
-                except Exception as e:
-                    logger.error(f"Error processing page {page_num} of applications: {str(e)}")
-                    break
-            
-            # Return appropriate result
-            if processor_func:
-                logger.info(f"Completed processing all {total_processed} applications")
-                return total_processed
-            else:
-                logger.info(f"Retrieved {len(all_applications)} applications total")
-                return all_applications
                 
         except Exception as e:
             logger.error(f"Error listing applications: {str(e)}")
@@ -570,7 +597,7 @@ class OktaClientWrapper:
             Count of processed records
         """
         try:
-            # Set up query parameters with page size
+            # Set up query parameters
             query_params = {"limit": self.USER_PAGE_SIZE}
             
             # Add filter for incremental sync if needed
@@ -578,123 +605,20 @@ class OktaClientWrapper:
                 since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
                 query_params["filter"] = f"lastUpdated gt \"{since_str}\""
             
-            logger.info(f"Starting users sync with page size: {self.USER_PAGE_SIZE}")
-            
-            # Tracking variables
-            total_processed = 0
-            
-            # Initial API call with semaphore protection
-            api_response = await self._execute_with_semaphore(
-                self.client.list_users,
-                query_params=query_params
+            # Use common pagination function with parallel processing
+            return await self._paginate(
+                api_method=self.client.list_users,
+                query_params=query_params,
+                transform_batch_func=self._process_single_user,
+                processor_func=processor_func,
+                page_size=self.USER_PAGE_SIZE,
+                entity_name="users",
+                batch_size=settings.MAX_CONCURRENT_USERS,
+                concurrent_transform=True
             )
-            
-            # Process initial response using normalize_okta_response
-            users, error = normalize_okta_response(api_response)
-            
-            # Get response object for pagination
-            response = api_response[1] if isinstance(api_response, tuple) and len(api_response) > 1 else None
-            
-            if error:
-                logger.error(f"Error retrieving users: {error}")
-                return 0
-            
-            # Process first page of users in parallel batches
-            if users:
-                for i in range(0, len(users), settings.MAX_CONCURRENT_USERS):
-                    small_batch = users[i:i + settings.MAX_CONCURRENT_USERS]
-                    logger.debug(f"Processing batch of {len(small_batch)} users concurrently")
-                    
-                    # Process users concurrently within batch
-                    tasks = []
-                    for user in small_batch:
-                        tasks.append(self._process_single_user(user))
-                    
-                    # Wait for all tasks to complete
-                    batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                    
-                    # Process results
-                    valid_results = []
-                    for result in batch_results:
-                        if isinstance(result, Exception):
-                            logger.error(f"Error processing user: {str(result)}")
-                        elif result:
-                            valid_results.append(result)
-                    
-                    # Process this batch immediately
-                    if valid_results and processor_func:
-                        await processor_func(valid_results)
-                        total_processed += len(valid_results)
-                        logger.info(f"Processed {len(valid_results)} users, total: {total_processed}")
-                    
-                    # Short delay between batches to prevent rate limiting
-                    await asyncio.sleep(0.2)
-            
-            # Process remaining pages using SDK's pagination
-            page_num = 1
-            while response and hasattr(response, 'has_next') and response.has_next():
-                page_num += 1
-                logger.info(f"Fetching page {page_num} of users")
-                
-                try:
-                    # Get next page with semaphore protection
-                    async with self.api_semaphore:
-                        next_response = await response.next()
-                        await asyncio.sleep(self.RATE_LIMIT_DELAY)
-                    
-                    # Process next_response using normalize_okta_response
-                    users, error = normalize_okta_response(next_response)
-                    
-                    if error:
-                        logger.error(f"Error retrieving page {page_num} of users: {error}")
-                        break
-                    
-                    if not users:
-                        logger.info(f"Page {page_num} contained no users")
-                        continue
-                        
-                    # Process users in this page concurrently within batch
-                    for i in range(0, len(users), settings.MAX_CONCURRENT_USERS):
-                        small_batch = users[i:i + settings.MAX_CONCURRENT_USERS]
-                        logger.debug(f"Processing batch of {len(small_batch)} users from page {page_num} concurrently")
-                        
-                        # Process users concurrently within batch
-                        tasks = []
-                        for user in small_batch:
-                            tasks.append(self._process_single_user(user))
-                        
-                        # Wait for all tasks to complete
-                        batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                        
-                        # Process results
-                        valid_results = []
-                        for result in batch_results:
-                            if isinstance(result, Exception):
-                                logger.error(f"Error processing user: {str(result)}")
-                            elif result:
-                                valid_results.append(result)
-                        
-                        # Process this batch immediately
-                        if valid_results and processor_func:
-                            await processor_func(valid_results)
-                            total_processed += len(valid_results)
-                            logger.info(f"Processed {len(valid_results)} users, total: {total_processed}")
-                        
-                        # Short delay between batches to prevent rate limiting
-                        await asyncio.sleep(0.2)
-                
-                except StopAsyncIteration:
-                    logger.info(f"Pagination complete after {page_num - 1} pages")
-                    break
-                except Exception as e:
-                    logger.error(f"Error processing page {page_num} of users: {str(e)}")
-                    break
-            
-            logger.info(f"Completed processing all {total_processed} users")
-            return total_processed
                 
         except Exception as e:
-            logger.error(f"Error listing users with relationships: {str(e)}")
+            logger.error(f"Error listing users: {str(e)}")
             raise
         
     async def _process_single_user(self, user) -> Dict:
@@ -862,6 +786,11 @@ class OktaClientWrapper:
             all_policies = []
             
             for policy_type in base_policies:
+                # Check for cancellation between policy types
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping policy sync")
+                    break
+                
                 logger.info(f"Fetching policies of type: {policy_type}")
                 query_params = {
                     "type": policy_type,
@@ -873,115 +802,48 @@ class OktaClientWrapper:
                     query_params["filter"] = f"lastUpdated gt \"{since_str}\""
                 
                 try:
-                    # Initial API call with semaphore protection
-                    api_response = await self._execute_with_semaphore(
-                        self.client.list_policies,
-                        query_params
+                    # Use common pagination function for each policy type
+                    # Create a transform function specifically for this policy type
+                    def transform_policy_batch(policies, policy_type=policy_type):
+                        transformed_batch = []
+                        for policy in policies:
+                            try:
+                                # First try object attribute access
+                                policy_dict = {
+                                    'okta_id': getattr(policy, 'id', None),
+                                    'name': getattr(policy, 'name', None),
+                                    'description': getattr(policy, 'description', None),
+                                    'status': getattr(policy, 'status', None),
+                                    'type': policy_type,
+                                    'created_at': parse_timestamp(getattr(policy, 'created', None)),
+                                    'last_updated_at': parse_timestamp(getattr(policy, 'lastUpdated', None))
+                                }
+                                
+                                # Ensure we have the required fields
+                                if policy_dict['okta_id'] and policy_dict['name']:
+                                    transformed_batch.append(policy_dict)
+                                else:
+                                    logger.warning(f"Skipping policy with missing data: {policy}")
+                                    
+                            except Exception as e:
+                                logger.error(f"Error transforming policy: {e}")
+                        return transformed_batch
+                    
+                    # Process this policy type
+                    result = await self._paginate(
+                        api_method=self.client.list_policies,
+                        query_params=query_params,
+                        transform_batch_func=transform_policy_batch,
+                        processor_func=processor_func,
+                        page_size=self.POLICY_PAGE_SIZE,
+                        entity_name=f"{policy_type} policies"
                     )
                     
-                    # Process initial response using normalize_okta_response
-                    policies, error = normalize_okta_response(api_response)
-                    
-                    # Get response object for pagination
-                    response = api_response[1] if isinstance(api_response, tuple) and len(api_response) > 1 else None
-                    
-                    if error:
-                        logger.error(f"Error retrieving {policy_type} policies: {error}")
-                        continue
-                        
-                    # Transform and process policies
-                    transformed_batch = []
-                    for policy in policies:
-                        try:
-                            # First try object attribute access - the classes don't have get()
-                            policy_dict = {
-                                'okta_id': getattr(policy, 'id', None),
-                                'name': getattr(policy, 'name', None),
-                                'description': getattr(policy, 'description', None),
-                                'status': getattr(policy, 'status', None),
-                                'type': policy_type,
-                                'created_at': parse_timestamp(getattr(policy, 'created', None)),
-                                'last_updated_at': parse_timestamp(getattr(policy, 'lastUpdated', None))
-                            }
-                            
-                            # Ensure we have the required fields
-                            if policy_dict['okta_id'] and policy_dict['name']:
-                                transformed_batch.append(policy_dict)
-                            else:
-                                logger.warning(f"Skipping policy with missing data: {policy}")
-                                
-                        except Exception as e:
-                            logger.error(f"Error transforming policy: {e}")
-                    
-                    # Process first page
-                    if processor_func and transformed_batch:
-                        # Process batch immediately
-                        await processor_func(transformed_batch)
-                        total_processed += len(transformed_batch)
-                        logger.info(f"Processed {len(transformed_batch)} {policy_type} policies")
-                    elif transformed_batch:
-                        all_policies.extend(transformed_batch)
-                    
-                    # Process pagination for this policy type
-                    page_num = 1
-                    while response and hasattr(response, 'has_next') and response.has_next():
-                        page_num += 1
-                        logger.info(f"Fetching page {page_num} of {policy_type} policies")
-                        
-                        try:
-                            # Get next page with semaphore protection
-                            async with self.api_semaphore:
-                                next_response = await response.next()
-                                await asyncio.sleep(self.RATE_LIMIT_DELAY)
-                            
-                            # Process next_response using normalize_okta_response
-                            policies, error = normalize_okta_response(next_response)
-                            
-                            if error:
-                                logger.error(f"Error on page {page_num} for {policy_type} policies: {error}")
-                                break
-                            
-                            if not policies:
-                                continue
-                                
-                            # Transform policies
-                            transformed_batch = []
-                            for policy in policies:
-                                try:
-                                    # Use consistent attribute access for policy objects
-                                    policy_dict = {
-                                        'okta_id': getattr(policy, 'id', None),
-                                        'name': getattr(policy, 'name', None),
-                                        'description': getattr(policy, 'description', None),
-                                        'status': getattr(policy, 'status', None),
-                                        'type': policy_type,
-                                        'created_at': parse_timestamp(getattr(policy, 'created', None)),
-                                        'last_updated_at': parse_timestamp(getattr(policy, 'lastUpdated', None))
-                                    }
-                                    
-                                    # Ensure we have the required fields
-                                    if policy_dict['okta_id'] and policy_dict['name']:
-                                        transformed_batch.append(policy_dict)
-                                    else:
-                                        logger.warning(f"Skipping policy with missing data: {policy}")
-                                        
-                                except Exception as e:
-                                    logger.error(f"Error transforming policy: {e}")
-                            
-                            if processor_func and transformed_batch:
-                                # Process batch immediately
-                                await processor_func(transformed_batch)
-                                total_processed += len(transformed_batch)
-                                logger.info(f"Processed {len(transformed_batch)} {policy_type} policies on page {page_num}")
-                            elif transformed_batch:
-                                all_policies.extend(transformed_batch)
-                                
-                        except StopAsyncIteration:
-                            logger.info(f"Pagination complete after {page_num - 1} pages")
-                            break
-                        except Exception as e:
-                            logger.error(f"Error processing page {page_num} of policies: {str(e)}")
-                            break
+                    # Accumulate results
+                    if processor_func:
+                        total_processed += result
+                    else:
+                        all_policies.extend(result)
                 
                 except Exception as e:
                     logger.error(f"Error processing {policy_type} policies: {str(e)}")
@@ -1065,6 +927,11 @@ class OktaClientWrapper:
     
             # Process sequentially - no batching
             for user_id in valid_ids:
+                # Check for cancellation
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping factor processing")
+                    break
+                
                 try:
                     # Use semaphore for API request
                     api_response = await self._execute_with_semaphore(
@@ -1144,6 +1011,11 @@ class OktaClientWrapper:
         try:
             logger.debug(f"Fetching app links for user {user_okta_id}")
             
+            # Check for cancellation
+            if self.cancellation_flag and self.cancellation_flag.is_set():
+                logger.info(f"Cancellation requested, skipping app links for user {user_okta_id}")
+                return []
+            
             # Use correct SDK method with semaphore
             api_response = await self._execute_with_semaphore(
                 self.client.list_app_links,
@@ -1190,6 +1062,11 @@ class OktaClientWrapper:
             # Handle pagination if needed
             page_num = 1
             while response and hasattr(response, 'has_next') and response.has_next():
+                # Check for cancellation
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping app links pagination for user {user_okta_id}")
+                    break
+                
                 page_num += 1
                 
                 try:
@@ -1245,6 +1122,11 @@ class OktaClientWrapper:
     async def get_user_groups(self, user_okta_id: str) -> List[Dict]:
         """Get groups a user is a member of"""
         try:
+            # Check for cancellation
+            if self.cancellation_flag and self.cancellation_flag.is_set():
+                logger.info(f"Cancellation requested, skipping groups for user {user_okta_id}")
+                return []
+                
             # Use SDK's method with semaphore
             api_response = await self._execute_with_semaphore(
                 self.client.list_user_groups,
@@ -1274,6 +1156,11 @@ class OktaClientWrapper:
             # Handle pagination if needed
             page_num = 1
             while response and hasattr(response, 'has_next') and response.has_next():
+                # Check for cancellation
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping groups pagination for user {user_okta_id}")
+                    break
+                
                 page_num += 1
                 
                 try:
@@ -1315,6 +1202,11 @@ class OktaClientWrapper:
         try:
             logger.debug(f"Fetching groups for application {app_okta_id}")
             
+            # Check for cancellation
+            if self.cancellation_flag and self.cancellation_flag.is_set():
+                logger.info(f"Cancellation requested, skipping groups for app {app_okta_id}")
+                return []
+                
             # Set pagination parameters
             query_params = {"limit": 100}  # Use a larger page size for efficiency
             
@@ -1349,6 +1241,11 @@ class OktaClientWrapper:
             # Handle pagination
             page_num = 1
             while response and hasattr(response, 'has_next') and response.has_next():
+                # Check for cancellation
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping groups pagination for app {app_okta_id}")
+                    break
+                
                 page_num += 1
                 logger.debug(f"Fetching page {page_num} of groups for application {app_okta_id}")
                 
@@ -1392,6 +1289,11 @@ class OktaClientWrapper:
     async def get_group_apps(self, group_okta_id: str) -> List[Dict]:
         """Get applications assigned to a group using SDK's list_group_assigned_applications"""
         try:
+            # Check for cancellation
+            if self.cancellation_flag and self.cancellation_flag.is_set():
+                logger.info(f"Cancellation requested, skipping apps for group {group_okta_id}")
+                return []
+                
             # Use SDK's method with semaphore
             api_response = await self._execute_with_semaphore(
                 self.client.list_group_assigned_applications,
@@ -1422,6 +1324,11 @@ class OktaClientWrapper:
             # Handle pagination if needed
             page_num = 1
             while response and hasattr(response, 'has_next') and response.has_next():
+                # Check for cancellation
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping apps pagination for group {group_okta_id}")
+                    break
+                    
                 page_num += 1
                 logger.debug(f"Fetching page {page_num} of apps for group {group_okta_id}")
                 

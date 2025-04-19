@@ -42,10 +42,11 @@ class SyncOrchestrator:
     - Sync history tracking
     - Error recovery
     """    
-    def __init__(self, tenant_id: str, db: DatabaseOperations = None):
+    def __init__(self, tenant_id: str, db: DatabaseOperations = None, cancellation_flag=None):
         self.tenant_id = tenant_id
         self.db = db or DatabaseOperations()
         self._initialized = False
+        self.cancellation_flag = cancellation_flag
 
     async def _initialize(self) -> None:
         if not self._initialized:
@@ -446,40 +447,67 @@ class SyncOrchestrator:
         Run entity syncs in sequential order to manage dependencies.
         
         Flow:
-        1. Applications first (no dependencies)
-        2. Groups second (depends on applications)
+        1. Groups first (for initial sync)
+        2. Applications second
         3. Authenticators third (no dependencies)
         4. Users last (depends on groups and apps)
         5. Policies (depends on apps)
+        
+        Supports cancellation via cancellation_flag attribute.
         """
         try:
             await self._initialize()
             
-            async with OktaClientWrapper(self.tenant_id) as okta:
+            # Pass the cancellation flag to the OktaClientWrapper
+            async with OktaClientWrapper(self.tenant_id, self.cancellation_flag) as okta:
                 logger.info(f"Starting sync in dependency order for tenant {self.tenant_id}")
                 
+                # Check cancellation before each major step
                 # 1. Groups first (for initial sync)
-                logger.info("Step 1: Syncing Groups")
-                await self.sync_model_streaming(Group, okta.list_groups)
-
+                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
+                    logger.info("Step 1: Syncing Groups")
+                    await self.sync_model_streaming(Group, okta.list_groups)
+                else:
+                    logger.info("Sync cancelled - skipping Groups")
+                    return
+                    
                 # 2. Applications second
-                logger.info("Step 2: Syncing Applications")
-                await self.sync_model_streaming(Application, okta.list_applications)
-
+                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
+                    logger.info("Step 2: Syncing Applications")
+                    await self.sync_model_streaming(Application, okta.list_applications)
+                else:
+                    logger.info("Sync cancelled - skipping remaining steps")
+                    return
+    
                 # 3. Authenticators third (no dependencies)
-                logger.info("Step 3: Syncing Authenticators")
-                await self.sync_model_streaming(Authenticator, okta.list_authenticators)
-
+                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
+                    logger.info("Step 3: Syncing Authenticators")
+                    await self.sync_model_streaming(Authenticator, okta.list_authenticators)
+                else:
+                    logger.info("Sync cancelled - skipping remaining steps")
+                    return
+    
                 # 4. Users last (depends on groups and apps)
-                logger.info("Step 4: Syncing Users")
-                await self.sync_model_streaming(User, okta.list_users)
-
+                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
+                    logger.info("Step 4: Syncing Users")
+                    await self.sync_model_streaming(User, okta.list_users)
+                else:
+                    logger.info("Sync cancelled - skipping remaining steps")
+                    return
+    
                 # 5. Policies (depends on apps)
-                logger.info("Step 5: Syncing Policies")
-                await self.sync_model_streaming(Policy, okta.list_policies)
+                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
+                    logger.info("Step 5: Syncing Policies")
+                    await self.sync_model_streaming(Policy, okta.list_policies)
+                    
+                    logger.info(f"Sync completed for tenant {self.tenant_id}")
+                else:
+                    logger.info("Sync cancelled - skipping remaining steps")
+                    return
                 
-                logger.info(f"Sync completed for tenant {self.tenant_id}")
-                
+        except asyncio.CancelledError:
+            logger.info(f"Sync for tenant {self.tenant_id} was cancelled")
+            raise
         except Exception as e:
             logger.error(f"Sync orchestration error: {str(e)}")
             raise
