@@ -57,7 +57,7 @@ AVAILABLE TOOLS:
 {build_tools_documentation()}
 
 ### Key Concepts ###
-
+IMPORTANT: Unless the user query specifes to look for an exact match, you should always use CO , sw or other search paramaters for the queries
 1. User Access:
    - Users can access applications through direct assignment or group membership
    - Users are identified by email or login
@@ -200,7 +200,7 @@ Your task is to create the most efficient execution plan using the available too
 routing_agent = Agent(
     model,
     system_prompt=system_prompt,
-    result_type=RoutingResult
+    output_type=RoutingResult
 )
 
 async def create_execution_plan(query: str) -> Tuple[RoutingResult, str]:

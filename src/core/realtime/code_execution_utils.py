@@ -34,6 +34,10 @@ class CodeValidator:
         'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'index', 'count', 'sort', 'reverse',
         # String methods
         'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower'
+        #pagination methods
+        'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages',
+        #general methods
+        'get'
     }
     
     @classmethod

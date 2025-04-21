@@ -47,6 +47,7 @@ class CodingAgent:
         # Generate code
         logger.info(f"Generating code for {len(plan.steps)} workflow steps")
         result = await self.agent.run(prompt)
+        logger.info(f"Result: {result.all_messages_json()}")
         
         # Extract the message content
         if hasattr(result, 'message'):
@@ -92,6 +93,7 @@ class CodingAgent:
         {steps_text}
         
         IMPORTANT INSTRUCTIONS:
+        NOTE: To any of the code generated for steps do not use comments or docsrtrings.
         1. Generate separate code blocks for EACH step
         2. Each code block should be marked with <STEP-1>, <STEP-2>, etc.
         3. Each step should explicitly RETURN its final result
