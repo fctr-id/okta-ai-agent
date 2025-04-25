@@ -4,6 +4,7 @@ import re
 from pydantic_ai import Agent
 from src.core.model_picker import ModelConfig, ModelType
 from src.utils.logging import logger
+from src.utils.security_config import ALLOWED_SDK_METHODS
 
 # Import tool registry instead of individual tool modules
 from src.utils.tool_registry import build_tools_documentation
@@ -35,6 +36,8 @@ class RoutingResult(BaseModel):
 # Get the appropriate model
 model = ModelConfig.get_model(ModelType.REASONING)
 
+allowed_methods = ", ".join(sorted(list(ALLOWED_SDK_METHODS)))
+
 # Create the system prompt
 system_prompt = f"""
 You are the Okta Query Coordinator, responsible for planning how to fulfill user queries about Okta resources.
@@ -46,6 +49,7 @@ SAFETY: If a query is irrelevant or cannot be answered, return an empty response
 3. Do NOT create or invent new tool names even if they seem logical
 4. Any attempt to use unlisted tools will cause security violations and be rejected
 5. If a query cannot be solved with the available tools, say so clearly rather than inventing new tools
+6. The only allowed Okta SDK methods are: {allowed_methods}
 
 AVAILABLE TOOLS:
 

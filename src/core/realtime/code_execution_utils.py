@@ -20,6 +20,15 @@ from src.utils.error_handling import (
 )
 from src.utils.logging import get_logger
 
+# Import security controls from centralized config
+from src.utils.security_config import (
+    ALLOWED_SDK_METHODS,
+    ALLOWED_UTILITY_METHODS,
+    ALLOWED_MODULES,
+    DANGEROUS_PATTERNS,
+    is_code_safe
+)
+
 # Configure logging
 logger = get_logger(__name__)
 
@@ -28,56 +37,9 @@ class ReturnValueException(Exception):
     def __init__(self, value):
         self.value = value
         super().__init__(f"Return value: {value}")
-
-# Security configuration - centralized allowed SDK methods
-ALLOWED_SDK_METHODS = {
-    # User operations
-    'get_user', 'get_users', 'list_users',
-    
-    # Group operations
-    'get_group', 'list_groups', 'list_group_users',
-    'list_assigned_applications_for_group',
-    
-    # Application operations
-    'get_application', 'list_applications',
-    'list_application_assignments',
-    
-    # Other operations
-    'get_logs', 'list_user_groups',
-    'list_factors', 'list_supported_factors',
-    'get_user_factors'
-}
-
-# Security configuration - allowed utility methods
-ALLOWED_UTILITY_METHODS = {
-    # Data conversion methods
-    'to_dict', 'as_dict', 'dict', 'json',
-    
-    # Common list operations
-    'append', 'extend', 'insert', 'remove', 'pop', 'clear', 
-    'index', 'count', 'sort', 'reverse',
-    
-    # String methods
-    'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
-    
-    # Pagination methods
-    'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages',
-    
-    # General methods
-    'get'
-}
-
-# Security configuration - allowed modules
-ALLOWED_MODULES = {
-    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time'
-}
     
 class CodeValidator:
     """Validates generated code for security."""
-    
-    # Reference the centralized security configurations
-    ALLOWED_MODULES = ALLOWED_MODULES
-    ALLOWED_METHODS = ALLOWED_SDK_METHODS.union(ALLOWED_UTILITY_METHODS)
     
     @classmethod
     def validate_code(cls, code: str, okta_domain: str) -> Union[bool, ValidationError]:
@@ -91,74 +53,15 @@ class CodeValidator:
         Returns:
             True if valid, ValidationError if invalid
         """
-        # Parse the code into an AST
-        try:
-            tree = ast.parse(code)
-        except SyntaxError as e:
-            return ValidationError(
-                message=f"Generated code contains syntax errors",
-                field="code",
-                context={"error": str(e)}
+        # Use centralized security validation
+        result = is_code_safe(code, okta_domain)
+        if result is not True:
+            return SecurityError(
+                message="Unauthorized code detected",
+                security_type="prohibited_code",
+                context={"code_preview": code[:100] + "..." if len(code) > 100 else code}
             )
-        
-        # Check for imports
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                module_name = node.names[0].name.split('.')[0] if isinstance(node, ast.Import) else node.module.split('.')[0]
-                if module_name not in cls.ALLOWED_MODULES:
-                    return SecurityError(
-                        message=f"Unauthorized module import",
-                        security_type="prohibited_import",
-                        context={
-                            "module": module_name,
-                            "allowed_modules": list(cls.ALLOWED_MODULES)
-                        }
-                    )
-                    
-        # Check for method calls
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                method_name = node.func.attr
-                if method_name not in cls.ALLOWED_METHODS:
-                    return SecurityError(
-                        message=f"Unauthorized method call",
-                        security_type="prohibited_method",
-                        context={
-                            "method": method_name,
-                            "allowed_methods_count": len(cls.ALLOWED_METHODS)
-                        }
-                    )
-                    
-        # Check for URL restrictions
-        url_pattern = re.compile(r'https?://([^/]+)')
-        urls = url_pattern.findall(code)
-        for url in urls:
-            if okta_domain not in url:
-                return SecurityError(
-                    message=f"Unauthorized domain in URL",
-                    security_type="prohibited_domain",
-                    context={"url": url, "allowed_domain": okta_domain}
-                )
-
-        # Look for potentially dangerous patterns
-        dangerous_patterns = [
-            (r'os\s*\.\s*system', "System command execution"),
-            (r'subprocess', "Subprocess execution"),
-            (r'exec\s*\(', "Dynamic code execution"),
-            (r'eval\s*\(', "Dynamic code evaluation"),
-            (r'__import__\s*\(', "Dynamic module import"),
-            (r'open\s*\(', "File operations"),
-            (r'input\s*\(', "User input")
-        ]
-        
-        for pattern, reason in dangerous_patterns:
-            if re.search(pattern, code):
-                return SecurityError(
-                    message=f"{reason} is not allowed",
-                    security_type="prohibited_pattern",
-                    context={"pattern": pattern, "reason": reason}
-                )
-        
+                
         return True
 
 

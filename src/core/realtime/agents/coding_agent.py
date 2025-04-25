@@ -4,7 +4,10 @@ import re
 import logging
 from pydantic_ai import Agent
 from src.core.model_picker import ModelConfig, ModelType
-from src.core.realtime.code_execution_utils import ALLOWED_SDK_METHODS, ALLOWED_UTILITY_METHODS
+from src.utils.security_config import (
+    ALLOWED_SDK_METHODS, ALLOWED_UTILITY_METHODS,
+    ALLOWED_MODULES, DANGEROUS_PATTERNS
+)
 # Add import for tool registry
 from src.utils.tool_registry import get_tool_prompt
 
