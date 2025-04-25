@@ -4,18 +4,24 @@ Provides validation, execution, and result processing for generated code.
 """
 
 from typing import Dict, List, Any, Optional, Union, Callable, Tuple
-import logging
-import time
-import ast
 import re
-import inspect
-from urllib.parse import urlparse
+import ast
 import textwrap
 import asyncio
 import json
+import time
 from datetime import datetime
+from urllib.parse import urlparse
 
-logger = logging.getLogger(__name__)
+# Import our new error handling
+from src.utils.error_handling import (
+    BaseError, SecurityError, ExecutionError, ConfigurationError, 
+    ValidationError, safe_execute, safe_execute_async, format_error_for_user, ErrorSeverity
+)
+from src.utils.logging import get_logger
+
+# Configure logging
+logger = get_logger(__name__)
 
 class ReturnValueException(Exception):
     """Exception used to capture return statements in executed code."""
@@ -74,7 +80,7 @@ class CodeValidator:
     ALLOWED_METHODS = ALLOWED_SDK_METHODS.union(ALLOWED_UTILITY_METHODS)
     
     @classmethod
-    def validate_code(cls, code: str, okta_domain: str) -> Union[bool, str]:
+    def validate_code(cls, code: str, okta_domain: str) -> Union[bool, ValidationError]:
         """
         Validate code meets security requirements.
         
@@ -83,34 +89,56 @@ class CodeValidator:
             okta_domain: Allowed Okta domain
             
         Returns:
-            True if valid, error message string if invalid
+            True if valid, ValidationError if invalid
         """
         # Parse the code into an AST
         try:
             tree = ast.parse(code)
         except SyntaxError as e:
-            return f"Generated code contains syntax errors: {str(e)}"
+            return ValidationError(
+                message=f"Generated code contains syntax errors",
+                field="code",
+                context={"error": str(e)}
+            )
         
         # Check for imports
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 module_name = node.names[0].name.split('.')[0] if isinstance(node, ast.Import) else node.module.split('.')[0]
                 if module_name not in cls.ALLOWED_MODULES:
-                    return f"Security violation: Unauthorized module import: '{module_name}'"
+                    return SecurityError(
+                        message=f"Unauthorized module import",
+                        security_type="prohibited_import",
+                        context={
+                            "module": module_name,
+                            "allowed_modules": list(cls.ALLOWED_MODULES)
+                        }
+                    )
                     
         # Check for method calls
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 method_name = node.func.attr
                 if method_name not in cls.ALLOWED_METHODS:
-                    return f"Security violation: Unauthorized method call: '{method_name}'"
+                    return SecurityError(
+                        message=f"Unauthorized method call",
+                        security_type="prohibited_method",
+                        context={
+                            "method": method_name,
+                            "allowed_methods_count": len(cls.ALLOWED_METHODS)
+                        }
+                    )
                     
         # Check for URL restrictions
         url_pattern = re.compile(r'https?://([^/]+)')
         urls = url_pattern.findall(code)
         for url in urls:
             if okta_domain not in url:
-                return f"Security violation: Unauthorized domain in URL: '{url}'"
+                return SecurityError(
+                    message=f"Unauthorized domain in URL",
+                    security_type="prohibited_domain",
+                    context={"url": url, "allowed_domain": okta_domain}
+                )
 
         # Look for potentially dangerous patterns
         dangerous_patterns = [
@@ -125,7 +153,11 @@ class CodeValidator:
         
         for pattern, reason in dangerous_patterns:
             if re.search(pattern, code):
-                return f"Security violation: {reason} is not allowed"
+                return SecurityError(
+                    message=f"{reason} is not allowed",
+                    security_type="prohibited_pattern",
+                    context={"pattern": pattern, "reason": reason}
+                )
         
         return True
 
@@ -367,40 +399,48 @@ def extract_code_from_llm_response(response: str) -> str:
         response: The raw response from the LLM
         
     Returns:
-        The extracted Python code
+        The extracted Python code or ValidationError
     """
-    # First, try to extract from XML-style tags
-    code_match = re.search(r'<CODE>(.*?)</CODE>', response, re.DOTALL)
-    if code_match:
-        return code_match.group(1).strip()
-    
-    # Next, try to extract from JSON (legacy support)
     try:
-        # Check for JSON format (either directly or in code blocks)
-        json_match = re.search(r'```json\s*(.*?)```', response, re.DOTALL) 
-        if json_match:
-            json_str = json_match.group(1).strip()
-        elif response.strip().startswith('{') and response.strip().endswith('}'):
-            json_str = response.strip()
-        else:
-            json_str = None
-            
-        if json_str:
-            data = json.loads(json_str)
-            if 'code' in data:
-                return data['code']
-    except Exception:
-        pass  # Silently continue if JSON parsing fails
-    
-    # Check for Python code blocks with ```python
-    if "```python" in response:
-        return response.split("```python")[1].split("```")[0].strip()
-    # Check for generic code blocks with ```
-    elif "```" in response:
-        return response.split("```")[1].split("```")[0].strip()
-    
-    # Otherwise return the whole response
-    return response.strip()
+        # First, try to extract from XML-style tags
+        code_match = re.search(r'<CODE>(.*?)</CODE>', response, re.DOTALL)
+        if code_match:
+            return code_match.group(1).strip()
+        
+        # Next, try to extract from JSON (legacy support)
+        try:
+            # Check for JSON format (either directly or in code blocks)
+            json_match = re.search(r'```json\s*(.*?)```', response, re.DOTALL) 
+            if json_match:
+                json_str = json_match.group(1).strip()
+            elif response.strip().startswith('{') and response.strip().endswith('}'):
+                json_str = response.strip()
+            else:
+                json_str = None
+                
+            if json_str:
+                data = json.loads(json_str)
+                if 'code' in data:
+                    return data['code']
+        except json.JSONDecodeError:
+            pass  # Silently continue if JSON parsing fails
+        
+        # Check for Python code blocks with ```python
+        if "```python" in response:
+            return response.split("```python")[1].split("```")[0].strip()
+        # Check for generic code blocks with ```
+        elif "```" in response:
+            return response.split("```")[1].split("```")[0].strip()
+        
+        # Otherwise return the whole response
+        return response.strip()
+        
+    except Exception as e:
+        return ValidationError(
+            message="Failed to extract code from LLM response",
+            original_exception=e,
+            context={"response_preview": response[:100] + "..." if len(response) > 100 else response}
+        )
 
 
 def log_execution_details(query_id: str, code: str, variables: Dict[str, Any], elapsed_time: float):
@@ -413,17 +453,17 @@ def log_execution_details(query_id: str, code: str, variables: Dict[str, Any], e
         variables: Variables from the execution
         elapsed_time: Execution time in seconds
     """
-    logger.info(f"[FLOW:{query_id}] Code execution completed in {elapsed_time:.2f}ms")
+    logger.info(f"Code execution completed in {elapsed_time:.2f}ms")
     
     # Log variables at debug level
-    logger.debug(f"[FLOW:{query_id}] Executed code:\n%s", code)
-    logger.debug(f"[FLOW:{query_id}] Variables:")
+    logger.debug(f"Executed code:\n%s", code)
+    logger.debug(f"Variables:")
     for var_name, var_value in variables.items():
         if var_name in ['err'] and var_value is not None:
-            logger.debug(f"[FLOW:{query_id}] %s = %s (ERROR DETECTED)", var_name, var_value)
+            logger.debug(f"%s = %s (ERROR DETECTED)", var_name, var_value)
         elif var_name not in ['resp', 'client']:
             var_preview = str(var_value)[:100] + '...' if len(str(var_value)) > 100 else str(var_value)
-            logger.debug(f"[FLOW:{query_id}] %s = %s = %s", var_name, type(var_value).__name__, var_preview)
+            logger.debug(f"%s = %s = %s", var_name, type(var_value).__name__, var_preview)
 
 
 async def execute_okta_code(
@@ -449,56 +489,104 @@ async def execute_okta_code(
         Dictionary with execution results and metadata
     """
     start_time = time.time()
-    logger.info(f"[FLOW:{query_id}] Validating and executing generated code")
-    logger.debug(f"[FLOW:{query_id}] Code to execute:\n{code}")
-    
-    # Step 1: Validate code for security
-    validation_result = CodeValidator.validate_code(code, okta_domain)
-    if validation_result is not True:
-        logger.warning(f"[FLOW:{query_id}] Code validation failed: {validation_result}")
-        return {
-            "result": {
-                "status": "error",
-                "error": f"Code validation failed: {validation_result}",
-                "data": None
-            },
-            "execution_time_ms": 0,
-            "code": code,
-            "success": False
-        }
-    
-    # Step 2: Prepare execution environment
-    namespace = prepare_execution_environment(okta_client, extra_context)
-    
-    # Step 3: Detect code patterns
-    has_tuple_unpacking = re.search(r'(\w+),\s*(\w+),\s*(\w+)\s*=\s*await\s+client\.', code) is not None
-    
-    # Step 4: Transform code for execution
-    modified_code = transform_code_for_execution(code)
-    
-    # Step 5: Wrap code in an execution function
-    func_code = wrap_code_in_function(modified_code)
+    logger.info(f"Validating and executing generated code")
+    logger.debug(f"Code to execute:\n{code}")
     
     try:
-        # Step 6: Execute the code with timeout protection
-        exec(func_code, namespace)
-        
-        try:
-            # Run with timeout protection
-            execution_task = namespace['_execute_step']()
-            local_vars = await asyncio.wait_for(execution_task, timeout=execution_timeout)
-        except asyncio.TimeoutError:
-            logger.error(f"[FLOW:{query_id}] Code execution timed out after {execution_timeout} seconds")
+        # Step 1: Validate code for security
+        validation_result = CodeValidator.validate_code(code, okta_domain)
+        if validation_result is not True:
+            if isinstance(validation_result, BaseError):
+                validation_result.log()
+                error_message = format_error_for_user(validation_result)
+            else:
+                error_message = str(validation_result)
+                
+            logger.warning(f"Code validation failed: {error_message}")
             return {
                 "result": {
                     "status": "error",
-                    "error": f"Execution timed out after {execution_timeout} seconds",
+                    "error": f"Code validation failed: {error_message}",
+                    "data": None
+                },
+                "execution_time_ms": 0,
+                "code": code,
+                "success": False
+            }
+        
+        # Step 2: Prepare execution environment
+        namespace = prepare_execution_environment(okta_client, extra_context)
+        
+        # Step 3: Detect code patterns
+        has_tuple_unpacking = re.search(r'(\w+),\s*(\w+),\s*(\w+)\s*=\s*await\s+client\.', code) is not None
+        
+        # Step 4: Transform code for execution
+        transformed_code, transform_error = safe_execute(
+            transform_code_for_execution,
+            code,
+            error_message="Failed to transform code for execution"
+        )
+        
+        if transform_error:
+            transform_error.log()
+            return {
+                "result": {
+                    "status": "error",
+                    "error": format_error_for_user(transform_error),
                     "data": None
                 },
                 "execution_time_ms": int((time.time() - start_time) * 1000),
                 "code": code,
                 "success": False,
-                "error": f"Execution timed out after {execution_timeout} seconds"
+                "error": format_error_for_user(transform_error)
+            }
+        
+        # Step 5: Wrap code in an execution function
+        func_code = wrap_code_in_function(transformed_code)
+        
+        # Step 6: Execute the code with timeout protection
+        exec_result, exec_error = await safe_execute_async(
+            async_execute_with_timeout,
+            func_code,
+            namespace,
+            execution_timeout,
+            error_message="Code execution failed"
+        )
+        
+        if exec_error:
+            exec_error.log()
+            return {
+                "result": {
+                    "status": "error",
+                    "error": format_error_for_user(exec_error),
+                    "data": None
+                },
+                "execution_time_ms": int((time.time() - start_time) * 1000),
+                "code": code,
+                "success": False,
+                "error": format_error_for_user(exec_error)
+            }
+        
+        # Unpack execution result
+        is_timeout, local_vars = exec_result
+        
+        # Handle timeout case
+        if is_timeout:
+            timeout_error = ExecutionError(
+                message=f"Execution timed out after {execution_timeout} seconds",
+                context={"timeout_seconds": execution_timeout}
+            )
+            timeout_error.log()
+            return {
+                "result": {
+                    "status": "error",
+                    "error": format_error_for_user(timeout_error),
+                    "data": None
+                },
+                "execution_time_ms": int((time.time() - start_time) * 1000),
+                "code": code,
+                "success": False,
+                "error": format_error_for_user(timeout_error)
             }
         
         # Step 7: Process and normalize results
@@ -506,7 +594,7 @@ async def execute_okta_code(
         
         # Step 8: Log execution details
         elapsed = time.time() - start_time
-        log_execution_details(query_id, code, variables, elapsed)
+        log_execution_details(query_id, code, variables, elapsed * 1000)
         
         # Step 9: Return execution results
         return {
@@ -519,18 +607,52 @@ async def execute_okta_code(
         }
         
     except Exception as e:
-        # Handle execution errors
-        elapsed = time.time() - start_time
-        logger.error(f"[FLOW:{query_id}] Code execution failed: {str(e)}", exc_info=True)
+        # Create a proper error object
+        error = ExecutionError(
+            message="Unexpected error during code execution",
+            original_exception=e,
+            context={"code_preview": code[:100] + "..." if len(code) > 100 else code}
+        )
+        error.log()
         
+        # Return structured error response
+        elapsed = time.time() - start_time
         return {
             "result": {
                 "status": "error",
-                "error": str(e),
+                "error": format_error_for_user(error),
                 "data": None
             },
             "execution_time_ms": int(elapsed * 1000),
             "code": code,
             "success": False,
-            "error": str(e)
+            "error": format_error_for_user(error)
         }
+
+
+async def async_execute_with_timeout(
+    func_code: str,
+    namespace: Dict[str, Any],
+    timeout: float
+) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Execute code with timeout protection.
+    
+    Args:
+        func_code: The function code to execute
+        namespace: The execution namespace
+        timeout: Timeout in seconds
+        
+    Returns:
+        Tuple of (is_timeout, local_vars)
+    """
+    # Execute the function code
+    exec(func_code, namespace)
+    
+    try:
+        # Run with timeout protection
+        execution_task = namespace['_execute_step']()
+        local_vars = await asyncio.wait_for(execution_task, timeout=timeout)
+        return False, local_vars  # Not a timeout
+    except asyncio.TimeoutError:
+        return True, {}  # Timeout occurred

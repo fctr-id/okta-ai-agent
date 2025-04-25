@@ -10,14 +10,19 @@ This module handles the execution of plans created by the Reasoning Agent:
 """
 
 from typing import Dict, List, Any, Optional, Union, Set, Tuple
-import logging
 import json
 import traceback
 import time
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from src.core.realtime.agents.base import EntityError
+# Import our new error handling
+from src.utils.error_handling import (
+    BaseError, ExecutionError, ApiError, safe_execute_async,
+    format_error_for_user, ErrorSeverity
+)
+from src.utils.logging import get_logger
+
 from src.core.realtime.okta_realtime_client import OktaRealtimeDeps
 from src.core.realtime.agents.reasoning_agent import ExecutionPlan, PlanStep
 from src.core.realtime.agents.coding_agent import coding_agent
@@ -28,10 +33,11 @@ from src.config.settings import settings
 from src.utils.tool_registry import get_tool_prompt, get_all_tools
 
 # Configure logging
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Error status constants
 ERROR_STATUSES = {"error", "not_found", "dependency_failed"}
+
 
 class StepError(BaseModel):
     """Error information for a specific execution step."""
@@ -102,7 +108,7 @@ class ExecutionManager:
         
         logger.debug(f"Initialized tool entity map with {len(self._tool_entity_map)} entries")
     
-    async def execute_plan(self, plan: ExecutionPlan) -> Union[ExecutionResult, EntityError]:
+    async def execute_plan(self, plan: ExecutionPlan) -> Union[ExecutionResult, BaseError]:
         """
         Execute a plan by generating code for all steps, then running them sequentially.
         
@@ -124,9 +130,15 @@ class ExecutionManager:
             entities_queried.update(queried_entities)
             
             # Generate code for all steps
-            code_generation_result = await self._generate_code_for_steps(plan, tool_docs)
-            if isinstance(code_generation_result, EntityError):
-                return code_generation_result
+            code_generation_result, gen_error = await safe_execute_async(
+                self._generate_code_for_steps,
+                plan,
+                tool_docs,
+                error_message="Failed to generate code for execution plan"
+            )
+            
+            if gen_error:
+                return gen_error
                 
             step_codes = code_generation_result
             
@@ -138,20 +150,38 @@ class ExecutionManager:
                 step_number = i + 1
                 
                 # Execute and process this step
-                step_result = await self._execute_step(
+                step_result, step_exec_error = await safe_execute_async(
+                    self._execute_step,
                     step=step,
                     code=code,
                     step_number=step_number,
                     step_context=step_context, 
-                    total_steps=len(plan.steps)
+                    total_steps=len(plan.steps),
+                    error_message=f"Failed to execute step {step_number}: {step.tool_name}"
                 )
+                
+                # Check if step execution itself failed (not the step logic but our code)
+                if step_exec_error:
+                    if step.critical:
+                        return step_exec_error
+                    
+                    # Non-critical step, add error and continue
+                    entity_type = self._get_entity_type(step.tool_name)
+                    errors.append(StepError(
+                        step=step.tool_name,
+                        error=format_error_for_user(step_exec_error),
+                        critical=step.critical,
+                        entity_type=entity_type,
+                        step_number=step_number
+                    ))
+                    continue
                 
                 # Update tracking variables based on step result
                 entity_type = self._get_entity_type(step.tool_name)
                 entities_queried.add(entity_type)
                 
                 # Check for critical errors that should halt execution
-                if isinstance(step_result, EntityError):
+                if isinstance(step_result, BaseError):
                     return step_result
                 
                 # Unpack the execution results
@@ -164,13 +194,7 @@ class ExecutionManager:
                 
                 # Track errors if any occurred
                 if step_error:
-                    errors.append(StepError(
-                        step=step.tool_name,
-                        error=step_error.error,
-                        critical=step.critical,
-                        entity_type=entity_type,
-                        step_number=step_number
-                    ))
+                    errors.append(step_error)
             
             # PHASE 3: RESULT PROCESSING
             # Process final result and create response
@@ -194,15 +218,14 @@ class ExecutionManager:
             )
             
         except Exception as e:
-            # Log detailed error information with traceback
-            logger.error(f"Error executing plan: {str(e)}")
-            logger.error(traceback.format_exc())
-            
-            return EntityError(
-                message=f"Execution error: {str(e)}",
-                error_type="execution_error",
-                entity="unknown"
+            # Convert to our error framework
+            error = ExecutionError(
+                message="Error executing plan",
+                original_exception=e,
+                context={"plan_steps": len(plan.steps) if plan else 0}
             )
+            error.log()
+            return error
     
     def _collect_tool_documentation(self, plan: ExecutionPlan) -> Tuple[List[str], Set[str]]:
         """
@@ -234,7 +257,7 @@ class ExecutionManager:
     
     async def _generate_code_for_steps(
         self, plan: ExecutionPlan, tool_docs: List[str]
-    ) -> Union[List[str], EntityError]:
+    ) -> Union[List[str], BaseError]:
         """
         Generate code for all steps in the plan.
         
@@ -245,37 +268,26 @@ class ExecutionManager:
         Returns:
             Either list of step codes or an error
         """
-        try:
-            # Use the coding agent to generate all step code
-            code_generation = await coding_agent.generate_workflow_code(
-                plan, 
-                tool_docs, 
-                flow_id=self.okta_deps.query_id
+        # Use the coding agent to generate all step code
+        code_generation = await coding_agent.generate_workflow_code(
+            plan, 
+            tool_docs, 
+            flow_id=self.okta_deps.query_id
+        )
+        
+        # Log the raw response at debug level only
+        logger.debug("Workflow Code Generation Response:\n%s", code_generation.raw_response)
+        
+        # Check for generation errors
+        if hasattr(code_generation, 'metadata') and code_generation.metadata.get('error'):
+            error = code_generation.metadata.get('error')
+            raise ExecutionError(
+                message=f"Code generation failed",
+                step_name="code_generation",
+                context={"error_details": error}
             )
-            
-            # Log the raw response at debug level only
-            logger.debug("Workflow Code Generation Response:\n%s", code_generation.raw_response)
-            
-            # Check for generation errors
-            if hasattr(code_generation, 'metadata') and code_generation.metadata.get('error'):
-                error = code_generation.metadata.get('error')
-                return EntityError(
-                    message=f"Code generation failed: {error}",
-                    error_type="generation_error",
-                    entity="code"
-                )
-            
-            return code_generation.step_codes
-            
-        except Exception as e:
-            logger.error(f"Error generating code: {str(e)}")
-            logger.error(traceback.format_exc())
-            
-            return EntityError(
-                message=f"Code generation failed: {str(e)}",
-                error_type="generation_error",
-                entity="code"
-            )
+        
+        return code_generation.step_codes
     
     async def _execute_step(
         self,
@@ -284,7 +296,7 @@ class ExecutionManager:
         step_number: int,
         step_context: Dict[str, Any],
         total_steps: int
-    ) -> Union[Tuple[Dict[str, Any], Dict[str, Any], Optional[StepError]], EntityError]:
+    ) -> Union[Tuple[Dict[str, Any], Dict[str, Any], Optional[StepError]], BaseError]:
         """
         Execute a single step of the plan.
         
@@ -296,95 +308,104 @@ class ExecutionManager:
             total_steps: Total number of steps in plan
             
         Returns:
-            Either tuple of (step_result, variables, error) or EntityError for critical failures
+            Either tuple of (step_result, variables, error) or BaseError for critical failures
         """
         logger.info(f"Executing step {step_number}/{total_steps}: {step.tool_name}")
         
         # Display code being executed
         self._print_step_info(step_number, step.tool_name, code)
         
-        try:
-            # Execute the code with current context
-            execution_result = await execute_okta_code(
-                code,
-                self.okta_deps.client,
-                self.okta_deps.domain,
-                self.okta_deps.query_id,
-                extra_context=step_context
-            )
-            
-            # Get entity type for this tool
-            entity_type = self._get_entity_type(step.tool_name)
-            
-            # Check if result indicates an error
-            step_error = None
-            if is_error_result(execution_result.get('result')):
-                error_msg = self._extract_error_message(execution_result)
-                logger.warning(f"Step {step.tool_name} returned error: {error_msg}")
-                print(f"Error in step {step_number}: {error_msg}")
-                
-                # Create error object
-                step_error = StepError(
-                    step=step.tool_name,
-                    error=error_msg,
-                    critical=step.critical,
-                    entity_type=entity_type,
-                    step_number=step_number
-                )
-                
-                # If critical step failed, return EntityError to halt execution
-                if step.critical:
-                    return EntityError(
-                        message=f"Critical step failed: {step.tool_name} - {error_msg}",
-                        error_type="execution_error",
-                        entity=entity_type
-                    )
-            else:
-                # Step succeeded
-                logger.info(f"Step {step.tool_name} completed successfully")
-                
-                # Display intermediate result
-                self._print_intermediate_result(execution_result.get('result'))
-                
-            # Extract variables for next steps
-            variables = execution_result.get('variables', {})
-            
-            # Log variables at debug level
-            if variables:
-                logger.debug(f"Variables after step {step_number}:")
-                for var_name, var_value in variables.items():
-                    var_preview = str(var_value)[:80] + ('...' if len(str(var_value)) > 80 else '')
-                    logger.debug(f"  {var_name}: {var_preview}")
-            
-            return execution_result, variables, step_error
-            
-        except Exception as e:
-            # Handle unexpected execution errors
-            logger.error(f"Error executing step {step.tool_name}: {str(e)}")
-            logger.error(traceback.format_exc())
-            
-            error_msg = str(e)
+        # Get entity type for this tool
+        entity_type = self._get_entity_type(step.tool_name)
+        
+        # Execute the code with current context
+        execution_result, exec_error = await safe_execute_async(
+            execute_okta_code,
+            code,
+            self.okta_deps.client,
+            self.okta_deps.domain,
+            self.okta_deps.query_id,
+            extra_context=step_context,
+            error_message=f"Error executing code for step {step.tool_name}"
+        )
+        
+        # Handle execution errors
+        if exec_error:
+            error_msg = format_error_for_user(exec_error)
+            logger.warning(f"Step {step.tool_name} execution failed: {error_msg}")
             print(f"Error in step {step_number}: {error_msg}")
             
-            # For critical steps, halt execution
-            if step.critical:
-                return EntityError(
-                    message=f"Critical step failed: {step.tool_name} - {error_msg}",
-                    error_type="execution_error",
-                    entity=self._get_entity_type(step.tool_name)
-                )
-            
-            # For non-critical steps, create error object but continue
+            # Create error object
             step_error = StepError(
                 step=step.tool_name,
                 error=error_msg,
                 critical=step.critical,
-                entity_type=self._get_entity_type(step.tool_name),
+                entity_type=entity_type,
                 step_number=step_number
             )
             
-            # Return empty result, no variables, and error
+            # If critical step failed, return error to halt execution
+            if step.critical:
+                return ExecutionError(
+                    message=f"Critical step failed: {step.tool_name}",
+                    step_name=step.tool_name,
+                    context={
+                        "step_number": step_number,
+                        "error_details": error_msg,
+                        "entity_type": entity_type
+                    },
+                    severity=ErrorSeverity.ERROR
+                )
+            
+            # For non-critical steps, return empty result with error
             return {}, {}, step_error
+        
+        # Check if result indicates an error
+        step_error = None
+        if is_error_result(execution_result.get('result')):
+            error_msg = self._extract_error_message(execution_result)
+            logger.warning(f"Step {step.tool_name} returned error: {error_msg}")
+            print(f"Error in step {step_number}: {error_msg}")
+            
+            # Create error object
+            step_error = StepError(
+                step=step.tool_name,
+                error=error_msg,
+                critical=step.critical,
+                entity_type=entity_type,
+                step_number=step_number
+            )
+            
+            # If critical step failed, return error to halt execution
+            if step.critical:
+                return ExecutionError(
+                    message=f"Critical step failed: {step.tool_name}",
+                    step_name=step.tool_name,
+                    context={
+                        "step_number": step_number,
+                        "error_details": error_msg,
+                        "entity_type": entity_type
+                    },
+                    severity=ErrorSeverity.ERROR
+                )
+        else:
+            # Step succeeded
+            logger.info(f"Step {step.tool_name} completed successfully")
+            
+            # Display intermediate result
+            self._print_intermediate_result(execution_result.get('result'))
+        
+        # Extract variables for next steps
+        variables = execution_result.get('variables', {})
+        
+        # Log variables at debug level
+        if variables:
+            logger.debug(f"Variables after step {step_number}:")
+            for var_name, var_value in variables.items():
+                var_preview = str(var_value)[:80] + ('...' if len(str(var_value)) > 80 else '')
+                logger.debug(f"  {var_name}: {var_preview}")
+        
+        return execution_result, variables, step_error
     
     def _print_step_info(self, step_number: int, tool_name: str, code: str) -> None:
         """Print information about the current step."""

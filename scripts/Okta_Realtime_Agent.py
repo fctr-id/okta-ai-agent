@@ -20,54 +20,18 @@ from typing import Optional, Dict, Any, Union, List
 project_root = Path(__file__).resolve().parent.parent
 sys.path.append(str(project_root))
 
-# Configure logging with different levels for file vs console
-import logging
-from logging.handlers import RotatingFileHandler
+# Import centralized logging configuration
+from src.utils.logging import get_logger, set_correlation_id, get_default_log_dir, generate_correlation_id
+from src.utils.error_handling import (
+    BaseError, ConfigurationError, ExecutionError, DependencyError, 
+    safe_execute_async, format_error_for_user
+)
 
-# Create logs directory if it doesn't exist
-logs_dir = project_root / "logs"
-logs_dir.mkdir(exist_ok=True)
+# Create logs directory using the utility
+logs_dir = get_default_log_dir()
 
-# Setup logging configuration
-def setup_logging():
-    """Configure logging with separate handlers for console and file."""
-    # Root logger configuration
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # Capture everything at root level
-    
-    # Clear any existing handlers
-    for handler in root_logger.handlers[:]:
-        root_logger.removeHandler(handler)
-    
-    # Console handler - show INFO and above
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                                     datefmt='%Y-%m-%d %H:%M:%S')
-    console_handler.setFormatter(console_format)
-    
-    # File handler - show DEBUG and above
-    log_file = logs_dir / "okta_agent.log"
-    file_handler = RotatingFileHandler(
-        log_file, 
-        maxBytes=10 * 1024 * 1024,  # 10 MB
-        backupCount=5
-    )
-    file_handler.setLevel(logging.DEBUG)
-    file_format = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    file_handler.setFormatter(file_format)
-    
-    # Add both handlers to root logger
-    root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
-    
-    return logging.getLogger(__name__)
-
-# Initialize logger
-logger = setup_logging()
+# Initialize logger (correlation ID is already set in logging.py)
+logger = get_logger(__name__)
 
 # Load environment variables
 load_dotenv()
@@ -81,8 +45,13 @@ try:
     from src.core.realtime.agents.reasoning_agent import routing_agent, ExecutionPlan
     from src.core.realtime.execution_manager import ExecutionManager
 except ImportError as e:
-    logger.critical(f"Failed to import required modules: {str(e)}")
-    print(f"Error: Could not import required modules. Please check your installation.")
+    error = DependencyError(
+        message="Could not import required modules",
+        dependency="core modules",
+        original_exception=e
+    )
+    error.log()
+    print(f"Error: {format_error_for_user(error)}. Please check your installation.")
     sys.exit(1)
 
 
@@ -93,7 +62,6 @@ class OktaRealtimeAgentCLI:
         """Initialize the CLI interface."""
         self.deps = None
         self.execution_manager = None
-        self.query_counter = 0
     
     async def initialize(self) -> bool:
         """
@@ -106,9 +74,15 @@ class OktaRealtimeAgentCLI:
             # Verify Okta settings
             logger.debug("Verifying Okta settings")
             if not settings.OKTA_CLIENT_ORGURL:
-                raise ValueError("Okta organization URL not configured")
+                raise ConfigurationError(
+                    message="Okta organization URL not configured",
+                    config_key="OKTA_CLIENT_ORGURL"
+                )
             if not settings.OKTA_API_TOKEN:
-                raise ValueError("Okta API token not configured")
+                raise ConfigurationError(
+                    message="Okta API token not configured",
+                    config_key="OKTA_API_TOKEN"
+                )
                 
             # Create Okta dependencies
             logger.debug("Creating Okta dependencies")
@@ -119,15 +93,19 @@ class OktaRealtimeAgentCLI:
             
             return True
             
-        except ValueError as e:
-            logger.error(f"Configuration error: {str(e)}")
-            print(f"\nConfiguration error: {str(e)}")
+        except ConfigurationError as e:
+            e.log()
+            print(f"\n{format_error_for_user(e)}")
             print("Please check your .env file or environment variables.")
             return False
             
         except Exception as e:
-            logger.error(f"Initialization error: {str(e)}", exc_info=True)
-            print(f"\nFailed to initialize Okta agent: {str(e)}")
+            error = BaseError(
+                message="Failed to initialize Okta agent",
+                original_exception=e
+            )
+            error.log()
+            print(f"\n{format_error_for_user(error)}")
             return False
     
     async def process_query(self, query: str) -> None:
@@ -137,10 +115,12 @@ class OktaRealtimeAgentCLI:
         Args:
             query: The natural language query from the user
         """
-        # Update query ID
-        self.query_counter += 1
-        query_id = f"cli-{self.query_counter}"
+        # Generate a unique correlation ID for this query
+        query_id = generate_correlation_id("q")
         self.deps.query_id = query_id
+        
+        # Set correlation ID for this query's logs
+        set_correlation_id(query_id)
         
         try:
             # Execute the query workflow
@@ -151,8 +131,13 @@ class OktaRealtimeAgentCLI:
             print("\nQuery cancelled.")
             
         except Exception as e:
-            logger.error(f"Error processing query: {str(e)}", exc_info=True)
-            print(f"\nError processing your query: {str(e)}")
+            error = ExecutionError(
+                message="Error processing query",
+                original_exception=e,
+                context={"query": query}
+            )
+            error.log()
+            print(f"\n{format_error_for_user(error)}")
             print("Please try again with a different query.")
     
     async def _create_and_execute_plan(self, query: str) -> None:
@@ -163,8 +148,16 @@ class OktaRealtimeAgentCLI:
             query: User query to execute
         """
         # Phase 1: Plan Creation
-        plan_result = await self._create_execution_plan(query)
-        if not plan_result:
+        plan_result, error = await safe_execute_async(
+            self._create_execution_plan,
+            query,
+            error_message="Failed to create execution plan",
+            log_error=True
+        )
+        
+        if error or not plan_result:
+            if error:
+                print(f"\n{format_error_for_user(error)}")
             return
             
         # Phase 2: Ask for confirmation
@@ -190,27 +183,21 @@ class OktaRealtimeAgentCLI:
         print("\n1. Creating execution plan...")
         logger.info(f"Creating execution plan for query: {query}")
         
-        try:
-            # Use routing agent to create plan
-            response = await routing_agent.run(query)
-            plan_result = response.output
-            
-            # Log the execution plan details
-            logger.debug(f"Plan created with {len(plan_result.plan.steps)} steps")
-            
-            # Display execution time
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            logger.debug(f"Plan creation took {elapsed_ms}ms")
-            
-            # Display the plan
-            self._display_execution_plan(plan_result)
-            
-            return plan_result
-            
-        except Exception as e:
-            logger.error(f"Failed to create execution plan: {str(e)}", exc_info=True)
-            print(f"\nError creating plan: {str(e)}")
-            return None
+        # Use routing agent to create plan
+        response = await routing_agent.run(query)
+        plan_result = response.output
+        
+        # Log the execution plan details
+        logger.debug(f"Plan created with {len(plan_result.plan.steps)} steps")
+        
+        # Display execution time
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.debug(f"Plan creation took {elapsed_ms}ms")
+        
+        # Display the plan
+        self._display_execution_plan(plan_result)
+        
+        return plan_result
     
     def _display_execution_plan(self, plan_result: Any) -> None:
         """
@@ -252,26 +239,29 @@ class OktaRealtimeAgentCLI:
         print("\n2. Executing plan...")
         logger.info(f"Executing plan with {len(plan.steps)} steps")
         
-        try:
-            # Execute the plan
-            execution_result = await self.execution_manager.execute_plan(plan)
-            
-            # Check for errors
-            if hasattr(execution_result, 'error_type'):
-                logger.error(f"Plan execution failed: {execution_result.message}")
-                print(f"Error: {execution_result.message}")
-                return
-            
-            # Calculate execution time
-            elapsed_ms = int((time.time() - start_time) * 1000)
-            logger.info(f"Plan executed in {elapsed_ms}ms")
-            
-            # Display results
-            self._display_execution_results(execution_result)
-            
-        except Exception as e:
-            logger.error(f"Error executing plan: {str(e)}", exc_info=True)
-            print(f"\nError executing plan: {str(e)}")
+        execution_result, error = await safe_execute_async(
+            self.execution_manager.execute_plan,
+            plan,
+            error_message="Error executing plan",
+            log_error=True
+        )
+        
+        if error:
+            print(f"\n{format_error_for_user(error)}")
+            return
+        
+        # Check for errors in the result
+        if hasattr(execution_result, 'error_type'):
+            logger.error(f"Plan execution failed: {execution_result.message}")
+            print(f"Error: {execution_result.message}")
+            return
+        
+        # Calculate execution time
+        elapsed_ms = int((time.time() - start_time) * 1000)
+        logger.info(f"Plan executed in {elapsed_ms}ms")
+        
+        # Display results
+        self._display_execution_results(execution_result)
     
     def _display_execution_results(self, execution_result: Any) -> None:
         """
@@ -367,8 +357,13 @@ async def main():
         await cli.run()
         
     except Exception as e:
-        logger.critical(f"Unhandled exception: {str(e)}", exc_info=True)
-        print(f"\nUnexpected error: {str(e)}")
+        error = BaseError(
+            message="Unhandled exception",
+            original_exception=e,
+            context={"location": "main"}
+        )
+        error.log()
+        print(f"\n{format_error_for_user(error)}")
         print("Please check the logs for more information.")
 
 
@@ -382,7 +377,12 @@ if __name__ == "__main__":
         logger.info("Application terminated by keyboard interrupt")
         print("\nExiting. Goodbye!")
     except Exception as e:
-        logger.critical(f"Fatal error: {str(e)}", exc_info=True)
-        print(f"\nFatal error: {str(e)}")
+        error = BaseError(
+            message="Fatal error",
+            original_exception=e,
+            context={"location": "script entry point"}
+        )
+        error.log()
+        print(f"\nFatal error: {format_error_for_user(error)}")
         print(f"Details: {traceback.format_exc()}")
         sys.exit(1)
