@@ -1,3 +1,8 @@
+"""
+Utilities for secure code execution in the Okta AI Agent.
+Provides validation, execution, and result processing for generated code.
+"""
+
 from typing import Dict, List, Any, Optional, Union, Callable, Tuple
 import logging
 import time
@@ -17,43 +22,55 @@ class ReturnValueException(Exception):
     def __init__(self, value):
         self.value = value
         super().__init__(f"Return value: {value}")
-        
+
+# Security configuration - centralized allowed SDK methods
 ALLOWED_SDK_METHODS = {
-    # Okta SDK methods
+    # User operations
     'get_user', 'get_users', 'list_users',
-    'get_group', 'list_groups',
+    
+    # Group operations
+    'get_group', 'list_groups', 'list_group_users',
+    'list_assigned_applications_for_group',
+    
+    # Application operations
     'get_application', 'list_applications',
     'list_application_assignments',
+    
+    # Other operations
     'get_logs', 'list_user_groups',
     'list_factors', 'list_supported_factors',
-    'get_user_factors',
+    'get_user_factors'
 }
 
+# Security configuration - allowed utility methods
 ALLOWED_UTILITY_METHODS = {
     # Data conversion methods
     'to_dict', 'as_dict', 'dict', 'json',
+    
     # Common list operations
-    'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'index', 'count', 'sort', 'reverse',
+    'append', 'extend', 'insert', 'remove', 'pop', 'clear', 
+    'index', 'count', 'sort', 'reverse',
+    
     # String methods
     'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
+    
     # Pagination methods
     'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages',
+    
     # General methods
     'get'
+}
+
+# Security configuration - allowed modules
+ALLOWED_MODULES = {
+    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time'
 }
     
 class CodeValidator:
     """Validates generated code for security."""
     
-    ALLOWED_MODULES = {
-        'okta', 'asyncio', 'typing', 'datetime', 'json', 
-        'logging', 'time'
-    }
-    
-    ALLOWED_MODULES = {
-        'okta', 'asyncio', 'typing', 'datetime', 'json', 'time'
-    }
-    
+    # Reference the centralized security configurations
+    ALLOWED_MODULES = ALLOWED_MODULES
     ALLOWED_METHODS = ALLOWED_SDK_METHODS.union(ALLOWED_UTILITY_METHODS)
     
     @classmethod
@@ -71,30 +88,44 @@ class CodeValidator:
         # Parse the code into an AST
         try:
             tree = ast.parse(code)
-        except SyntaxError:
-            return "Generated code contains syntax errors"
+        except SyntaxError as e:
+            return f"Generated code contains syntax errors: {str(e)}"
         
         # Check for imports
         for node in ast.walk(tree):
-            if isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
                 module_name = node.names[0].name.split('.')[0] if isinstance(node, ast.Import) else node.module.split('.')[0]
                 if module_name not in cls.ALLOWED_MODULES:
-                    return f"Unauthorized module: {module_name}"
+                    return f"Security violation: Unauthorized module import: '{module_name}'"
                     
         # Check for method calls
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                if isinstance(node.func, ast.Attribute):
-                    method_name = node.func.attr
-                    if method_name not in cls.ALLOWED_METHODS:
-                        return f"Unauthorized method: {method_name}"
-                        
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+                method_name = node.func.attr
+                if method_name not in cls.ALLOWED_METHODS:
+                    return f"Security violation: Unauthorized method call: '{method_name}'"
+                    
         # Check for URL restrictions
         url_pattern = re.compile(r'https?://([^/]+)')
         urls = url_pattern.findall(code)
         for url in urls:
             if okta_domain not in url:
-                return f"Unauthorized domain in URL: {url}"
+                return f"Security violation: Unauthorized domain in URL: '{url}'"
+
+        # Look for potentially dangerous patterns
+        dangerous_patterns = [
+            (r'os\s*\.\s*system', "System command execution"),
+            (r'subprocess', "Subprocess execution"),
+            (r'exec\s*\(', "Dynamic code execution"),
+            (r'eval\s*\(', "Dynamic code evaluation"),
+            (r'__import__\s*\(', "Dynamic module import"),
+            (r'open\s*\(', "File operations"),
+            (r'input\s*\(', "User input")
+        ]
+        
+        for pattern, reason in dangerous_patterns:
+            if re.search(pattern, code):
+                return f"Security violation: {reason} is not allowed"
         
         return True
 
@@ -205,11 +236,17 @@ def process_execution_result(
     Returns:
         Tuple of (result, variables for next step)
     """
+    # Define excluded variables that should not be passed to the next step
+    excluded_vars = {
+        'client', 'okta_client', 'asyncio', 'json', 
+        'datetime', 'logger', 'ReturnValueException'
+    }
+    
     # Extract variables for the next step
-    variables = {}
-    for k, v in local_vars.items():
-        if not k.startswith('_') and k not in ['client', 'okta_client', 'asyncio', 'json', 'datetime', 'logger', 'ReturnValueException']:
-            variables[k] = v
+    variables = {
+        k: v for k, v in local_vars.items() 
+        if not k.startswith('_') and k not in excluded_vars
+    }
     
     # Determine the result value, prioritizing explicit returns
     result = local_vars.get('result')
@@ -224,7 +261,13 @@ def process_execution_result(
     
     # If no explicit result from return statement, try to infer from common variable names
     if result is None:
-        for name in ['user_details', 'result', 'users_list', 'user', 'users', 'groups', 'applications', 'email', 'combined_results']:
+        # Common result variable names in order of priority
+        result_var_names = [
+            'user_details', 'result', 'users_list', 'user', 'users', 
+            'groups', 'applications', 'email', 'combined_results'
+        ]
+        
+        for name in result_var_names:
             if name in variables:
                 # Check if this is actually a tuple from unpacking
                 if isinstance(variables[name], tuple) and len(variables[name]) == 3:
@@ -244,7 +287,8 @@ def process_execution_result(
                 break
     
     # Check for empty results (e.g., [], {}) and differentiate from None
-    if result is None and any(name in variables and variables[name] == [] for name in ['users_list', 'users', 'groups', 'results']):
+    empty_result_vars = ['users_list', 'users', 'groups', 'results']
+    if result is None and any(name in variables and variables[name] == [] for name in empty_result_vars):
         # Empty list is a valid result, not an error
         result = []
         
@@ -272,9 +316,12 @@ def is_error_result(result: Any) -> bool:
     Returns:
         True if the result indicates an error, False otherwise
     """
+    # Error statuses
+    ERROR_STATUSES = {"error", "not_found", "dependency_failed"}
+    
     # Check dictionary with standard error structure
     if isinstance(result, dict):
-        if "status" in result and result["status"] in ["error", "not_found", "dependency_failed"]:
+        if "status" in result and result["status"] in ERROR_STATUSES:
             return True
         if "error" in result:
             return True
@@ -384,7 +431,8 @@ async def execute_okta_code(
     okta_client: Any, 
     okta_domain: str,
     query_id: str = "unknown",
-    extra_context: Dict[str, Any] = None
+    extra_context: Dict[str, Any] = None,
+    execution_timeout: float = 5.0  # 5 second timeout
 ) -> Dict[str, Any]:
     """
     Execute generated Okta SDK code in a secure environment.
@@ -395,6 +443,7 @@ async def execute_okta_code(
         okta_domain: The Okta domain for validation
         query_id: Identifier for the query/flow
         extra_context: Variables from previous steps
+        execution_timeout: Maximum execution time in seconds
         
     Returns:
         Dictionary with execution results and metadata
@@ -431,9 +480,26 @@ async def execute_okta_code(
     func_code = wrap_code_in_function(modified_code)
     
     try:
-        # Step 6: Execute the code
+        # Step 6: Execute the code with timeout protection
         exec(func_code, namespace)
-        local_vars = await namespace['_execute_step']()
+        
+        try:
+            # Run with timeout protection
+            execution_task = namespace['_execute_step']()
+            local_vars = await asyncio.wait_for(execution_task, timeout=execution_timeout)
+        except asyncio.TimeoutError:
+            logger.error(f"[FLOW:{query_id}] Code execution timed out after {execution_timeout} seconds")
+            return {
+                "result": {
+                    "status": "error",
+                    "error": f"Execution timed out after {execution_timeout} seconds",
+                    "data": None
+                },
+                "execution_time_ms": int((time.time() - start_time) * 1000),
+                "code": code,
+                "success": False,
+                "error": f"Execution timed out after {execution_timeout} seconds"
+            }
         
         # Step 7: Process and normalize results
         result, variables = process_execution_result(local_vars, has_tuple_unpacking)

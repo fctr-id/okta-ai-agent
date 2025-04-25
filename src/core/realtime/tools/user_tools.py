@@ -3,8 +3,9 @@ User-related tool definitions for Okta API operations.
 Contains documentation and examples for user operations.
 """
 
-from typing import List, Optional, Dict, Set
+from typing import List, Optional, Dict, Set, Any
 from pydantic import BaseModel, Field
+from src.utils.pagination_limits import paginate_results, handle_single_entity_request
 
 class ToolPrompt(BaseModel):
     """Base model for tool prompts with common properties."""
@@ -23,96 +24,167 @@ SEARCH_USERS = ToolPrompt(
     description="Search for users in the Okta directory based on different criteria",
     parameters=["search_term"],
     usage="Find users matching specific criteria (email, name, status, etc.)",
-    aliases={"user_search", "users_search", "searchusers"},
+    aliases={"user_search", "users_search", "searchusers", "find_users", "list_users"},
     prompt="""
 # Okta User Search API
 
 ## Overview
-The Okta User API allows you to search for users based on various criteria.
+This API allows you to search for users in the Okta directory based on various criteria.
 
-## Python SDK Example
-List Okta users with filtering. Use query for simple terms (e.g. 'Dan') or search for SCIM filters (e.g. profile.firstName sw "Dan").
-            IMPORTANT: make sure you understand the user query. USE co or pr unless the user specifically asks for the exact name match.
-            search (Recommended, Powerful):
-            Uses flexible SCIM filter syntax.
-            Supports operators: eq, ne, gt, lt, ge, le, sw (starts with), co (contains), pr (present), and, or.
-            Filters on most user properties, including custom attributes, id, status, dates, arrays.
-            Supports sorting (sortBy, sortOrder) - NOTE: Sorting parameters ONLY work with 'search' parameter, not with 'query'.
-            Examples:
-            {'search': 'profile.department eq "Engineering" and status eq "ACTIVE"'}
-            {'search': 'profile.firstName sw "A"'}
-            {'search': 'profile.city eq "San Francisco" or profile.city eq "London"'}
-            Sorting: {'search': 'status eq "ACTIVE"', 'sortBy': 'profile.lastName', 'sortOrder': 'ascending'}
-            Custom Attribute (Exact): {'search': 'profile.employeeNumber eq "12345"'}
-            Custom Attribute (Starts With): {'search': 'profile.employeeNumber sw "123"'}
-            Custom Attribute (Present): {'search': 'profile.employeeNumber pr'}
+## Use Cases
+- Find users by name, email, or other attributes
+- Filter users by status, department, or custom attributes
+- Get all active users in the organization
+- Search based on complex criteria with profile attributes
 
-### Pagination
-- limit: Max results per page (default is 200 or 10, max 200)
-- after: Cursor for the next page (from Link header)
-- expand: Includes related resources (e.g., expand=user)
+## Example Usage
+```python
+# List all users (excluding DEPROVISIONED)
+users, resp, err = await client.list_users()
+if err:
+    return {"status": "error", "error": str(err)}
+users_list = [user.as_dict() for user in users]
 
-### List All Users
-Calling the API without other parameters such as filter, search or q will list all the users except ones with DEPROVISIONED status.
+# Basic search by name or email
+users, resp, err = await client.list_users(query_params={"q": "John Smith"})
+if err:
+    return {"status": "error", "error": str(err)}
+users_list = [user.as_dict() for user in users]
 
-## Return Format
-The API returns User objects with these key fields:
+# Advanced search with specific criteria
+query_params = {'search': 'profile.department eq "Engineering" and status eq "ACTIVE"'}
+users, resp, err = await client.list_users(query_params=query_params)
+if err:
+    return {"status": "error", "error": str(err)}
+users_list = [user.as_dict() for user in users]
+
+# Search by first name with starts with
+query_params = {'search': 'profile.firstName sw "A"'}
+users, resp, err = await client.list_users(query_params=query_params)
+if err:
+    return {"status": "error", "error": str(err)}
+users_list = [user.as_dict() for user in users]
+```
+
+## SDK Method Signature
+```python
+async def list_users(query_params=None):
+    # This is the internal SDK method signature
+    # query_params is an optional dictionary with search criteria
+    pass
+```
+
+## Parameters
+- **query_params**: Optional dictionary with search criteria:
+  - 'q': Simple text search
+  - 'search': Advanced SCIM filter expression
+  - 'sortBy': Field to sort results by (only works with 'search')
+  - 'sortOrder': Direction to sort ('ascending' or 'descending')
+
+## Search Operators (for 'search' parameter)
+- eq: profile.department eq "Engineering" (equals)
+- ne: profile.department ne "Sales" (not equals)
+- co: profile.displayName co "Smith" (contains)
+- sw: profile.firstName sw "J" (starts with)
+- pr: profile.mobilePhone pr (present/has value)
+- gt/lt/ge/le: For dates and numeric values
+- Combine with 'and', 'or' for complex filters
+
+## Note on Group Membership
+To find users in a specific group, DO NOT use search filters. Instead, use the get_group_members tool with the group ID.
+
+## Return Value
+List of user objects, each containing:
 - id: Unique identifier
 - profile: Contains email, firstName, lastName, etc.
-- status: User's status
+- status: User's status (ACTIVE, PROVISIONED, STAGED, SUSPENDED, DEPROVISIONED)
 - created: Creation timestamp
 - lastUpdated: Last update timestamp
+
+## Error Handling
+If the API call fails, returns an error object:
+```python
+{"status": "error", "error": error_message}
+```
 """)
 
-### GET USER DETAILS TOOL ###
 GET_USER_DETAILS = ToolPrompt(
     name="get_user_details",
     entity_type="user",
     description="Get detailed information about a specific user",
     parameters=["user_id_or_login"],
     usage="Retrieve complete details for a user by ID or login",
-    aliases={"user_details", "get_user", "getuserdetails"},
+    aliases={"user_details", "get_user", "getuserdetails", "user_info"},
     prompt="""
 # Okta Get User Details API
 
 ## Overview
-This API retrieves detailed information about a specific user by their ID or login.
+This API retrieves detailed information about a specific user by their ID or login (email).
 
-## Python SDK Example
+## Use Cases
+- View complete user profile and attributes
+- Check user status and credentials
+- Get user creation and activity timestamps
+- Verify user settings and account details
+
+## Example Usage
 ```python
-# Get user by ID
-user = await client.get_user("00u1qqxig80cFCxPP0h7")
+# Get user by ID - parameter is passed directly, not as a named argument
+user, resp, err = await client.get_user("00u1qqxig80cFCxPP0h7")
+if err:
+    return {"status": "error", "error": str(err)}
+user_details = user.as_dict()
 
-# Get user by login (usually email)
-user = await client.get_user("user@example.com")
+# Get user by login (usually email) - parameter is passed directly
+user, resp, err = await client.get_user("user@example.com")
+if err:
+    return {"status": "error", "error": str(err)}
+user_details = user.as_dict()
 
 # Access user properties
-user_id = user.id
-email = user.profile.email
-status = user.status
-created = user.created
+user_id = user_details["id"]
+email = user_details["profile"]["email"]
+status = user_details["status"]
+created = user_details["created"]
+first_name = user_details["profile"]["firstName"]
+last_name = user_details["profile"]["lastName"]
 ```
 
-## Important User Fields
-- **id**: Unique identifier
-- **profile**: Contains all profile attributes like:
-  - **email**: User's email address
-  - **firstName**: User's first name
-  - **lastName**: User's last name
-  - **login**: Username (often email)
-  - **mobilePhone**: Mobile phone number
+## SDK Method Signature
+```python
+async def get_user(user_id_or_login):
+    # This is the internal SDK method signature
+    # The user_id_or_login is passed as a positional argument, NOT a named argument
+    # Do NOT use: client.get_user(user_id=user_id) - this will cause an error
+    # Instead use: client.get_user(user_id)
+    pass
+```
+
+## Parameters
+- **user_id_or_login**: Required. Either the user's unique ID or their login (typically email), passed as a direct parameter.
+
+## Return Value
+User object containing detailed information:
+- id: Unique identifier
+- profile: Contains all profile attributes including:
+  - email: User's email address
+  - firstName, lastName: User's name
+  - login: Username (often email)
+  - mobilePhone: Mobile phone number
   - (+ any custom attributes)
-- **status**: User status (ACTIVE, PROVISIONED, STAGED, SUSPENDED, DEPROVISIONED)
-- **created**: Creation timestamp
-- **activated**: Activation timestamp
-- **statusChanged**: Status change timestamp
-- **lastUpdated**: Last update timestamp
-- **lastLogin**: Last login timestamp
-- **credentials**: Contains credential information (password, recovery question, provider)
+- status: User status (ACTIVE, PROVISIONED, STAGED, SUSPENDED, DEPROVISIONED)
+- created: Creation timestamp
+- activated: Activation timestamp
+- statusChanged: Status change timestamp
+- lastUpdated: Last update timestamp
+- lastLogin: Last login timestamp
+- credentials: Contains credential information
 
 ## Error Handling
-- If the user doesn't exist, the API will return a 404 error
-- Handle this case by checking for exceptions
+If the user doesn't exist, returns an error object:
+```python
+{"status": "not_found", "entity": "user", "id": user_id_or_login}
+```
 """ )
 
 # List of all user tools
@@ -125,7 +197,8 @@ _alias_map = {}
 # Build the alias map
 for tool in USER_TOOLS:
     for alias in tool.aliases:
-        _alias_map[alias] = tool.name
+        normalized_alias = alias.lower().replace("_", "").replace(" ", "")
+        _alias_map[normalized_alias] = tool.name
 
 def get_user_tool_prompt(tool_name: str) -> Optional[str]:
     """
@@ -153,3 +226,14 @@ def get_user_tool_prompt(tool_name: str) -> Optional[str]:
 def get_all_user_tools() -> List[ToolPrompt]:
     """Get all available user tools."""
     return USER_TOOLS
+
+# New function for registry integration
+def register_tools(registry: Any) -> None:
+    """
+    Register all user tools with the provided registry.
+    
+    Args:
+        registry: The tool registry to register with
+    """
+    for tool in USER_TOOLS:
+        registry.register_tool(tool)

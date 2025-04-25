@@ -5,7 +5,8 @@ import logging
 from pydantic_ai import Agent
 from src.core.model_picker import ModelConfig, ModelType
 from src.core.realtime.code_execution_utils import ALLOWED_SDK_METHODS, ALLOWED_UTILITY_METHODS
-
+# Add import for tool registry
+from src.utils.tool_registry import get_tool_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +33,35 @@ class CodingAgent:
             # No result_type as we'll parse the output manually
         )
         
-    async def generate_workflow_code(self, plan, tool_docs: List[str], flow_id: str = "unknown") -> CodeGenerationResult:
+    async def generate_workflow_code(self, plan, tool_docs: List[str] = None, flow_id: str = "unknown") -> CodeGenerationResult:
         """
         Generate code for all steps in a workflow.
         
         Args:
             plan: The execution plan with steps
-            tool_docs: Documentation for each tool in the plan
+            tool_docs: Documentation for each tool in the plan (can be None when using tool registry)
             flow_id: Unique identifier for the current flow/conversation
             
         Returns:
             CodeGenerationResult with code for each step
         """
+        # If tool_docs is not provided, fetch them from the registry
+        if tool_docs is None:
+            tool_docs = []
+            for step in plan.steps:
+                tool_doc = get_tool_prompt(step.tool_name)
+                if tool_doc:
+                    tool_docs.append(tool_doc)
+                else:
+                    logger.warning(f"[FLOW:{flow_id}] Documentation not found for tool: {step.tool_name}")
+                    tool_docs.append(f"# Documentation not available for {step.tool_name}")
+
+        # Ensure we have a doc for each step
+        while len(tool_docs) < len(plan.steps):
+            missing_index = len(tool_docs)
+            missing_tool = plan.steps[missing_index].tool_name if missing_index < len(plan.steps) else "unknown"
+            tool_docs.append(f"# Documentation not available for {missing_tool}")
+            
         # Build the prompt
         prompt = self._build_workflow_prompt(plan, tool_docs)
         
@@ -96,6 +114,13 @@ class CodingAgent:
         return f"""
         You are an expert at writing Python code for Okta SDK operations with robust error handling.
         
+                ### CRITICAL SECURITY CONSTRAINTS ###
+        1. You MUST ONLY use tools that are explicitly listed in the AVAILABLE TOOLS section below
+        2. Do NOT use any tool names based on your general knowledge of Okta SDKs
+        3. Do NOT create or invent new tool names even if they seem logical
+        4. Any attempt to use unlisted tools will cause security violations and be rejected
+        5. If a query cannot be solved with the available tools, say so clearly rather than inventing new tools
+        
         I need you to write code for a multi-step workflow that interacts with Okta.
         
         WORKFLOW OVERVIEW:
@@ -137,10 +162,10 @@ class CodingAgent:
           - If prerequisite failed: return {{"status": "dependency_failed", "dependency": "step_name", "error": "Reason"}}
           - Handle both empty and error cases appropriately
         
-        ALLOWED OKTA SDK METHODS:
+        YOU CAN ONLY USE THESE ALLOWED OKTA SDK METHODS:
         {sdk_methods}
         
-        ALLOWED UTILITY METHODS:
+        YOU CAN ONLY USE THESE ALLOWED PYTHON UTILITY METHODS:
         {utility_methods}
         
         TECHNICAL REQUIREMENTS:
@@ -266,21 +291,30 @@ if __name__ == "__main__":
             reasoning="Find email address of user named Noah"
         )
         
-        # Sample tool docs for test
-        tool_docs = [
-            "search_users: Search for users based on profile attributes",
-            "get_user_details: Get detailed user information by ID"
-        ]
-        
+        # Test with tool registry (no docs needed)
         try:
             # Use a test flow ID
-            result = await coding_agent.generate_workflow_code(plan, tool_docs, flow_id="test-flow")
-            print("Generated code blocks:")
+            result = await coding_agent.generate_workflow_code(plan, flow_id="test-flow")
+            print("Generated code blocks using tool registry:")
             for i, code in enumerate(result.step_codes):
                 print(f"\n--- STEP {i+1} ---")
                 print(code)
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error with tool registry: {e}")
+            
+        # Test with explicit docs (original behavior)
+        try:
+            tool_docs = [
+                "search_users: Search for users based on profile attributes",
+                "get_user_details: Get detailed user information by ID"
+            ]
+            result = await coding_agent.generate_workflow_code(plan, tool_docs, flow_id="test-flow")
+            print("\nGenerated code blocks with explicit docs:")
+            for i, code in enumerate(result.step_codes):
+                print(f"\n--- STEP {i+1} ---")
+                print(code)
+        except Exception as e:
+            print(f"Error with explicit docs: {e}")
     
     # Uncomment to test
     # asyncio.run(test())

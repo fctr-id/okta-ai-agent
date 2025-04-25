@@ -1,11 +1,12 @@
 from pydantic import BaseModel, Field
 from typing import List, Tuple, Optional
+import re
 from pydantic_ai import Agent
 from src.core.model_picker import ModelConfig, ModelType
 from src.utils.logging import logger
 
-# Import tool definitions
-from src.core.realtime.tools.user_tools import get_all_user_tools
+# Import tool registry instead of individual tool modules
+from src.utils.tool_registry import build_tools_documentation
 
 # Define the data structures for the execution plan
 class PlanStep(BaseModel):
@@ -34,35 +35,32 @@ class RoutingResult(BaseModel):
 # Get the appropriate model
 model = ModelConfig.get_model(ModelType.REASONING)
 
-def build_tools_documentation():
-    """Build documentation for all available tools."""
-    tools_docs = ""
-    
-    # Get all user tools
-    user_tools = get_all_user_tools()
-    
-    # User Tools section
-    tools_docs += "User Tools:\n"
-    for tool in user_tools:
-        tools_docs += f"- {tool.name}: {tool.description}\n"
-    
-    return tools_docs
-
 # Create the system prompt
 system_prompt = f"""
 You are the Okta Query Coordinator, responsible for planning how to fulfill user queries about Okta resources.
 SAFETY: If a query is irrelevant or cannot be answered, return an empty response with a helpful message.
+
+### CRITICAL SECURITY CONSTRAINTS ###
+1. You MUST ONLY use tools that are explicitly listed in the AVAILABLE TOOLS section below
+2. Do NOT use any tool names based on your general knowledge of Okta SDKs
+3. Do NOT create or invent new tool names even if they seem logical
+4. Any attempt to use unlisted tools will cause security violations and be rejected
+5. If a query cannot be solved with the available tools, say so clearly rather than inventing new tools
 
 AVAILABLE TOOLS:
 
 {build_tools_documentation()}
 
 ### Key Concepts ###
-IMPORTANT: Unless the user query specifes to look for an exact match, you should always use CO , sw or other search paramaters for the queries
+IMPORTANT: Unless the user query specifes to look for an exact match, you should always use CO, sw or other search parameters for the queries
 1. User Access:
    - Users can access applications through direct assignment or group membership
    - Users are identified by email or login
    - User status can be: ACTIVE, SUSPENDED, DEPROVISIONED, etc.
+2. Group Membership:
+   - To find users in a specific group, use get_group_members with the group ID
+   - To find a group by name, use list_groups with a search term
+   - DO NOT try to search users with a "groups" filter - this will not work
 
 YOUR RESPONSE FORMAT:
 You must respond with a valid JSON object containing an execution plan with the following structure:
@@ -186,7 +184,7 @@ For the query "Get emails for users Noah and Ava and their group memberships", t
         "fallback_action": null
       }},
       {{
-        "tool_name": "get_group_memberships",
+        "tool_name": "get_group_members",
         "query_context": "For each user found in steps 1 and 2, get their group memberships",
         "critical": false,
         "reason": "Get group information for all users found",
@@ -206,6 +204,35 @@ For the query "Get emails for users Noah and Ava and their group memberships", t
     "partial_success_acceptable": true
   }},
   "confidence": 90
+}}
+
+EXAMPLE 3:
+For the query "Find all users in the okta-admins group", the execution plan would be:
+
+{{
+  "plan": {{
+    "steps": [
+      {{
+        "tool_name": "list_groups",
+        "query_context": "Search for groups with name 'okta-admins'",
+        "critical": true,
+        "reason": "Need to find the group ID before we can get its members",
+        "error_handling": "If no group is found, return a clear 'group not found' message",
+        "fallback_action": "Try searching with a partial name using 'co' operator: profile.name co 'admin'"
+      }},
+      {{
+        "tool_name": "get_group_members",
+        "query_context": "Get all members of the group using the 'id' field from the first group in step 1's results",
+        "critical": true,
+        "reason": "Retrieve all users who are members of the okta-admins group",
+        "error_handling": "If API call fails, report the error with the group ID",
+        "fallback_action": null
+      }}
+    ],
+    "reasoning": "This query requires finding the group first, then retrieving its members.",
+    "partial_success_acceptable": false
+  }},
+  "confidence": 95
 }}
 
 Your task is to create the most efficient execution plan using the available tools.
@@ -298,7 +325,6 @@ def analyze_query_complexity(query: str) -> dict:
 # For interactive testing
 if __name__ == "__main__":
     import asyncio
-    import re
     
     async def test():
         query = "Get all groups for the user john.smith@company.com"
