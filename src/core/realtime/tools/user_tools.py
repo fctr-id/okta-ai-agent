@@ -17,88 +17,122 @@ logger = get_logger(__name__)
     entity_type="user",
     aliases=["user_search", "users_search", "searchusers", "find_users", "list_users"]
 )
-async def search_users(client, query=None, filter=None, limit=None):
+async def search_users(client, search=None, limit=None):
     """
-    # Okta User Search API
+    Searches for users in the Okta directory using advanced search expressions (SCIM filter syntax) with support for pagination. Returns user information on identity profile attributes.
 
-    ## Overview
-    This API allows you to search for users in the Okta directory based on various criteria.
+    # Tool Documentation: Okta User Search API Tool
 
-    ## Use Cases
-    - Find users by name, email, or other attributes
-    - Filter users by status, department, or custom attributes
-    - Get all active users in the organization
-    - Search based on complex criteria with profile attributes
+    ## Goal
+    This tool searches for users in the Okta directory based on specified criteria.
+
+    ## Core Functionality
+    Searches for Okta users using advanced search expressions with support for pagination.
+
+    ## Parameters
+    *   **`search`** (String):
+        *   Applies an advanced search filter using Okta's SCIM filter expression syntax.
+        *   Okta recommends this parameter for optimal search performance.
+        *   Examples:
+            *   `profile.lastName eq \"Smith\"`
+            *   `status eq \"ACTIVE\"`
+            *   `profile.department eq \"Engineering\" and status eq \"ACTIVE\"`
+            *   `lastUpdated gt \"2023-01-01T00:00:00.000Z\"`
+            *   `id eq \"00u1ero7vZFVEIYLWPBN\"`
+            *   `profile.firstName co \"Joh\"` (contains operator)
+
+    *   **`limit`** (Integer):
+        *   Specifies the maximum number of results to return per page.
+        *   Pagination is handled automatically by the underlying function.
+
+    ## Default Output Fields
+    If no specific attributes are requested, return these minimal fields:
+    - id: User's unique Okta identifier
+    - email: User's primary email address (from profile.email)
+    - firstName: User's first name (from profile.firstName)
+    - lastName: User's last name (from profile.lastName)
+    - status: User's current status (e.g., ACTIVE, SUSPENDED)
+
+    If the user specifically asks for different attributes, return those instead of the default fields.
+    If the user asks for "all" or "complete" data, return the full user objects.
+
+    ## Search Operators
+    *   **eq**: Equals - `status eq \"ACTIVE\"`
+    *   **sw**: Starts with - `profile.firstName sw \"J\"` (for string fields)
+    *   **co**: Contains - `profile.email co \"example\"` (only for firstName, lastName, email, and login)
+    *   **gt/lt**: Greater than/Less than - `lastUpdated gt \"2023-01-01T00:00:00.000Z\"`
+    *   **ge/le**: Greater than or equal/Less than or equal
+    *   Combine with `and`, `or`, and parentheses for complex queries
 
     ## Example Usage
     ```python
-    # List all users (excluding DEPROVISIONED)
-    users, resp, err = await client.list_users()
-    if err:
-        return {"status": "error", "error": str(err)}
-    users_list = [user.as_dict() for user in users]
+    # Build query parameters
+    query_params = {}
+    
+    if search:
+        query_params["search"] = search
+        
+    if limit:
+        query_params["limit"] = limit
+    
+    # Get users with pagination 
+    users = await paginate_results(
+        "list_users",
+        query_params=query_params,
+        entity_name="users"
+    )
+    
+    # Check for errors
+    if isinstance(users, dict) and "status" in users and users["status"] == "error":
+        return users
 
-    # Basic search by name or email
-    users, resp, err = await client.list_users(query_params={"q": "John Smith"})
-    if err:
-        return {"status": "error", "error": str(err)}
-    users_list = [user.as_dict() for user in users]
+    # Handle empty results
+    if not users:
+        return []
 
-    # Advanced search with specific criteria
-    query_params = {'search': 'profile.department eq "Engineering" and status eq "ACTIVE"'}
-    users, resp, err = await client.list_users(query_params=query_params)
-    if err:
-        return {"status": "error", "error": str(err)}
-    users_list = [user.as_dict() for user in users]
-
-    # Search by first name with starts with
-    query_params = {'search': 'profile.firstName sw "A"'}
-    users, resp, err = await client.list_users(query_params=query_params)
-    if err:
-        return {"status": "error", "error": str(err)}
-    users_list = [user.as_dict() for user in users]
+    # Transform results to include only default fields
+    minimal_users = []
+    for user in users:
+        minimal_users.append({
+            "id": user["id"],
+            "email": user["profile"].get("email"),
+            "firstName": user["profile"].get("firstName"),
+            "lastName": user["profile"].get("lastName"),
+            "status": user["status"]
+        })
+    
+    # Return the transformed results
+    return minimal_users
     ```
 
-    ## SDK Method Signature
+    ## Example Search Syntax
     ```python
-    async def list_users(query_params=None):
-        # This is the internal SDK method signature
-        # query_params is an optional dictionary with search criteria
-        pass
+    # Correct syntax with double quotes
+    query_params = {
+        "search": "profile.firstName eq \"Dan\""
+    }
+
+    # For starts with
+    query_params = {
+        "search": "profile.firstName sw \"D\""
+    }
+
+    # For contains
+    query_params = {
+        "search": "profile.firstName co \"an\""
+    }
     ```
-
-    ## Parameters
-    - **query_params**: Optional dictionary with search criteria:
-      - 'q': Simple text search
-      - 'search': Advanced SCIM filter expression
-      - 'sortBy': Field to sort results by (only works with 'search')
-      - 'sortOrder': Direction to sort ('ascending' or 'descending')
-
-    ## Search Operators (for 'search' parameter)
-    - eq: profile.department eq "Engineering" (equals)
-    - ne: profile.department ne "Sales" (not equals)
-    - co: profile.displayName co "Smith" (contains)
-    - sw: profile.firstName sw "J" (starts with)
-    - pr: profile.mobilePhone pr (present/has value)
-    - gt/lt/ge/le: For dates and numeric values
-    - Combine with 'and', 'or' for complex filters
-
-    ## Note on Group Membership
-    To find users in a specific group, DO NOT use search filters. Instead, use the get_group_members tool with the group ID.
-
-    ## Return Value
-    List of user objects, each containing:
-    - id: Unique identifier
-    - profile: Contains email, firstName, lastName, etc.
-    - status: User's status (ACTIVE, PROVISIONED, STAGED, SUSPENDED, DEPROVISIONED)
-    - created: Creation timestamp
-    - lastUpdated: Last update timestamp
 
     ## Error Handling
-    If the API call fails, returns an error object:
-    ```python
-    {"status": "error", "error": error_message}
-    ```
+    If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
+
+    ## Important Notes
+    - Pagination is handled automatically for large result sets
+    - The Okta API limits results to 200 users per page
+    - Results are already converted to dictionaries; do not call as_dict() on them
+    - Double quotes must be used inside the search string and properly escaped
+    - DO NOT use single quotes for the search values
+    - Empty results are normal and will return an empty list []
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -112,75 +146,71 @@ async def search_users(client, query=None, filter=None, limit=None):
 )
 async def get_user_details(client, user_id_or_login):
     """
-    # Okta Get User Details API
+    Retrieves detailed information about a specific Okta user by ID or login (email). Returns user profile data including ID, email, name, login, status, and creation date.
 
-    ## Overview
-    This API retrieves detailed information about a specific user by their ID or login (email).
+    # Tool Documentation: Okta Get User Details API Tool
 
-    ## Use Cases
-    - View complete user profile and attributes
-    - Check user status and credentials
-    - Get user creation and activity timestamps
-    - Verify user settings and account details
+    ## Goal
+    This tool retrieves detailed information about a specific Okta user by ID or login.
+
+    ## Core Functionality
+    Retrieves information about a single user from the Okta directory.
+
+    ## Parameters
+    *   **`user_id_or_login`** (Required, String):
+        *   The unique identifier or login (usually email) of the user to retrieve.
+        *   Can be either:
+            *   An Okta user ID (e.g., "00u1ero7vZFVEIYLWPBN")
+            *   A user's login/email (e.g., "john.doe@example.com")
+        *   Note: This parameter is passed as a direct positional argument.
+
+    ## Default Output Fields
+    If no specific attributes are requested, return these minimal fields:
+    - id: User's unique Okta identifier
+    - email: User's primary email address (from profile.email)
+    - firstName: User's first name (from profile.firstName)
+    - lastName: User's last name (from profile.lastName)
+    - login: User's username (from profile.login)
+    - status: User's current status (e.g., ACTIVE, SUSPENDED)
+    - created: When the user was created
+
+    If the user specifically asks for different attributes, return those instead of the default fields.
+    If the user asks for "all" or "complete" data, return the full user object.
 
     ## Example Usage
     ```python
-    # Get user by ID - parameter is passed directly, not as a named argument
-    user, resp, err = await client.get_user("00u1qqxig80cFCxPP0h7")
+    # Get user by ID or email
+    user, resp, err = await client.get_user(user_id_or_login)
     if err:
         return {"status": "error", "error": str(err)}
+    
+    # If user not found (would be caught in error handling above but being explicit)
+    if not user:
+        return {"status": "not_found", "entity": "user", "id": user_id_or_login}
+    
     user_details = user.as_dict()
-
-    # Get user by login (usually email) - parameter is passed directly
-    user, resp, err = await client.get_user("user@example.com")
-    if err:
-        return {"status": "error", "error": str(err)}
-    user_details = user.as_dict()
-
-    # Access user properties
-    user_id = user_details["id"]
-    email = user_details["profile"]["email"]
-    status = user_details["status"]
-    created = user_details["created"]
-    first_name = user_details["profile"]["firstName"]
-    last_name = user_details["profile"]["lastName"]
+    
+    # Return default fields unless full data is requested
+    minimal_user = {
+        "id": user_details["id"],
+        "email": user_details["profile"].get("email"),
+        "firstName": user_details["profile"].get("firstName"),
+        "lastName": user_details["profile"].get("lastName"),
+        "login": user_details["profile"].get("login"),
+        "status": user_details["status"],
+        "created": user_details.get("created")
+    }
+    
+    return minimal_user
     ```
-
-    ## SDK Method Signature
-    ```python
-    async def get_user(user_id_or_login):
-        # This is the internal SDK method signature
-        # The user_id_or_login is passed as a positional argument, NOT a named argument
-        # Do NOT use: client.get_user(user_id=user_id) - this will cause an error
-        # Instead use: client.get_user(user_id)
-        pass
-    ```
-
-    ## Parameters
-    - **user_id_or_login**: Required. Either the user's unique ID or their login (typically email), passed as a direct parameter.
-
-    ## Return Value
-    User object containing detailed information:
-    - id: Unique identifier
-    - profile: Contains all profile attributes including:
-      - email: User's email address
-      - firstName, lastName: User's name
-      - login: Username (often email)
-      - mobilePhone: Mobile phone number
-      - (+ any custom attributes)
-    - status: User status (ACTIVE, PROVISIONED, STAGED, SUSPENDED, DEPROVISIONED)
-    - created: Creation timestamp
-    - activated: Activation timestamp
-    - statusChanged: Status change timestamp
-    - lastUpdated: Last update timestamp
-    - lastLogin: Last login timestamp
-    - credentials: Contains credential information
 
     ## Error Handling
-    If the user doesn't exist, returns an error object:
-    ```python
-    {"status": "not_found", "entity": "user", "id": user_id_or_login}
-    ```
+    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id_or_login}`
+    If another error occurs, returns: `{"status": "error", "error": error_message}`
+
+    ## Important Notes
+    - Pass user_id_or_login as a positional argument: client.get_user(user_id)
+    - Do NOT use named arguments: client.get_user(user_id=user_id)
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -194,67 +224,81 @@ async def get_user_details(client, user_id_or_login):
 )
 async def list_user_groups(client, user_id_or_login):
     """
-    # Okta List User Groups API
+    Retrieves all groups that an Okta user belongs to by user ID or login (email). Returns group information including ID, name, and type for each group membership.
 
-    ## Overview
-    This API retrieves all groups that a user belongs to.
+    # Tool Documentation: Okta List User Groups API Tool
 
-    ## Use Cases
-    - Check group memberships for a user
-    - Determine a user's roles and access rights
-    - Audit user permissions and group assignments
-    - Filter groups by different criteria
+    ## Goal
+    This tool retrieves all groups that an Okta user belongs to.
+
+    ## Core Functionality
+    Retrieves groups associated with a specific user.
+
+    ## Parameters
+    *   **`user_id_or_login`** (Required, String):
+        *   The unique identifier or login (usually email) of the user.
+        *   Can be either:
+            *   An Okta user ID (e.g., "00u1ero7vZFVEIYLWPBN")
+            *   A user's login/email (e.g., "john.doe@example.com")
+
+    ## Default Output Fields
+    If no specific attributes are requested, return these minimal fields for each group:
+    - id: Group's unique Okta identifier
+    - name: Group name (from profile.name)
+    - type: Group type (Usually "OKTA_GROUP")
+
+    If the user specifically asks for different attributes, return those instead of the default fields.
+    If the user asks for "all" or "complete" data, return the full group objects.
 
     ## Example Usage
     ```python
-    # Get groups for a user by user ID
-    user_id = "00u1qqxig80cFCxPP0h7"
-    groups, resp, err = await client.list_user_groups(user_id)
-    if err:
-        return {"status": "error", "error": str(err)}
-
-    groups_list = [group.as_dict() for group in groups]
-
-    # Get groups for a user by email
-    user_email = "user@example.com"
-    # First get the user to find their ID
-    user, resp, err = await client.get_user(user_email)
-    if err:
-        return {"status": "error", "error": str(err)}
-
-    user_id = user.id
-    groups, resp, err = await client.list_user_groups(user_id)
-    if err:
-        return {"status": "error", "error": str(err)}
-
-    groups_list = [group.as_dict() for group in groups]
+    # If input is an email/login rather than ID, look up the user ID first
+    if "@" in user_id_or_login:
+        user, resp, err = await client.get_user(user_id_or_login)
+        if err:
+            return {"status": "error", "error": str(err)}
+        user_id = user.id
+    else:
+        # Input is already a user ID
+        user_id = user_id_or_login
+    
+    # Get all groups for this user
+    groups = await paginate_results(
+        "list_user_groups",
+        method_args=[user_id],  # Pass user_id as a positional argument in a list
+        entity_name="groups"
+    )
+    
+    # Check for errors
+    if isinstance(groups, dict) and "status" in groups and groups["status"] == "error":
+        return groups
+    
+    # Handle empty results
+    if not groups:
+        return []
+    
+    # Transform results to include only default fields
+    minimal_groups = []
+    for group in groups:
+        minimal_groups.append({
+            "id": group["id"],
+            "name": group["profile"].get("name"),
+            "type": group.get("type", "OKTA_GROUP")
+        })
+    
+    return minimal_groups
     ```
-
-    ## SDK Method Signature
-    ```python
-    async def list_user_groups(user_id):
-        # This is the internal SDK method signature
-        pass
-    ```
-
-    ## Parameters
-    - **user_id**: Required. The user's unique ID (not email/login).
-
-    ## Return Value
-    List of group objects the user belongs to, each containing:
-    - id: Group unique identifier
-    - name: Group name
-    - description: Group description
-    - type: Group type (Usually "OKTA_GROUP")
-    - created: Creation timestamp
-    - lastUpdated: Last update timestamp
-    - objectClass: Usually ["okta:user_group"]
 
     ## Error Handling
-    If the user doesn't exist, returns an error object:
-    ```python
-    {"status": "not_found", "entity": "user", "id": user_id}
-    ```
+    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id_or_login}`
+    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If no groups are found, returns an empty list `[]`
+
+    ## Important Implementation Notes
+    - The method does NOT accept query_params
+    - When using paginate_results, pass the user_id in method_args=[user_id]
+    - Results are already converted to dictionaries; do not call as_dict() on them
+    - Empty results are normal and will return an empty list []
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration

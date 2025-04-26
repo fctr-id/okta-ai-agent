@@ -17,121 +17,118 @@ logger = get_logger(__name__)
     entity_type="group",
     aliases=["group_search", "groups_search", "searchgroups", "get_groups"]
 )
-async def list_groups(client, query=None, filter=None):
+async def list_groups(client, query=None, search=None):
     """
-    # Okta Group Search/List API
+    Searches for or lists groups in the Okta directory based on name, description or other criteria with pagination support. Returns group information including ID, name, description and type.
 
-    ## Overview
-    This API allows you to search for or list groups in the Okta directory based on various criteria.
+    # Tool Documentation: Okta Group Search/List API Tool
 
-    ## Use Cases
-    - Get all groups in the organization
-    - Find groups with specific names or descriptions
-    - Filter groups by type
-    - Search using complex criteria with profile attributes
+    ## Goal
+    This tool searches for or lists groups in the Okta directory based on various criteria.
 
-    ## Example Usage
-    ```python
-    # List all groups
-    groups, resp, err = await client.list_groups()
-    if err:
-        return {"status": "error", "error": str(err)}
-    groups_list = [group.as_dict() for group in groups]
-
-    # Search groups by name
-    groups, resp, err = await client.list_groups(query_params={"q": "Engineering"})
-    if err:
-        return {"status": "error", "error": str(err)}
-    groups_list = [group.as_dict() for group in groups]
-
-    # Advanced search with specific criteria
-    groups, resp, err = await client.list_groups(query_params={"search": "profile.name co \"Engineering\""})
-    if err:
-        return {"status": "error", "error": str(err)}
-    groups_list = [group.as_dict() for group in groups]
-    ```
+    ## Core Functionality
+    Retrieves groups matching search criteria or lists all groups with pagination support.
 
     ## Parameters
-    - **query_params**: Optional dictionary with search criteria:
-      - 'q': Simple text search
-      - 'search': Advanced SCIM filter expression
-      - 'type': Filter by group type (OKTA_GROUP, APP_GROUP)
+    *   **`query`** (String):
+        *   Optional simple text search across group names and descriptions.
+        *   Example: `"Engineering"` will find groups with "Engineering" in name or description.
 
-    ## Search Operators (for 'search' parameter)
-    - eq: profile.name eq "Engineering" (equals)
-    - co: profile.name co "Eng" (contains)
-    - sw: profile.name sw "Dev" (starts with)
-    - And other operators: ne (not equals), pr (present), gt/lt (greater/less than)
+    *   **`search`** (String):
+        *   Optional advanced SCIM filter expression for more complex searches.
+        *   Examples:
+            *   `profile.name eq \"Engineering\"`
+            *   `profile.name co \"Dev\"`
+            *   `type eq \"OKTA_GROUP\"`
 
-    ## Return Value
-    List of group objects with these key fields:
-    - id: Unique identifier
+    ## Default Output Fields
+    Groups contain these key fields:
+    - id: Unique group identifier
     - profile: Contains name and description
     - type: Group type (OKTA_GROUP, APP_GROUP)
     - created/lastUpdated: Timestamps
-    """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
-    pass
 
+    ## Search Operators (for 'search' parameter)
+    *   **eq**: Equals - `profile.name eq \"Engineering\"`
+    *   **co**: Contains - `profile.name co \"Eng\"`
+    *   **sw**: Starts with - `profile.name sw \"Dev\"`
+    *   Others: ne (not equals), pr (present), gt/lt (greater/less than)
 
-@register_tool(
-    name="get_group_details",
-    entity_type="group",
-    aliases=["group_details", "get_group", "getgroupdetails"]
-)
-async def get_group_details(client, group_id):
-    """
-    # Okta Get Group Details API
+    ## Example Search Syntax
+    ```python
+    # Correct syntax with double quotes for equals
+    query_params = {
+        "search": "profile.name eq \"Engineering\""
+    }
 
-    ## Overview
-    This API retrieves detailed information about a specific Okta group using its unique ID.
+    # For starts with
+    query_params = {
+        "search": "profile.name sw \"Dev\""
+    }
 
-    ## Use Cases
-    - View detailed properties of a specific group
-    - Check group settings and attributes
-    - Verify group type and timestamps
+    # For contains
+    query_params = {
+        "search": "profile.name co \"Admin\""
+    }
+    
+    # Using the simple query parameter for text search
+    query_params = {
+        "q": "Engineering"
+    }
+    ```
 
     ## Example Usage
     ```python
-    # Get group details by ID - parameter is passed directly, not as a named argument
-    group, resp, err = await client.get_group("00g1qqxig80cFCxPP0h7")
-    if err:
-        return {"status": "error", "error": str(err)}
+    # Build query parameters based on inputs
+    query_params = {}
+    if query:
+        query_params["q"] = query
+    if search:  # Using search parameter (not filter)
+        query_params["search"] = search
+    
+    # Get groups with pagination
+    groups = await paginate_results(
+        "list_groups",
+        query_params=query_params,
+        entity_name="groups"
+    )
+    
+    # Check for errors
+    if isinstance(groups, dict) and "status" in groups and groups["status"] == "error":
+        return groups
+
+    # Handle empty results
+    if not groups:
+        return {"status": "not_found", "entity": "group", "message": "No matching groups found"}
         
-    group_details = group.as_dict()
+        IMPORTANT: When handling empty results, ALWAYS return a status object:
+        {{}"status": "not_found", "entity": "[entity_type]", "message": "No matching records found"}}
+        NEVER return an empty list [] for empty results.        
 
-    # Access group properties
-    group_name = group_details["profile"]["name"]
-    group_description = group_details["profile"]["description"]
-    group_type = group_details["type"]
+    # Transform to include only essential fields
+    minimal_groups = []
+    for group in groups:
+        minimal_groups.append({
+            "id": group["id"],
+            "name": group["profile"].get("name"),
+            "description": group["profile"].get("description", ""),
+            "type": group.get("type", "OKTA_GROUP")
+        })
+    
+    return minimal_groups
     ```
-
-    ## Parameters
-    - **group_id**: Required. The unique identifier for the group, passed as a direct parameter.
-
-    ## SDK Method Signature
-    ```python
-    async def get_group(group_id):
-        # This is the internal SDK method signature
-        # The group_id is passed as a positional argument, NOT a named argument
-        pass
-    ```
-
-    ## Return Value
-    Dictionary containing detailed group information:
-    - id: Unique identifier
-    - profile: Contains name, description and other attributes
-    - type: Group type (OKTA_GROUP, APP_GROUP)
-    - created: Creation timestamp
-    - lastUpdated: Last update timestamp
-    - lastMembershipUpdated: When membership was last changed
 
     ## Error Handling
-    If the group doesn't exist, returns an error object:
-    ```python
-    {"status": "not_found", "entity": "group", "id": group_id}
-    ```
+    If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
+    If no groups are found, returns: `{"status": "not_found", "entity": "group", "message": "No matching groups found"}`
+
+    ## Important Notes
+    - Pagination is handled automatically for large result sets
+    - The Okta API limits results to 200 groups per page
+    - Results are already converted to dictionaries; do not call as_dict() on them
+    - Double quotes must be used inside search strings and properly escaped
+    - DO NOT use single quotes for the search values
+    - Try using the simple "q" parameter first if specific filters fail
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -145,78 +142,74 @@ async def get_group_details(client, group_id):
 )
 async def get_group_members(client, group_id):
     """
-    # Okta Group Members API
+    Retrieves all users who are members of a specific Okta group by group ID. Returns user information including ID, profile details and status for each group member.
 
-    ## Overview
-    This API retrieves all users who are members of a specific Okta group.
+    # Tool Documentation: Okta Group Members API Tool
 
-    ## Use Cases
-    - List all users in a group
-    - Check group membership
-    - Find user details within a specific group
+    ## Goal
+    This tool retrieves all users who are members of a specific Okta group.
 
-    ## Example Usage
-    ```python
-    # Get all members of a group - IMPORTANT: parameter is passed directly, not as a named argument
-    users, resp, err = await client.list_group_users("00g1qqxig80cFCxPP0h7")
-    if err:
-        return {"status": "error", "error": str(err)}
-        
-    users_list = [user.as_dict() for user in users]
-
-    # Process the members
-    for user in users_list:
-        user_id = user["id"]
-        email = user["profile"]["email"]
-        name = f"{user['profile']['firstName']} {user['profile']['lastName']}"
-        print(f"User: {name}, Email: {email}")
-
-    # Common pattern: First find group by name, then get members
-    # Step 1: Find the group by name
-    groups, resp, err = await client.list_groups(query_params={"q": "okta-admins"})
-    if err:
-        return {"status": "error", "error": str(err)}
-        
-    groups_list = [group.as_dict() for group in groups]
-    if groups_list:
-        # Step 2: Get the members of that group - note how group_id is passed directly
-        group_id = groups_list[0]["id"]
-        users, resp, err = await client.list_group_users(group_id)  # NOT client.list_group_users(group_id=group_id)
-        if err:
-            return {"status": "error", "error": str(err)}
-            
-        users_list = [user.as_dict() for user in users]
-    ```
-
-    ## SDK Method Signature
-    ```python
-    async def list_group_users(group_id):
-        # This is the internal SDK method signature
-        # The group_id is passed as a positional argument, NOT a named argument
-        # Do NOT use: client.list_group_users(group_id=group_id) - this will cause an error
-        # Instead use: client.list_group_users(group_id)
-        pass
-    ```
+    ## Core Functionality
+    Lists users that belong to a specified group with pagination support for large groups.
 
     ## Parameters
-    - **group_id**: Required. The unique identifier for the group, passed as a direct parameter.
+    *   **`group_id`** (Required, String):
+        *   The unique identifier for the group.
+        *   Example: `"00g1qqxig80cFCxPP0h7"`
+        *   Note: This parameter is passed via method_args when using paginate_results.
 
-    ## Return Value
-    A list of user objects, each containing:
+    ## Default Output Fields
+    Each user object contains:
     - id: User's unique identifier
     - profile: User profile containing:
       - email: User's email address
       - firstName, lastName: User's name
       - login: Username (often email)
-      - other profile attributes
     - status: User status (ACTIVE, SUSPENDED, etc.)
     - created: When user was created
 
-    ## Error Handling
-    If the group doesn't exist, returns an error object:
+    ## Example Usage
     ```python
-    {"status": "not_found", "entity": "group", "id": group_id}
+    # Get all users in the group with pagination
+    users = await paginate_results(
+        "list_group_users",
+        method_args=[group_id],  # Pass group_id as a positional argument in a list
+        entity_name="users"
+    )
+    
+    # Check for errors
+    if isinstance(users, dict) and "status" in users and users["status"] == "error":
+        return users
+    
+    # Handle empty results
+    if not users:
+        return {"status": "not_found", "entity": "group_members", "id": group_id, "message": "No users found in this group"}
+    
+    # Users are already dictionaries - no need for as_dict()
+    
+    # Transform to include only essential fields
+    minimal_users = []
+    for user in users:
+        minimal_users.append({
+            "id": user["id"],
+            "email": user["profile"].get("email"),
+            "firstName": user["profile"].get("firstName"),
+            "lastName": user["profile"].get("lastName"),
+            "status": user["status"]
+        })
+    
+    return minimal_users
     ```
+
+    ## Error Handling
+    If the group doesn't exist, returns: `{"status": "not_found", "entity": "group", "id": group_id}`
+    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If no users are found in the group, returns: `{"status": "not_found", "entity": "group_members", "id": group_id, "message": "No users found in this group"}`
+
+    ## Important Notes
+    - When using paginate_results, pass the group_id in method_args=[group_id]
+    - Results are already converted to dictionaries; do not call as_dict() on them
+    - Pagination is handled automatically for groups with many users
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -230,59 +223,71 @@ async def get_group_members(client, group_id):
 )
 async def list_group_applications(client, group_id):
     """
-    # Okta Group Applications API
+    Retrieves all applications that are assigned to a specific Okta group by group ID. Returns application information including ID, name, label and status for each assigned app.
 
-    ## Overview
-    This API retrieves all applications that are assigned to a specific Okta group.
+    # Tool Documentation: Okta Group Applications API Tool
 
-    ## Use Cases
-    - See which applications a group has access to
-    - Audit application assignments
-    - View application details for group members
+    ## Goal
+    This tool retrieves all applications that are assigned to a specific Okta group.
 
-    ## Example Usage
-    ```python
-    # Get all applications assigned to a group - IMPORTANT: parameter is passed directly, not as a named argument
-    apps, resp, err = await client.list_assigned_applications_for_group("00g1qqxig80cFCxPP0h7")
-    if err:
-        return {"status": "error", "error": str(err)}
-        
-    apps_list = [app.as_dict() for app in apps]
-
-    # Process the applications
-    for app in apps_list:
-        app_id = app["id"]
-        app_name = app["name"]
-        app_label = app["label"]
-        print(f"App: {app_label} ({app_name})")
-    ```
-
-    ## SDK Method Signature
-    ```python
-    async def list_assigned_applications_for_group(group_id):
-        # This is the internal SDK method signature
-        # The group_id is passed as a positional argument, NOT a named argument
-        # Do NOT use: client.list_assigned_applications_for_group(group_id=group_id) - this will cause an error
-        # Instead use: client.list_assigned_applications_for_group(group_id)
-        pass
-    ```
+    ## Core Functionality
+    Lists applications with access granted to a specific group with pagination support.
 
     ## Parameters
-    - **group_id**: Required. The unique identifier for the group, passed as a direct parameter.
+    *   **`group_id`** (Required, String):
+        *   The unique identifier for the group.
+        *   Example: `"00g1qqxig80cFCxPP0h7"`
+        *   Note: This parameter is passed via method_args when using paginate_results.
 
-    ## Return Value
-    A list of application objects, each containing:
+    ## Default Output Fields
+    Each application object contains:
     - id: Application's unique identifier
     - name: Application name (internal name)
     - label: User-facing name
     - status: Application status
     - created/lastUpdated: Timestamps
 
-    ## Error Handling
-    If the group doesn't exist, returns an error object:
+    ## Example Usage
     ```python
-    {"status": "not_found", "entity": "group", "id": group_id}
+    # Get all applications assigned to the group with pagination
+    apps = await paginate_results(
+        "list_assigned_applications_for_group",
+        method_args=[group_id],  # Pass group_id as a positional argument in a list
+        entity_name="applications"
+    )
+    
+    # Check for errors
+    if isinstance(apps, dict) and "status" in apps and apps["status"] == "error":
+        return apps
+    
+    # Handle empty results
+    if not apps:
+        return {"status": "not_found", "entity": "group_applications", "id": group_id, "message": "No applications assigned to this group"}
+    
+    # Apps are already dictionaries - no need for as_dict()
+    
+    # Transform to include only essential fields
+    minimal_apps = []
+    for app in apps:
+        minimal_apps.append({
+            "id": app["id"],
+            "name": app["name"],
+            "label": app["label"],
+            "status": app["status"]
+        })
+    
+    return minimal_apps
     ```
+
+    ## Error Handling
+    If the group doesn't exist, returns: `{"status": "not_found", "entity": "group", "id": group_id}`
+    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If no applications are found for the group, returns: `{"status": "not_found", "entity": "group_applications", "id": group_id, "message": "No applications assigned to this group"}`
+
+    ## Important Notes
+    - When using paginate_results, pass the group_id in method_args=[group_id]
+    - Results are already converted to dictionaries; do not call as_dict() on them
+    - Pagination is handled automatically for groups with many applications
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
