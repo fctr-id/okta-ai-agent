@@ -49,7 +49,7 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
     'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
     
     # Pagination methods
-    'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages',
+    'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages', 'paginate_results',
     
     # General methods
     'get'
@@ -57,7 +57,7 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
 
 # Allowed modules
 ALLOWED_MODULES: Set[str] = {
-    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time'
+    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time', 'src.utils.pagination_limits'
 }
 
 # Dangerous patterns to check for in code
