@@ -19,6 +19,9 @@ from src.utils.error_handling import (
     ValidationError, safe_execute, safe_execute_async, format_error_for_user, ErrorSeverity
 )
 from src.utils.logging import logger
+from src.core.realtime.tools.datetime_tools import (
+    get_current_time, parse_relative_time, format_date_for_query
+)
 
 # Import security controls from centralized config
 from src.utils.security_config import (
@@ -80,7 +83,10 @@ def prepare_execution_environment(
         'json': json,
         'datetime': datetime,
         'logger': logger,
-        'ReturnValueException': ReturnValueException
+        'ReturnValueException': ReturnValueException,
+        'get_current_time': get_current_time,
+        'parse_relative_time': parse_relative_time,
+        'format_date_for_query': format_date_for_query,
     }
     
     # Add any variables from previous steps
