@@ -18,19 +18,12 @@ from src.utils.error_handling import (
     BaseError, SecurityError, ExecutionError, ConfigurationError, 
     ValidationError, safe_execute, safe_execute_async, format_error_for_user, ErrorSeverity
 )
-from src.utils.logging import get_logger
+from src.utils.logging import logger
 
 # Import security controls from centralized config
 from src.utils.security_config import (
-    ALLOWED_SDK_METHODS,
-    ALLOWED_UTILITY_METHODS,
-    ALLOWED_MODULES,
-    DANGEROUS_PATTERNS,
     is_code_safe
 )
-
-# Configure logging
-logger = get_logger(__name__)
 
 class ReturnValueException(Exception):
     """Exception used to capture return statements in executed code."""
@@ -294,7 +287,7 @@ def normalize_result(result: Any) -> Dict[str, Any]:
     }
 
 
-def extract_code_from_llm_response(response: str) -> str:
+def extract_code_from_llm_response(response: str) -> Union[str, ValidationError]:
     """
     Extract Python code from an LLM response using various formats.
     
@@ -346,193 +339,6 @@ def extract_code_from_llm_response(response: str) -> str:
         )
 
 
-def log_execution_details(query_id: str, code: str, variables: Dict[str, Any], elapsed_time: float):
-    """
-    Log details about the code execution.
-    
-    Args:
-        query_id: Identifier for the query/flow
-        code: The executed code
-        variables: Variables from the execution
-        elapsed_time: Execution time in seconds
-    """
-    logger.info(f"Code execution completed in {elapsed_time:.2f}ms")
-    
-    # Log variables at debug level
-    logger.debug(f"Executed code:\n%s", code)
-    logger.debug(f"Variables:")
-    for var_name, var_value in variables.items():
-        if var_name in ['err'] and var_value is not None:
-            logger.debug(f"%s = %s (ERROR DETECTED)", var_name, var_value)
-        elif var_name not in ['resp', 'client']:
-            var_preview = str(var_value)[:100] + '...' if len(str(var_value)) > 100 else str(var_value)
-            logger.debug(f"%s = %s = %s", var_name, type(var_value).__name__, var_preview)
-
-
-async def execute_okta_code(
-    code: str, 
-    okta_client: Any, 
-    okta_domain: str,
-    query_id: str = "unknown",
-    extra_context: Dict[str, Any] = None,
-    execution_timeout: float = 5.0  # 5 second timeout
-) -> Dict[str, Any]:
-    """
-    Execute generated Okta SDK code in a secure environment.
-    
-    Args:
-        code: The Python code to execute
-        okta_client: The Okta client instance
-        okta_domain: The Okta domain for validation
-        query_id: Identifier for the query/flow
-        extra_context: Variables from previous steps
-        execution_timeout: Maximum execution time in seconds
-        
-    Returns:
-        Dictionary with execution results and metadata
-    """
-    start_time = time.time()
-    logger.info(f"Validating and executing generated code")
-    logger.debug(f"Code to execute:\n{code}")
-    
-    try:
-        # Step 1: Validate code for security
-        validation_result = CodeValidator.validate_code(code, okta_domain)
-        if validation_result is not True:
-            if isinstance(validation_result, BaseError):
-                validation_result.log()
-                error_message = format_error_for_user(validation_result)
-            else:
-                error_message = str(validation_result)
-                
-            logger.warning(f"Code validation failed: {error_message}")
-            return {
-                "result": {
-                    "status": "error",
-                    "error": f"Code validation failed: {error_message}",
-                    "data": None
-                },
-                "execution_time_ms": 0,
-                "code": code,
-                "success": False
-            }
-        
-        # Step 2: Prepare execution environment
-        namespace = prepare_execution_environment(okta_client, extra_context)
-        
-        # Step 3: Detect code patterns
-        has_tuple_unpacking = re.search(r'(\w+),\s*(\w+),\s*(\w+)\s*=\s*await\s+client\.', code) is not None
-        
-        # Step 4: Transform code for execution
-        transformed_code, transform_error = safe_execute(
-            transform_code_for_execution,
-            code,
-            error_message="Failed to transform code for execution"
-        )
-        
-        if transform_error:
-            transform_error.log()
-            return {
-                "result": {
-                    "status": "error",
-                    "error": format_error_for_user(transform_error),
-                    "data": None
-                },
-                "execution_time_ms": int((time.time() - start_time) * 1000),
-                "code": code,
-                "success": False,
-                "error": format_error_for_user(transform_error)
-            }
-        
-        # Step 5: Wrap code in an execution function
-        func_code = wrap_code_in_function(transformed_code)
-        
-        # Step 6: Execute the code with timeout protection
-        exec_result, exec_error = await safe_execute_async(
-            async_execute_with_timeout,
-            func_code,
-            namespace,
-            execution_timeout,
-            error_message="Code execution failed"
-        )
-        
-        if exec_error:
-            exec_error.log()
-            return {
-                "result": {
-                    "status": "error",
-                    "error": format_error_for_user(exec_error),
-                    "data": None
-                },
-                "execution_time_ms": int((time.time() - start_time) * 1000),
-                "code": code,
-                "success": False,
-                "error": format_error_for_user(exec_error)
-            }
-        
-        # Unpack execution result
-        is_timeout, local_vars = exec_result
-        
-        # Handle timeout case
-        if is_timeout:
-            timeout_error = ExecutionError(
-                message=f"Execution timed out after {execution_timeout} seconds",
-                context={"timeout_seconds": execution_timeout}
-            )
-            timeout_error.log()
-            return {
-                "result": {
-                    "status": "error",
-                    "error": format_error_for_user(timeout_error),
-                    "data": None
-                },
-                "execution_time_ms": int((time.time() - start_time) * 1000),
-                "code": code,
-                "success": False,
-                "error": format_error_for_user(timeout_error)
-            }
-        
-        # Step 7: Process and normalize results
-        result, variables = process_execution_result(local_vars, has_tuple_unpacking)
-        
-        # Step 8: Log execution details
-        elapsed = time.time() - start_time
-        log_execution_details(query_id, code, variables, elapsed * 1000)
-        
-        # Step 9: Return execution results
-        return {
-            "result": result,
-            "execution_time_ms": int(elapsed * 1000),
-            "code": code,
-            "success": not is_error_result(result),
-            "variables": variables,
-            "error": result["error"] if is_error_result(result) and isinstance(result, dict) and "error" in result else None
-        }
-        
-    except Exception as e:
-        # Create a proper error object
-        error = ExecutionError(
-            message="Unexpected error during code execution",
-            original_exception=e,
-            context={"code_preview": code[:100] + "..." if len(code) > 100 else code}
-        )
-        error.log()
-        
-        # Return structured error response
-        elapsed = time.time() - start_time
-        return {
-            "result": {
-                "status": "error",
-                "error": format_error_for_user(error),
-                "data": None
-            },
-            "execution_time_ms": int(elapsed * 1000),
-            "code": code,
-            "success": False,
-            "error": format_error_for_user(error)
-        }
-
-
 async def async_execute_with_timeout(
     func_code: str,
     namespace: Dict[str, Any],
@@ -559,3 +365,123 @@ async def async_execute_with_timeout(
         return False, local_vars  # Not a timeout
     except asyncio.TimeoutError:
         return True, {}  # Timeout occurred
+
+
+async def execute_okta_code(
+    code: str, 
+    okta_client: Any, 
+    okta_domain: str,
+    query_id: str = "unknown",
+    extra_context: Dict[str, Any] = None,
+    execution_timeout: float = 60.0  
+) -> Dict[str, Any]:
+    """
+    Execute generated Okta SDK code in a secure environment.
+    
+    Args:
+        code: The Python code to execute
+        okta_client: The Okta client instance
+        okta_domain: The Okta domain for validation
+        query_id: Identifier for the query/flow
+        extra_context: Variables from previous steps
+        execution_timeout: Maximum execution time in seconds
+        
+    Returns:
+        Dictionary with execution results
+    """
+    start_time = time.time()
+    logger.info(f"[{query_id}] Validating and executing generated code")
+    
+    try:
+        # Step 1: Validate code for security
+        validation_result = CodeValidator.validate_code(code, okta_domain)
+        if validation_result is not True:
+            if isinstance(validation_result, BaseError):
+                validation_result.log()
+                error_message = format_error_for_user(validation_result)
+            else:
+                error_message = str(validation_result)
+                
+            logger.warning(f"[{query_id}] Code validation failed: {error_message}")
+            return {
+                "result": {
+                    "status": "error",
+                    "error": f"Code validation failed: {error_message}",
+                    "data": None
+                },
+                "execution_time_ms": 0,
+                "code": code,
+                "success": False
+            }
+        
+        # Step 2: Prepare execution environment
+        namespace = prepare_execution_environment(okta_client, extra_context)
+        
+        # Step 3: Detect code patterns
+        has_tuple_unpacking = re.search(r'(\w+),\s*(\w+),\s*(\w+)\s*=\s*await\s+client\.', code) is not None
+        
+        # Step 4: Transform code for execution
+        transformed_code = transform_code_for_execution(code)
+        func_code = wrap_code_in_function(transformed_code)
+        
+        # Step 5: Execute the code with timeout protection
+        logger.debug(f"[{query_id}] Executing code with {execution_timeout}s timeout")
+        
+        is_timeout, local_vars = await async_execute_with_timeout(
+            func_code, namespace, execution_timeout
+        )
+        
+        # Handle timeout case
+        if is_timeout:
+            elapsed = (time.time() - start_time) * 1000  # in ms
+            logger.warning(f"[{query_id}] Execution timed out after {execution_timeout}s")
+            return {
+                "result": {
+                    "status": "error",
+                    "error": f"Execution timed out after {execution_timeout} seconds",
+                    "data": None
+                },
+                "execution_time_ms": int(elapsed),
+                "code": code,
+                "success": False
+            }
+        
+        # Step 6: Process and normalize results
+        result, variables = process_execution_result(local_vars, has_tuple_unpacking)
+        
+        # Step 7: Return execution results
+        elapsed = (time.time() - start_time) * 1000  # in ms
+        logger.info(f"[{query_id}] Code execution completed in {elapsed:.2f}ms")
+        
+        return {
+            "result": result,
+            "execution_time_ms": int(elapsed),
+            "code": code,
+            "success": not is_error_result(result),
+            "variables": variables,
+            "error": result["error"] if is_error_result(result) and isinstance(result, dict) and "error" in result else None
+        }
+        
+    except Exception as e:
+        # Create a proper error object
+        error = ExecutionError(
+            message="Unexpected error during code execution",
+            original_exception=e,
+            context={"code_preview": code[:100] + "..." if len(code) > 100 else code}
+        )
+        error.log()
+        
+        # Return structured error response
+        elapsed = (time.time() - start_time) * 1000  # in ms
+        logger.error(f"[{query_id}] Unexpected error after {elapsed:.2f}ms: {str(e)}")
+        return {
+            "result": {
+                "status": "error",
+                "error": format_error_for_user(error),
+                "data": None
+            },
+            "execution_time_ms": int(elapsed),
+            "code": code,
+            "success": False,
+            "error": format_error_for_user(error)
+        }
