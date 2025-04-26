@@ -116,6 +116,7 @@ class CodingAgent:
         
         return f"""
         You are an expert at writing Python code for Okta SDK operations with robust error handling.
+        Without previous knowledge of okta functions, you will generate code for a multi-step workflow. Make SURE you read the tool documentation carefully before generating code.
         
                 ### CRITICAL SECURITY CONSTRAINTS ###
         1. You MUST ONLY use tools that are explicitly listed in the AVAILABLE TOOLS section below
@@ -223,6 +224,7 @@ class CodingAgent:
         </STEP-2>
         
         Please generate all {len(plan.steps)} steps now, with clear code for each step.
+        DO NOT ADD ANY EXPLANATIONS, COMMENTS, OR DOCSTRINGS.
         """
         
     def _extract_step_codes(self, response: str, expected_steps: int) -> List[str]:

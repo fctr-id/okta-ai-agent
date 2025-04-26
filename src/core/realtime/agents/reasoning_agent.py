@@ -1,10 +1,13 @@
 from pydantic import BaseModel, Field
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 import re
+import time
 from pydantic_ai import Agent
 from src.core.model_picker import ModelConfig, ModelType
 from src.utils.logging import logger
 from src.utils.security_config import ALLOWED_SDK_METHODS
+from pydantic_ai.usage import UsageLimits
+from pydantic_ai import capture_run_messages
 
 # Import tool registry instead of individual tool modules
 from src.utils.tool_registry import build_tools_documentation
@@ -20,6 +23,15 @@ class PlanStep(BaseModel):
                                         description="How to handle errors in this step")
     fallback_action: Optional[str] = Field(default=None, 
                                         description="Action to take if this step fails")
+    step_number: Optional[int] = Field(default=None, description="Sequence number of this step")
+
+class PlanMetrics(BaseModel):
+    """Metrics about plan generation."""
+    llm_processing_time_ms: Optional[int] = Field(default=None, description="Time spent in LLM processing in ms")
+    total_processing_time_ms: Optional[int] = Field(default=None, description="Total time spent generating the plan in ms")
+    step_count: Optional[int] = Field(default=None, description="Number of steps in the plan")
+    complexity_score: Optional[int] = Field(default=None, description="Complexity score of the query")
+    entity_count: Optional[int] = Field(default=None, description="Number of entities in the query")
 
 class ExecutionPlan(BaseModel):
     """A structured plan for executing multiple steps."""
@@ -27,6 +39,7 @@ class ExecutionPlan(BaseModel):
     reasoning: str = Field(description="Overall reasoning for the plan")
     partial_success_acceptable: bool = Field(default=False, 
                                            description="Whether partial success is acceptable")
+    metrics: Optional[PlanMetrics] = Field(default=None, description="Metrics about plan generation")
 
 class RoutingResult(BaseModel):
     """Result from the routing agent's reasoning."""
@@ -66,6 +79,15 @@ IMPORTANT: Unless the user query specifes to look for an exact match, you should
    - To find a group by name, use list_groups with a search term
    - DO NOT try to search users with a "groups" filter - this will not work
 
+### Output Attributes ###
+1. If the user does not specify attributes, return only the default fields for each entity type. Otherwise only reutrn what the user asks for.
+   a. User: id, profile.login, profile.email, status
+   b. Group: id, profile.name, type
+   c. App: id, label, status
+   d. Event: id, eventType, published, severity
+   e. Policy: id, name, type, status
+    
+    
 YOUR RESPONSE FORMAT:
 You must respond with a valid JSON object containing an execution plan with the following structure:
 
@@ -249,26 +271,71 @@ routing_agent = Agent(
     output_type=RoutingResult
 )
 
-async def create_execution_plan(query: str) -> Tuple[RoutingResult, str]:
+async def create_execution_plan(
+    query: str, 
+    correlation_id: str = None, 
+    usage_limits: Optional[UsageLimits] = None  # New parameter
+) -> Tuple[RoutingResult, str]:
     """Create an execution plan for an Okta query
     
+    Args:
+        query: The user's query to create a plan for
+        correlation_id: Optional correlation ID for tracing
+        usage_limits: Optional usage limits for token consumption (not enforced by default)
+        
     Returns:
         Tuple containing (structured result, raw JSON response)
     """
+    start_time = time.time()
+    
+    # Add correlation ID to logs if provided
+    prefix = f"[{correlation_id}] " if correlation_id else ""
+    logger.info(f"{prefix}Generating execution plan for: {query}")
+    
     try:
-        # Run the agent against the query
-        result = await routing_agent.run(query)
+        # Analyze query complexity
+        complexity = analyze_query_complexity(query)
         
-        # Get the raw response from result.raw (the full raw LLM response in the example)
+        # Record LLM call start time
+        llm_start_time = time.time()
+        
+        # Run the agent against the query - with optional usage limits
+        if usage_limits:
+            result = await routing_agent.run(query, usage_limits=usage_limits)
+        else:
+            result = await routing_agent.run(query)
+        
+        # Calculate LLM processing time
+        llm_time = time.time() - llm_start_time
+        
+        # Get the raw response
         raw_response = result.message if hasattr(result, 'message') else str(result)
         
-        # Log some info about the result
-        logger.info(f"Created execution plan with {len(result.output.plan.steps)} steps")
+        # Add metrics to the plan
+        if result.output and result.output.plan:
+            result.output.plan.metrics = PlanMetrics(
+                llm_processing_time_ms=int(llm_time * 1000),
+                total_processing_time_ms=int((time.time() - start_time) * 1000),
+                step_count=len(result.output.plan.steps),
+                complexity_score=1 if complexity["likely_multi_entity"] else 0,
+                entity_count=complexity["entity_count"]
+            )
+            
+            # Add step numbers if missing
+            for i, step in enumerate(result.output.plan.steps):
+                step.step_number = i + 1
+        
+        # Log success with timing information
+        elapsed_time = time.time() - start_time
+        logger.info(f"{prefix}Plan generated in {elapsed_time:.2f}s with {len(result.output.plan.steps)} steps and {result.output.confidence}% confidence")
         
         # Return both the structured data and raw response
         return result.output, raw_response
+        
     except Exception as e:
-        logger.error(f"Failed to create execution plan: {str(e)}")
+        # Log error with timing information
+        elapsed_time = time.time() - start_time
+        logger.error(f"{prefix}Failed to create execution plan after {elapsed_time:.2f}s: {str(e)}")
         raise ValueError(f"Failed to create execution plan: {str(e)}")
 
 def analyze_query_entities(query: str) -> List[str]:
@@ -338,6 +405,7 @@ if __name__ == "__main__":
             print(f"Plan confidence: {plan.confidence}%")
             print(f"Reasoning: {plan.plan.reasoning}")
             print(f"Partial success acceptable: {plan.plan.partial_success_acceptable}")
+            print(f"Metrics: {plan.plan.metrics}")
             for i, step in enumerate(plan.plan.steps):
                 print(f"Step {i+1}: {step.tool_name}")
                 print(f"  Context: {step.query_context}")
