@@ -14,6 +14,9 @@ import traceback
 import json
 from enum import Enum
 from typing import Optional, Dict, Any, List, Union, Tuple, Type
+from typing import Optional, Dict, Any
+import traceback
+from datetime import datetime
 
 # Import logging for integration
 from src.utils.logging import get_logger
@@ -550,6 +553,60 @@ def format_error_for_response(
             "error_type": error.__class__.__name__
         }
 
+
+async def capture_detailed_error(
+    error: Exception,
+    correlation_id: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Capture detailed error information for debugging
+    
+    This function is prepared for future use with PydanticAI's capture_run_messages
+    but currently just provides enhanced error details.
+    
+    Args:
+        error: The exception that was raised
+        correlation_id: Optional correlation ID for tracing
+        context: Optional context about the error
+        
+    Returns:
+        Dictionary with detailed error information
+    """
+    # Get the current traceback
+    tb = traceback.format_exc()
+    
+    error_info = {
+        "error_type": error.__class__.__name__,
+        "error_message": str(error),
+        "timestamp": datetime.now().isoformat(),
+        "correlation_id": correlation_id,
+        "traceback": tb,
+        "context": context or {}
+    }
+    
+    # In the future, we could integrate with capture_run_messages here
+    # For now, just return the error details
+    return error_info
+
+# Add this class for future retry capabilities
+class RetryableError(BaseError):
+    """
+    Error type for operations that could be retried.
+    
+    This is prepared for future integration with PydanticAI's ModelRetry.
+    """
+    def __init__(
+        self,
+        message: str,
+        retry_after: Optional[float] = None,
+        max_retries: int = 3,
+        **kwargs
+    ):
+        super().__init__(message, **kwargs)
+        self.retry_after = retry_after
+        self.max_retries = max_retries
+        self.current_retry = 0
 
 # Legacy aliases for backward compatibility with client_errors.py
 OktaRealtimeError = BaseError
