@@ -117,7 +117,7 @@ class ExecutionManager:
                         self._tool_entity_map[alias] = tool.entity_type
         
         correlation_id = self.okta_deps.query_id if hasattr(self.okta_deps, 'query_id') else "init"
-        logger.debug(f"[{correlation_id}] Initialized tool entity map with {len(self._tool_entity_map)} entries")
+        #logger.debug(f"[{correlation_id}] Initialized tool entity map with {len(self._tool_entity_map)} entries")
     
     def _generate_correlation_id(self) -> str:
         """Generate a unique correlation ID for tracing execution."""
