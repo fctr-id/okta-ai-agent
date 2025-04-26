@@ -376,6 +376,10 @@ class ExecutionError(BaseError):
             **kwargs: Additional arguments
         """
         context = kwargs.pop("context", {})
+        
+        if 'severity' in kwargs:
+           del kwargs['severity']
+           
         if step_name:
             context["step_name"] = step_name
         if code_snippet:
@@ -387,11 +391,12 @@ class ExecutionError(BaseError):
                 context["code_snippet"] = code_snippet
                 
         super().__init__(
-            message,
+            message=message,
             severity=ErrorSeverity.ERROR,
-            context=context,
+            context=context or {},
             **kwargs
         )
+        self.step_name = step_name
 
 
 # Utility functions for error handling

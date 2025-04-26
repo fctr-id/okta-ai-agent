@@ -481,16 +481,66 @@ class ExecutionManager:
                             "error_details": error_msg,
                             "entity_type": entity_type,
                             "execution_time_ms": int(execution_time * 1000)
-                        },
-                        severity=ErrorSeverity.ERROR
+                        }
                     )
                 
                 # For non-critical steps, return empty result with error
                 return {}, {}, step_error
             
             # Check if result indicates an error
+            # Check if result indicates an error
             step_error = None
-            if is_error_result(execution_result.get('result')):
+            result = execution_result.get('result')
+            
+            # Special handling for empty lists - they are valid results, not errors
+            # In _execute_step method, right after checking for empty lists
+             # Special handling for empty lists - they are valid results, not errors
+            if isinstance(result, list) and len(result) == 0:
+                # Empty list is a valid result representing "no matches found"
+                logger.info(f"[{correlation_id}] Step completed in {execution_time:.2f}s: No matching items found (empty result)")
+                
+                # Display intermediate result
+                self._print_intermediate_result(result)
+                
+                # For critical steps, stop execution but return a friendly message
+                if step.critical:
+                    logger.info(f"[{correlation_id}] Critical step returned empty result - halting plan")
+                    return ExecutionError(
+                        message="No matching records found",
+                        step_name=step.tool_name,
+                        context={
+                            "step_number": step_number,
+                            "error_details": "No matching records found for the search criteria",
+                            "entity_type": entity_type,
+                            "status": "not_found"  # Special status to indicate empty result
+                        }
+                    )
+                
+                # For non-critical steps, just return the empty result normally
+                return execution_result, execution_result.get('variables', {}), None
+            elif isinstance(result, dict) and "status" in result and result["status"] == "not_found":
+                logger.info(f"[{correlation_id}] Step completed in {execution_time:.2f}s: Entity not found")
+                
+                # Display intermediate result
+                self._print_intermediate_result(result)
+                
+                # For critical steps, stop execution but return a friendly message
+                if step.critical:
+                    logger.info(f"[{correlation_id}] Critical step returned not_found - halting plan")
+                    return ExecutionError(
+                        message=f"No matching {result.get('entity', 'record')} found",
+                        step_name=step.tool_name,
+                        context={
+                            "step_number": step_number,
+                            "error_details": f"No matching {result.get('entity', 'record')} found with ID {result.get('id', 'unknown')}",
+                            "entity_type": entity_type,
+                            "status": "not_found"
+                        }
+                    )
+                
+                # For non-critical steps, just return the not_found result normally
+                return execution_result, execution_result.get('variables', {}), None            
+            elif is_error_result(result):
                 error_msg = self._extract_error_message(execution_result)
                 logger.warning(f"[{correlation_id}] Step returned error after {execution_time:.2f}s: {error_msg}")
                 logger.error(f"Error in step {step_number}: {error_msg}")
@@ -517,7 +567,7 @@ class ExecutionManager:
                         severity=ErrorSeverity.ERROR
                     )
             else:
-                # Step succeeded
+                # Step succeeded with non-empty result
                 result_summary = self._get_result_summary(execution_result.get('result'))
                 logger.info(f"[{correlation_id}] Step completed in {execution_time:.2f}s: {result_summary}")
                 
@@ -540,7 +590,7 @@ class ExecutionManager:
         """Print information about the current step."""
         logger.info(f"\nStep {step_number}: {tool_name}")
         logger.debug("-" * 60)
-        logger.debug(code)
+        logger.info(code)
         logger.debug("-" * 60)
     
     def _print_intermediate_result(self, result: Any) -> None:

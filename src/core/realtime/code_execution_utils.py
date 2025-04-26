@@ -244,14 +244,23 @@ def is_error_result(result: Any) -> bool:
     Returns:
         True if the result indicates an error, False otherwise
     """
-    # Error statuses
-    ERROR_STATUSES = {"error", "not_found", "dependency_failed"}
+    # Empty lists and empty dicts are valid results, not errors
+    if result == [] or result == {}:
+        return False
+    
+    # None might indicate an error depending on context
+    if result is None:
+        return False
+    
+    # Error statuses - include "not_found" as an error for critical steps
+    # This ensures processing stops when an entity isn't found
+    ERROR_STATUSES = {"error", "dependency_failed", "not_found"}
     
     # Check dictionary with standard error structure
     if isinstance(result, dict):
         if "status" in result and result["status"] in ERROR_STATUSES:
             return True
-        if "error" in result:
+        if "error" in result and result["error"]:  # Only if error has a value
             return True
             
     return False

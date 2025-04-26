@@ -268,35 +268,61 @@ class OktaRealtimeAgentCLI:
         Display the execution results in a user-friendly format.
         
         Args:
-            execution_result: The result from the execution manager
+            execution_result: The result from the execution manager or error
         """
-        # Display execution summary
-        if execution_result.status == "success":
-            print(f"\nPlan executed successfully!")
-        else:
-            print(f"\nPlan execution completed with warnings/issues.")
+        # Handle BaseError objects explicitly
+        if isinstance(execution_result, BaseError):
+            print(f"\nError: {execution_result.message}")
             
-        # Show entities queried
-        if execution_result.entities_queried:
-            print(f"Entities queried: {', '.join(execution_result.entities_queried)}")
+            # Check for context info
+            if hasattr(execution_result, 'context') and execution_result.context:
+                if 'error_details' in execution_result.context:
+                    print(f"Details: {execution_result.context['error_details']}")
+                elif 'original_exception' in execution_result.context:
+                    print(f"Details: {str(execution_result.context['original_exception'])}")
             
-        # Show warnings/errors if any
-        if execution_result.errors:
-            logger.warning(f"Plan completed with {len(execution_result.errors)} warnings/errors")
-            if len(execution_result.errors) == 1:
-                print(f"Warning: {execution_result.errors[0].error}")
+            # Special handling for "not_found" errors to make them more user-friendly
+            if hasattr(execution_result, 'context') and execution_result.context and 'status' in execution_result.context and execution_result.context['status'] == 'not_found':
+                print("\nNo matching records were found in Okta.")
+            elif hasattr(execution_result, 'context') and execution_result.context and 'error_details' in execution_result.context and 'not found' in str(execution_result.context['error_details']).lower():
+                print("\nNo matching records were found in Okta.")
             else:
-                print(f"Warnings/Errors: {len(execution_result.errors)}")
-                
+                print("\nPlan execution failed.")
+            return
+        
+        # Handle normal execution results
+        # Display execution summary
+        if hasattr(execution_result, 'status'):
+            if execution_result.status == "success":
+                print(f"\nPlan executed successfully!")
+            else:
+                print(f"\nPlan execution completed with warnings/issues.")
+            
+            # Show entities queried
+            if hasattr(execution_result, 'entities_queried') and execution_result.entities_queried:
+                print(f"Entities queried: {', '.join(execution_result.entities_queried)}")
+            
+            # Show warnings/errors if any
+            if hasattr(execution_result, 'errors') and execution_result.errors:
+                logger.warning(f"Plan completed with {len(execution_result.errors)} warnings/errors")
+                if len(execution_result.errors) == 1:
+                    print(f"Warning: {execution_result.errors[0].error}")
+                else:
+                    print(f"Warnings/Errors: {len(execution_result.errors)}")
+        
         # Format and show the final result
-        final_result = execution_result.final_result
+        if hasattr(execution_result, 'final_result'):
+            final_result = execution_result.final_result
+        else:
+            # Fallback if execution_result doesn't have expected structure
+            final_result = execution_result
         
         print("\nResult:")
         print("-" * 60)
         if isinstance(final_result, (dict, list)):
             # Handle empty results
             if not final_result:
-                print("No results found.")
+                print("No matching results found.")
             else:
                 # Pretty-print JSON
                 try:
