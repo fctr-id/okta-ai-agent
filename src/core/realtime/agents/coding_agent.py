@@ -174,11 +174,11 @@ class CodingAgent:
         
         TECHNICAL REQUIREMENTS:
         6. Use client.X for Okta SDK calls (not okta_client)
-        7. Always use the tuple unpacking pattern: object, resp, err = await client.X
-        8. Always check for errors with: if err: return {{"status": "error", "error": str(err)}}
-        9. Use as_dict() (not to_dict()) to convert Okta objects to dictionaries
-        10. For list operations, use: [item.as_dict() for item in items]
-        11. For collecting results, use list comprehensions instead of append: emails = [user["profile"]["email"] for user in users_list]
+        7. For direct SDK methods only: Always use the tuple unpacking pattern: object, resp, err = await client.X
+        8. IMPORTANT EXCEPTION: For utility functions like paginate_results(), do NOT use tuple unpacking. Instead use: users = await paginate_results(...)
+        9. For direct SDK error checking: if err: return {{'status': 'error', 'error': str(err)}}
+        10. For utility functions error checking: if isinstance(result, dict) and 'status' in result and result['status'] == 'error':
+        11. Use as_dict() (not to_dict()) to convert Okta objects to dictionaries
         
         CRITICAL DATA EXTRACTION REQUIREMENTS:
         - Always extract ONLY the specific data mentioned in the step description
