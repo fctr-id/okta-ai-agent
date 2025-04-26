@@ -30,6 +30,9 @@ ALLOWED_SDK_METHODS: Set[str] = {
     'get_application', 'list_applications',
     'list_application_assignments',
     
+    # Datetime utility operations
+    'get_current_time', 'parse_relative_time', 'format_date_for_query',
+    
     # Other operations
     'get_logs', 'list_user_groups',
     'list_factors', 'list_supported_factors',

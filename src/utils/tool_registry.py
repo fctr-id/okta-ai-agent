@@ -273,6 +273,7 @@ def load_tools() -> bool:
         packages_to_try = [
             "src.core.realtime.tools.user_tools",
             "src.core.realtime.tools.group_tools",
+            "src.core.realtime.tools.datetime_tools",
             # Add more tool modules as they become available
         ]
         
