@@ -33,10 +33,13 @@ ALLOWED_SDK_METHODS: Set[str] = {
     # Datetime utility operations
     'get_current_time', 'parse_relative_time', 'format_date_for_query',
     
+    #application operations
+    'list_applications ', 'get_application_details', 'list_application_users', 'list_application_groups',
+    
     # Other operations
-    'get_logs', 'list_user_groups',
+    'get_event_logs', 'get_logs','list_user_groups',
     'list_factors', 'list_supported_factors',
-    'get_user_factors'
+    'get_user_factors', 'format_event_logs'
 }
 
 # Allowed utility methods 
@@ -45,7 +48,7 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
     'to_dict', 'as_dict', 'dict', 'json',
     
     # Common list operations
-    'append', 'extend', 'insert', 'remove', 'pop', 'clear', 
+    'append', 'extend', 'insert', 'add', 'remove', 'pop', 'clear', 
     'index', 'count', 'sort', 'reverse',
     
     # String methods

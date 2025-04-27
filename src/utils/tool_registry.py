@@ -254,7 +254,7 @@ def build_tools_documentation() -> str:
                 # Get first paragraph or first 200 chars
                 desc_lines = tool.description.strip().split("\n\n")
                 brief_desc = desc_lines[0].strip()
-                if len(brief_desc) > 200:
+                if len(brief_desc) > 300:
                     brief_desc = brief_desc[:197] + "..."
                 tools_docs += f"{brief_desc}\n\n"
     
@@ -274,6 +274,8 @@ def load_tools() -> bool:
             "src.core.realtime.tools.user_tools",
             "src.core.realtime.tools.group_tools",
             "src.core.realtime.tools.datetime_tools",
+            "src.core.realtime.tools.logevents_tools",
+            "src.core.realtime.tools.application_tools",
             # Add more tool modules as they become available
         ]
         
