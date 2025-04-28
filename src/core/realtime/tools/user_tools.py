@@ -304,4 +304,96 @@ async def list_user_groups(client, user_id_or_login):
     # This function is just a placeholder for registration
     pass
 
+@register_tool(
+    name="list_user_factors",
+    entity_type="user",
+    aliases=["user_factors", "get_user_factors", "list_factors", "authentication_factors"]
+)
+async def list_user_factors(client, user_id_or_login):
+    """
+    Retrieves all authentication factors enrolled for a specific Okta user by user ID or login (email). Returns detailed information about each factor including type, status, and provider.
+
+    # Tool Documentation: Okta List User Factors API Tool
+
+    ## Goal
+    This tool retrieves all authentication factors that an Okta user has enrolled.
+
+    ## Core Functionality
+    Retrieves MFA factors associated with a specific user with detailed factor information.
+
+    ## Parameters
+    *   **`user_id_or_login`** (Required, String):
+        *   The unique identifier or login (usually email) of the user.
+        *   Can be either:
+            *   An Okta user ID (e.g., "00u1ero7vZFVEIYLWPBN")
+            *   A user's login/email (e.g., "john.doe@example.com")
+
+    ## Default Output Fields
+    If no specific attributes are requested, return these minimal fields for each factor:
+    - id: Factor's unique identifier
+    - factorType: The type of factor (e.g., "sms", "push", "webauthn", "email")
+    - provider: The provider of the factor (e.g., "OKTA", "GOOGLE", "SYMANTEC")
+    - status: Current status of the factor (e.g., "ACTIVE", "PENDING_ACTIVATION")
+    - created: When the factor was enrolled
+
+    If the user specifically asks for different attributes, return those instead of the default fields.
+    If the user asks for "all" or "complete" data, return the full factor objects.
+
+    ## Example Usage
+    ```python
+    # If input is an email/login rather than ID, look up the user ID first
+    if "@" in user_id_or_login:
+        user, resp, err = await client.get_user(user_id_or_login)
+        if err:
+            return {"status": "error", "error": str(err)}
+        if not user:
+            return {"status": "not_found", "entity": "user", "id": user_id_or_login}
+        user_id = user.id
+    else:
+        # Input is already a user ID
+        user_id = user_id_or_login
+    
+    # Get all factors for this user
+    factors, resp, err = await client.list_factors(user_id)
+    if err:
+        return {"status": "error", "error": str(err)}
+    
+    # Handle empty results
+    if not factors:
+        return {"factors": [], "total_factors": 0}
+    
+    # Transform results to include only default fields
+    minimal_factors = []
+    for factor in factors:
+        factor_dict = factor.as_dict()
+        minimal_factors.append({
+            "id": factor_dict["id"],
+            "factorType": factor_dict.get("factorType"),
+            "provider": factor_dict.get("provider"),
+            "status": factor_dict.get("status"),
+            "created": factor_dict.get("created")
+        })
+    
+    return {
+        "factors": minimal_factors,
+        "total_factors": len(minimal_factors)
+    }
+    ```
+
+    ## Error Handling
+    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id_or_login}`
+    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If no factors are found, returns: `{"factors": [], "total_factors": 0}`
+
+    ## Important Implementation Notes
+    - Call the Okta API method directly: client.list_factors(user_id)
+    - This method does not require pagination as factors typically come in a single response
+    - Factor status can be "ACTIVE", "PENDING_ACTIVATION", or other values depending on factor type
+    - Common factor types include "sms", "email", "push", "webauthn", "token:software:totp"
+    - Return counts in addition to factor details for better user experience
+    """
+    # Implementation will be handled by code generation
+    # This function is just a placeholder for registration
+    pass
+
 logger.info("Registered user tools")

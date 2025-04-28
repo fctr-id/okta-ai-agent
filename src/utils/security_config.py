@@ -19,28 +19,35 @@ logger = get_logger(__name__)
 
 # Allowed Okta SDK methods 
 ALLOWED_SDK_METHODS: Set[str] = {
-    # User operations
-    'get_user', 'get_users', 'list_users',
+    # User operations from user_tools.py
+    'get_user',                 # Used in get_user_details and for resolving email to ID
+    'list_users',               # Used in search_users
+    'list_factors',             # Used in list_user_factors
+    'list_user_groups',         # Used with paginate_results
     
-    # Group operations
-    'get_group', 'list_groups', 'list_group_users',
-    'list_assigned_applications_for_group',
+    # Group operations from group_tools.py
+    'list_groups',              # Used in list_groups
+    'list_group_users',         # Used with paginate_results in get_group_members
+    'list_assigned_applications_for_group',  # Used in list_group_applications
     
-    # Application operations
-    'get_application', 'list_applications',
-    'list_application_assignments',
+    # Application operations from application_tools.py
+    'get_application',          # Used in get_application_details
+    'list_applications',        # Used in list_applications
+    'list_application_users',   # Used with paginate_results
+    'list_application_groups',  # Used with paginate_results
     
-    # Datetime utility operations
-    'get_current_time', 'parse_relative_time', 'format_date_for_query',
+    # Log/Event operations from logevents_tools.py
+    'get_logs',                 # Used in get_event_logs
     
-    #application operations
-    'list_applications ', 'get_application_details', 'list_application_users', 'list_application_groups',
+    # Datetime utility operations from datetime_tools.py
+    'get_current_time',         # No direct client call but used as a tool
+    'parse_relative_time',      # No direct client call but used as a tool
+    'format_date_for_query',    # No direct client call but used as a tool
     
-    # Other operations
-    'get_event_logs', 'get_logs','list_user_groups',
-    'list_factors', 'list_supported_factors',
-    'get_user_factors', 'format_event_logs'
+    # For 'paginate_results' function used in many tools
+    'paginate_results'
 }
+
 
 # Allowed utility methods 
 ALLOWED_UTILITY_METHODS: Set[str] = {
