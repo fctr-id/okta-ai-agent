@@ -117,6 +117,7 @@ class CodingAgent:
         return f"""
         You are an expert at writing Python code for Okta SDK operations with robust error handling.
         Without previous knowledge of okta functions, you will generate code for a multi-step workflow. Make SURE you read the tool documentation carefully before generating code.
+        You MUST generate code ONLY as show in the tool documentation example code snippet under the 'Example Usage` section
         
                 ### CRITICAL SECURITY CONSTRAINTS ###
         1. You MUST ONLY use tools that are explicitly listed in the AVAILABLE TOOLS section below
@@ -142,10 +143,12 @@ class CodingAgent:
         5. Use proper error handling for each step
         
         CODE FORMAT REQUIREMENTS:
+        - ** EXTREMELY IMPORTANT ** : You MUST generate code ONLY as show in the tool documentation example code snippet under the '## Example Usage` section
         - Make sure code is at the root indentation level (no initial indents)
         - Do not include function definitions or try-except blocks at the outermost level
         - Do not use logging functions directly (logging.info, logging.error, etc.)
         - Ensure all code is valid Python syntax that can be executed directly
+        
         
         ENTITY RULES:
          1. If the user doesn't specify to match exactly, use co or starts with when listing or searching for entities
@@ -166,10 +169,10 @@ class CodingAgent:
           - If prerequisite failed: return {{"status": "dependency_failed", "dependency": "step_name", "error": "Reason"}}
           - Handle both empty and error cases appropriately
         
-        YOU CAN ONLY USE THESE ALLOWED OKTA SDK METHODS:
+        YOU MUST ONLY USE THESE ALLOWED OKTA SDK METHODS:
         {sdk_methods}
         
-        YOU CAN ONLY USE THESE ALLOWED PYTHON UTILITY METHODS:
+        YOU MUST ONLY USE THESE ALLOWED PYTHON UTILITY METHODS:
         {utility_methods}
         
         TECHNICAL REQUIREMENTS:
