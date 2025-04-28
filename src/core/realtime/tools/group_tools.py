@@ -138,39 +138,39 @@ async def list_groups(client, query=None, search=None):
 @register_tool(
     name="get_group_members",
     entity_type="group",
-    aliases=["group_members", "list_group_members", "group_users", "find_users_in_group"]
+    aliases=["group_users", "list_group_users", "user_membership"]
 )
 async def get_group_members(client, group_id):
     """
-    Retrieves all users who are members of a specific Okta group by group ID. Returns user information including ID, profile details and status for each group member.
+    Retrieves all members (users) of a specific Okta group by group ID. Returns user information including ID, email, and status for each user in the group.
 
-    # Tool Documentation: Okta Group Members API Tool
+    # Tool Documentation: Okta Get Group Members API Tool
 
     ## Goal
-    This tool retrieves all users who are members of a specific Okta group.
+    This tool retrieves all members (users) of a specific Okta group.
 
     ## Core Functionality
-    Lists users that belong to a specified group with pagination support for large groups.
+    Retrieves users associated with a specific group.
 
     ## Parameters
     *   **`group_id`** (Required, String):
-        *   The unique identifier for the group.
-        *   Example: `"00g1qqxig80cFCxPP0h7"`
-        *   Note: This parameter is passed via method_args when using paginate_results.
+        *   The unique identifier of the group.
+        *   Must be an Okta group ID (e.g., "00g1emaKYZTWRYYRRTDK")
 
     ## Default Output Fields
-    Each user object contains:
-    - id: User's unique identifier
-    - profile: User profile containing:
-      - email: User's email address
-      - firstName, lastName: User's name
-      - login: Username (often email)
-    - status: User status (ACTIVE, SUSPENDED, etc.)
-    - created: When user was created
+    If no specific attributes are requested, return these minimal fields for each user:
+    - id: User's unique Okta identifier
+    - email: User's primary email address (from profile.email)
+    - firstName: User's first name (from profile.firstName)
+    - lastName: User's last name (from profile.lastName)
+    - status: User's current status (e.g., ACTIVE, SUSPENDED)
+
+    If the user specifically asks for different attributes, return those instead of the default fields.
+    If the user asks for "all" or "complete" data, return the full user objects.
 
     ## Example Usage
     ```python
-    # Get all users in the group with pagination
+    # Get all users for this group with pagination
     users = await paginate_results(
         "list_group_users",
         method_args=[group_id],  # Pass group_id as a positional argument in a list
@@ -183,11 +183,9 @@ async def get_group_members(client, group_id):
     
     # Handle empty results
     if not users:
-        return {"status": "not_found", "entity": "group_members", "id": group_id, "message": "No users found in this group"}
+        return []
     
-    # Users are already dictionaries - no need for as_dict()
-    
-    # Transform to include only essential fields
+    # Transform results to include only default fields
     minimal_users = []
     for user in users:
         minimal_users.append({
@@ -204,12 +202,12 @@ async def get_group_members(client, group_id):
     ## Error Handling
     If the group doesn't exist, returns: `{"status": "not_found", "entity": "group", "id": group_id}`
     If another error occurs, returns: `{"status": "error", "error": error_message}`
-    If no users are found in the group, returns: `{"status": "not_found", "entity": "group_members", "id": group_id, "message": "No users found in this group"}`
+    If no users are found, returns an empty list `[]`
 
-    ## Important Notes
+    ## Important Implementation Notes
     - When using paginate_results, pass the group_id in method_args=[group_id]
     - Results are already converted to dictionaries; do not call as_dict() on them
-    - Pagination is handled automatically for groups with many users
+    - Empty results are normal and will return an empty list []
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
