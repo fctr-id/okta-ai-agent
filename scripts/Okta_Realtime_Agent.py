@@ -15,6 +15,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 import traceback
 from typing import Optional, Dict, Any, Union, List
+import csv
+from datetime import datetime
+from pathlib import Path
 
 # Fix import paths - add project root to path
 project_root = Path(__file__).resolve().parent.parent
@@ -53,6 +56,11 @@ except ImportError as e:
     error.log()
     print(f"Error: {format_error_for_user(error)}. Please check your installation.")
     sys.exit(1)
+
+
+# Add these constants after other global variables
+RESULTS_DIR = Path(__file__).resolve().parent.parent / "results"
+DISPLAY_LIMIT = 10  # Maximum number of results to display in console
 
 
 class OktaRealtimeAgentCLI:
@@ -227,6 +235,38 @@ class OktaRealtimeAgentCLI:
             return input("\nProceed with execution? (y/n): ").lower().startswith('y')
         except EOFError:
             return False
+        
+    def save_results_to_csv(self, results: List[dict], filename: str) -> str:
+        """
+        Save query results to CSV file.
+        
+        Args:
+            results: List of dictionaries containing result data
+            filename: Base filename without extension
+            
+        Returns:
+            Path to saved CSV file
+        """
+        # Create results directory if it doesn't exist
+        RESULTS_DIR.mkdir(exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        full_filename = RESULTS_DIR / f"{filename}_{timestamp}.csv"
+        
+        try:
+            with open(full_filename, 'w', newline='') as csvfile:
+                if results:
+                    writer = csv.DictWriter(csvfile, fieldnames=results[0].keys())
+                    writer.writeheader()
+                    writer.writerows(results)
+                    logger.info(f"Results saved to: {full_filename}")
+                    return str(full_filename)
+            return str(full_filename)
+        except Exception as e:
+            logger.error(f"Error saving results to CSV: {str(e)}")
+            raise
+        
     
     async def _execute_plan(self, plan: ExecutionPlan) -> None:
         """
@@ -319,19 +359,48 @@ class OktaRealtimeAgentCLI:
         
         print("\nResult:")
         print("-" * 60)
-        if isinstance(final_result, (dict, list)):
-            # Handle empty results
-            if not final_result:
-                print("No matching results found.")
+        
+        # Handle empty results
+        if not final_result:
+            print("No matching results found.")
+        else:
+            # Check if result is a list of dictionaries that could be exported to CSV
+            if isinstance(final_result, list) and len(final_result) > 0 and isinstance(final_result[0], dict):
+                result_count = len(final_result)
+                
+                # Large result handling
+                if result_count > DISPLAY_LIMIT:
+                    try:
+                        # Save results to CSV
+                        saved_file = self.save_results_to_csv(final_result, "okta_realtime_results")
+                        
+                        # Show preview of first few records
+                        preview_data = final_result[:DISPLAY_LIMIT]
+                        # Pretty-print JSON for the preview
+                        print(json.dumps(preview_data, indent=2, default=str))
+                        
+                        # Print summary with file location
+                        print(f"\n📊 Found {result_count} records")
+                        print(f"💾 Results automatically saved to: {saved_file}")
+                        print(f"\nFirst {DISPLAY_LIMIT} records preview:")
+                        print("-" * 60)
+                        
+                        
+                    except Exception as e:
+                        logger.error(f"Error saving results: {str(e)}")
+                        print(f"\n❌ Error saving results: {str(e)}")
+                        # Fallback to standard display
+                        print(json.dumps(final_result, indent=2, default=str))
+                else:
+                    # Standard display for small results
+                    print(json.dumps(final_result, indent=2, default=str))
             else:
-                # Pretty-print JSON
+                # Handle non-list results
                 try:
                     print(json.dumps(final_result, indent=2, default=str))
                 except Exception:
                     print(str(final_result))
-        else:
-            print(final_result)
-        print("-" * 60)
+                    
     
     async def run(self) -> None:
         """Run the CLI interface main loop."""
