@@ -197,15 +197,15 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
 )
 async def get_application_details(client, app_id):
     """
-    Retrieves detailed information about a specific Okta application by ID. Returns application profile data including ID, name, label, status, creation date, and sign-on mode.
+    Retrieves detailed information about a specific Okta application by ID. Returns application profile data including ID, name, label, status, creation date, sign-on mode, and associated policy IDs that can be used with list_policy_rules.
 
     # Tool Documentation: Okta Get Application Details API Tool
 
     ## Goal
-    This tool retrieves detailed information about a specific Okta application by ID.
+    This tool retrieves detailed information about a specific Okta application by ID, including any associated policy IDs.
 
     ## Core Functionality
-    Retrieves information about a single application from the Okta directory.
+    Retrieves information about a single application from the Okta directory, with special attention to extracting policy IDs.
 
     ## Parameters
     *   **`app_id`** (Required, String):
@@ -222,6 +222,7 @@ async def get_application_details(client, app_id):
     - created: When the application was created
     - lastUpdated: When the application was last updated
     - signOnMode: Application's sign-on mode (e.g., SAML, BROWSER_PLUGIN)
+    - policyIds: Object containing associated policy IDs extracted from _links section
 
     If the user specifically asks for different attributes, return those instead of the default fields.
     If the user asks for "all" or "complete" data, return the full application object.
@@ -239,6 +240,18 @@ async def get_application_details(client, app_id):
     
     app_details = app.as_dict()
     
+    # Extract policy IDs from links section if available
+    policy_ids = {}
+    if "_links" in app_details:
+        links = app_details["_links"]
+                
+        # Extract access policy ID if present
+        if "accessPolicy" in links and "href" in links["accessPolicy"]:
+            access_url = links["accessPolicy"]["href"]
+            # Extract ID from URL format like "https://domain/api/v1/policies/policy_id"
+            if "/policies/" in access_url:
+                policy_ids["accessPolicyId"] = access_url.split("/policies/")[1]
+    
     # Return default fields unless full data is requested
     minimal_app = {
         "id": app_details["id"],
@@ -247,7 +260,8 @@ async def get_application_details(client, app_id):
         "status": app_details.get("status"),
         "created": app_details.get("created"),
         "lastUpdated": app_details.get("lastUpdated"),
-        "signOnMode": app_details.get("signOnMode")
+        "signOnMode": app_details.get("signOnMode"),
+        "policyIds": policy_ids  # Include extracted policy IDs
     }
     
     return minimal_app
@@ -257,9 +271,13 @@ async def get_application_details(client, app_id):
     If the application doesn't exist, returns: `{"status": "not_found", "entity": "application", "id": app_id}`
     If another error occurs, returns: `{"status": "error", "error": error_message}`
 
-    ## Important Notes
+    ## Important Implementation Notes
     - Pass app_id as a positional argument: client.get_application(app_id)
     - Do NOT use named arguments: client.get_application(app_id=app_id)
+    - Policy IDs are found in the _links section of the response
+    - Extract profileEnrollment policy ID from _links.profileEnrollment.href
+    - Extract access policy ID from _links.accessPolicy.href
+    - These policy IDs can be used with list_policy_rules to get detailed policy information
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
