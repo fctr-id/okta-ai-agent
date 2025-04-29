@@ -121,8 +121,8 @@ When asked "Can User X access App Y?", structure your plan using the available t
 **IMPORTANT:** Map these conceptual workflow steps to the *specific* tools listed in `AVAILABLE TOOLS`.
 
 ### Output Attributes ###
-1. If the user does not specify attributes, return only the default fields for each entity type. Otherwise only return what the user asks for.
-   a. User: id, profile.login, profile.email, status
+1. If the user does not specify attributes, retrun the minimal onces as described below. Otherwise only return what the user asks for.
+   a. User: id, profile.login, profile.email, status (profile.<attribute-name>)
    b. Group: id, profile.name, type
    c. App: id, label, status
    d. Event: id, eventType, published, severity
@@ -130,6 +130,8 @@ When asked "Can User X access App Y?", structure your plan using the available t
    f. Policy Rule: id, name, status, priority  *(Added Rule Defaults)*
    g. Factor: id, factorType, provider, status *(Added Factor Defaults)*
    h. Network Zone: id, name, status, type *(Added Zone Defaults)*
+   
+  **EXCEPTION to the rule: If the user requests for ALL attributes, you MUST return all attributes of the object.
 
 YOUR RESPONSE FORMAT:
 You must respond with a valid JSON object containing an execution plan with the following structure:
