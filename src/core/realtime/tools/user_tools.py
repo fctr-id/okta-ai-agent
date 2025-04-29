@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 )
 async def search_users(client, search=None, limit=None):
     """
-    Searches for users in the Okta directory using advanced search expressions (SCIM filter syntax) with support for pagination. Returns user information on identity profile attributes.
+    Searches for users in the Okta directory using advanced search expressions (SCIM filter syntax) with support for pagination.
 
     # Tool Documentation: Okta User Search API Tool
 
@@ -32,33 +32,17 @@ async def search_users(client, search=None, limit=None):
     ## Parameters
     *   **`search`** (String):
         *   Applies an advanced search filter using Okta's SCIM filter expression syntax.
-        *   Okta recommends this parameter for optimal search performance.
         *   Examples:
             *   `profile.lastName eq \"Smith\"`
             *   `status eq \"ACTIVE\"`
-            *   `profile.department eq \"Engineering\" and status eq \"ACTIVE\"`
-            *   `lastUpdated gt \"2023-01-01T00:00:00.000Z\"`
-            *   `id eq \"00u1ero7vZFVEIYLWPBN\"`
             *   `profile.firstName co \"Joh\"` (contains operator)
 
     *   **`limit`** (Integer):
         *   Specifies the maximum number of results to return per page.
-        *   Pagination is handled automatically by the underlying function.
-
-    ## Default Output Fields
-    If no specific attributes are requested, return these minimal fields:
-    - id: User's unique Okta identifier
-    - email: User's primary email address (from profile.email)
-    - firstName: User's first name (from profile.firstName)
-    - lastName: User's last name (from profile.lastName)
-    - status: User's current status (e.g., ACTIVE, SUSPENDED)
-
-    If the user specifically asks for different attributes, return those instead of the default fields.
-    If the user asks for "all" or "complete" data, return the full user objects.
 
     ## Search Operators
     *   **eq**: Equals - `status eq \"ACTIVE\"`
-    *   **sw**: Starts with - `profile.firstName sw \"J\"` (for string fields)
+    *   **sw**: Starts with - `profile.firstName sw \"J\"`
     *   **co**: Contains - `profile.email co \"example\"` (only for firstName, lastName, email, and login)
     *   **gt/lt**: Greater than/Less than - `lastUpdated gt \"2023-01-01T00:00:00.000Z\"`
     *   **ge/le**: Greater than or equal/Less than or equal
@@ -86,53 +70,19 @@ async def search_users(client, search=None, limit=None):
     if isinstance(users, dict) and "status" in users and users["status"] == "error":
         return users
 
-    # Handle empty results
-    if not users:
-        return []
-
-    # Transform results to include only default fields
-    minimal_users = []
-    for user in users:
-        minimal_users.append({
-            "id": user["id"],
-            "email": user["profile"].get("email"),
-            "firstName": user["profile"].get("firstName"),
-            "lastName": user["profile"].get("lastName"),
-            "status": user["status"]
-        })
-    
-    # Return the transformed results
-    return minimal_users
-    ```
-
-    ## Example Search Syntax
-    ```python
-    # Correct syntax with double quotes
-    query_params = {
-        "search": "profile.firstName eq \"Dan\""
-    }
-
-    # For starts with
-    query_params = {
-        "search": "profile.firstName sw \"D\""
-    }
-
-    # For contains
-    query_params = {
-        "search": "profile.firstName co \"an\""
-    }
+    # Return the results directly - filtering/formatting will be handled by the results processor
+    return users
     ```
 
     ## Error Handling
     If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
 
     ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
     - Pagination is handled automatically for large result sets
-    - The Okta API limits results to 200 users per page
-    - Results are already converted to dictionaries; do not call as_dict() on them
     - Double quotes must be used inside the search string and properly escaped
     - DO NOT use single quotes for the search values
-    - Empty results are normal and will return an empty list []
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -179,29 +129,29 @@ async def get_user_details(client, user_id_or_login):
 
     ## Example Usage
     ```python
-    # Get user by ID or email
-    user, resp, err = await client.get_user(user_id_or_login)
-    if err:
-        return {"status": "error", "error": str(err)}
+    # Get user by ID or email (using method_args for positional argument)
+    user_result = await paginate_results(
+        "get_user",
+        method_args=[user_id_or_login],
+        entity_name="user"
+    )
     
-    # If user not found (would be caught in error handling above but being explicit)
-    if not user:
+    # Check for errors
+    if isinstance(user_result, dict) and "status" in user_result and user_result["status"] == "error":
+        return user_result
+    
+    # Check if user was found
+    if not user_result or (isinstance(user_result, list) and len(user_result) == 0):
         return {"status": "not_found", "entity": "user", "id": user_id_or_login}
     
-    user_details = user.as_dict()
+    # Handle case where response might be a list with one user
+    if isinstance(user_result, list) and len(user_result) > 0:
+        user = user_result[0]
+    else:
+        user = user_result
     
-    # Return default fields unless full data is requested
-    minimal_user = {
-        "id": user_details["id"],
-        "email": user_details["profile"].get("email"),
-        "firstName": user_details["profile"].get("firstName"),
-        "lastName": user_details["profile"].get("lastName"),
-        "login": user_details["profile"].get("login"),
-        "status": user_details["status"],
-        "created": user_details.get("created")
-    }
-    
-    return minimal_user
+    # Return the user data directly - the results processor will handle formatting
+    return user
     ```
 
     ## Error Handling
@@ -209,8 +159,12 @@ async def get_user_details(client, user_id_or_login):
     If another error occurs, returns: `{"status": "error", "error": error_message}`
 
     ## Important Notes
-    - Pass user_id_or_login as a positional argument: client.get_user(user_id)
-    - Do NOT use named arguments: client.get_user(user_id=user_id)
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
+    - Use method_args=[user_id_or_login] to pass the user ID or login as a positional argument
+    - paginate_results already handles converting objects to dictionaries
+    - Return the data directly without additional transformation
+    - The results processor will handle filtering fields based on query context
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -247,62 +201,45 @@ async def list_user_groups(client, user_id_or_login):
     - name: Group name (from profile.name)
     - type: Group type (Usually "OKTA_GROUP")
 
-    If the user specifically asks for different attributes, return those instead of the default fields.
-    If the user asks for "all" or "complete" data, return the full group objects.
-
     ## Example Usage
     ```python
-    # If input is an email/login rather than ID, look up the user ID first
+    # Convert email to user ID if needed
     if "@" in user_id_or_login:
-        user, resp, err = await client.get_user(user_id_or_login)
-        if err:
-            return {"status": "error", "error": str(err)}
+        user, resp, err = normalize_okta_response(await client.get_user(user_id_or_login))
+        if err or not user:
+            return {"status": "error" if err else "not_found", "id": user_id_or_login}
         user_id = user.id
     else:
-        # Input is already a user ID
         user_id = user_id_or_login
     
-    # Get all groups for this user
+    # Get groups for this user
     groups = await paginate_results(
         "list_user_groups",
-        method_args=[user_id],  # Pass user_id as a positional argument in a list
+        method_args=[user_id],  # Must be in a list
         entity_name="groups"
     )
     
-    # Check for errors
-    if isinstance(groups, dict) and "status" in groups and groups["status"] == "error":
+    # Return results directly
+    if isinstance(groups, dict) and "status" in groups:
         return groups
-    
-    # Handle empty results
-    if not groups:
-        return []
-    
-    # Transform results to include only default fields
-    minimal_groups = []
-    for group in groups:
-        minimal_groups.append({
-            "id": group["id"],
-            "name": group["profile"].get("name"),
-            "type": group.get("type", "OKTA_GROUP")
-        })
-    
-    return minimal_groups
+    return groups
     ```
 
     ## Error Handling
-    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id_or_login}`
-    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If the user doesn't exist, returns: `{"status": "not_found", "id": user_id_or_login}`
+    If another error occurs, returns: `{"status": "error", "error": message}`
     If no groups are found, returns an empty list `[]`
 
-    ## Important Implementation Notes
-    - The method does NOT accept query_params
-    - When using paginate_results, pass the user_id in method_args=[user_id]
-    - Results are already converted to dictionaries; do not call as_dict() on them
-    - Empty results are normal and will return an empty list []
+    ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
+    - Pass user_id in method_args as a list
+    - Return data directly without transformation
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
     pass
+
 
 @register_tool(
     name="list_user_factors",
@@ -336,61 +273,52 @@ async def list_user_factors(client, user_id_or_login):
     - status: Current status of the factor (e.g., "ACTIVE", "PENDING_ACTIVATION")
     - created: When the factor was enrolled
 
-    If the user specifically asks for different attributes, return those instead of the default fields.
-    If the user asks for "all" or "complete" data, return the full factor objects.
-
     ## Example Usage
     ```python
-    # If input is an email/login rather than ID, look up the user ID first
+    # Convert email to user ID if needed
     if "@" in user_id_or_login:
-        user, resp, err = await client.get_user(user_id_or_login)
-        if err:
-            return {"status": "error", "error": str(err)}
-        if not user:
+        user_result = await paginate_results(
+            "get_user",
+            method_args=[user_id_or_login],
+            entity_name="user"
+        )
+        if isinstance(user_result, dict) and "status" in user_result:
+            return user_result
+        if not user_result or len(user_result) == 0:
             return {"status": "not_found", "entity": "user", "id": user_id_or_login}
-        user_id = user.id
+        # Handle case where result is a list
+        user = user_result[0] if isinstance(user_result, list) else user_result
+        user_id = user["id"]
     else:
-        # Input is already a user ID
         user_id = user_id_or_login
     
-    # Get all factors for this user
-    factors, resp, err = await client.list_factors(user_id)
-    if err:
-        return {"status": "error", "error": str(err)}
+    # Get factors for this user
+    factors = await paginate_results(
+        "list_factors",
+        method_args=[user_id],
+        entity_name="factors"
+    )
     
-    # Handle empty results
-    if not factors:
-        return {"factors": [], "total_factors": 0}
+    # Check for errors
+    if isinstance(factors, dict) and "status" in factors and factors["status"] == "error":
+        return factors
     
-    # Transform results to include only default fields
-    minimal_factors = []
-    for factor in factors:
-        factor_dict = factor.as_dict()
-        minimal_factors.append({
-            "id": factor_dict["id"],
-            "factorType": factor_dict.get("factorType"),
-            "provider": factor_dict.get("provider"),
-            "status": factor_dict.get("status"),
-            "created": factor_dict.get("created")
-        })
-    
-    return {
-        "factors": minimal_factors,
-        "total_factors": len(minimal_factors)
-    }
+    # Return results directly
+    return factors
     ```
 
     ## Error Handling
     If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id_or_login}`
-    If another error occurs, returns: `{"status": "error", "error": error_message}`
-    If no factors are found, returns: `{"factors": [], "total_factors": 0}`
+    If another error occurs, returns: `{"status": "error", "error": message}`
+    If no factors are found, returns an empty list `[]`
 
-    ## Important Implementation Notes
-    - Call the Okta API method directly: client.list_factors(user_id)
-    - This method does not require pagination as factors typically come in a single response
-    - Factor status can be "ACTIVE", "PENDING_ACTIVATION", or other values depending on factor type
-    - Common factor types include "sms", "email", "push", "webauthn", "token:software:totp"
-    - Return counts in addition to factor details for better user experience
+    ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
+    - User lookup and factor retrieval both use paginate_results for consistent handling
+    - paginate_results already converts objects to dictionaries
+    - Return data directly without transformation
+    - The results processor will handle filtering fields based on query context
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration

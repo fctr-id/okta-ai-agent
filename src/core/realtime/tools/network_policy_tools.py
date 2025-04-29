@@ -50,11 +50,6 @@ async def make_async_request(client, method: str, url: str, headers: Dict = None
     entity_type="policy",
     aliases=["policy_rules", "get_policy_rules"]
 )
-@register_tool(
-    name="list_policy_rules",
-    entity_type="policy",
-    aliases=["policy_rules", "get_policy_rules"]
-)
 async def list_policy_rules(client, policy_id, after=None, limit=50):
     """
     Lists all rules for a specific Okta policy. Returns detailed information about each policy rule including name, priority, conditions, and actions.
@@ -103,8 +98,8 @@ async def list_policy_rules(client, policy_id, after=None, limit=50):
     # Get all rules for this policy with pagination
     rules = await paginate_results(
         "list_policy_rules",
-        method_args=[policy_id],  # Pass policy_id as a positional argument in a list
-        query_params=query_params,  # Pass additional query parameters
+        method_args=[policy_id],  # Pass policy_id as a positional argument
+        query_params=query_params,
         entity_name="rules"
     )
     
@@ -112,31 +107,21 @@ async def list_policy_rules(client, policy_id, after=None, limit=50):
     if isinstance(rules, dict) and "status" in rules and rules["status"] == "error":
         return rules
     
-    # Handle empty results
-    if not rules:
-        return {"rules": [], "policy_id": policy_id, "total_rules": 0}
-    
-    # Format response with results
-    result = {
-        "rules": rules,  # paginate_results already converts objects to dictionaries
-        "policy_id": policy_id,
-        "total_rules": len(rules)
-    }
-    
-    return result
+    # Return results directly
+    return rules
     ```
 
     ## Error Handling
     If the policy doesn't exist, returns: `{"status": "not_found", "entity": "policy", "id": policy_id}`
     If another error occurs, returns: `{"status": "error", "error": error_message}`
-    If no rules are found, returns an empty list for the rules field
+    If no rules are found, returns an empty list `[]`
 
-    ## Important Implementation Notes
+    ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: rule["name"] (not object.attribute syntax)
     - When using paginate_results, pass the policy_id in method_args=[policy_id]
     - Policy rules define conditions and actions applied to authentication and authorization
-    - Common rule properties include name, priority, conditions, and actions
-    - Actions may contain factormode and constraints (what type of authentication is required)
-    - Network zones referenced by zone IDs (network.connection.include) can be looked up using list_network_zones
+    - Network zones referenced by zone IDs can be looked up using list_network_zones
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -180,38 +165,27 @@ async def get_policy_rule(client, policy_id, rule_id):
 
     ## Example Usage
     ```python
-    # Get the Okta organization URL and API token
-    org_url = os.getenv('OKTA_CLIENT_ORGURL').rstrip('/')
-    api_token = os.getenv('OKTA_API_TOKEN')
+    # Get the rule using paginate_results
+    rule = await paginate_results(
+        "get_policy_rule",
+        method_args=[policy_id, rule_id],  # Pass both IDs as positional arguments
+        entity_name="rule"
+    )
     
-    if not org_url:
-        return {"status": "error", "error": "OKTA_CLIENT_ORGURL environment variable not set"}
-    if not api_token:
-        return {"status": "error", "error": "OKTA_API_TOKEN environment variable not set"}
+    # Check for errors
+    if isinstance(rule, dict) and "status" in rule and rule["status"] == "error":
+        return rule
     
-    # Setup headers for API call
-    headers = {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-        'Authorization': f'SSWS {api_token}'
-    }
+    # Check if rule was found
+    if not rule or (isinstance(rule, list) and len(rule) == 0):
+        return {"status": "not_found", "entity": "rule", "id": rule_id}
     
-    # Make the direct API request
-    url = f"{org_url}/api/v1/policies/{policy_id}/rules/{rule_id}"
+    # Handle case where response might be a list with one rule
+    if isinstance(rule, list) and len(rule) > 0:
+        rule = rule[0]
     
-    try:
-        # Use direct API call
-        response = await make_async_request(
-            client=client,
-            method="GET",
-            url=url,
-            headers=headers
-        )
-        
-        # Return the raw response
-        return response
-    except Exception as e:
-        return {"status": "error", "error": str(e)}
+    # Return the rule data directly
+    return rule
     ```
 
     ## Error Handling
@@ -219,8 +193,10 @@ async def get_policy_rule(client, policy_id, rule_id):
     If the rule doesn't exist, returns: `{"status": "not_found", "entity": "rule", "id": rule_id}`
     If another error occurs, returns: `{"status": "error", "error": error_message}`
 
-    ## Important Implementation Notes
-    - This tool makes a direct API call rather than using the client library
+    ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: rule["name"] (not object.attribute syntax)
+    - Pass both policy_id and rule_id in method_args=[policy_id, rule_id]
     - Authentication methods can be found in actions.appSignOn.constraints.authenticationMethods
     - Network zones are referenced by ID and can be looked up with list_network_zones
     """
@@ -230,92 +206,134 @@ async def get_policy_rule(client, policy_id, rule_id):
 
 
 @register_tool(
-    name="list_policy_rules",
-    entity_type="policy",
-    aliases=["policy_rules", "get_policy_rules"]
+    name="list_network_zones",
+    entity_type="network",
+    aliases=["network_zones", "get_network_zones"]
 )
-async def list_policy_rules(client, policy_id, after=None, limit=50):
+async def list_network_zones(client):
     """
-    Lists all rules for a specific Okta policy. MUST retrive the policy ID first before fetching rules. Returns detailed information about each policy rule including name, priority, conditions, and actions.
+    Lists all network zones defined in the Okta organization. Returns details about each network zone including name, gateways, proxies, and IP ranges.
 
-    # Tool Documentation: Okta List Policy Rules API Tool
+    # Tool Documentation: Okta List Network Zones API Tool
 
     ## Goal
-    This tool retrieves all rules for a specific Okta policy.
+    This tool retrieves all network zones defined in an Okta organization.
 
     ## Core Functionality
-    Lists rules associated with a policy with support for pagination.
+    Lists network zones with their configuration details.
 
     ## Parameters
-    *   **`policy_id`** (Required, String):
-        *   The unique identifier of the policy.
-        *   Must be an Okta policy ID (e.g., "00p1abc2defGHIjk3LMn")
-
-    *   **`after`** (String):
-        *   Pagination cursor for the next page of results.
-        *   Obtained from a previous response's pagination information.
-
-    *   **`limit`** (Integer):
-        *   Specifies the number of results per page (1-200).
-        *   Default: 50 if not specified
+    This tool doesn't require any parameters beyond the Okta client.
 
     ## Default Output Fields
-    The response includes all policy rule objects with complete nested properties:
-    - id: Rule's unique identifier
-    - name: Display name of the rule
-    - priority: Order of evaluation (lower is higher priority)
-    - conditions: Authentication contexts where the rule applies (IP, user, device, etc.)
-    - actions: What happens when the rule matches (factor requirements, session settings)
+    Each network zone contains:
+    - id: Zone's unique identifier
+    - name: Display name of the zone
     - status: ACTIVE or INACTIVE
+    - created/lastUpdated: Timestamps
+    - gateways: Array of IP address objects (for IP-based zones)
+    - proxies: Array of proxy server objects (if configured)
+    - type: IP or DYNAMIC (location-based)
 
     ## Example Usage
     ```python
-    # Prepare request parameters
-    query_params = {}
-    
-    if limit:
-        query_params["limit"] = limit
-        
-    if after:
-        query_params["after"] = after
-    
-    # Get all rules for this policy with pagination
-    rules = await paginate_results(
-        "list_policy_rules",
-        method_args=[policy_id],  # Pass policy_id as a positional argument in a list
-        query_params=query_params,  # Pass additional query parameters
-        entity_name="rules"
+    # Get all network zones
+    zones = await paginate_results(
+        "list_zones",
+        entity_name="zones"
     )
     
     # Check for errors
-    if isinstance(rules, dict) and "status" in rules and rules["status"] == "error":
-        return rules
+    if isinstance(zones, dict) and "status" in zones and zones["status"] == "error":
+        return zones
     
-    # Handle empty results
-    if not rules:
-        return {"rules": [], "policy_id": policy_id, "total_rules": 0}
-    
-    # Format response with results
-    result = {
-        "rules": rules,  # paginate_results already converts objects to dictionaries
-        "policy_id": policy_id,
-        "total_rules": len(rules)
-    }
-    
-    return result
+    # Return results directly
+    return zones
     ```
 
     ## Error Handling
-    If the policy doesn't exist, returns: `{"status": "not_found", "entity": "policy", "id": policy_id}`
-    If another error occurs, returns: `{"status": "error", "error": error_message}`
-    If no rules are found, returns an empty list for the rules field
+    If an error occurs, returns: `{"status": "error", "error": error_message}`
+    If no zones are found, returns an empty list `[]`
 
-    ## Important Implementation Notes
-    - When using paginate_results, pass the policy_id in method_args=[policy_id]
-    - Policy rules define conditions and actions applied to authentication and authorization
-    - Common rule properties include name, priority, conditions, and actions
-    - Actions may contain factormode and constraints (what type of authentication is required)
-    - Network zones referenced by zone IDs (network.connection.include) can be looked up using list_network_zones
+    ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: zone["gateways"] (not object.attribute syntax)
+    - Network zones define IP ranges or locations that can be used in policy rules
+    - Zone IDs are referenced in policy rule conditions (network.connection.include)
+    - DYNAMIC zones are based on geographic location rather than IP addresses
+    """
+    # Implementation will be handled by code generation
+    # This function is just a placeholder for registration
+    pass
+
+
+@register_tool(
+    name="get_network_zone",
+    entity_type="network",
+    aliases=["zone_details", "network_zone_details"]
+)
+async def get_network_zone(client, zone_id):
+    """
+    Retrieves detailed information about a specific Okta network zone by ID. Returns complete configuration of the zone including name, status, gateways, proxies, and IP ranges.
+
+    # Tool Documentation: Okta Get Network Zone Details API Tool
+
+    ## Goal
+    This tool retrieves detailed information about a specific Okta network zone.
+
+    ## Core Functionality
+    Gets complete information about a network zone configuration.
+
+    ## Parameters
+    *   **`zone_id`** (Required, String):
+        *   The unique identifier of the network zone to retrieve.
+        *   Must be an Okta zone ID (e.g., "nzowdja3hKaMgfaQe0g3")
+
+    ## Default Output Fields
+    The complete network zone object with all properties:
+    - id: Zone's unique identifier
+    - name: Display name of the zone
+    - status: ACTIVE or INACTIVE
+    - created/lastUpdated: Timestamps
+    - gateways: Array of IP address objects with CIDR format addresses
+    - proxies: Array of proxy server objects (if configured)
+    - type: IP or DYNAMIC (location-based)
+
+    ## Example Usage
+    ```python
+    # Get network zone details
+    zone = await paginate_results(
+        "get_zone",
+        method_args=[zone_id],  # Pass zone_id as a positional argument
+        entity_name="zone"
+    )
+    
+    # Check for errors
+    if isinstance(zone, dict) and "status" in zone and zone["status"] == "error":
+        return zone
+    
+    # Check if zone was found
+    if not zone or (isinstance(zone, list) and len(zone) == 0):
+        return {"status": "not_found", "entity": "zone", "id": zone_id}
+    
+    # Handle case where response might be a list with one zone
+    if isinstance(zone, list) and len(zone) > 0:
+        zone = zone[0]
+    
+    # Return the zone data directly
+    return zone
+    ```
+
+    ## Error Handling
+    If the zone doesn't exist, returns: `{"status": "not_found", "entity": "zone", "id": zone_id}`
+    If another error occurs, returns: `{"status": "error", "error": error_message}`
+
+    ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: zone["gateways"] (not object.attribute syntax)
+    - IP zones contain gateways array with CIDR format addresses
+    - Dynamic zones contain locations array with country/region information
+    - Use this tool to look up zone details when you have a zone ID from a policy rule
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration

@@ -176,8 +176,8 @@ def format_event_logs(logs: List[Dict]) -> List[Dict]:
 )
 async def get_event_logs(client, query_params=None):
     """
-    Fetches System Log events from Okta with filtering options. This tool requires specific event type codes that you must provide from your memory. If you do not know, say I do NOT know the codes.
-    
+    Fetches System Log events from Okta with filtering options. Returns formatted logs with human-readable fields including actors, targets, and timestamps.
+
     # Tool Documentation: Get Okta System Log Events
     
     ## Goal
@@ -216,13 +216,8 @@ async def get_event_logs(client, query_params=None):
     ```python
     # Get login events from the last 7 days
     # First, get ISO format timestamps using datetime tools
-    current_time, err = await get_current_time()
-    if err:
-        return {"status": "error", "error": err["error"]}
-        
-    start_date, err = await parse_relative_time("7 days ago")
-    if err:
-        return {"status": "error", "error": err["error"]}
+    current_time = format_date_for_query(datetime.now())
+    start_date = format_date_for_query(datetime.now() - timedelta(days=7))
     
     # Build query parameters
     query_params = {
@@ -254,13 +249,15 @@ async def get_event_logs(client, query_params=None):
     
     ## Error Handling
     If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
+    If no events are found, returns an empty list `[]`
     
     ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: event["property"]["field"] (not object.attribute syntax)
     - Pagination is handled automatically for large result sets
     - The Okta API may limit results based on your rate limits
     - Results are automatically formatted with human-readable timestamps
     - Double quotes must be used inside filter strings and properly escaped
-    - Empty results are normal and will return an empty list []
     - Time expressions MUST be in ISO8601 format (use datetime tools if needed)
     """
     # Implementation will be handled by code generation

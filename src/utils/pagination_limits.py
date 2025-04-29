@@ -100,7 +100,7 @@ def normalize_okta_response(response):
         return None, resp_obj, f"Error normalizing response: {str(e)}"
 
 async def paginate_results(client_method, method_args=None, method_kwargs=None, 
-                          entity_name="items", flow_id=None):
+                          entity_name="items", flow_id=None, preserve_links=False):
     """
     Handle pagination for Okta API calls with rate limiting.
     
@@ -110,6 +110,7 @@ async def paginate_results(client_method, method_args=None, method_kwargs=None,
         method_kwargs: Keyword arguments to pass to the method
         entity_name: Name of the entity for logging
         flow_id: Flow ID for logging context
+        preserve_links: Whether to preserve _links in the response (defaults to False)
         
     Returns:
         List of all items across pages, or error dict
@@ -118,6 +119,9 @@ async def paginate_results(client_method, method_args=None, method_kwargs=None,
         method_args = []
     if method_kwargs is None:
         method_kwargs = {}
+    
+    # Automatically preserve links for application entities
+    should_preserve_links = preserve_links or entity_name in ["application", "applications"]
     
     log_prefix = f"[FLOW:{flow_id}] " if flow_id else ""
     all_items = []
@@ -142,9 +146,15 @@ async def paginate_results(client_method, method_args=None, method_kwargs=None,
                 processed_items = []
                 for item in items:
                     if hasattr(item, "as_dict"):
-                        processed_items.append(item.as_dict())
+                        item_dict = item.as_dict()
                     else:
-                        processed_items.append(item)
+                        item_dict = item
+                    
+                    # Remove _links unless it should be preserved
+                    if not should_preserve_links and "_links" in item_dict:
+                        del item_dict["_links"]
+                    
+                    processed_items.append(item_dict)
                 
                 all_items.extend(processed_items)
                 page_count += 1
@@ -171,9 +181,15 @@ async def paginate_results(client_method, method_args=None, method_kwargs=None,
                             processed_items = []
                             for item in items:
                                 if hasattr(item, "as_dict"):
-                                    processed_items.append(item.as_dict())
+                                    item_dict = item.as_dict()
                                 else:
-                                    processed_items.append(item)
+                                    item_dict = item
+                                
+                                # Remove _links unless it should be preserved
+                                if not should_preserve_links and "_links" in item_dict:
+                                    del item_dict["_links"]
+                                
+                                processed_items.append(item_dict)
                             
                             all_items.extend(processed_items)
                             page_count += 1

@@ -54,36 +54,13 @@ async def list_groups(client, query=None, search=None):
     *   **sw**: Starts with - `profile.name sw \"Dev\"`
     *   Others: ne (not equals), pr (present), gt/lt (greater/less than)
 
-    ## Example Search Syntax
-    ```python
-    # Correct syntax with double quotes for equals
-    query_params = {
-        "search": "profile.name eq \"Engineering\""
-    }
-
-    # For starts with
-    query_params = {
-        "search": "profile.name sw \"Dev\""
-    }
-
-    # For contains
-    query_params = {
-        "search": "profile.name co \"Admin\""
-    }
-    
-    # Using the simple query parameter for text search
-    query_params = {
-        "q": "Engineering"
-    }
-    ```
-
     ## Example Usage
     ```python
     # Build query parameters based on inputs
     query_params = {}
     if query:
         query_params["q"] = query
-    if search:  # Using search parameter (not filter)
+    if search:
         query_params["search"] = search
     
     # Get groups with pagination
@@ -97,43 +74,27 @@ async def list_groups(client, query=None, search=None):
     if isinstance(groups, dict) and "status" in groups and groups["status"] == "error":
         return groups
 
-    # Handle empty results
-    if not groups:
-        return {"status": "not_found", "entity": "group", "message": "No matching groups found"}
-        
-        IMPORTANT: When handling empty results, ALWAYS return a status object:
-        {{}"status": "not_found", "entity": "[entity_type]", "message": "No matching records found"}}
-        NEVER return an empty list [] for empty results.        
-
-    # Transform to include only essential fields
-    minimal_groups = []
-    for group in groups:
-        minimal_groups.append({
-            "id": group["id"],
-            "name": group["profile"].get("name"),
-            "description": group["profile"].get("description", ""),
-            "type": group.get("type", "OKTA_GROUP")
-        })
-    
-    return minimal_groups
+    # Return results directly
+    return groups
     ```
 
     ## Error Handling
     If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
-    If no groups are found, returns: `{"status": "not_found", "entity": "group", "message": "No matching groups found"}`
+    If no groups are found, returns an empty list `[]`
 
     ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)
     - Pagination is handled automatically for large result sets
     - The Okta API limits results to 200 groups per page
-    - Results are already converted to dictionaries; do not call as_dict() on them
     - Double quotes must be used inside search strings and properly escaped
     - DO NOT use single quotes for the search values
     - Try using the simple "q" parameter first if specific filters fail
+    - Return data directly without transformation - formatting will be handled by the results processor
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
     pass
-
 
 @register_tool(
     name="get_group_members",
@@ -165,9 +126,6 @@ async def get_group_members(client, group_id):
     - lastName: User's last name (from profile.lastName)
     - status: User's current status (e.g., ACTIVE, SUSPENDED)
 
-    If the user specifically asks for different attributes, return those instead of the default fields.
-    If the user asks for "all" or "complete" data, return the full user objects.
-
     ## Example Usage
     ```python
     # Get all users for this group with pagination
@@ -181,22 +139,8 @@ async def get_group_members(client, group_id):
     if isinstance(users, dict) and "status" in users and users["status"] == "error":
         return users
     
-    # Handle empty results
-    if not users:
-        return []
-    
-    # Transform results to include only default fields
-    minimal_users = []
-    for user in users:
-        minimal_users.append({
-            "id": user["id"],
-            "email": user["profile"].get("email"),
-            "firstName": user["profile"].get("firstName"),
-            "lastName": user["profile"].get("lastName"),
-            "status": user["status"]
-        })
-    
-    return minimal_users
+    # Return results directly
+    return users
     ```
 
     ## Error Handling
@@ -204,10 +148,12 @@ async def get_group_members(client, group_id):
     If another error occurs, returns: `{"status": "error", "error": error_message}`
     If no users are found, returns an empty list `[]`
 
-    ## Important Implementation Notes
+    ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
     - When using paginate_results, pass the group_id in method_args=[group_id]
-    - Results are already converted to dictionaries; do not call as_dict() on them
-    - Empty results are normal and will return an empty list []
+    - Return data directly without transformation
+    - The results processor will handle filtering fields based on query context
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
@@ -258,33 +204,21 @@ async def list_group_applications(client, group_id):
     if isinstance(apps, dict) and "status" in apps and apps["status"] == "error":
         return apps
     
-    # Handle empty results
-    if not apps:
-        return {"status": "not_found", "entity": "group_applications", "id": group_id, "message": "No applications assigned to this group"}
-    
-    # Apps are already dictionaries - no need for as_dict()
-    
-    # Transform to include only essential fields
-    minimal_apps = []
-    for app in apps:
-        minimal_apps.append({
-            "id": app["id"],
-            "name": app["name"],
-            "label": app["label"],
-            "status": app["status"]
-        })
-    
-    return minimal_apps
+    # Return results directly
+    return apps
     ```
 
     ## Error Handling
     If the group doesn't exist, returns: `{"status": "not_found", "entity": "group", "id": group_id}`
     If another error occurs, returns: `{"status": "error", "error": error_message}`
-    If no applications are found for the group, returns: `{"status": "not_found", "entity": "group_applications", "id": group_id, "message": "No applications assigned to this group"}`
+    If no applications are found, returns an empty list `[]`
 
     ## Important Notes
+    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
     - When using paginate_results, pass the group_id in method_args=[group_id]
-    - Results are already converted to dictionaries; do not call as_dict() on them
+    - Return data directly without transformation
+    - The results processor will handle filtering fields based on query context
     - Pagination is handled automatically for groups with many applications
     """
     # Implementation will be handled by code generation
