@@ -9,6 +9,8 @@ from typing import List, Dict, Any, Set, Optional
 import re
 import ast
 from src.utils.logging import get_logger
+import os
+from urllib.parse import urlparse
 
 # Configure logging
 logger = get_logger(__name__)
@@ -44,6 +46,14 @@ ALLOWED_SDK_METHODS: Set[str] = {
     'parse_relative_time',      # No direct client call but used as a tool
     'format_date_for_query',    # No direct client call but used as a tool
     
+        # Policy operations from policy_tools.py
+    'list_policy_rules',        # Used in list_policy_rules
+    # Network operations from policy_tools.py
+    'list_network_zones',      # Used in list_network_zones
+    
+    # Additional method needed for direct API calls
+    'make_async_request',       # Helper for direct API calls
+    
     # For 'paginate_results' function used in many tools
     'paginate_results'
 }
@@ -65,12 +75,12 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
     'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages', 'paginate_results',
     
     # General methods
-    'get'
+    'get', 'is_okta_url_allowed'
 }
 
 # Allowed modules
 ALLOWED_MODULES: Set[str] = {
-    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time', 'src.utils.pagination_limits'
+    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time', 'src.utils.pagination_limits', 'aiohttp'
 }
 
 # Dangerous patterns to check for in code
@@ -181,3 +191,51 @@ def sanitize_response(data: Any) -> Any:
     # Implementation would depend on data structure
     # This is a placeholder for the actual implementation
     return data
+
+
+def is_okta_url_allowed(url: str) -> bool:
+    """
+    Validates if a URL is allowed for direct API calls by checking
+    if it belongs to the configured Okta organization domain.
+    
+    Args:
+        url: The URL to validate
+        
+    Returns:
+        True if URL is allowed (matches Okta org URL), False otherwise
+    """
+    try:
+        # Get the Okta organization URL from environment
+        okta_org_url = os.getenv('OKTA_CLIENT_ORGURL')
+        if not okta_org_url:
+            logger.error("OKTA_CLIENT_ORGURL environment variable not set")
+            return False
+        
+        # Normalize URLs by removing trailing slashes
+        if okta_org_url.endswith('/'):
+            okta_org_url = okta_org_url[:-1]
+            
+        # Parse the URLs to compare domains and paths
+        parsed_okta_url = urlparse(okta_org_url)
+        parsed_request_url = urlparse(url)
+        
+        # Extract the base domain for comparison
+        okta_domain = parsed_okta_url.netloc
+        request_domain = parsed_request_url.netloc
+        
+        # Check if domains match
+        if request_domain != okta_domain:
+            logger.warning(f"URL validation failed: unauthorized domain: {request_domain}")
+            return False
+            
+        # Check if request URL starts with Okta org URL
+        if not url.startswith(okta_org_url):
+            logger.warning(f"URL validation failed: URL {url} does not belong to Okta org URL {okta_org_url}")
+            return False
+            
+        logger.debug(f"URL validation passed: {url}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating URL: {str(e)}")
+        return False
