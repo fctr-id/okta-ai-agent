@@ -18,6 +18,7 @@ from typing import Optional, Dict, Any, Union, List
 import csv
 from datetime import datetime
 from pathlib import Path
+import re
 
 # Fix import paths - add project root to path
 project_root = Path(__file__).resolve().parent.parent
@@ -175,7 +176,7 @@ class OktaRealtimeAgentCLI:
             return
             
         # Phase 3: Plan Execution
-        await self._execute_plan(plan_result.plan)
+        await self._execute_plan(plan_result.plan, query)
     
     async def _create_execution_plan(self, query: str) -> Optional[Any]:
         """
@@ -255,7 +256,7 @@ class OktaRealtimeAgentCLI:
         full_filename = RESULTS_DIR / f"{filename}_{timestamp}.csv"
         
         try:
-            with open(full_filename, 'w', newline='') as csvfile:
+            with open(full_filename, 'w', newline='', encoding='utf-8') as csvfile:
                 if results:
                     writer = csv.DictWriter(csvfile, fieldnames=results[0].keys())
                     writer.writeheader()
@@ -266,14 +267,75 @@ class OktaRealtimeAgentCLI:
         except Exception as e:
             logger.error(f"Error saving results to CSV: {str(e)}")
             raise
-        
     
-    async def _execute_plan(self, plan: ExecutionPlan) -> None:
+    # ADD NEW METHOD: Save Vue table format to CSV
+    def _save_vue_table_to_csv(self, vue_table_data: Dict[str, Any]) -> str:
+        """
+        Save Vue.js compatible table data directly to CSV.
+        
+        Args:
+            vue_table_data: Dictionary containing headers and items arrays
+                
+        Returns:
+            Path to saved CSV file
+        """
+        # Create results directory if it doesn't exist
+        RESULTS_DIR.mkdir(exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_filename = RESULTS_DIR / f"okta_data_{timestamp}.csv"
+        
+        # Extract items and header information
+        headers = vue_table_data.get("headers", [])
+        items = vue_table_data.get("items", [])
+        
+        if not items:
+            logger.warning("No items to save in CSV file")
+            return str(csv_filename)
+        
+        try:
+            # Extract column keys and titles from headers
+            column_keys = [h.get("key") for h in headers]
+            column_titles = [h.get("title") for h in headers]
+            
+            # If no column keys found, try extracting from first item
+            if not column_keys and items:
+                column_keys = list(items[0].keys())
+                column_titles = column_keys  # Use keys as titles if not explicitly defined
+            
+            # Write to CSV
+            with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+                # Use column titles as the CSV header row
+                writer = csv.writer(csvfile)
+                writer.writerow(column_titles)
+                
+                # Write each item as a row, ensuring correct column order
+                for item in items:
+                    # Extract values using the column keys to ensure correct order
+                    row = []
+                    for key in column_keys:
+                        value = item.get(key, '')
+                        # Handle nested structures
+                        if isinstance(value, (dict, list)):
+                            value = json.dumps(value, default=str)
+                        row.append(value)
+                    writer.writerow(row)
+                    
+            logger.info(f"Table data saved to CSV: {csv_filename}")
+            return str(csv_filename)
+            
+        except Exception as e:
+            logger.error(f"Error saving table data to CSV: {str(e)}")
+            return f"Error saving CSV: {str(e)}"
+    
+    async def _execute_plan(self, plan: ExecutionPlan, query: str) -> None:
         """
         Execute the created plan and display results.
         
         Args:
             plan: The execution plan to run
+            query: The original user query for context
         """
         start_time = time.time()
         print("\n2. Executing plan...")
@@ -282,6 +344,7 @@ class OktaRealtimeAgentCLI:
         execution_result, error = await safe_execute_async(
             self.execution_manager.execute_plan,
             plan,
+            query,  # Pass the original query for results processing
             error_message="Error executing plan",
             log_error=True
         )
@@ -321,16 +384,16 @@ class OktaRealtimeAgentCLI:
                 elif 'original_exception' in execution_result.context:
                     print(f"Details: {str(execution_result.context['original_exception'])}")
             
-            # Special handling for "not_found" errors to make them more user-friendly
-            if hasattr(execution_result, 'context') and execution_result.context and 'status' in execution_result.context and execution_result.context['status'] == 'not_found':
-                print("\nNo matching records were found in Okta.")
-            elif hasattr(execution_result, 'context') and execution_result.context and 'error_details' in execution_result.context and 'not found' in str(execution_result.context['error_details']).lower():
-                print("\nNo matching records were found in Okta.")
-            else:
-                print("\nPlan execution failed.")
+            # Special handling for "not_found" errors
+            if hasattr(execution_result, 'context') and execution_result.context:
+                ctx = execution_result.context
+                if ('status' in ctx and ctx['status'] == 'not_found') or \
+                   ('error_details' in ctx and 'not found' in str(ctx['error_details']).lower()):
+                    print("\nNo matching records were found in Okta.")
+                else:
+                    print("\nPlan execution failed.")
             return
         
-        # Handle normal execution results
         # Display execution summary
         if hasattr(execution_result, 'status'):
             if execution_result.status == "success":
@@ -350,57 +413,193 @@ class OktaRealtimeAgentCLI:
                 else:
                     print(f"Warnings/Errors: {len(execution_result.errors)}")
         
-        # Format and show the final result
-        if hasattr(execution_result, 'final_result'):
-            final_result = execution_result.final_result
-        else:
-            # Fallback if execution_result doesn't have expected structure
-            final_result = execution_result
-        
         print("\nResult:")
         print("-" * 60)
+        
+        # Get the final result
+        final_result = execution_result.final_result if hasattr(execution_result, 'final_result') else execution_result
+        
+        # Check if this is a dictionary in the Vue table format
+        if isinstance(final_result, dict) and "headers" in final_result and "items" in final_result:
+            saved_file = self._save_vue_table_to_csv(final_result)
+            items = final_result.get("items", [])
+            record_count = len(items)
+            print(f"📊 Found {record_count} records in table format")
+            print(f"💾 Data saved to: {saved_file}")
+            return
+        
+        # Direct handling for AgentRunResult objects
+        if hasattr(final_result, 'output'):
+            output_content = final_result.output
+            
+            # Try to parse the output as JSON (either from markdown blocks or directly)
+            json_content = self._extract_json(output_content)
+            
+            if json_content:
+                # Process JSON content
+                display_type = json_content.get('display_type', 'default')
+                content = json_content.get('content', {})
+                metadata = json_content.get('metadata', {})
+                
+                # Check for Vue table format
+                if display_type == "table" and isinstance(content, dict) and "headers" in content and "items" in content:
+                    saved_file = self._save_vue_table_to_csv(content)
+                    items = content.get("items", [])
+                    record_count = len(items)
+                    print(f"📊 Found {record_count} records in table format")
+                    print(f"💾 Data saved to: {saved_file}")
+                    return
+                
+                # Handle other display types
+                elif display_type == "markdown" and isinstance(content, str):
+                    print(self._format_markdown_for_terminal(content))
+                    return
+                
+                # Legacy table format
+                elif display_type == "table" and isinstance(content, list):
+                    columns = metadata.get("columns", [])
+                    
+                    # Convert to Vue format and save
+                    headers = [{"key": col, "title": col, "align": "start", "sortable": True} for col in columns]
+                    vue_data = {"headers": headers, "items": content}
+                    
+                    # Save as CSV
+                    saved_file = self._save_vue_table_to_csv(vue_data)
+                    record_count = len(content)
+                    print(f"📊 Found {record_count} records in table format")
+                    print(f"💾 Data saved to: {saved_file}")
+                    return
+                
+                # Fall back to printing the JSON content
+                print(json.dumps(json_content, indent=2, default=str))
+                return
+            else:
+                # If we couldn't parse JSON, just print the output
+                print(output_content)
+                return
         
         # Handle empty results
         if not final_result:
             print("No matching results found.")
-        else:
-            # Check if result is a list of dictionaries that could be exported to CSV
-            if isinstance(final_result, list) and len(final_result) > 0 and isinstance(final_result[0], dict):
-                result_count = len(final_result)
+            return
+        
+        # Fallback handling for non-processed results
+        display_type = execution_result.display_type if hasattr(execution_result, 'display_type') else "default"
+        
+        # Special handling for table type to save to CSV
+        if display_type == "table" and isinstance(final_result, list) and final_result:
+            # Try to get columns or extract them from first item
+            display_hints = execution_result.display_hints if hasattr(execution_result, 'display_hints') else {}
+            columns = display_hints.get("columns", [])
+            
+            if not columns and isinstance(final_result[0], dict):
+                columns = list(final_result[0].keys())
+            
+            if columns:
+                # Convert to Vue format and save
+                headers = [{"key": col, "title": col, "align": "start", "sortable": True} for col in columns]
+                vue_data = {"headers": headers, "items": final_result}
                 
-                # Large result handling
-                if result_count > DISPLAY_LIMIT:
-                    try:
-                        # Save results to CSV
-                        saved_file = self.save_results_to_csv(final_result, "okta_realtime_results")
-                        
-                        # Show preview of first few records
-                        preview_data = final_result[:DISPLAY_LIMIT]
-                        # Pretty-print JSON for the preview
-                        print(json.dumps(preview_data, indent=2, default=str))
-                        
-                        # Print summary with file location
-                        print(f"\n📊 Found {result_count} records")
-                        print(f"💾 Results automatically saved to: {saved_file}")
-                        print(f"\nFirst {DISPLAY_LIMIT} records preview:")
-                        print("-" * 60)
-                        
-                        
-                    except Exception as e:
-                        logger.error(f"Error saving results: {str(e)}")
-                        print(f"\n❌ Error saving results: {str(e)}")
-                        # Fallback to standard display
-                        print(json.dumps(final_result, indent=2, default=str))
+                saved_file = self._save_vue_table_to_csv(vue_data)
+                record_count = len(final_result)
+                print(f"📊 Found {record_count} records in table format")
+                print(f"💾 Data saved to: {saved_file}")
+                
+                # Also print a preview
+                if len(final_result) > DISPLAY_LIMIT:
+                    print("\nPreview of first few records:")
+                    self._print_table(final_result[:DISPLAY_LIMIT], columns)
                 else:
-                    # Standard display for small results
-                    print(json.dumps(final_result, indent=2, default=str))
-            else:
-                # Handle non-list results
-                try:
-                    print(json.dumps(final_result, indent=2, default=str))
-                except Exception:
-                    print(str(final_result))
+                    self._print_table(final_result, columns)
+                
+                return
+        
+        # Default: just print as JSON
+        try:
+            print(json.dumps(final_result, indent=2, default=str))
+        except:
+            print(str(final_result))
+    
+    def _extract_json(self, text):
+        """Extract JSON from text, handling markdown code blocks."""
+        # First try to extract from markdown code blocks
+        json_match = re.search(r'```json\s+(.*?)\s+```', text, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1))
+            except:
+                pass
+        
+        # Then try direct JSON parsing
+        try:
+            return json.loads(text)
+        except:
+            # Try cleaning markdown blocks
+            cleaned = re.sub(r'```json\s+|\s+```', '', text)
+            try:
+                return json.loads(cleaned)
+            except:
+                return None
+
+    def _format_markdown_for_terminal(self, markdown_text: str) -> str:
+        """Format markdown text for better display in the terminal."""
+        # Make headings stand out
+        formatted = re.sub(r'^# (.+)$', r'\n\033[1;4m\1\033[0m', markdown_text, flags=re.MULTILINE)
+        formatted = re.sub(r'^## (.+)$', r'\n\033[1m\1\033[0m', formatted, flags=re.MULTILINE)
+        formatted = re.sub(r'^### (.+)$', r'\n\033[1m\1\033[0m', formatted, flags=re.MULTILINE)
+        
+        # Highlight bullet points
+        formatted = re.sub(r'^- (.+)$', r'• \1', formatted, flags=re.MULTILINE)
+        
+        # Bold and italic formatting
+        formatted = re.sub(r'\*\*(.+?)\*\*', r'\033[1m\1\033[0m', formatted)
+        formatted = re.sub(r'\*(.+?)\*', r'\033[3m\1\033[0m', formatted)
+        
+        # Format code blocks
+        formatted = re.sub(r'```.*?\n(.+?)```', r'\n--- Code ---\n\1\n-----------', formatted, flags=re.DOTALL)
+        
+        return formatted
+
+    def _print_table(self, data: List[dict], columns: List[str]) -> None:
+        """Print data as a formatted table."""
+        # Filter columns to only include those that exist in the data
+        if data and isinstance(data[0], dict):
+            valid_columns = [col for col in columns if any(col in row for row in data)]
+        else:
+            valid_columns = []
+        
+        if not data or not valid_columns:
+            print(json.dumps(data, indent=2, default=str))
+            return
+        
+        # Calculate column widths
+        widths = {col: max(len(str(col)), max(len(str(row.get(col, ''))) for row in data)) for col in valid_columns}
+        
+        # Print header
+        header = " | ".join(str(col).ljust(widths[col]) for col in valid_columns)
+        print(header)
+        print("-" * len(header))
+        
+        # Print rows
+        for row in data:
+            # Convert all values to strings, handle nested objects
+            formatted_row = {}
+            for col in valid_columns:
+                val = row.get(col, '')
+                if isinstance(val, (dict, list)):
+                    formatted_row[col] = "..." 
+                elif val is None:
+                    formatted_row[col] = ""
+                else:
+                    formatted_row[col] = str(val)
                     
+            row_str = " | ".join(formatted_row[col].ljust(widths[col]) for col in valid_columns)
+            print(row_str)
+
+    def _print_table_preview(self, data: List[dict], columns: List[str]) -> None:
+        """Print preview of data as a formatted table."""
+        print(f"\nFirst {len(data)} records preview:")
+        self._print_table(data, columns)
     
     async def run(self) -> None:
         """Run the CLI interface main loop."""
@@ -422,7 +621,7 @@ class OktaRealtimeAgentCLI:
         while True:
             try:
                 # Get query from user
-                query = input("\nEnter your query (or 'exit' to quit): ")
+                query = input("\nEnter your query (or 'exit' to quit) \nNOTE: All names are case-sensitive. Match exact case of the entity name as in Okta: ")
                 
                 # Check for exit
                 if query.lower() in ('exit', 'quit'):
