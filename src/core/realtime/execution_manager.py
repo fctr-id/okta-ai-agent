@@ -6,6 +6,7 @@ This module handles the execution of plans created by the Reasoning Agent:
 - Generates code for all steps using the Coding Agent
 - Executes each step securely
 - Tracks results and manages error handling
+- Processes results for optimal display with Results Processor
 - Provides structured output for the final response
 """
 
@@ -15,12 +16,13 @@ import traceback
 import time
 import uuid
 from datetime import datetime
+import sys
 from pydantic import BaseModel, Field
 # Add these imports at the top
 from pydantic_ai import capture_run_messages
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from src.utils.pagination_limits import paginate_results as _base_paginate_results
+from src.utils.pagination_limits import paginate_results as _base_paginate_results, handle_single_entity_request as _base_handle_single_entity_request, make_async_request
 
 
 # Import our new error handling
@@ -36,6 +38,9 @@ from src.core.realtime.agents.coding_agent import coding_agent
 from src.core.realtime.code_execution_utils import execute_okta_code, is_error_result
 from src.config.settings import settings
 
+# Import results processor agent
+from src.core.realtime.agents.results_processor_agent import results_processor
+
 # Tool registry imports
 from src.utils.tool_registry import get_tool_prompt, get_all_tools
 
@@ -44,6 +49,12 @@ logger = get_logger(__name__)
 
 # Error status constants
 ERROR_STATUSES = {"error", "not_found", "dependency_failed"}
+
+# Character limit before using sampling for results processing
+MAX_CHARS_FOR_FULL_RESULTS = 60000
+
+# Number of sample items to include per step result
+MAX_SAMPLES_PER_STEP = 5
 
 
 class StepError(BaseModel):
@@ -65,8 +76,8 @@ class ExecutionResult(BaseModel):
     status: str = Field(default="success", description="Overall execution status")
     execution_time_ms: int = Field(default=0, description="Total execution time in milliseconds")
     correlation_id: Optional[str] = Field(default=None, description="Correlation ID for tracing")
-
-
+    display_type: Optional[str] = Field(default=None, description="Suggested display format (markdown, table, combined)")
+    display_hints: Optional[Dict[str, Any]] = Field(default=None, description="Display hints for frontend rendering")
 
 
 class ExecutionManager:
@@ -77,7 +88,8 @@ class ExecutionManager:
     1. Generate Okta SDK code for all steps in one go
     2. Securely execute generated code with validation
     3. Manage results and handle errors
-    4. Provide aggregated, structured responses
+    4. Process results for optimal display format
+    5. Provide aggregated, structured responses
     """
     
     def __init__(self, okta_deps: OktaRealtimeDeps = None):
@@ -123,12 +135,13 @@ class ExecutionManager:
         """Generate a unique correlation ID for tracing execution."""
         return f"exec-{str(uuid.uuid4())[:8]}"
     
-    async def execute_plan(self, plan: ExecutionPlan, correlation_id: str = None) -> Union[ExecutionResult, BaseError]:
+    async def execute_plan(self, plan: ExecutionPlan, query: str = None, correlation_id: str = None) -> Union[ExecutionResult, BaseError]:
         """
         Execute a plan by generating code for all steps, then running them sequentially.
         
         Args:
             plan: The execution plan with steps to run
+            query: The original user query (for results processing)
             correlation_id: Optional correlation ID for tracing
             
         Returns:
@@ -233,7 +246,7 @@ class ExecutionManager:
                 result_data, step_vars, step_error = step_result
                 
                 # Store results and update context for next steps
-                results[step.tool_name] = result_data
+                results[str(step_number)] = result_data
                 if step_vars:
                     step_context.update(step_vars)
                 
@@ -248,7 +261,8 @@ class ExecutionManager:
             
             # PHASE 3: RESULT PROCESSING
             # Process final result and create response
-            final_result = self._process_final_result(results, plan)
+            final_result, display_type, display_hints = await self._process_results(results, plan, query, correlation_id)
+            
             status = "success" if not errors else "partial_success"
             execution_time_ms = int((time.time() - start_time) * 1000)
             
@@ -265,6 +279,8 @@ class ExecutionManager:
                 entities_queried=list(entities_queried),
                 errors=errors if errors else None,
                 final_result=final_result,
+                display_type=display_type,
+                display_hints=display_hints,
                 status=status,
                 execution_time_ms=execution_time_ms,
                 correlation_id=correlation_id,
@@ -288,6 +304,496 @@ class ExecutionManager:
             logger.error(f"[{correlation_id}] Execution failed after {elapsed_time:.2f}s: {str(e)}")
             error.log()
             return error
+
+    async def _process_results(
+        self, 
+        results: Dict[str, Any], 
+        plan: ExecutionPlan, 
+        query: str, 
+        correlation_id: str
+    ) -> Tuple[Any, str, Dict[str, Any]]:
+        """
+        Process execution results using the Results Processor Agent.
+        
+        Args:
+            results: Results from all steps
+            plan: The execution plan
+            query: Original user query
+            correlation_id: Correlation ID for tracing
+            
+        Returns:
+            Tuple of (processed_result, display_type, display_hints)
+        """
+        try:
+            # Prepare results for processing
+            results_data, is_sample, metadata = self._prepare_results_for_processor(results, correlation_id)
+            
+        # DEBUG: Print the complete sampled data
+            if is_sample:
+                try:
+                    # Convert to string with pretty formatting for better readability
+                    import pprint
+                    sample_data_str = pprint.pformat(results_data, indent=2, depth=4)
+                    logger.info(f"[{correlation_id}] FULL SAMPLED DATA: \n{sample_data_str}")
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Error printing sampled data: {str(e)}")
+                    # Try a simpler approach if pretty printing fails
+                    logger.info(f"[{correlation_id}] SAMPLED DATA KEYS: {list(results_data.keys())}")            
+            
+            # Log whether we're using sampled data
+            log_message = "Using sampled data" if is_sample else "Using complete data"
+            results_size = len(json.dumps(results_data, default=str))
+            logger.info(f"[{correlation_id}] Results processing: {log_message} ({results_size} chars)")
+            
+            # Process the results with appropriate agent
+            process_start = time.time()
+            processing_result = await results_processor.process_results(
+                query=query,
+                results=results_data,
+                original_plan=plan,
+                is_sample=is_sample,
+                metadata={
+                    "flow_id": correlation_id,
+                    "total_records": metadata.get("record_counts", {})
+                }
+            )
+            process_time = (time.time() - process_start) * 1000
+            logger.info(f"[{correlation_id}] Results processed in {process_time:.2f}ms")
+            
+            # Check if we got a raw AgentRunResult
+            if hasattr(processing_result, 'output') and isinstance(processing_result.output, str):
+                # Extract content from AgentRunResult
+                output_content = processing_result.output
+                
+                # Extract JSON from markdown code blocks if present
+                import re
+                json_match = re.search(r'```json\s+(.*?)\s+```', output_content, re.DOTALL)
+                
+                if json_match:
+                    try:
+                        # Parse JSON from markdown code block
+                        json_str = json_match.group(1)
+                        processed_result = json.loads(json_str)
+                        
+                        # Extract structured content
+                        final_result = processed_result.get('content', {})
+                        display_type = processed_result.get('display_type', 'default')
+                        display_hints = processed_result.get('metadata', {})
+                        
+                        return final_result, display_type, display_hints
+                    except json.JSONDecodeError:
+                        logger.warning(f"[{correlation_id}] Failed to parse JSON from processor output")
+                
+                # If we didn't find valid JSON in markdown blocks, try parsing the raw output
+                try:
+                    # Try parsing the entire output as JSON
+                    cleaned_output = re.sub(r'```json\s+|\s+```', '', output_content)
+                    processed_result = json.loads(cleaned_output)
+                    
+                    # Extract structured content
+                    final_result = processed_result.get('content', {})
+                    display_type = processed_result.get('display_type', 'default')
+                    display_hints = processed_result.get('metadata', {})
+                    
+                    return final_result, display_type, display_hints
+                except json.JSONDecodeError:
+                    logger.warning(f"[{correlation_id}] Failed to parse cleaned output as JSON")
+                    
+                # If all parsing attempts failed, return the raw output as markdown
+                return output_content, "markdown", {}
+                
+            # Handle sampled data with processing code
+            if is_sample and hasattr(processing_result, 'processing_code') and processing_result.processing_code:
+                # Execute processing code with the full results
+                logger.info(f"[{correlation_id}] Executing processing code for large dataset")
+                processed_data = await self._execute_processor_code(
+                    processing_result.processing_code,
+                    results,  # Use full results
+                    correlation_id
+                )
+                
+                # Extract formatted data
+                final_result = processed_data.get("content", {})
+                display_type = processed_data.get("display_type", "table")
+                display_hints = processed_data.get("metadata", {})
+            else:
+                # Use direct output from processor
+                if hasattr(processing_result, 'content'):
+                    # Handle properly structured response
+                    final_result = processing_result.content
+                    display_type = getattr(processing_result, 'display_type', 'default')
+                    display_hints = getattr(processing_result, 'metadata', {})
+                else:
+                    # Handle unstructured response
+                    final_result = processing_result
+                    display_type = "default"
+                    display_hints = {}
+            
+            return final_result, display_type, display_hints
+            
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Error processing results: {str(e)}")
+            # Fall back to the last step's result
+            default_result = self._get_last_step_result(results, plan)
+            return default_result, "default", {}
+    
+    def _prepare_results_for_processor(
+        self, 
+        results: Dict[str, Any], 
+        correlation_id: str
+    ) -> Tuple[Dict[str, Any], bool, Dict[str, Any]]:
+        """
+        Prepare results for processing, sampling if necessary.
+        
+        Args:
+            results: Results from all steps
+            correlation_id: Correlation ID for tracing
+            
+        Returns:
+            Tuple of (prepared_results, is_sample, metadata)
+        """
+        # First, serialize all data to ensure consistent types
+        serialized_results = self._serialize_results(results)
+        
+        # Convert to JSON string to estimate size
+        results_json = json.dumps(serialized_results)  # No default=str needed as already serialized
+        results_size = len(results_json)
+        logger.debug(f"[{correlation_id}] Total results size: {results_size} characters")
+        
+        # If under threshold, use complete results
+        if results_size <= MAX_CHARS_FOR_FULL_RESULTS:
+            logger.debug(f"[{correlation_id}] Results under threshold, using complete data")
+            return serialized_results, False, {}
+            
+        # Otherwise, sample the results
+        logger.info(f"[{correlation_id}] Results exceed threshold ({results_size} chars), sampling data")
+        
+        sampled_results = {}
+        record_counts = {}
+        
+        # Sample each step's results
+        for step_key, step_data in serialized_results.items():
+            # Extract the result value (handle both dict with 'result' key and direct values)
+            result_value = step_data.get('result') if isinstance(step_data, dict) and 'result' in step_data else step_data
+            
+            # Get entity name for this step based on key
+            entity_name = f"step_{step_key}"
+            
+            # Sample the data
+            sampled_value, count = self._sample_result(result_value, MAX_SAMPLES_PER_STEP)
+            sampled_results[step_key] = sampled_value
+            
+            if count > MAX_SAMPLES_PER_STEP:
+                record_counts[entity_name] = count
+        
+        metadata = {
+            "record_counts": record_counts,
+            "is_sample": True,
+            "original_size": results_size
+        }
+        
+        return sampled_results, True, metadata
+    
+    def _serialize_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert all data to serializable types, handling enums and special objects.
+        
+        Args:
+            results: Raw results to serialize
+            
+        Returns:
+            Dict with all values serialized to JSON-safe types
+        """
+        if results is None:
+            return None
+        
+        if isinstance(results, dict):
+            serialized_dict = {}
+            for key, value in results.items():
+                serialized_dict[key] = self._serialize_results(value)
+            return serialized_dict
+        
+        elif isinstance(results, list):
+            return [self._serialize_results(item) for item in results]
+        
+        elif hasattr(results, 'value') and not callable(results.value):
+            # Handle enum-like objects
+            return str(results.value)
+        
+        elif hasattr(results, '__dict__') and not isinstance(results, (str, int, float, bool, type(None))):
+            # Handle custom objects by converting to dict
+            return self._serialize_results(results.__dict__)
+        
+        else:
+            # Return basic types as is
+            return results
+    
+    def _sample_result(self, result: Any, max_samples: int) -> Tuple[Any, int]:
+        """
+        Sample a result value to a maximum number of items.
+        
+        Args:
+            result: The result value to sample
+            max_samples: Maximum number of items to include
+            
+        Returns:
+            Tuple of (sampled_result, total_count)
+        """
+        # Handle lists - take first N items
+        if isinstance(result, list):
+            total_count = len(result)
+            if total_count > max_samples:
+                return result[:max_samples], total_count
+            return result, total_count
+            
+        # Handle dicts with nested lists - sample each list
+        if isinstance(result, dict):
+            total_count = 1  # Start with 1 for the dict itself
+            sampled_dict = {}
+            
+            for key, value in result.items():
+                if isinstance(value, list):
+                    list_count = len(value)
+                    total_count += list_count
+                    if list_count > max_samples:
+                        sampled_dict[key] = value[:max_samples]
+                    else:
+                        sampled_dict[key] = value
+                else:
+                    sampled_dict[key] = value
+            
+            return sampled_dict, total_count
+            
+        # For other types, return as is
+        return result, 1
+    
+    async def _execute_processor_code(
+        self, 
+        code: str, 
+        all_results: Dict[str, Any], 
+        correlation_id: str
+    ) -> Dict[str, Any]:
+        """
+        Execute generated processing code on full results.
+        
+        Args:
+            code: Generated Python code for processing
+            all_results: Complete results from all steps
+            correlation_id: Correlation ID for tracing
+            
+        Returns:
+            Processed results
+        """
+        # Add debug logging before execution
+        logger.info(f"[{correlation_id}] Preparing to execute processor code")
+        logger.info(f"[{correlation_id}] all_results keys: {list(all_results.keys())}")
+        
+        # Debug key data structures
+        for key in all_results:
+            logger.info(f"[{correlation_id}] Key '{key}' type: {type(all_results[key]).__name__}")
+        
+        # Normalize all data structures for consistency
+        processed_results = self._normalize_step_results(all_results)
+        
+        # Log normalized structures
+        for key in processed_results:
+            logger.info(f"[{correlation_id}] Normalized key '{key}' type: {type(processed_results[key]).__name__}")
+            if isinstance(processed_results[key], list):
+                logger.info(f"[{correlation_id}] Normalized key '{key}' has {len(processed_results[key])} items")
+        
+        # Prepare the code to execute - we expect this to create a 'result' variable
+        # Important: No indentation for the code template string
+        execution_code = f"""
+# Variables with data needed for processing
+full_results = all_results
+
+# Structure documentation for reference
+'''
+All result keys contain normalized data with consistent structure:
+- List results are always provided as lists
+- Single entity results are wrapped in a list for consistent handling
+- Results with a 'result' key have that value extracted
+- Each step's results are stored under the step number as string key ('1', '2', etc.)
+'''
+
+# Debug info without prohibited imports
+print(f"DEBUG: full_results keys: {{list(full_results.keys())}}")
+for key in full_results:
+    if isinstance(full_results[key], list):
+        print(f"DEBUG: full_results[{{key}}] is a list with {{len(full_results[key])}} items")
+    else:
+        print(f"DEBUG: full_results[{{key}}] type: {{type(full_results[key]).__name__}}")
+
+# Start of generated code
+{code}
+# End of generated code
+
+# Debug the result
+if 'result' in locals():
+    if isinstance(result, dict):
+        print(f"DEBUG: Result keys: {{list(result.keys())}}")
+        if "content" in result and isinstance(result["content"], dict):
+            content = result["content"]
+            print(f"DEBUG: Content keys: {{list(content.keys())}}")
+            if "items" in content:
+                print(f"DEBUG: Items count: {{len(content['items'])}}")
+                if content['items']:
+                    print(f"DEBUG: First item keys: {{list(content['items'][0].keys()) if content['items'] else []}}")
+            else:
+                print("DEBUG: No 'items' key found in content")
+    else:
+        print(f"DEBUG: Result is not a dict, but a {{type(result).__name__}}")
+else:
+    print("DEBUG: No 'result' variable created")
+
+# The code should have created a 'result' variable
+if 'result' not in locals():
+    result = {{
+        "display_type": "markdown",
+        "content": "*Error: Processing code did not create a 'result' variable*",
+        "metadata": {{"error": "missing_result"}}
+        }}
+        """
+        
+        # Execute the code securely
+        exec_result, exec_error = await safe_execute_async(
+            execute_okta_code,
+            execution_code,
+            self.okta_deps.client,
+            self.okta_deps.domain,
+            correlation_id, 
+            extra_context={
+                'all_results': processed_results  # Use the normalized results
+            },
+            error_message="Error executing results processing code"
+        )
+        
+        if exec_error:
+            logger.error(f"[{correlation_id}] Results processing code execution failed: {exec_error}")
+            return {
+                "display_type": "markdown",
+                "content": f"*Error processing results: {str(exec_error)}*",
+                "metadata": {
+                    "error": str(exec_error)
+                }
+            }
+        
+        # Extract the result variable from the execution context
+        if isinstance(exec_result, dict) and 'result' in exec_result:
+            result = exec_result['result']
+            
+            # Log result details for debugging
+            if isinstance(result, dict):
+                logger.info(f"[{correlation_id}] Result has keys: {list(result.keys())}")
+                
+                if "content" in result and isinstance(result["content"], dict):
+                    content = result["content"]
+                    logger.info(f"[{correlation_id}] Content has keys: {list(content.keys())}")
+                    
+                    if "items" in content:
+                        item_count = len(content["items"])
+                        logger.info(f"[{correlation_id}] Content has {item_count} items")
+                        if item_count == 0:
+                            logger.warning(f"[{correlation_id}] No items were created - possible data processing issue")
+                    else:
+                        logger.warning(f"[{correlation_id}] Content does not have 'items' key")
+            
+            # Validate the result has the required structure
+            if (isinstance(result, dict) and 
+                "display_type" in result and 
+                "content" in result):
+                return result
+            else:
+                logger.warning(f"[{correlation_id}] Results processing produced invalid structure")
+                return {
+                    "display_type": "markdown",
+                    "content": "*Results processing produced invalid output structure*",
+                    "metadata": {"error": "invalid_structure"}
+                }
+        
+        # Fallback if we couldn't extract a proper result
+        logger.warning(f"[{correlation_id}] Results processing did not produce a result variable")
+        return {
+            "display_type": "markdown", 
+            "content": "*Results processing completed but did not produce a result*",
+            "metadata": {"error": "missing_result"}
+        }
+    
+    def _normalize_step_results(self, all_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize all step results to consistent structures.
+        
+        This ensures that regardless of how the API returned data, the processing
+        code will always receive data in a consistent structure.
+        
+        Args:
+            all_results: The raw results from execution steps
+            
+        Returns:
+            Normalized results with consistent structure
+        """
+        normalized = {}
+        
+        for key, value in all_results.items():
+            # Apply consistent normalization to ALL keys
+            if isinstance(value, dict) and 'result' in value:
+                # Extract result from result wrapper
+                result_value = value['result']
+                normalized[key] = self._normalize_result_value(result_value)
+            else:
+                # Apply normalization directly to the value
+                normalized[key] = self._normalize_result_value(value)
+        
+        return normalized
+    
+    def _normalize_result_value(self, value: Any) -> Any:
+        """
+        Normalize a single result value to a consistent structure.
+        
+        Args:
+            value: The value to normalize
+            
+        Returns:
+            Normalized value
+        """
+        # Lists stay as lists
+        if isinstance(value, list):
+            return value
+        
+        # Single entity results (dicts with id, name, etc.) get wrapped in a list
+        elif isinstance(value, dict):
+            # If it looks like a single entity (has common entity fields)
+            entity_indicators = ['id', 'name', 'login', 'profile', 'status']
+            if any(indicator in value for indicator in entity_indicators):
+                return [value]
+            
+            # If it contains a list under a key like 'items', 'data', 'users', etc.
+            # Extract and return that list
+            for list_key in ['items', 'data', 'users', 'groups', 'applications', 'factors']:
+                if list_key in value and isinstance(value[list_key], list):
+                    return value[list_key]
+                    
+            # Otherwise return as is
+            return value
+        
+        # Non-dict, non-list values return as is
+        return value
+    
+    def _get_last_step_result(self, results: Dict[str, Any], plan: ExecutionPlan) -> Any:
+        """Get the result from the last successful step as fallback."""
+        # Convert keys to integers for proper sorting
+        step_keys = sorted([int(k) for k in results.keys() if k.isdigit()])
+        if not step_keys:
+            return {}
+            
+        # Get the last step's result
+        last_key = str(step_keys[-1])
+        step_result = results.get(last_key)
+        
+        # Extract the result value
+        if isinstance(step_result, dict) and 'result' in step_result:
+            return step_result['result']
+        return step_result
     
     def _collect_tool_documentation(self, plan: ExecutionPlan, correlation_id: str) -> Tuple[List[str], Set[str]]:
         """
@@ -440,6 +946,38 @@ class ExecutionManager:
                     logger.error(f"[{correlation_id}] Error in pagination: {str(e)}")
                     return {"status": "error", "error": f"Error during pagination: {str(e)}"}
             
+            # Define the single entity request helper function
+            async def handle_single_entity_request(method_name, entity_type, entity_id, method_args=None, method_kwargs=None):
+                """
+                Helper function to handle single entity requests for Okta API calls.
+                
+                Args:
+                    method_name: Name of the client method to call (like "get_user")
+                    entity_type: Type of entity being requested ("user", "group", etc.)
+                    entity_id: ID or login of the entity
+                    method_args: Optional list of positional arguments for the method
+                    method_kwargs: Optional dict of keyword arguments
+                    
+                Returns:
+                    Entity data or error dict
+                """
+                # Get the method from the client by name
+                method = getattr(self.okta_deps.client, method_name)
+                
+                # Call the imported single entity request utility
+                try:
+                    return await _base_handle_single_entity_request(
+                        method,
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        method_args=method_args,
+                        method_kwargs=method_kwargs,
+                        flow_id=correlation_id
+                    )
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Error in single entity request: {str(e)}")
+                    return {"status": "error", "error": f"Error during entity request: {str(e)}"}
+            
             # Execute the code with current context and pagination helper
             execution_start = time.time()
             execution_result, exec_error = await safe_execute_async(
@@ -450,7 +988,9 @@ class ExecutionManager:
                 correlation_id,  # Pass correlation ID to code execution
                 extra_context={
                     **step_context,
-                    'paginate_results': paginate_results  # Add pagination helper to context
+                    'paginate_results': paginate_results,  # Add pagination helper to context
+                    'handle_single_entity_request': handle_single_entity_request,  # Add single entity helper
+                    'make_async_request': make_async_request  # Add async request helper
                 },
                 error_message=f"Error executing code for step {step.tool_name}"
             )
@@ -488,13 +1028,10 @@ class ExecutionManager:
                 return {}, {}, step_error
             
             # Check if result indicates an error
-            # Check if result indicates an error
             step_error = None
             result = execution_result.get('result')
             
             # Special handling for empty lists - they are valid results, not errors
-            # In _execute_step method, right after checking for empty lists
-             # Special handling for empty lists - they are valid results, not errors
             if isinstance(result, list) and len(result) == 0:
                 # Empty list is a valid result representing "no matches found"
                 logger.info(f"[{correlation_id}] Step completed in {execution_time:.2f}s: No matching items found (empty result)")
@@ -600,8 +1137,8 @@ class ExecutionManager:
             if isinstance(result, (dict, list)):
                 # Truncate long JSON output
                 result_json = json.dumps(result, indent=2, default=str)
-                if len(result_json) > 500:
-                    logger.debug(result_json[:500] + "\n... (truncated)")
+                if len(result_json) > 5000:
+                    logger.debug(result_json[:5000] + "\n... (truncated)")
                 else:
                     logger.debug(result_json)
             else:
@@ -719,29 +1256,6 @@ class ExecutionManager:
         # Fallback message
         return "Unknown error (could not extract specific message)"
     
-    def _process_final_result(self, results: Dict[str, Any], plan: ExecutionPlan) -> Any:
-        """
-        Process results from all steps to create a final result.
-        By default, returns the result of the last step.
-        
-        Args:
-            results: Results from all executed steps
-            plan: The original execution plan
-            
-        Returns:
-            Final processed result
-        """
-        # Try to get the result of the last successful step
-        for step in reversed(plan.steps):
-            if step.tool_name in results:
-                step_result = results[step.tool_name]
-                if isinstance(step_result, dict) and 'result' in step_result:
-                    if not is_error_result(step_result['result']):
-                        return step_result['result']
-        
-        # If we didn't find a valid result, return empty dict
-        return {}
-    
     def format_result_for_output(self, execution_result: ExecutionResult) -> Dict[str, Any]:
         """
         Format the execution result for API or CLI output.
@@ -755,6 +1269,8 @@ class ExecutionManager:
         # Start with the final result as the main output
         output = {
             "data": execution_result.final_result,
+            "display_type": execution_result.display_type or "default",
+            "display_hints": execution_result.display_hints or {},
             "metadata": {
                 "status": execution_result.status,
                 "entities_queried": execution_result.entities_queried,
@@ -827,7 +1343,7 @@ class ExecutionManager:
             Execution results with added diagnostics
         """
         # Start with normal execution
-        results = await self.execute(plan, correlation_id)
+        results = await self.execute_plan(plan, correlation_id)
         
         # Add placeholder for advanced diagnostics that could be enabled in the future
         if enable_advanced_diagnostics:
@@ -838,4 +1354,4 @@ class ExecutionManager:
                 "potential_issues": []
             }
         
-        return results     
+        return results

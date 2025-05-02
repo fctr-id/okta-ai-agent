@@ -5,6 +5,7 @@ Provides validation, execution, and result processing for generated code.
 
 from typing import Dict, List, Any, Optional, Union, Callable, Tuple
 import re
+import traceback
 import ast
 import textwrap
 import asyncio
@@ -107,23 +108,35 @@ def prepare_execution_environment(
 
 def transform_code_for_execution(code: str) -> str:
     """
-    Transform code to capture return statements using exceptions.
-    
-    Args:
-        code: The original Python code
-        
-    Returns:
-        Modified code with return statements replaced
+    Transform code to capture return statements using AST to correctly handle complex expressions.
     """
-    modified_code = code
-    return_pattern = re.compile(r'return\s+(.*?)(\n|$)')
+    class ReturnTransformer(ast.NodeTransformer):
+        def visit_Return(self, node):
+            # Create a new node that raises ReturnValueException with the return value
+            return ast.Raise(
+                exc=ast.Call(
+                    func=ast.Name(id='ReturnValueException', ctx=ast.Load()),
+                    args=[node.value],
+                    keywords=[]
+                ),
+                cause=None
+            )
     
-    for match in return_pattern.finditer(code):
-        return_expr = match.group(1).strip()
-        replacement = f"raise ReturnValueException({return_expr})"
-        modified_code = modified_code.replace(f"return {return_expr}", replacement)
-    
-    return modified_code
+    try:
+        # Parse the code into an AST
+        tree = ast.parse(code)
+        
+        # Transform all return statements
+        transformer = ReturnTransformer()
+        new_tree = transformer.visit(tree)
+        ast.fix_missing_locations(new_tree)
+        
+        # Generate the new code
+        return ast.unparse(new_tree)
+    except SyntaxError:
+        # Fall back to the original code if there are syntax errors in the input
+        logger.warning("Syntax error in code, skipping return transformation")
+        return code
 
 
 def wrap_code_in_function(code: str) -> str:
@@ -255,6 +268,10 @@ def is_error_result(result: Any) -> bool:
     if result == [] or result == {}:
         return False
     
+    # Lists are never errors themselves, even if they contain items with status fields
+    if isinstance(result, list):
+        return False
+        
     # None might indicate an error depending on context
     if result is None:
         return False
@@ -377,10 +394,49 @@ async def async_execute_with_timeout(
     try:
         # Run with timeout protection
         execution_task = namespace['_execute_step']()
-        local_vars = await asyncio.wait_for(execution_task, timeout=timeout)
-        return False, local_vars  # Not a timeout
-    except asyncio.TimeoutError:
-        return True, {}  # Timeout occurred
+        try:
+            local_vars = await asyncio.wait_for(execution_task, timeout=timeout)
+            return False, local_vars  # Not a timeout
+        except asyncio.TimeoutError:
+            return True, {}  # Timeout occurred
+        except Exception as e:
+            # Capture and print the actual error that occurred during execution
+            error_tb = traceback.format_exc()
+            print(f"\n============= EXECUTION ERROR =============")
+            print(f"{type(e).__name__}: {str(e)}")
+            print(f"\n{error_tb}")
+            print(f"==========================================\n")
+            
+            # Also log the error
+            logger.error(f"Execution error: {type(e).__name__}: {str(e)}")
+            logger.debug(f"Error traceback:\n{error_tb}")
+            
+            # Return structured error information
+            return False, {
+                "result": {
+                    "status": "error", 
+                    "error": f"{type(e).__name__}: {str(e)}",
+                    "traceback": error_tb
+                }
+            }
+    except Exception as outer_e:
+        # Handle any errors in setting up the execution task
+        error_tb = traceback.format_exc()
+        print(f"\n========= EXECUTION SETUP ERROR =========")
+        print(f"{type(outer_e).__name__}: {str(outer_e)}")
+        print(f"\n{error_tb}")
+        print(f"========================================\n")
+        
+        logger.error(f"Execution setup error: {type(outer_e).__name__}: {str(outer_e)}")
+        logger.debug(f"Setup error traceback:\n{error_tb}")
+        
+        return False, {
+            "result": {
+                "status": "error", 
+                "error": f"Setup error: {type(outer_e).__name__}: {str(outer_e)}",
+                "traceback": error_tb
+            }
+        }
 
 
 async def execute_okta_code(
@@ -389,7 +445,7 @@ async def execute_okta_code(
     okta_domain: str,
     query_id: str = "unknown",
     extra_context: Dict[str, Any] = None,
-    execution_timeout: float = 60.0  
+    execution_timeout: float = 300.0  
 ) -> Dict[str, Any]:
     """
     Execute generated Okta SDK code in a secure environment.
