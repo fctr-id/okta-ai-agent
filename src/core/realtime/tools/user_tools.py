@@ -34,8 +34,11 @@ async def search_users(client, search=None, limit=None):
         *   Applies an advanced search filter using Okta's SCIM filter expression syntax.
         *   Examples:
             *   `profile.lastName eq \"Smith\"`
+            *   `profile.login eq \"john.doe@example.com\"`
+            *   `profile.email eq \"john.doe@example.com\"`
             *   `status eq \"ACTIVE\"`
             *   `profile.firstName co \"Joh\"` (contains operator)
+        *   IMPORTANT: Always prefix user attributes with 'profile.' (e.g., profile.login, profile.email)
 
     *   **`limit`** (Integer):
         *   Specifies the maximum number of results to return per page.
@@ -53,8 +56,15 @@ async def search_users(client, search=None, limit=None):
     # Build query parameters
     query_params = {}
     
+    # Example: To search by email or login (always use profile prefix)
     if search:
         query_params["search"] = search
+    else:
+        # If looking for a specific user by email
+        user_email = "aiden.garcia@fctr.io"
+        query_params["search"] = f'profile.email eq "{user_email}"'
+        # Or by login
+        # query_params["search"] = f'profile.login eq "{user_email}"'
         
     if limit:
         query_params["limit"] = limit
@@ -82,6 +92,8 @@ async def search_users(client, search=None, limit=None):
     - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
     - Pagination is handled automatically for large result sets
     - Double quotes must be used inside the search string and properly escaped
+    - ALWAYS use the 'profile.' prefix when searching user attributes (profile.login, profile.email, etc.)
+    - DO NOT use attributes without the profile prefix (e.g., 'login eq "value"' will fail)
     - DO NOT use single quotes for the search values
     """
     # Implementation will be handled by code generation
@@ -129,29 +141,20 @@ async def get_user_details(client, user_id_or_login):
 
     ## Example Usage
     ```python
-    # Get user by ID or email (using method_args for positional argument)
-    user_result = await paginate_results(
-        "get_user",
-        method_args=[user_id_or_login],
-        entity_name="user"
+    # Get user by ID or email using handle_single_entity_request
+    user_result = await handle_single_entity_request(
+        method_name="get_user",
+        entity_type="user",
+        entity_id=user_id_or_login,
+        method_args=[user_id_or_login]
     )
     
-    # Check for errors
-    if isinstance(user_result, dict) and "status" in user_result and user_result["status"] == "error":
+    # Check for errors or not found status
+    if isinstance(user_result, dict) and "status" in user_result:
         return user_result
     
-    # Check if user was found
-    if not user_result or (isinstance(user_result, list) and len(user_result) == 0):
-        return {"status": "not_found", "entity": "user", "id": user_id_or_login}
-    
-    # Handle case where response might be a list with one user
-    if isinstance(user_result, list) and len(user_result) > 0:
-        user = user_result[0]
-    else:
-        user = user_result
-    
     # Return the user data directly - the results processor will handle formatting
-    return user
+    return user_result
     ```
 
     ## Error Handling
@@ -159,10 +162,9 @@ async def get_user_details(client, user_id_or_login):
     If another error occurs, returns: `{"status": "error", "error": error_message}`
 
     ## Important Notes
-    - Data returned by paginate_results is already in dictionary format (not objects)
+    - Data returned by handle_single_entity_request is already in dictionary format
     - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
-    - Use method_args=[user_id_or_login] to pass the user ID or login as a positional argument
-    - paginate_results already handles converting objects to dictionaries
+    - This function is specifically designed for retrieving single entities (not collections)
     - Return the data directly without additional transformation
     - The results processor will handle filtering fields based on query context
     """
@@ -248,7 +250,7 @@ async def list_user_groups(client, user_id_or_login):
 )
 async def list_user_factors(client, user_id_or_login):
     """
-    Retrieves all authentication factors enrolled for a specific Okta user by user ID or login (email). Returns detailed information about each factor including type, status, and provider.
+    Retrieves all authentication factors enrolled for a specific Okta user. IMPORTANT: Requires user ID (not login/email).
 
     # Tool Documentation: Okta List User Factors API Tool
 
@@ -260,10 +262,14 @@ async def list_user_factors(client, user_id_or_login):
 
     ## Parameters
     *   **`user_id_or_login`** (Required, String):
-        *   The unique identifier or login (usually email) of the user.
-        *   Can be either:
-            *   An Okta user ID (e.g., "00u1ero7vZFVEIYLWPBN")
-            *   A user's login/email (e.g., "john.doe@example.com")
+        *   The unique identifier of the user.
+        *   Must be a valid Okta user ID (e.g., "00ub0oNGTSWTBKOLGLNR")
+        *   Cannot be a login or email - must be converted to ID first if needed
+
+    ## API Details
+    * Endpoint: GET /api/v1/users/{userId}/factors
+    * Path Parameters:
+        * userId (required): ID of an existing Okta user (e.g., "00ub0oNGTSWTBKOLGLNR")
 
     ## Default Output Fields
     If no specific attributes are requested, return these minimal fields for each factor:
@@ -275,50 +281,47 @@ async def list_user_factors(client, user_id_or_login):
 
     ## Example Usage
     ```python
-    # Convert email to user ID if needed
-    if "@" in user_id_or_login:
-        user_result = await paginate_results(
-            "get_user",
-            method_args=[user_id_or_login],
-            entity_name="user"
-        )
-        if isinstance(user_result, dict) and "status" in user_result:
-            return user_result
-        if not user_result or len(user_result) == 0:
-            return {"status": "not_found", "entity": "user", "id": user_id_or_login}
-        # Handle case where result is a list
-        user = user_result[0] if isinstance(user_result, list) else user_result
-        user_id = user["id"]
-    else:
-        user_id = user_id_or_login
+    # Get user ID first if needed (usually when user_id_or_login is an email or login)
+    user_result = await handle_single_entity_request(
+        method_name="get_user",
+        entity_type="user",
+        entity_id=user_id_or_login,
+        method_args=[user_id_or_login]
+    )
     
-    # Get factors for this user
+    # Check if user retrieval failed
+    if isinstance(user_result, dict) and "status" in user_result and user_result["status"] in ["not_found", "error"]:
+        return user_result
+    
+    # Extract user ID from the user result
+    user_id = user_result["id"]
+    
+    # Now get factors for this user ID using paginate_results for list operations
     factors = await paginate_results(
         "list_factors",
+        query_params={},  # No query params needed for this operation
         method_args=[user_id],
         entity_name="factors"
     )
     
-    # Check for errors
+    # Check for errors in the factors result
     if isinstance(factors, dict) and "status" in factors and factors["status"] == "error":
         return factors
-    
-    # Return results directly
+        
     return factors
     ```
 
     ## Error Handling
-    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id_or_login}`
+    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id}`
     If another error occurs, returns: `{"status": "error", "error": message}`
     If no factors are found, returns an empty list `[]`
 
     ## Important Notes
-    - Data returned by paginate_results is already in dictionary format (not objects)
-    - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
-    - User lookup and factor retrieval both use paginate_results for consistent handling
-    - paginate_results already converts objects to dictionaries
-    - Return data directly without transformation
-    - The results processor will handle filtering fields based on query context
+    - This tool requires a valid Okta user ID to retrieve factors
+    - If you have a login or email, you MUST first perform a user lookup to get the ID
+    - IMPORTANT: Use paginate_results (not handle_single_entity_request) when retrieving multiple items
+    - handle_single_entity_request is only for single entity operations (like get_user)
+    - paginate_results is for operations that return lists/collections (like list_factors)
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
