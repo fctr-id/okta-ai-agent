@@ -258,3 +258,109 @@ async def handle_single_entity_request(client_method, entity_type, entity_id,
     except Exception as e:
         logger.error(f"{log_prefix}Error in {entity_type} request: {str(e)}")
         return {"status": "error", "error": str(e)}
+    
+async def make_async_request(client, method: str, url: str, headers: Dict = None, json_data: Dict = None, return_object=False, object_type=None):
+    """
+    Make an API request using the Okta SDK client's request executor.
+    
+    Args:
+        client: The Okta client instance
+        method: HTTP method (GET, POST, etc.)
+        url: URL path or full URL
+        headers: Optional additional headers
+        json_data: Optional request body as dictionary
+        return_object: Whether to return an Okta object (True) or raw response (False)
+        object_type: Okta model type to use when return_object is True
+        
+    Returns:
+        The API response as JSON or Okta object, or error dict on failure
+    """
+    try:
+        # First determine if this is a full URL or a relative path
+        is_full_url = url.startswith(('http://', 'https://'))
+        
+        # If it's a relative path, use it as-is
+        api_url = url if is_full_url else url
+        
+        # If it's a full URL, we need to validate and extract the path
+        if is_full_url:
+            # Validate the URL before proceeding
+            from src.utils.security_config import is_okta_url_allowed
+            if not is_okta_url_allowed(url):
+                error_msg = f"Security violation: URL {url} is not an authorized Okta URL"
+                logger.error(error_msg)
+                return {"status": "error", "error": error_msg}
+                
+            # Extract the path from the full URL
+            from urllib.parse import urlparse
+            parsed_url = urlparse(url)
+            api_url = parsed_url.path
+            if parsed_url.query:
+                api_url += f"?{parsed_url.query}"
+        
+        # Set up headers
+        request_headers = {}
+        if headers:
+            request_headers.update(headers)
+        
+        # Prepare request body
+        body = json_data if json_data else {}
+        
+        # Log request details for debugging
+        logger.debug(f"Making SDK client request: {method} {api_url}")
+        
+        # Create request using client's request executor
+        request, error = await client.get_request_executor().create_request(
+            method=method,
+            url=api_url,
+            body=body,
+            headers=request_headers,
+            oauth=False
+        )
+        
+        if error:
+            logger.error(f"Error creating request: {error}")
+            return {"status": "error", "error": f"Error creating request: {error}"}
+        
+        # Execute the request
+        if return_object and object_type:
+            # Execute with object type for deserialization
+            response, error = await client.get_request_executor().execute(request, object_type)
+            
+            if error:
+                logger.error(f"Error executing request: {error}")
+                return {"status": "error", "error": f"Error executing request: {error}"}
+                
+            # Get the typed object
+            response_body = client.form_response_body(response.get_body())
+            result = response.get_type()(response_body)
+            return result
+        else:
+            # Execute without object type for raw response
+            response, error = await client.get_request_executor().execute(request, None)
+            
+            if error:
+                logger.error(f"Error executing request: {error}")
+                return {"status": "error", "error": f"Error executing request: {error}"}
+                
+            # Get raw response body
+            response_body = response.get_body()
+            
+            # Use normalize_okta_response to handle various response formats
+            items, resp, err = normalize_okta_response(response_body)
+            
+            if err:
+                return {"status": "error", "error": str(err)}
+                
+            # Return the normalized items directly for consistency
+            # with other pagination functions
+            return items if items is not None else response_body
+            
+    except Exception as e:
+        # Log full exception details including traceback
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Error making SDK request: {str(e)}")
+        logger.debug(f"Exception traceback: {tb}")
+        
+        return {"status": "error", "error": f"Error making SDK request: {str(e)}"}    

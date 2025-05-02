@@ -36,7 +36,7 @@ ALLOWED_SDK_METHODS: Set[str] = {
     'get_application',          # Used in get_application_details
     'list_applications',        # Used in list_applications
     'list_application_users',   # Used with paginate_results
-    'list_application_groups',  # Used with paginate_results
+    'list_application_group_assignments',  # Used with paginate_results
     
     # Log/Event operations from logevents_tools.py
     'get_logs',                 # Used in get_event_logs
@@ -55,7 +55,14 @@ ALLOWED_SDK_METHODS: Set[str] = {
     'make_async_request',       # Helper for direct API calls
     
     # For 'paginate_results' function used in many tools
-    'paginate_results'
+    'paginate_results',
+    
+    # Request executor methods
+    'get_request_executor',
+    'create_request',
+    'execute',
+    'get_body',
+    'get_type'    
 }
 
 
@@ -70,12 +77,19 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
     
     # String methods
     'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
+    'capitalize', 'title', 'startswith', 'endswith', 'replace', 'format',
     
     # Pagination methods
-    'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages', 'paginate_results',
+    'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages', 'paginate_results', 'handle_single_entity_request'
     
     # General methods
-    'get', 'is_okta_url_allowed'
+    'get', 'is_okta_url_allowed',
+    
+    'items', 'keys', 'values', 'enumerate', 'zip',  # Dictionary/list operations
+    'format', 'replace', 'startswith', 'endswith',  # String processing
+    'sorted', 'filter', 'map', 'any', 'all',        # Data processing
+    'sum', 'min', 'max', 'len', 'round',            # Math and sizing
+    'flatten_dict', 'combine_results',              # Results processing helpers
 }
 
 # Allowed modules
@@ -129,6 +143,11 @@ def is_code_safe(code: str, okta_domain: str = None) -> bool:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             method_name = node.func.attr
+            
+            # Special case for dictionary methods like .get()
+            if method_name in ['get', 'items', 'keys', 'values']:
+                continue
+                
             if method_name not in all_allowed_methods:
                 logger.warning(f"Code validation failed: unauthorized method call: {method_name}")
                 return False
