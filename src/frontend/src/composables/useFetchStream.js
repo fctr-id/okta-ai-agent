@@ -1,7 +1,7 @@
 import { ref } from "vue";
 
 const CONFIG = {
-    CONNECTION_TIMEOUT: 10000,  // Keep initial connection timeout
+    CONNECTION_TIMEOUT: 60000,  // Keep initial connection timeout
     TOTAL_TIMEOUT: 300000,      // Keep total timeout as a safety measure
 };
 

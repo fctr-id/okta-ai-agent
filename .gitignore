@@ -56,3 +56,7 @@ src/backend/app/static/*
 certs/
 wiki.md
 mcp.txt
+docs/Comprehensive Implementation Plan for Okta.md
+docs/mcp2.txt
+docs/mcp_sdk-examples.md
+docs/pydantic_ai_mcp.md
