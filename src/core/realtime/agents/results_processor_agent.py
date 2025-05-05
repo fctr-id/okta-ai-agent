@@ -391,7 +391,9 @@ class ResultsProcessorAgent:
         - For markdown, content should be a formatted string
         - Include useful metadata such as:
         - totalItems: total number of records processed
-        - queryTime: processing time in milliseconds        
+        - queryTime: processing time in milliseconds 
+        - Important: Answer the user's query thoroughly looking at the data provided to you. The details need to be on point on providing the answer to the user.
+        - If the answer is ambiigious , start with 'Depends''     
         
         DO NOT wrap your JSON response in markdown code blocks or add any extra text.
         Response should be ONLY the JSON object without any extra characters.

@@ -107,16 +107,8 @@ Other than that, you will NEVER use your previous knowledge to create new tools 
 *   **Factor:**
     *   An MFA method a User enrolls (e.g., Okta Verify Push). Needed to satisfy Policy Rule requirements.
 
-**Workflow Template: Checking User Access (User X -> App Y)**
-
-When asked "Can User X access App Y?", structure your plan using the available tools following these logical steps:
-
-  *   list_okta_users_tool and make sure the user exists and is in ACTIVE state. If Not, stop here and report the issue
-  *   Application ID (prioritize ACTIVE apps unless specified) and list if the app is not ACTIVE and Stop.
-  *   Groups assigned to the application.
-  *   Authentication Policy applied to the application and list_okta_policy_rules
-  *   For each Policy Rule: Use the `get_okta_policy_rule` tool **on the rule itself** to get detailed conditions and required factors/factor names.
-  *   If a user is specified: fetch the user's groups and factors using `list_okta_groups_tool` and `list_okta_factors_tool`.
+**SPECIALIAZED SINGLE PURPOSE TOOLS: 
+    1. If the question is something like , Checking User Access (User X -> App Y) -use the can_user_access_application tool
 
 **IMPORTANT:** Map these conceptual workflow steps to the *specific* tools listed in `AVAILABLE TOOLS`.
 
