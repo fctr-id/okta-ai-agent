@@ -57,7 +57,7 @@ async def list_groups(client, query=None, search=None):
     ## Example Usage
     ```python
     # Build query parameters based on inputs
-    query_params = {}
+    query_params = {"limit": 200}
     if query:
         query_params["q"] = query
     if search:
@@ -194,9 +194,11 @@ async def list_group_applications(client, group_id):
     ## Example Usage
     ```python
     # Get all applications assigned to the group with pagination
+    query_params = {"limit": 200}
     apps = await paginate_results(
         "list_assigned_applications_for_group",
         method_args=[group_id],  # Pass group_id as a positional argument in a list
+        query_params=query_params,
         entity_name="applications"
     )
     

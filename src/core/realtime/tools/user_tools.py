@@ -54,7 +54,7 @@ async def search_users(client, search=None, limit=None):
     ## Example Usage
     ```python
     # Build query parameters
-    query_params = {}
+    query_params = {"limit": 200}
     
     # Example: To search by email or login (always use profile prefix)
     if search:
@@ -66,8 +66,6 @@ async def search_users(client, search=None, limit=None):
         # Or by login
         # query_params["search"] = f'profile.login eq "{user_email}"'
         
-    if limit:
-        query_params["limit"] = limit
     
     # Get users with pagination 
     users = await paginate_results(

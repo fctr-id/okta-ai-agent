@@ -49,10 +49,6 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
         *   Example: `filter='name eq "okta_org2org"'`
         *   Note: Only the eq operator is supported for application filtering
 
-    *   **`limit`** (Integer):
-        *   Specifies the number of results per page (maximum 200).
-        *   Default is determined by the Okta API if not specified.
-
     *   **`after`** (String):
         *   Pagination cursor for the next page of results.
         *   Treat this as an opaque value obtained from a previous response's next link.
@@ -79,7 +75,7 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
     ## Example Usage
     ```python
     # Build query parameters
-    query_params = {}
+    query_params = {"limit": 200}
     
     # To search by application display name (most common case)
     query_params["q"] = "Workday"  # Searches both name and label fields
@@ -180,6 +176,7 @@ async def get_application_details(client, app_id):
         return {"status": "error", "error": "Application ID not found in previous step"}
 
     # Get application details by ID using handle_single_entity_request
+    
     app_result = await handle_single_entity_request(
         method_name="get_application",
         entity_type="application",
@@ -257,10 +254,6 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
         *   Matches the beginning of userName, firstName, lastName, and email.
         *   Example: `q="sam"` finds users with names or emails starting with "sam"
 
-    *   **`limit`** (Integer):
-        *   Specifies the number of results per page (1-500).
-        *   Default: 50 if not specified
-
     *   **`after`** (String):
         *   Pagination cursor for the next page of results.
         *   Obtained from a previous response's next link.
@@ -268,12 +261,10 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
     ## Example Usage
     ```python
     # Build query parameters
-    query_params = {"expand": "user"}  # Always include expand=user for better data
+    query_params = {"expand": "user", "limit" : 500}  # Always include expand=user for better data
     
     if q:
         query_params["q"] = q
-    if limit:
-        query_params["limit"] = limit
     if after:
         query_params["after"] = after
     
@@ -339,10 +330,6 @@ async def list_application_groups(client, app_id, q=None, limit=None, after=None
         *   Matches the beginning of the group name.
         *   Example: `q="test"` finds groups with names starting with "test"
 
-    *   **`limit`** (Integer):
-        *   Specifies the number of results per page (20-200).
-        *   Default: 20 if not specified
-
     *   **`after`** (String):
         *   Pagination cursor for the next page of results.
         *   Obtained from a previous response's next link.
@@ -356,16 +343,15 @@ async def list_application_groups(client, app_id, q=None, limit=None, after=None
     ## Example Usage
     ```python
     # Build query parameters
-    query_params = {}
+    query_params = {"limit": 200}
     
     if q:
         query_params["q"] = q
-    if limit:
-        query_params["limit"] = limit
+    
     if after:
         query_params["after"] = after
-    if expand:
-        query_params["expand"] = expand
+
+    query_params["expand"] = group
     
     # Get all groups for this application with pagination
     groups = await paginate_results(
