@@ -43,6 +43,8 @@ class ResultsProcessorAgent:
         3. Choose the most appropriate display format (markdown or table)
         4. For large datasets, generate Python code to process the full dataset
         
+        IMPORTANT: Markdown is only usefule when you need to provide a summary or explanation. Otherwise , you can just pass the data as provided to you in the table format.
+        
         ### Key Okta Entities and Their Relationships ###
         
         * **User (Identity):**
@@ -375,7 +377,7 @@ class ResultsProcessorAgent:
         {results_str}
         
         ## Your Task
-        Process these results and format them to directly answer the user's query.
+        Process these results and format them to directly answer the user's query. 
         
         Return your response in JSON format with:
         1. A display_type of either "markdown" or "table" (choose one)
