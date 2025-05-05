@@ -277,6 +277,7 @@ def load_tools() -> bool:
             "src.core.realtime.tools.logevents_tools",
             "src.core.realtime.tools.application_tools",
             "src.core.realtime.tools.network_policy_tools",
+            "src.core.realtime.tools.specialized_tools.user_app_access",
             # Add more tool modules as they become available
         ]
         
