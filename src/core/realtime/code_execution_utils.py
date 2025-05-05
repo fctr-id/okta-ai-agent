@@ -5,6 +5,7 @@ Provides validation, execution, and result processing for generated code.
 
 from typing import Dict, List, Any, Optional, Union, Callable, Tuple
 import re
+import os
 import traceback
 import ast
 import textwrap
@@ -13,6 +14,9 @@ import json
 import time
 from datetime import datetime
 from urllib.parse import urlparse
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 # Import our new error handling
 from src.utils.error_handling import (
@@ -445,7 +449,7 @@ async def execute_okta_code(
     okta_domain: str,
     query_id: str = "unknown",
     extra_context: Dict[str, Any] = None,
-    execution_timeout: float = 300.0  
+    execution_timeout: float = float(os.getenv("RLTIME_STEP_EXECUTION_TIMEOUT", 300))
 ) -> Dict[str, Any]:
     """
     Execute generated Okta SDK code in a secure environment.
