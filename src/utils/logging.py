@@ -13,10 +13,14 @@ import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Dict, Optional, Any
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 # Default log levels
-DEFAULT_CONSOLE_LEVEL = logging.INFO
-DEFAULT_FILE_LEVEL = logging.DEBUG
+DEFAULT_CONSOLE_LEVEL = os.getenv("RLTIME_CONSOLE_LOG_LEVEL", "INFO").upper()
+# Default file log level    
+DEFAULT_FILE_LEVEL = os.getenv("RLTIME_FILE_LOG_LEVEL", "DEBUG").upper()
 
 # Store correlation ID (simple global variable approach)
 _CORRELATION_ID = None
