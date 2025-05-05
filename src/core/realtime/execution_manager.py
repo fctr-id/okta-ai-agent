@@ -23,6 +23,7 @@ from pydantic_ai import capture_run_messages
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from src.utils.pagination_limits import paginate_results as _base_paginate_results, handle_single_entity_request as _base_handle_single_entity_request, make_async_request
+from src.core.realtime.tools.specialized_tools.user_app_access import can_user_access_application
 
 
 # Import our new error handling
@@ -990,7 +991,8 @@ if 'result' not in locals():
                     **step_context,
                     'paginate_results': paginate_results,  # Add pagination helper to context
                     'handle_single_entity_request': handle_single_entity_request,  # Add single entity helper
-                    'make_async_request': make_async_request  # Add async request helper
+                    'make_async_request': make_async_request,  # Add async request helper
+                    'can_user_access_application': can_user_access_application # Add access check helper
                 },
                 error_message=f"Error executing code for step {step.tool_name}"
             )
