@@ -426,7 +426,7 @@ class ResultsProcessorAgent:
           - queryTime: processing time in milliseconds 
         - Answer the user's query thoroughly with all available relevant information
         - If the answer is ambiguous, start with 'Depends'
-        
+        y
         DO NOT wrap your JSON response in markdown code blocks or add any extra text.
         Response should be ONLY the JSON object without any extra characters.
         EXTRA IMPORTANT: Do NOT add any additional or escape characters to the JSON response when creating code for large datasets.
@@ -479,8 +479,8 @@ class ResultsProcessorAgent:
         {results_str}
         
         ## Your Task
-        You are receiving only a SAMPLE of a large dataset. Write Python code WITHOUT function definitions 
-        that would process the complete dataset.
+        You are receiving only a SAMPLE of a large dataset. 
+        Write Python code WITHOUT function definitions that would process the complete dataset.
         
         Your code will be executed with the FULL dataset (available as variable 'full_results') 
         to transform it into a user-friendly format.
@@ -489,6 +489,7 @@ class ResultsProcessorAgent:
         
     ## Data Structure Guidelines
         - INSPECT THE DATA FIRST: Debug the structure before processing
+        - INSPECT THE STEPS, CODE and RESULTS and then decide what to do with them. If the results already contain the answer to the user's query, you can just return them as is. 
         - Step results are numbered - key "1" contains results from step 1, etc.
         - Check data types and content before assuming what's in each key
         - Use print statements to understand the full data structure
@@ -509,6 +510,13 @@ class ResultsProcessorAgent:
         - Common built-ins: {safe_builtins}
         - Dictionary methods: get, items, keys, values
         - List methods: append, extend, insert, remove, pop, sort
+        
+        CRITICAL REQUIREMENTS FOR CODE GENERATION FOR DATA PROCESSING:
+        - NEVER use Python sets or set operations - they are not JSON serializable
+        - Instead of 'set()', use empty list: ids = []
+        - Instead of '.add()', use if/not in check: if id not in ids: ids.append(id)
+        - Always ensure ALL data structures are JSON serializable (dict, list, str, int, float, bool, None)
+        - Your result MUST include 'display_type' and proper structure for displaying results          
         
         Example:
         
@@ -614,12 +622,7 @@ class ResultsProcessorAgent:
         - Include useful metadata such as totalItems for the number of records processed
         
         
-        CRITICAL REQUIREMENTS FOR DATA PROCESSING:
-        - NEVER use Python sets or set operations - they are not JSON serializable
-        - Instead of 'set()', use empty list: ids = []
-        - Instead of '.add()', use if/not in check: if id not in ids: ids.append(id)
-        - Always ensure ALL data structures are JSON serializable (dict, list, str, int, float, bool, None)
-        - Your result MUST include 'display_type' and proper structure for displaying results        
+      
         
         IMPORTANT: Place your code ONLY between <CODE> and </CODE> tags.
         DO NOT use markdown code blocks or other formatting.
