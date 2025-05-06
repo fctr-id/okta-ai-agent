@@ -117,6 +117,7 @@ async def get_group_members(client, group_id):
 
     ## Goal
     This tool retrieves all members (users) of a specific Okta group.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Core Functionality
     Retrieves users associated with a specific group.
