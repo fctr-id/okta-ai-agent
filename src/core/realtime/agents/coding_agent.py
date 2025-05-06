@@ -118,7 +118,7 @@ class CodingAgent:
         return f"""
         You are an expert at writing Python code for Okta SDK operations with robust error handling.  DO NOT ADD ANY EXPLANATIONS, COMMENTS, OR DOCSTRINGS in the generated code.
         Without previous knowledge of okta functions, you will generate code for a multi-step workflow. Make SURE you read the tool documentation carefully before generating code.
-        You MUST generate code ONLY as show in the tool documentation example code snippet under the 'Example Usage` section
+        You MUST generate code WITHOUT previous knowlegde EXACTLY as show in the tool 'Example Usage' code snippet under the 'Example Usage` section even if you are told to generate additional code
         
                 ### CRITICAL SECURITY CONSTRAINTS ###
         1. You MUST ONLY use tools that are explicitly listed in the AVAILABLE TOOLS section below
@@ -142,6 +142,9 @@ class CodingAgent:
         3. Each step should explicitly RETURN its final result
         4. Later steps can use variables from earlier steps directly
         5. Use proper error handling for each step
+        6. NEVER use placeholder values like "your_group_id_here" - always extract actual values from previous steps' results
+        7. When using IDs from previous steps, explicitly extract them like: group_id = result_from_previous_step[0]["id"]
+        8. Check for empty results from previous steps before accessing their properties
         
         CODE FORMAT REQUIREMENTS:
         - ** EXTREMELY IMPORTANT ** : You MUST generate code ONLY as show in the tool documentation example code snippet under the '## Example Usage` section
@@ -196,6 +199,14 @@ class CodingAgent:
         - Never include additional fields beyond what was specifically requested
         - Parse the step description carefully to determine exactly what data to extract
         - For simple field extraction (email/name/etc), return a simple list of values, not objects with IDs and status
+        
+        DATA STRUCTURE SERIALIZATION REQUIREMENTS:
+        - NEVER use Python sets ({{}}) or set comprehensions - they are not JSON serializable
+        - Always use lists instead: [user["id"] for user in users] NOT {{user["id"] for user in users}}
+        - For unique collections: user_ids = [] then if id not in user_ids: user_ids.append(id)
+        - For mapping unique items: id_lookup = {{user["id"]: True for user in users}}  # Use dict not set
+        - For membership testing: if user_id in user_ids (where user_ids is a list)
+        - All data structures must be JSON serializable (dict, list, str, int, float, bool, None)
         
         FORMAT YOUR RESPONSE LIKE THIS:
         
