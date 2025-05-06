@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 )
 async def can_user_access_application(client, user_identifier=None, group_identifier=None, app_identifier=None, ip_address=None):
     """
-    Collects comprehensive data about a user's or group's relationship to an Okta application.
+    Single tool call to Collects comprehensive data about a user's or group's relationship to an Okta application.
 
     # Tool Documentation: Can User Access Application
 

@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 )
 async def list_groups(client, query=None, search=None):
     """
-    Searches for or lists groups in the Okta directory based on name, description or other criteria with pagination support. Returns group information including ID, name, description and type.
+     lists groups in the Okta directory based on name, description or other criteria with pagination support. Returns group information including ID, name, description and type.
 
     # Tool Documentation: Okta Group Search/List API Tool
 
@@ -28,10 +28,11 @@ async def list_groups(client, query=None, search=None):
 
     ## Core Functionality
     Retrieves groups matching search criteria or lists all groups with pagination support.
+    IMPORTANT: Make sure you read the example and documentataion carefully to understand how to use this tool effectively.
 
     ## Parameters
     *   **`query`** (String):
-        *   Optional simple text search across group names and descriptions.
+        *   RECOMMENDED simple text search across group names and descriptions.
         *   Example: `"Engineering"` will find groups with "Engineering" in name or description.
 
     *   **`search`** (String):
@@ -40,6 +41,13 @@ async def list_groups(client, query=None, search=None):
             *   `profile.name eq \"Engineering\"`
             *   `profile.name co \"Dev\"`
             *   `type eq \"OKTA_GROUP\"`
+            
+            ## Search Operators (for 'search' parameter)
+            *   **eq**: Equals - `profile.name eq \"Engineering\"`
+            *   **co**: Contains - `profile.name co \"Eng\"`
+            *   **sw**: Starts with - `profile.name sw \"Dev\"`
+            *   Others: ne (not equals), pr (present), gt/lt (greater/less than)
+
 
     ## Default Output Fields
     Groups contain these key fields:

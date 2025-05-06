@@ -25,6 +25,7 @@ async def search_users(client, search=None, limit=None):
 
     ## Goal
     This tool searches for users in the Okta directory based on specified criteria.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Core Functionality
     Searches for Okta users using advanced search expressions with support for pagination.
