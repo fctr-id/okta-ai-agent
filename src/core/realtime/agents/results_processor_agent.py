@@ -367,41 +367,69 @@ class ResultsProcessorAgent:
             results_str = results_str[:10000] + "... [truncated]"
         
         return f"""
-        # Results Processing Task
-        
+         # Results Processing Task
+                
         ## Original User Query
         {query}
-        
+                
         ## Execution Plan Reasoning
         {plan_reasoning}
-        
+                
         ## Complete Execution Results
         {results_str}
-        
+                
         ## Your Task
         Process these results and format them to directly answer the user's query. 
-        
+                
         Return your response in JSON format with:
         1. A display_type of either "markdown" or "table" (choose one)
         2. Content formatted according to the chosen display type
         
-        - You must implement ONLY the 'process_results' function with the exact signature shown
-        - Return a dict with keys: display_type, content, and metadata
-        - Choose display_type as either "markdown" or "table" (not both)
-        - For tables, content MUST be a dictionary with "headers" and "items" arrays:
-        - "headers": array of column definitions with key, title, align, and sortable properties
-        - "items": array of data objects where property names match header keys
+        ## Display Type Selection Guidelines
+        Choose the appropriate display format based on the following criteria:
         
+        1. USE TABLES WHEN:
+           - Displaying structured data with multiple attributes per item
+           - Showing more than 5 items with multiple attributes
+           - Presenting data that benefits from sorting or column organization
+           - Displaying raw records from a database or API
+           - The user query asks for a list of items with their properties
+           - Comparing multiple items across common attributes
+        
+        2. USE MARKDOWN ONLY WHEN:
+           - Creating a brief summary with less than 5 key points
+           - Presenting hierarchical or nested information that doesn't fit a tabular format
+           - Creating a narrative explanation rather than displaying raw data
+           - Showing statistical summaries or aggregated insights
+           - The query asks "why" or "how" questions requiring explanations
+        
+        3. IMPORTANT: For lists of users, applications, groups, or other entities:
+           - ALWAYS use TABLE format unless specifically creating a high-level summary
+           - NEVER use markdown to display individual records when more than 5 exist
+        
+        ## Critical Results Requirements
+        - NEVER limit the number of items displayed in either format
+        - ALWAYS include ALL items in your response regardless of format
+        - NEVER include notes about "showing only a subset" of items
+        - NEVER use phrases like "first few results" or "due to space"
+        - For tables: Include all items in the "items" array
+        - For markdown: List all relevant items without truncation
+        
+        ## Response Format Requirements
+        - Return a dict with keys: display_type, content, and metadata
+        - For tables, content MUST be a dictionary with "headers" and "items" arrays:
+          - "headers": array of column definitions with key, title, align, and sortable properties
+          - "items": array of data objects where property names match header keys
         - For markdown, content should be a formatted string
         - Include useful metadata such as:
-        - totalItems: total number of records processed
-        - queryTime: processing time in milliseconds 
-        - Important: Answer the user's query thoroughly looking at the data provided to you. The more information you provide, the better espcially if the answer depends on certain conditions.
-        - If the answer is ambiigious , start with 'Depends''     
+          - totalItems: total number of records processed
+          - queryTime: processing time in milliseconds 
+        - Answer the user's query thoroughly with all available relevant information
+        - If the answer is ambiguous, start with 'Depends'
         
         DO NOT wrap your JSON response in markdown code blocks or add any extra text.
         Response should be ONLY the JSON object without any extra characters.
-        EXTRA IMPORTANT: Do NOT add any additional or escape characterts to the JSON response when creating code for large datasets.
+        EXTRA IMPORTANT: Do NOT add any additional or escape characters to the JSON response when creating code for large datasets.
         """
     
     def _create_sample_data_prompt(self, query: str, results: Dict[str, Any], plan: Any) -> str:
