@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 )
 async def list_groups(client, query=None, search=None):
     """
-     lists groups in the Okta directory based on name, description or other criteria with pagination support. Returns group information including ID, name, description and type.
+    Lists groups in the Okta directory based on name, and also get basic statistics like user counts. Returns group information including ID, name, description, type and statistical data (user count, app count, groupPushMappings count and if the group has adminPrivileges assigned.).
 
     # Tool Documentation: Okta Group Search/List API Tool
 
@@ -28,7 +28,7 @@ async def list_groups(client, query=None, search=None):
 
     ## Core Functionality
     Retrieves groups matching search criteria or lists all groups with pagination support.
-    IMPORTANT: Make sure you read the example and documentataion carefully to understand how to use this tool effectively.
+    IMPORTANT: Make sure you read the example and documentation carefully to understand how to use this tool effectively.
 
     ## Parameters
     *   **`query`** (String):
@@ -42,12 +42,11 @@ async def list_groups(client, query=None, search=None):
             *   `profile.name co \"Dev\"`
             *   `type eq \"OKTA_GROUP\"`
             
-            ## Search Operators (for 'search' parameter)
-            *   **eq**: Equals - `profile.name eq \"Engineering\"`
-            *   **co**: Contains - `profile.name co \"Eng\"`
-            *   **sw**: Starts with - `profile.name sw \"Dev\"`
-            *   Others: ne (not equals), pr (present), gt/lt (greater/less than)
-
+    ## Search Operators (for 'search' parameter)
+    *   **eq**: Equals - `profile.name eq \"Engineering\"`
+    *   **co**: Contains - `profile.name co \"Eng\"`
+    *   **sw**: Starts with - `profile.name sw \"Dev\"`
+    *   Others: ne (not equals), pr (present), gt/lt (greater/less than)
 
     ## Default Output Fields
     Groups contain these key fields:
@@ -55,17 +54,16 @@ async def list_groups(client, query=None, search=None):
     - profile: Contains name and description
     - type: Group type (OKTA_GROUP, APP_GROUP)
     - created/lastUpdated: Timestamps
-
-    ## Search Operators (for 'search' parameter)
-    *   **eq**: Equals - `profile.name eq \"Engineering\"`
-    *   **co**: Contains - `profile.name co \"Eng\"`
-    *   **sw**: Starts with - `profile.name sw \"Dev\"`
-    *   Others: ne (not equals), pr (present), gt/lt (greater/less than)
+    - _embedded.stats: Contains statistical data:
+      - usersCount: Number of users in the group
+      - appsCount: Number of applications assigned to the group
+      - groupPushMappingsCount: Number of push mappings
+      - hasAdminPrivilege: Whether group has admin privileges
 
     ## Example Usage
     ```python
     # Build query parameters based on inputs
-    query_params = {"limit": 200}
+    query_params = {"limit": 200, "expand": "stats"}
     if query:
         query_params["q"] = query
     if search:
@@ -82,6 +80,14 @@ async def list_groups(client, query=None, search=None):
     if isinstance(groups, dict) and "status" in groups and groups["status"] == "error":
         return groups
 
+    # Example of accessing stats data
+    if groups and isinstance(groups, list):
+        for group in groups:
+            stats = group.get("_embedded", {}).get("stats", {})
+            user_count = stats.get("usersCount", 0)
+            app_count = stats.get("appsCount", 0)
+            # These counts are now available for processing
+    
     # Return results directly
     return groups
     ```
@@ -98,6 +104,8 @@ async def list_groups(client, query=None, search=None):
     - Double quotes must be used inside search strings and properly escaped
     - DO NOT use single quotes for the search values
     - Try using the simple "q" parameter first if specific filters fail
+    - Statistical data (_embedded.stats) is always included in the results
+    - Check if "_embedded" and "stats" keys exist before accessing them
     - Return data directly without transformation - formatting will be handled by the results processor
     """
     # Implementation will be handled by code generation
@@ -111,7 +119,7 @@ async def list_groups(client, query=None, search=None):
 )
 async def get_group_members(client, group_id):
     """
-    Retrieves all members (users) of a specific Okta group by group ID. Returns user information including ID, email, and status for each user in the group.
+    Retrieves all members (users) detailed properties of a specific Okta group by group ID. Returns user information including ID, email, and status for each user in the group. For just stats or counts  use the list_groups tool.
 
     # Tool Documentation: Okta Get Group Members API Tool
 
