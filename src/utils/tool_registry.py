@@ -223,42 +223,41 @@ def is_registry_initialized() -> bool:
     return len(_TOOLS) > 0
 
 
+import json
+
 def build_tools_documentation() -> str:
     """
-    Build comprehensive documentation for all available tools.
+    Build comprehensive documentation for all available tools in JSON format.
     
     Returns:
-        Formatted string containing all tool documentation
+        JSON string containing all tool names and descriptions
     """
     if not _TOOLS:
         logger.warning("No tools registered when building documentation")
-        return "# No tools available\n\nNo tools have been registered with the system."
+        return json.dumps([])
     
-    tools_docs = "# Available Tools\n\n"
+    tools_list = []
     
-    # Group tools by entity type
-    for entity_type, tools in sorted(_TOOLS_BY_ENTITY.items()):
-        tools_docs += f"\n## {entity_type.capitalize()} Tools\n\n"
-        
-        for tool in sorted(tools, key=lambda t: t.name):
-            # Format aliases if present
-            aliases = getattr(tool, 'aliases', [])
-            if aliases:
-                alias_str = f" (aliases: {', '.join(sorted(aliases))})"
-            else:
-                alias_str = ""
-            tools_docs += f"### {tool.name}{alias_str}\n"
+    # Process all tools across all entity types
+    for entity_type, tools in _TOOLS_BY_ENTITY.items():
+        for tool in tools:
+            # Get first paragraph as brief description
+            desc_lines = tool.description.strip().split("\n\n")
+            brief_desc = desc_lines[0].strip()
+            if len(brief_desc) > 300:
+                brief_desc = brief_desc[:297] + "..."
             
-            # Add description (truncated for brevity in overall docs)
-            if tool.description:
-                # Get first paragraph or first 200 chars
-                desc_lines = tool.description.strip().split("\n\n")
-                brief_desc = desc_lines[0].strip()
-                if len(brief_desc) > 300:
-                    brief_desc = brief_desc[:197] + "..."
-                tools_docs += f"{brief_desc}\n\n"
+            # Add tool to list
+            tools_list.append({
+                "tool_name": tool.name,
+                "description": brief_desc
+            })
     
-    return tools_docs
+    # Sort tools by name for consistency
+    #tools_list.sort(key=lambda x: x["tool_name"])
+    
+    # Return as formatted JSON string
+    return json.dumps(tools_list, indent=2)
 
 
 def load_tools() -> bool:
