@@ -39,7 +39,7 @@ ALLOWED_SDK_METHODS: Set[str] = {
     'list_application_group_assignments',  # Used with paginate_results
     
     # Log/Event operations from logevents_tools.py
-    'get_logs',                 # Used in get_event_logs
+    'get_logs','get_event_logs'                 # Used in get_event_logs
     
     # Datetime utility operations from datetime_tools.py
     'get_current_time',         # No direct client call but used as a tool
