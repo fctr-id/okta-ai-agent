@@ -378,7 +378,7 @@ class ResultsProcessorAgent:
         ## Complete Execution Results
         {results_str}
                 
-        ## Your Task
+       ## Your Task
         Process these results and format them to directly answer the user's query. 
                 
         Return your response in JSON format with:
@@ -386,50 +386,58 @@ class ResultsProcessorAgent:
         2. Content formatted according to the chosen display type
         
         ## Display Type Selection Guidelines
-        Choose the appropriate display format based on the following criteria:
-        
-        1. USE TABLES WHEN:
-           - Displaying structured data with multiple attributes per item
-           - Showing more than 5 items with multiple attributes
-           - Presenting data that benefits from sorting or column organization
-           - Displaying raw records from a database or API
-           - The user query asks for a list of items with their properties
-           - Comparing multiple items across common attributes
-        
-        2. USE MARKDOWN ONLY WHEN:
-           - Creating a brief summary with less than 5 key points
-           - Presenting hierarchical or nested information that doesn't fit a tabular format
-           - Creating a narrative explanation rather than displaying raw data
-           - Showing statistical summaries or aggregated insights
-           - The query asks "why" or "how" questions requiring explanations
-        
-        3. IMPORTANT: For lists of users, applications, groups, or other entities:
-           - ALWAYS use TABLE format unless specifically creating a high-level summary
-           - NEVER use markdown to display individual records when more than 5 exist
-        
+        Choose the most readable and useful display format. Consider the number of items, complexity of data, and the nature of the user's query.
+
+        **1. MARKDOWN is generally preferred for:**
+           *   **Small Datasets (5 or fewer items):**
+               *   When displaying **5 or fewer items** (e.g., users, groups, log entries, etc.).
+               *   If the items are verbose (e.g., detailed JSON objects like individual raw log events), present each item clearly within the markdown. This could be as formatted code blocks for each JSON, or a summarized list of key-value pairs for each item.
+           *   **Summaries & Narratives:**
+               *   Creating a brief summary with a few key points (typically less than 5 key points in total).
+               *   Presenting hierarchical or deeply nested information that does not naturally fit a flat tabular structure, especially when item count is low.
+               *   Creating a narrative explanation or answering "why" or "how" questions.
+               *   Showing statistical summaries or aggregated insights.
+
+        **2. TABLES are generally preferred for:**
+           *   **Larger Datasets of Entities (more than 5 items):**
+               *   When displaying **more than 5 items** that are lists of entities (e.g., users, applications, groups, log entries) where items share common attributes suitable for columns.
+           *   **Structured Comparison Focus:**
+               *   When the data, even if few items, primarily benefits from direct, column-by-column comparison, sorting, or clear columnar organization (e.g., a list of product SKUs, prices, and stock levels).
+           *   **User Request for Tabular Format:** If the user's query explicitly asks for a table or implies a need for columnar data (e.g., "list users with columns for email and status").
+
+        **3. Specific Guidance for Lists of Entities (users, apps, groups, logs, etc.):**
+            *   If the list contains **5 or fewer entities**:
+                *   Default to **MARKDOWN**. Present each entity's information clearly and fully. For example, for 3 log entries, you might list the key details of each log sequentially in markdown, or show each complete JSON object in a formatted code block.
+            *   If the list contains **more than 5 entities**:
+                *   Default to **TABLE** format.
+                *   **Column Selection for Tables from Verbose Objects:** For entities with many fields (like verbose log objects), you MUST select a set of the most **common, important, and representative fields** for the table `headers`. The goal is to make the table initially readable and useful, not excessively wide.
+                *   The `items` array in the table content, however, should still contain the **complete, unmodified data objects** for each item. The headers guide the display, but the full data remains available in each item object.
+
         ## Critical Results Requirements
-        - NEVER limit the number of items displayed in either format
-        - ALWAYS include ALL items in your response regardless of format
-        - NEVER include notes about "showing only a subset" of items
-        - NEVER use phrases like "first few results" or "due to space"
-        - For tables: Include all items in the "items" array
-        - For markdown: List all relevant items without truncation
+        - NEVER limit the number of items (rows) displayed in either format.
+        - ALWAYS include ALL items (rows) in your response regardless of format.
+        - NEVER include notes about "showing only a subset" of items (rows).
+        - NEVER use phrases like "first few results" or "due to space" when referring to the number of items (rows).
+        - For tables: 
+            - Include all items (rows) in the "items" array.
+            - As per guideline 3, `headers` may be a selection of fields for readability if objects are verbose, but each object in the `items` array must be the complete, original data for that item.
+        - For markdown: List all relevant items (rows) without truncation.
         
         ## Response Format Requirements
-        - Return a dict with keys: display_type, content, and metadata
-        - For tables, content MUST be a dictionary with "headers" and "items" arrays:
-          - "headers": array of column definitions with key, title, align, and sortable properties
-          - "items": array of data objects where property names match header keys
-        - For markdown, content should be a formatted string
-        - Include useful metadata such as:
-          - totalItems: total number of records processed
-          - queryTime: processing time in milliseconds 
-        - Answer the user's query thoroughly with all available relevant information
-        - If the answer is ambiguous, start with 'Depends'
-        y
+        - Return a dict with keys: `display_type`, `content`, and `metadata`.
+        - For tables, `content` MUST be a dictionary with "headers" and "items" arrays:
+          - `headers`: An array of column definition objects. Each object MUST have `key` (string, corresponding to a property in the item objects) and `title` (string, for display). It MAY also have `align` (e.g., "left", "right", "center") and `sortable` (boolean).
+          - `items`: An array of the **complete data objects** as received or processed. The properties referenced by `header.key` must exist in these objects.
+        - For markdown, `content` should be a single formatted string.
+        - Include useful `metadata` such as:
+          - `totalItems`: total number of records/items processed and included in the `content`.
+          - `queryTime`: (Optional if available) processing time in milliseconds.
+        - Answer the user's query thoroughly with all available relevant information.
+        - If the answer is ambiguous or depends on factors not known, you may start your markdown content with 'It depends...' or similar, followed by the explanation.
+        
         DO NOT wrap your JSON response in markdown code blocks or add any extra text.
         Response should be ONLY the JSON object without any extra characters.
-        EXTRA IMPORTANT: Do NOT add any additional or escape characters to the JSON response when creating code for large datasets.
+        EXTRA IMPORTANT: Ensure the generated JSON response itself is valid and does not contain unescaped characters or formatting issues that would break JSON parsing, especially when dealing with data that might have come from large datasets.
         """
     
     def _create_sample_data_prompt(self, query: str, results: Dict[str, Any], plan: Any) -> str:
