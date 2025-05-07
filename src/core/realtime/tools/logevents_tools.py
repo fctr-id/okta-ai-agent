@@ -170,95 +170,185 @@ def format_event_logs(logs: List[Dict]) -> List[Dict]:
     return list(events_by_uuid.values())
 
 @register_tool(
-    name="get_event_logs",
+    name="get_logs",
     entity_type="event",
-    aliases=["list_logs", "get_logs", "fetch_events"]
+    aliases=["list_logs", "fetch_events"]
 )
-async def get_event_logs(client, query_params=None):
+async def get_logs(client, query_params=None):
     """
-    Fetches System Log events from Okta with filtering options. Returns formatted logs with human-readable fields including actors, targets, and timestamps.
+    Fetches Okta System Log events. IMPORTANT: For time-based filtering, use 'since' and 'until' parameters instead of 'published' field in filter. Example: query_params={"since": "2025-05-05T00:00:00Z", "filter": 'eventType eq "user.session.start"'}
 
     # Tool Documentation: Get Okta System Log Events
-    
+
     ## Goal
-    This tool queries the Okta System Log API to retrieve audit events.
-    
+    This tool queries the Okta System Log API to retrieve audit events using SCIM filter syntax.
+
+    ## Core Functionality
+    Retrieves detailed system log events with filtering options for time ranges, event types, users, and authentication events. Supports all SCIM filter operators including eq, gt, lt, ge, le, sw, and Okta-specific co, ew operators.
+
     ## Parameters
     *   **`query_params`** (Required, Dict): Parameters for filtering logs
-        *   `filter`: SCIM filter expression (e.g., "eventType eq \"user.session.start\"")
-        *   `since`: Start time (ISO8601 timestamp)
-        *   `until`: End time (ISO8601 timestamp) 
+        *   `filter`: SCIM filter expression (see examples below)
+        *   `since`: Start time (ISO8601 timestamp) - RECOMMENDED for time filtering
+        *   `until`: End time (ISO8601 timestamp) - RECOMMENDED for time filtering
         *   `limit`: Number of results to return (default: 1000, max: 1000)
         *   `sortOrder`: "ASCENDING" or "DESCENDING" (default: "ASCENDING")
         *   `q`: Keyword search (URL encoded)
-    
-    ## Output Format
-    Events are returned in a standardized format with the following fields:
-    - eventId: Unique identifier
-    - eventType: Type of event that occurred
-    - eventDescription: Human-readable description
-    - timestamp: Local time of the event
-    - severity: Importance level
-    - result: Outcome (SUCCESS, FAILURE, etc.)
-    - reason: Failure reason (if applicable)
-    - actor: Who performed the action (name, email, type)
-    - client: Where the action was performed (IP, location)
-    - targets: What resources were affected (name, type, ID)
-    
-    ## Common Event Types
-    - Authentication: user.session.start, user.session.end
-    - User Actions: user.account.update_profile, user.mfa.factor.verify
-    - Admin Actions: system.api_token.create, system.app.user.consent.grant
-    - Application: application.lifecycle.create, application.user_membership.add
-    - Group: group.user_membership.add, group.user_membership.remove
+
+    ## SCIM Filter Operators
+    - Equality: eq (equals), ne (not equals)
+    - Comparison: gt (greater than), lt (less than), ge (greater than or equal), le (less than or equal)
+    - String: sw (starts with), co (contains), ew (ends with)
+    - Logical: and, or, not
+    - Grouping: ( )
+
+    ## Common Event Fields
+    - actor.id: User ID who performed the action
+    - actor.alternateId: User email who performed the action
+    - target.id: ID of object affected by the action
+    - target.alternateId: Email/name of object affected
+    - eventType: Type of event (e.g., "user.session.start")
+    - published: UTC timestamp of when the event occurred
+    - displayMessage: Human-readable description of the event
+
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Example Usage
     ```python
-    # Get login events from the last 7 days
-    # First, get ISO format timestamps using datetime tools
-    current_time = format_date_for_query(datetime.now())
-    start_date = format_date_for_query(datetime.now() - timedelta(days=7))
+    # Example 1: Basic search by user who performed actions
+    # RECOMMENDED: Use 'since' parameter instead of 'published gt' in filter
+    two_days_ago, err = await parse_relative_time("2 days ago")
+    if err:
+        return {"status": "error", "error": err["error"]}
     
-    # Build query parameters
     query_params = {
-        "filter": "eventType eq \"user.session.start\"",
-        "since": start_date,
-        "until": current_time,
+        "since": two_days_ago,
+        "filter": 'actor.alternateId eq "user@example.com"',
         "limit": 100
     }
     
-    # Get logs with pagination
-    raw_logs = await paginate_results(
+    log_results = await paginate_results(
         "get_logs",
         query_params=query_params,
         entity_name="events"
     )
     
-    # Check for errors
-    if isinstance(raw_logs, dict) and "status" in raw_logs and raw_logs["status"] == "error":
-        return raw_logs
+    if isinstance(log_results, dict) and "status" in log_results and log_results["status"] == "error":
+        return log_results
         
-    # Handle empty results
-    if not raw_logs:
+    if not log_results:
         return []
         
-    # Format logs with readable timestamps and clean structure
-    formatted_logs = format_event_logs(raw_logs)
-    return formatted_logs
+    return log_results
+
+    # Example 2: Multi-step workflow with time calculation
+    # Step 1: Get time for 7 days ago
+    time_result, err = await parse_relative_time("7 days ago")
+    if err:
+        return {"status": "error", "error": err["error"]}
+    
+    # Step 2: Get logs for login and password change events
+    # RECOMMENDED: Using since parameter for time filtering
+    query_params = {
+        "since": time_result,
+        "filter": '(eventType eq "user.session.start" or eventType eq "user.account.update_password")',
+        "limit": 100
+    }
+    
+    # Step 3: Get logs with pagination
+    log_results = await paginate_results(
+        "get_logs",
+        query_params=query_params,
+        entity_name="events"
+    )
+    
+    if isinstance(log_results, dict) and "status" in log_results and log_results["status"] == "error":
+        return log_results
+        
+    if not log_results:
+        return []
+        
+    return log_results
+
+    # Example 3: Using results from previous steps with time window
+    # Step 1: Get user
+    user_result = await handle_single_entity_request(
+        method_name="get_user",
+        entity_type="user",
+        entity_id=user_email,
+        method_args=[user_email]
+    )
+    
+    if isinstance(user_result, dict) and "status" in user_result:
+        return user_result
+    
+    # Step 2: Extract user ID and get timestamps
+    user_id = user_result["id"]
+    two_days_ago, err = await parse_relative_time("2 days ago")
+    if err:
+        return {"status": "error", "error": err["error"]}
+    
+    # Note: Use since parameter for time filtering and actor.id for user filtering
+    query_params = {
+        "since": two_days_ago,
+        "filter": 'actor.id eq "' + user_id + '"',
+        "limit": 100
+    }
+    
+    # Step 3: Get logs with pagination
+    log_results = await paginate_results(
+        "get_logs",
+        query_params=query_params,
+        entity_name="events"
+    )
+    
+    if isinstance(log_results, dict) and "status" in log_results and log_results["status"] == "error":
+        return log_results
+        
+    if not log_results:
+        return []
+        
+    return log_results
     ```
+
+    ## Common Filter Patterns
+    ```python
+    # Login events
+    'eventType eq "user.session.start"'
     
+    # Password changes
+    'eventType eq "user.account.update_password"'
+    
+    # Admin actions by specific user
+    'actor.alternateId eq "admin@example.com" and eventType sw "system."'
+    
+    # Failed login attempts
+    'eventType eq "user.session.start" and outcome.result eq "FAILURE"'
+    
+    # Search by IP address
+    'client.ipAddress eq "192.168.1.1"'
+    
+    # Events containing specific text
+    'displayMessage co "password"'
+    ```
+
     ## Error Handling
-    If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
-    If no events are found, returns an empty list `[]`
-    
+    - If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
+    - If no events are found, returns an empty list `[]`
+    - If a previous step fails, use: `return {"status": "dependency_failed", "dependency": "step_name", "error": error_message}`
+
     ## Important Notes
+    - For time-based filtering, use 'since' and 'until' parameters instead of 'published' field in filter
     - Data returned by paginate_results is already in dictionary format (not objects)
-    - Access fields using dictionary syntax: event["property"]["field"] (not object.attribute syntax)
-    - Pagination is handled automatically for large result sets
-    - The Okta API may limit results based on your rate limits
-    - Results are automatically formatted with human-readable timestamps
-    - Double quotes must be used inside filter strings and properly escaped
-    - Time expressions MUST be in ISO8601 format (use datetime tools if needed)
+    - Do NOT call as_dict() on the results - this will cause errors
+    - Use actor.id/alternateId for searching who performed actions
+    - Use target.id/alternateId for searching what was affected
+    - SCIM filter syntax requires individual comparisons with 'or', not 'in' operators
+    - String values must be enclosed in double quotes and properly escaped
+    - Date values must use ISO 8601 format: YYYY-MM-DDTHH:mm:ss.SSSZ
+    - The System Log API uniquely supports 'co' (contains) and 'ew' (ends with) operators
+    - For multi-step workflows, always properly reference previous step variables
+    - Never use underscore (_) as a variable name for previous step results
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration
