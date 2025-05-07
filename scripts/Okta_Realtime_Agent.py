@@ -188,6 +188,14 @@ class OktaRealtimeAgentCLI:
         Returns:
             Execution plan or None if planning failed
         """
+        
+        from src.utils.tool_registry import build_tools_documentation
+    
+        # Print the tools documentation
+        #print("\n==== TOOLS DOCUMENTATION PASSED TO REASONING AGENT ====")
+        #print(build_tools_documentation())
+        #print("======================================================\n")
+        
         start_time = time.time()
         print("\n1. Creating execution plan...")
         logger.info(f"Creating execution plan for query: {query}")
