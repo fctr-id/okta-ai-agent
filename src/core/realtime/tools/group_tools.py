@@ -22,6 +22,7 @@ async def list_groups(client, query=None, search=None):
     Lists groups in the Okta directory based on name, and also get basic statistics like user counts. Returns group information including ID, name, description, type and statistical data (user count, app count, groupPushMappings count and if the group has adminPrivileges assigned.).
 
     # Tool Documentation: Okta Group Search/List API Tool
+    # IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool searches for or lists groups in the Okta directory based on various criteria.
@@ -187,6 +188,7 @@ async def list_assigned_applications_for_group(client, group_id):
     Retrieves all applications that are assigned to a specific Okta group by group ID. Returns application information including ID, name, label and status for each assigned app.
 
     # Tool Documentation: Okta Group Applications API Tool
+    # IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all applications that are assigned to a specific Okta group.

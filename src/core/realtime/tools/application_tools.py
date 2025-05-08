@@ -22,6 +22,7 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
     Lists all applications in the Okta organization with pagination support. Returns application information including ID, name, label, and status.
 
     # Tool Documentation: Okta Application Search API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves and searches for applications in the Okta directory based on specified criteria.
@@ -139,6 +140,7 @@ async def get_application(client, app_id):
     Retrieves detailed information about a specific Okta application by ID. Returns application profile data including ID, name, label, status, creation date, sign-on mode, and accessPolicyId.
 
     # Tool Documentation: Okta Get Application Details API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta application by ID, including any associated policy IDs.
@@ -232,6 +234,7 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
     Retrieves all users that are assigned to an Okta application by application ID. Returns user information including ID, name, and status for each user assigned to the application.
 
     # Tool Documentation: Okta List Application Users API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all users that are assigned to an Okta application.
@@ -313,6 +316,7 @@ async def list_application_group_assignments(client, app_id, q=None, limit=None,
     Retrieves all groups that are assigned to an Okta application by application ID. Returns group information including ID, name, and type for each group assigned to the application.
 
     # Tool Documentation: Okta List Application Groups API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all groups that are assigned to an Okta application.

@@ -6,18 +6,11 @@ Contains documentation and examples for policy and network zone operations.
 from typing import List, Dict, Any, Optional
 from src.utils.tool_registry import register_tool
 from src.utils.logging import get_logger
-import os, traceback
 
 # Configure logging
 logger = get_logger(__name__)
 
-# Helper function for direct API calls when needed
-from src.utils.security_config import is_okta_url_allowed
-from src.utils.error_handling import SecurityError
-from src.utils.pagination_limits import make_async_request
-
 # ---------- Tool Registration ----------
-
 
 @register_tool(
     name="list_policy_rules",
@@ -105,6 +98,9 @@ async def list_policy_rules(client, policy_id: str, query_params: Optional[Dict]
     - Standard Okta objects have a "status" field with values like "ACTIVE" - these are not error indicators
     - Error responses will have "status" values like "error", "not_found", or "dependency_failed"
     """
+    # Implementation will be handled by code generation
+    # This function is just a placeholder for registration
+    pass
 
 @register_tool(
     name="list_network_zones",
@@ -116,6 +112,7 @@ async def list_network_zones(client, zone_ids: Optional[List[str]] = None):
     Lists network zones defined in the Okta organization. Can retrieve all zones or specific ones by ID.
 
     # Tool Documentation: Okta List Network Zones API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves network zones defined in an Okta organization, either all zones or specific zones by ID.
@@ -139,27 +136,22 @@ async def list_network_zones(client, zone_ids: Optional[List[str]] = None):
     - proxies: Array of proxy server objects (if configured)
     - type: IP or DYNAMIC (location-based)
 
-    ## Example Usage
+   ## Example Usage
     ```python
     # Get all network zones
-    all_zones = await list_network_zones(client)
+    all_zones = await paginate_results(
+        "list_network_zones",  # SDK method name
+        query_params={},
+        method_args=[],
+        entity_name="zones"
+    )
     
-    # Get specific zones by ID
-    zone_ids = ["nzondmw5liMu8IdyB5d7", "nzondmw5liMu8IdyC6e8"]
-    specific_zones = await list_network_zones(client, zone_ids=zone_ids)
-    
-    # Extract zone IDs from policy rules
-    zone_ids_to_fetch = []
-    for rule in policy_rules:
-        if (rule.get("conditions") and rule["conditions"].get("network") and 
-            rule["conditions"]["network"].get("include")):
-            zone_ids_to_fetch.extend(rule["conditions"]["network"]["include"])
-    
-    # Fetch only those zones
-    relevant_zones = await list_network_zones(client, zone_ids=zone_ids_to_fetch)
-    
-    # Return results
-    return all_zones  # or specific_zones or relevant_zones
+    # Filter zones by ID if needed
+    if zone_ids:
+        filtered_zones = [zone for zone in all_zones if zone.get("id") in zone_ids]
+        return filtered_zones
+    else:
+        return all_zones
     ```
 
     ## Error Handling
@@ -188,6 +180,7 @@ async def get_network_zone(client, zone_id):
     Retrieves detailed information about a specific Okta network zone by ID. Returns complete configuration of the zone including name, status, gateways, proxies, and IP ranges.
 
     # Tool Documentation: Okta Get Network Zone Details API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta network zone.
@@ -212,33 +205,52 @@ async def get_network_zone(client, zone_id):
 
     ## Example Usage
     ```python
-    # Get network zone details using handle_single_entity_request
-    zone = await handle_single_entity_request(
-        method_name="get_zone",
+
+    # Get network zone by ID using handle_single_entity_request
+    zone_result = await handle_single_entity_request(
+        method_name="get_network_zone",  # SDK method name
         entity_type="network_zone",
         entity_id=zone_id,
         method_args=[zone_id]
     )
     
     # Check for errors or not found status
-    if isinstance(zone, dict) and "status" in zone:
-        return zone
+    if isinstance(zone_result, dict) and "status" in zone_result and zone_result["status"] in ["error", "not_found"]:
+        return zone_result
     
     # Return the zone data directly
-    return zone
+    return zone_result
+    
+    # If you need to find by name instead of ID:
+    if not zone_id.startswith("nz"):
+        # List all zones
+        zones = await paginate_results(
+            "list_network_zones",
+            query_params={},
+            method_args=[],
+            entity_name="zones"
+        )
+        
+        # Find zone by name
+        for zone in zones:
+            if zone.get("name") == zone_id:
+                return zone
+                
+        return {"status": "not_found", "entity": "network_zone", "name": zone_id}
     ```
 
     ## Error Handling
-    If the zone doesn't exist, returns: `{"status": "not_found", "entity": "zone", "id": zone_id}`
+    If the zone doesn't exist, returns: `{"status": "not_found", "entity": "network_zone", "id": zone_id}`
     If another error occurs, returns: `{"status": "error", "error": error_message}`
 
     ## Important Notes
-    - Data returned by handle_single_entity_request is already in dictionary format
+    - For singular entities, use handle_single_entity_request (not paginate_results)
+    - Data returned is already in dictionary format (not objects)
     - Access fields using dictionary syntax: zone["gateways"] (not object.attribute syntax)
     - IP zones contain gateways array with CIDR format addresses
     - Dynamic zones contain locations array with country/region information
     - Use this tool to look up zone details when you have a zone ID from a policy rule
-    - This function is specifically designed for retrieving single entities (not collections)
+    - When a name is provided instead of an ID, the function will attempt to find the zone by name
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration

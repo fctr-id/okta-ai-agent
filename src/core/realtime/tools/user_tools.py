@@ -22,10 +22,11 @@ async def list_users(client, search=None, limit=None):
     Searches for users in the Okta directory using advanced search expressions (SCIM filter syntax) with support for pagination.
 
     # Tool Documentation: Okta User Search API Tool
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool searches for users in the Okta directory based on specified criteria.
-    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    
 
     ## Core Functionality
     Searches for Okta users using advanced search expressions with support for pagination.
@@ -110,6 +111,7 @@ async def get_user(client, user_id_or_login):
     Retrieves detailed information about a specific Okta user by ID or login (email). Returns user profile data including ID, email, name, login, status, and creation date.
 
     # Tool Documentation: Okta Get User Details API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta user by ID or login.
@@ -182,6 +184,7 @@ async def list_user_groups(client, user_id_or_login):
     Retrieves all groups that an Okta user belongs to by user ID or login (email). Returns group information including ID, name, and type for each group membership.
 
     # Tool Documentation: Okta List User Groups API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all groups that an Okta user belongs to.
@@ -252,6 +255,7 @@ async def list_factors(client, user_id_or_login):
     Retrieves all authentication factors enrolled for a specific Okta user. IMPORTANT: Requires user ID (not login/email).
 
     # Tool Documentation: Okta List User Factors API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all authentication factors that an Okta user has enrolled.
