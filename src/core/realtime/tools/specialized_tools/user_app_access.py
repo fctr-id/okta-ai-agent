@@ -12,9 +12,6 @@ import json
 # Configure logging
 logger = get_logger(__name__)
 
-# Import network zone tools
-from src.core.realtime.tools.network_policy_tools import get_network_zone
-
 # ---------- Tool Registration ----------
 
 @register_tool(
@@ -24,7 +21,7 @@ from src.core.realtime.tools.network_policy_tools import get_network_zone
 )
 async def can_user_access_application(client, user_identifier=None, group_identifier=None, app_identifier=None, ip_address=None):
     """
-    Use this single use special tool call to answer the questions like : "Can a user or group access a specific application?", "Can user X access application Y?"
+    #SPECIAL TOOL: Use this single use special tool call to answer the questions like : "Can a user or group access a specific application?", "Can user X access application Y?"
 
     # Tool Documentation: Can User Access Application
 
@@ -513,20 +510,51 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                                 
                                 for zone_id in zone_ids:
                                     try:
-                                        # Call the get_network_zone function to fetch zone details
-                                        zone_result = await get_network_zone(client, zone_id)
+                                        # Use list_network_zones with filter instead of get_network_zone
+                                        query_params = {
+                                            'filter': f'id eq "{zone_id}"'
+                                        }
                                         
-                                        # The function might return tuple of (response, _, _) so handle that case
-                                        if isinstance(zone_result, tuple) and len(zone_result) > 0:
-                                            zone_data = zone_result[0]
-                                        else:
-                                            zone_data = zone_result
+                                        # Call list_network_zones with the filter
+                                        zones_resp, resp, err = await client.list_network_zones(query_params)
                                         
-                                        if zone_data and isinstance(zone_data, dict) and zone_data.get("status") != "error":
-                                            result["network_zones"][zone_id] = zone_data
-                                        else:
-                                            logger.error(f"Failed to get zone details for {zone_id}")
-                                            result["network_zones"][zone_id] = {"error": "Failed to fetch zone details"}
+                                        if err:
+                                            logger.error(f"Failed to get zone details for {zone_id}: {err}")
+                                            result["network_zones"][zone_id] = {"error": f"Failed to fetch zone details: {err}"}
+                                            continue
+                                            
+                                        if not zones_resp or len(zones_resp) == 0:
+                                            logger.error(f"Zone with ID {zone_id} not found")
+                                            result["network_zones"][zone_id] = {"error": f"Zone not found"}
+                                            continue
+                                            
+                                        # Convert the first (and should be only) zone to dictionary
+                                        zone_data = zones_resp[0].as_dict() if hasattr(zones_resp[0], 'as_dict') else zones_resp[0]
+                                        
+                                        # Process all enum values in the zone data
+                                        processed_zone = {}
+                                        
+                                        # Handle top-level enum fields explicitly
+                                        for key, value in zone_data.items():
+                                            if key in ["type", "status", "usage"] and hasattr(value, "value"):
+                                                processed_zone[key] = value.value
+                                            elif key == "gateways" and isinstance(value, list):
+                                                # Handle gateways specially
+                                                processed_gateways = []
+                                                for gateway in value:
+                                                    processed_gateway = {}
+                                                    for k, v in gateway.items():
+                                                        if hasattr(v, "value"):
+                                                            processed_gateway[k] = v.value
+                                                        else:
+                                                            processed_gateway[k] = v
+                                                    processed_gateways.append(processed_gateway)
+                                                processed_zone[key] = processed_gateways
+                                            else:
+                                                processed_zone[key] = value
+                                                
+                                        result["network_zones"][zone_id] = processed_zone
+                                        
                                     except Exception as e:
                                         logger.error(f"Error fetching network zone {zone_id}: {str(e)}")
                                         result["network_zones"][zone_id] = {"error": str(e)}
@@ -725,24 +753,55 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                                 
                                 for zone_id in zone_ids:
                                     try:
-                                        # Call the get_network_zone function to fetch zone details
-                                        zone_result = await get_network_zone(client, zone_id)
+                                        # Use list_network_zones with filter instead of get_network_zone
+                                        query_params = {
+                                            'filter': f'id eq "{zone_id}"'
+                                        }
                                         
-                                        # The function might return tuple of (response, _, _) so handle that case
-                                        if isinstance(zone_result, tuple) and len(zone_result) > 0:
-                                            zone_data = zone_result[0]
-                                        else:
-                                            zone_data = zone_result
+                                        # Call list_network_zones with the filter
+                                        zones_resp, resp, err = await client.list_network_zones(query_params)
                                         
-                                        if zone_data and isinstance(zone_data, dict) and zone_data.get("status") != "error":
-                                            result["network_zones"][zone_id] = zone_data
-                                        else:
-                                            logger.error(f"Failed to get zone details for {zone_id}")
-                                            result["network_zones"][zone_id] = {"error": "Failed to fetch zone details"}
+                                        if err:
+                                            logger.error(f"Failed to get zone details for {zone_id}: {err}")
+                                            result["network_zones"][zone_id] = {"error": f"Failed to fetch zone details: {err}"}
+                                            continue
+                                            
+                                        if not zones_resp or len(zones_resp) == 0:
+                                            logger.error(f"Zone with ID {zone_id} not found")
+                                            result["network_zones"][zone_id] = {"error": f"Zone not found"}
+                                            continue
+                                            
+                                        # Convert the first (and should be only) zone to dictionary
+                                        zone_data = zones_resp[0].as_dict() if hasattr(zones_resp[0], 'as_dict') else zones_resp[0]
+                                        
+                                        # Process all enum values in the zone data
+                                        processed_zone = {}
+                                        
+                                        # Handle top-level enum fields explicitly
+                                        for key, value in zone_data.items():
+                                            if key in ["type", "status", "usage"] and hasattr(value, "value"):
+                                                processed_zone[key] = value.value
+                                            elif key == "gateways" and isinstance(value, list):
+                                                # Handle gateways specially
+                                                processed_gateways = []
+                                                for gateway in value:
+                                                    processed_gateway = {}
+                                                    for k, v in gateway.items():
+                                                        if hasattr(v, "value"):
+                                                            processed_gateway[k] = v.value
+                                                        else:
+                                                            processed_gateway[k] = v
+                                                    processed_gateways.append(processed_gateway)
+                                                processed_zone[key] = processed_gateways
+                                            else:
+                                                processed_zone[key] = value
+                                                
+                                        result["network_zones"][zone_id] = processed_zone
+                                        
                                     except Exception as e:
                                         logger.error(f"Error fetching network zone {zone_id}: {str(e)}")
                                         result["network_zones"][zone_id] = {"error": str(e)}
-                
+                            
                 except Exception as e:
                     logger.error(f"Error fetching policy information: {str(e)}")
                     result["policy_error"] = str(e)
