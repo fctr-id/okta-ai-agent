@@ -33,10 +33,10 @@ ALLOWED_SDK_METHODS: Set[str] = {
     'list_assigned_applications_for_group',  # Used in list_group_applications
     
     # Application operations from application_tools.py
-    'get_application',          # Used in get_application_details
-    'list_applications',        # Used in list_applications
-    'list_application_users',   # Used with paginate_results
-    'list_application_group_assignments',  # Used with paginate_results
+    'get_application',          
+    'list_applications',        
+    'list_application_users',   
+    'list_application_group_assignments',
     
     # Log/Event operations from logevents_tools.py
     'get_logs','get_event_logs'                 # Used in get_event_logs
