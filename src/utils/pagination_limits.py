@@ -222,7 +222,7 @@ async def handle_single_entity_request(client_method, entity_type, entity_id,
         flow_id: Flow ID for logging context
         
     Returns:
-        Entity data dict or error dict
+        Entity data dict with status field or error dict
     """
     if method_args is None:
         method_args = []
@@ -251,9 +251,15 @@ async def handle_single_entity_request(client_method, entity_type, entity_id,
             
             # Convert to dictionary if needed
             if hasattr(entity, "as_dict"):
-                return entity.as_dict()
+                entity_dict = entity.as_dict()
             else:
-                return entity
+                entity_dict = entity
+            
+            # Add a status field to indicate success
+            if isinstance(entity_dict, dict) and "status" not in entity_dict:
+                entity_dict = {"status": "success", "data": entity_dict}
+            
+            return entity_dict
             
     except Exception as e:
         logger.error(f"{log_prefix}Error in {entity_type} request: {str(e)}")
