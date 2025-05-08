@@ -130,11 +130,11 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
 
 
 @register_tool(
-    name="get_application_details",
+    name="get_application",
     entity_type="application",
     aliases=["app_details", "get_app", "getappdetails", "app_info"]
 )
-async def get_application_details(client, app_id):
+async def get_application(client, app_id):
     """
     Retrieves detailed information about a specific Okta application by ID. Returns application profile data including ID, name, label, status, creation date, sign-on mode, and accessPolicyId.
 
@@ -304,11 +304,11 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
 
 
 @register_tool(
-    name="list_application_groups",
+    name="list_application_group_assignments",
     entity_type="application",
     aliases=["app_groups", "get_app_groups"]
 )
-async def list_application_groups(client, app_id, q=None, limit=None, after=None, expand=None):
+async def list_application_group_assignments(client, app_id, q=None, limit=None, after=None, expand=None):
     """
     Retrieves all groups that are assigned to an Okta application by application ID. Returns group information including ID, name, and type for each group assigned to the application.
 

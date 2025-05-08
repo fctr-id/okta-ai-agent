@@ -13,11 +13,11 @@ logger = get_logger(__name__)
 # ---------- Tool Registration ----------
 
 @register_tool(
-    name="search_users",
+    name="list_users",
     entity_type="user",
     aliases=["user_search", "users_search", "searchusers", "find_users", "list_users"]
 )
-async def search_users(client, search=None, limit=None):
+async def list_users(client, search=None, limit=None):
     """
     Searches for users in the Okta directory using advanced search expressions (SCIM filter syntax) with support for pagination.
 
@@ -101,11 +101,11 @@ async def search_users(client, search=None, limit=None):
 
 
 @register_tool(
-    name="get_user_details",
+    name="get_user",
     entity_type="user",
     aliases=["user_details", "get_user", "getuserdetails", "user_info"]
 )
-async def get_user_details(client, user_id_or_login):
+async def get_user(client, user_id_or_login):
     """
     Retrieves detailed information about a specific Okta user by ID or login (email). Returns user profile data including ID, email, name, login, status, and creation date.
 
@@ -243,11 +243,11 @@ async def list_user_groups(client, user_id_or_login):
 
 
 @register_tool(
-    name="list_user_factors",
+    name="list_factors",
     entity_type="user",
     aliases=["user_factors", "get_user_factors", "list_factors", "authentication_factors"]
 )
-async def list_user_factors(client, user_id_or_login):
+async def list_factors(client, user_id_or_login):
     """
     Retrieves all authentication factors enrolled for a specific Okta user. IMPORTANT: Requires user ID (not login/email).
 

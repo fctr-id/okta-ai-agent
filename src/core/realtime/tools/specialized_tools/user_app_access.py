@@ -12,6 +12,9 @@ import json
 # Configure logging
 logger = get_logger(__name__)
 
+# Import network zone tools
+from src.core.realtime.tools.network_policy_tools import get_network_zone
+
 # ---------- Tool Registration ----------
 
 @register_tool(
@@ -21,7 +24,7 @@ logger = get_logger(__name__)
 )
 async def can_user_access_application(client, user_identifier=None, group_identifier=None, app_identifier=None, ip_address=None):
     """
-    Single tool call to Collects comprehensive data about a user's or group's relationship to an Okta application.
+    Use this single use special tool call to answer the questions like : "Can a user or group access a specific application?", "Can user X access application Y?"
 
     # Tool Documentation: Can User Access Application
 
@@ -43,11 +46,15 @@ async def can_user_access_application(client, user_identifier=None, group_identi
         *   Example: "192.168.1.1"
 
     ## Return Value
-    *   A dictionary containing:
+    *   A single dictionary containing:
+        *   `status`: "success" for successful checks, "error" for failures, or "not_found" for missing entities
         *   `user_details` or `group_details`: Information about the user or group
         *   `application_details`: Information about the application
         *   `assignment`: Whether and how the user is assigned to the application
         *   `policy_rules`: Access policies and rules that apply
+        *   `network_zones`: Details about network zones referenced in policies
+
+    ## IMPORTANT: This function returns a single dictionary, not a tuple. Do not use tuple unpacking when calling this function.
 
     ## Example Usage
     ```python
@@ -64,6 +71,9 @@ async def can_user_access_application(client, user_identifier=None, group_identi
         group_identifier="sales-team",
         app_identifier="salesforce"
     )
+    
+    # INCORRECT USAGE - DO NOT DO THIS
+    # result, _, error = await can_user_access_application(...)  # WRONG!
     ```
     """
     # Basic validation
@@ -441,6 +451,9 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                             elif rules_response:
                                 rules_list = [rules_response]
                             
+                            # Track zone IDs used in rules
+                            zone_ids = set()
+                            
                             for rule in rules_list:
                                 if hasattr(rule, 'as_dict'):
                                     rule = rule.as_dict()
@@ -458,7 +471,13 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                                 if conditions:
                                     # Network zones
                                     if "network" in conditions:
-                                        rule_info["network_conditions"] = conditions.get("network", {})
+                                        network_conditions = conditions.get("network", {})
+                                        rule_info["network_conditions"] = network_conditions
+                                        
+                                        # Collect zone IDs for later retrieval
+                                        if network_conditions.get("connection") == "ZONE" and "include" in network_conditions:
+                                            for zone_id in network_conditions.get("include", []):
+                                                zone_ids.add(zone_id)
                                     
                                     # User type conditions
                                     if "people" in conditions:
@@ -486,6 +505,31 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                                         }
                                 
                                 result["policy_rules"].append(rule_info)
+                            
+                            # Fetch network zone details
+                            if zone_ids:
+                                result["network_zones"] = {}
+                                logger.info(f"Fetching details for {len(zone_ids)} network zones")
+                                
+                                for zone_id in zone_ids:
+                                    try:
+                                        # Call the get_network_zone function to fetch zone details
+                                        zone_result = await get_network_zone(client, zone_id)
+                                        
+                                        # The function might return tuple of (response, _, _) so handle that case
+                                        if isinstance(zone_result, tuple) and len(zone_result) > 0:
+                                            zone_data = zone_result[0]
+                                        else:
+                                            zone_data = zone_result
+                                        
+                                        if zone_data and isinstance(zone_data, dict) and zone_data.get("status") != "error":
+                                            result["network_zones"][zone_id] = zone_data
+                                        else:
+                                            logger.error(f"Failed to get zone details for {zone_id}")
+                                            result["network_zones"][zone_id] = {"error": "Failed to fetch zone details"}
+                                    except Exception as e:
+                                        logger.error(f"Error fetching network zone {zone_id}: {str(e)}")
+                                        result["network_zones"][zone_id] = {"error": str(e)}
                 
                 except Exception as e:
                     logger.error(f"Error fetching policy information: {str(e)}")
@@ -618,6 +662,9 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                             # Store rules
                             result["policy_rules"] = []
                             
+                            # Track zone IDs used in rules
+                            zone_ids = set()
+                            
                             if isinstance(rules_response, list):
                                 for rule in rules_response:
                                     if hasattr(rule, 'as_dict'):
@@ -636,7 +683,13 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                                     if conditions:
                                         # Network zones
                                         if "network" in conditions:
-                                            rule_info["network_conditions"] = conditions.get("network", {})
+                                            network_conditions = conditions.get("network", {})
+                                            rule_info["network_conditions"] = network_conditions
+                                            
+                                            # Collect zone IDs for later retrieval
+                                            if network_conditions.get("connection") == "ZONE" and "include" in network_conditions:
+                                                for zone_id in network_conditions.get("include", []):
+                                                    zone_ids.add(zone_id)
                                         
                                         # Group type conditions
                                         if "people" in conditions:
@@ -664,6 +717,31 @@ async def can_user_access_application(client, user_identifier=None, group_identi
                                             }
                                     
                                     result["policy_rules"].append(rule_info)
+                            
+                            # Fetch network zone details
+                            if zone_ids:
+                                result["network_zones"] = {}
+                                logger.info(f"Fetching details for {len(zone_ids)} network zones")
+                                
+                                for zone_id in zone_ids:
+                                    try:
+                                        # Call the get_network_zone function to fetch zone details
+                                        zone_result = await get_network_zone(client, zone_id)
+                                        
+                                        # The function might return tuple of (response, _, _) so handle that case
+                                        if isinstance(zone_result, tuple) and len(zone_result) > 0:
+                                            zone_data = zone_result[0]
+                                        else:
+                                            zone_data = zone_result
+                                        
+                                        if zone_data and isinstance(zone_data, dict) and zone_data.get("status") != "error":
+                                            result["network_zones"][zone_id] = zone_data
+                                        else:
+                                            logger.error(f"Failed to get zone details for {zone_id}")
+                                            result["network_zones"][zone_id] = {"error": "Failed to fetch zone details"}
+                                    except Exception as e:
+                                        logger.error(f"Error fetching network zone {zone_id}: {str(e)}")
+                                        result["network_zones"][zone_id] = {"error": str(e)}
                 
                 except Exception as e:
                     logger.error(f"Error fetching policy information: {str(e)}")
@@ -690,6 +768,6 @@ async def can_user_access_application(client, user_identifier=None, group_identi
     except Exception as e:
         logger.error(f"Error printing results: {str(e)}")
     
-    return result, None, None
+    return result
 
 logger.info("Registered application access tools")

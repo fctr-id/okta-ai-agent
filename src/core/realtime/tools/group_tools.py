@@ -113,11 +113,11 @@ async def list_groups(client, query=None, search=None):
     pass
 
 @register_tool(
-    name="get_group_members",
+    name="list_group_users",
     entity_type="group",
     aliases=["group_users", "list_group_users", "user_membership"]
 )
-async def get_group_members(client, group_id):
+async def list_group_users(client, group_id):
     """
     Retrieves all members (users) detailed properties of a specific Okta group by group ID. Returns user information including ID, email, and status for each user in the group. For just stats or counts  use the list_groups tool.
 
@@ -178,11 +178,11 @@ async def get_group_members(client, group_id):
 
 
 @register_tool(
-    name="list_group_applications",
+    name="list_assigned_applications_for_group",
     entity_type="group",
     aliases=["group_apps", "group_applications", "get_group_apps", "list_assigned_applications_for_group"]
 )
-async def list_group_applications(client, group_id):
+async def list_assigned_applications_for_group(client, group_id):
     """
     Retrieves all applications that are assigned to a specific Okta group by group ID. Returns application information including ID, name, label and status for each assigned app.
 
