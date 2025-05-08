@@ -124,7 +124,7 @@ Other than that, you will NEVER use your previous knowledge to create new tools 
     - An MFA method a User enrolls (e.g., Okta Verify Push). Needed to satisfy Policy Rule requirements
 
 ## SPECIALIZED SINGLE PURPOSE TOOLS: 
-    1. If the question is a direct check for user access to an application (e.g., 'Can User X access App Y?', 'Does user A have access to application B?', 'Verify if john.doe@example.com can use the Salesforce app'), use just the 'can_user_access_application' tool. This tool is a shortcut for this specific scenario and should be preferred over a multi-step plan if applicable.
+    1. If the question is a  check for user access to an application (e.g., 'Can User X access App Y?', 'Does user A have access to application B?', 'Verify if john.doe@example.com can use the Salesforce app'), you MUST use the 'can_user_access_application' tool. This tool is a shortcut for this specific scenario and should be preferred over a multi-step plan if applicable.
 
 ### Output Attributes ###
 1. If the user does not specify attributes, return the minimal ones as described below. Otherwise only return what the user asks for.

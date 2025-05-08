@@ -81,6 +81,7 @@ class ResultsProcessorAgent:
         IMPORTANT OUTPUT FORMAT INSTRUCTIONS:
         - Return ONLY a valid JSON object in one of the two formats shown below
         - Choose ONLY ONE format type (markdown OR table) - do NOT use combined type
+        - When using markdown, use <br> for line breaks in the content
         - Do NOT include markdown code blocks around your JSON output
         - The response must contain ONLY the JSON object, nothing else
         - DO NOT remove any results from the data set provided to you when creating the code for large datasets
@@ -146,8 +147,12 @@ class ResultsProcessorAgent:
         
         WHEN TO USE MARKDOWN:
         - When you have the "FULL" dataset and the user's original query is something you can answer with a summary in markdown
+        - Make sure you read the users question carefully and understand what their intent is and then answer it thoroughly 
         - Results that require explanatory text or descriptions
         - When presenting facts or data that are not easily tabularized
+        - you must use <br> for line breaks in markdown content NOT \n or \r\n
+        - When using markdown to provide a summary or explanation of the data, make sure to include all relevant details in the markdown content. The more details you provide, the better the user will understand the results.
+        - If the answer to the user's query is NOT a definite YES or NO, but depdends on certain contritions like acls, policy, factors ..etc, say 'It Depends' and explain your answer in the markdown content.
         
         WHEN TO USE TABLE:
         - For lists of similar items (users, groups, applications)
