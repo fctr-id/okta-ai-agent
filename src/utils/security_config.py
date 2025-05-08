@@ -48,7 +48,7 @@ ALLOWED_SDK_METHODS: Set[str] = {
     
         # Policy operations from policy_tools.py
     'list_policy_rules',        # Used in list_policy_rules
-    # Network operations from policy_tools.py
+    'get_network_zone',        # Used in get_network_zones
     'list_network_zones',      # Used in list_network_zones
     
     # Additional method needed for direct API calls
