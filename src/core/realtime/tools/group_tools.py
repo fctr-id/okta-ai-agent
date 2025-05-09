@@ -19,7 +19,7 @@ logger = get_logger(__name__)
 )
 async def list_groups(client, query=None, search=None):
     """
-    Lists groups in the Okta directory based on name, and also get basic statistics like user counts. Returns group information including ID, name, description, type and statistical data (user count, app count, groupPushMappings count and if the group has adminPrivileges assigned.).
+    Lists Okta groups matching ONE name/pattern per call. Returns a LIST of normalized group objects, NOT tuples. For multiple distinct groups (e.g., "Everyone" AND "monday-users"), use SEPARATE tool calls. Supports q= for partial matches, filter= for exact criteria. Use limit= for pagination.
 
     # Tool Documentation: Okta Group Search/List API Tool
     # IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
@@ -120,7 +120,7 @@ async def list_groups(client, query=None, search=None):
 )
 async def list_group_users(client, group_id):
     """
-    Retrieves all members (users) detailed properties of a specific Okta group by group ID. Returns user information including ID, email, and status for each user in the group. For just stats or counts  use the list_groups tool.
+    Retrieves ALL members of ONE specific Okta group using group_id (not name). Returns a LIST of normalized user objects, NOT tuples. Requires exact group_id as first method arg. For multiple groups, use separate calls. Uses automatic pagination for complete results regardless of group size.
 
     # Tool Documentation: Okta Get Group Members API Tool
 
@@ -185,7 +185,7 @@ async def list_group_users(client, group_id):
 )
 async def list_assigned_applications_for_group(client, group_id):
     """
-    Retrieves all applications that are assigned to a specific Okta group by group ID. Returns application information including ID, name, label and status for each assigned app.
+    Lists ALL applications assigned to ONE specific Okta group by group_id. Returns a LIST of normalized application objects, NOT tuples. Requires exact group_id as first method arg. Get complete results regardless of number of app assignments via automatic pagination handling.
 
     # Tool Documentation: Okta Group Applications API Tool
     # IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.

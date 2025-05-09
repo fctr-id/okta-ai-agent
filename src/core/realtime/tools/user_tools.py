@@ -19,10 +19,10 @@ logger = get_logger(__name__)
 )
 async def list_users(client, search=None, limit=None):
     """
-    Searches for users in the Okta directory using advanced search expressions (SCIM filter syntax) with support for pagination.
+    Searches for Okta users matching criteria. Returns a LIST of user objects, NOT tuples. ALWAYS prefix user attributes with 'profile.' (e.g., search='profile.email eq "user@example.com"'). Uses automatic pagination for complete results regardless of count.
 
     # Tool Documentation: Okta User Search API Tool
-    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool searches for users in the Okta directory based on specified criteria.
@@ -108,10 +108,10 @@ async def list_users(client, search=None, limit=None):
 )
 async def get_user(client, user_id_or_login):
     """
-    Retrieves detailed information about a specific Okta user by ID or login (email). Returns user profile data including ID, email, name, login, status, and creation date.
+    Retrieves ONE specific user by ID or login/email. Returns a DICTIONARY with user details, NOT a tuple. Contains normalized profile data with common fields like id, email, firstName, lastName, login, and status. Use handle_single_entity_request to process errors properly.
 
     # Tool Documentation: Okta Get User Details API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta user by ID or login.
@@ -181,10 +181,10 @@ async def get_user(client, user_id_or_login):
 )
 async def list_user_groups(client, user_id_or_login):
     """
-    Retrieves all groups that an Okta user belongs to by user ID or login (email). Returns group information including ID, name, and type for each group membership.
+    Lists ALL groups that ONE specific Okta user belongs to. Returns a LIST of group objects, NOT tuples. Accepts user ID or login/email. For login/email, converts to ID first. Uses automatic pagination to retrieve all group memberships regardless of count.
 
     # Tool Documentation: Okta List User Groups API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all groups that an Okta user belongs to.
@@ -252,10 +252,10 @@ async def list_user_groups(client, user_id_or_login):
 )
 async def list_factors(client, user_id_or_login):
     """
-    Retrieves all authentication factors enrolled for a specific Okta user. IMPORTANT: Requires user ID (not login/email).
+    Lists ALL authentication factors enrolled for ONE specific user. Returns a LIST of factor objects, NOT tuples. REQUIRES user ID (not login/email) - convert emails to IDs first. Contains factor types, providers, and status. Uses automatic pagination.
 
     # Tool Documentation: Okta List User Factors API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all authentication factors that an Okta user has enrolled.

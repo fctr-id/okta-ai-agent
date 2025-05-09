@@ -20,7 +20,8 @@ logger = get_logger(__name__)
     aliases=["current_time", "now", "current_date", "today"]
 )
 async def get_current_time(client=None, buffer_hours=0, format="iso"):
-    """Returns the current date and time in UTC ISO format (YYYY-MM-DDTHH:MM:SS.sssZ). Use this instead of datetime.now() for all time-related operations. Returns a tuple (timestamp, error).Optional parameters: buffer_hours to add/subtract hours, format to specify output format (iso, date, time, datetime).
+    """
+    Returns current UTC time as tuple (timestamp_string, error). ALWAYS use tuple unpacking: current_time, error = await get_current_time(). Returns FIRST value on success, SECOND on error. Optional: buffer_hours (int) to adjust time, format (iso/date/time/datetime) for output format.
     
     
     # Tool Documentation: Get Current Time Utility
@@ -92,7 +93,7 @@ async def get_current_time(client=None, buffer_hours=0, format="iso"):
 )
 async def parse_relative_time(client=None, time_expression=None):
     """
-    Converts natural language time expressions (like "2 days ago", "yesterday", "last week") into UTC timestamps in ISO format (YYYY-MM-DDTHH:MM:SS.sssZ).. Always use this instead of datetime calculations. Example: "parse_relative_time('3 days ago')" returns "2025-05-04T12:00:00.000Z".
+    Converts natural language time (e.g., "2 days ago") to ISO format UTC timestamp. Returns tuple (timestamp_string, error). ALWAYS use with tuple unpacking: timestamp, error = await parse_relative_time("expression"). For different expression formats, pass time_expression as first arg.
 
     # Tool Documentation: Parse Relative Time Utility
     
@@ -159,7 +160,7 @@ async def parse_relative_time(client=None, time_expression=None):
 )
 async def format_date_for_query(client=None, date_value=None, output_format="iso"):
     """
-    Formats date/time values into the correct format for Okta API queries. Takes any date string or timestamp and converts it to ISO format (YYYY-MM-DDTHH:MM:SS.sssZ) by default. Parameters: date_value (required), output_format (iso, date, time, datetime). Use for converting timestamps before using them 
+    Formats dates for Okta API queries, returning tuple (formatted_string, error). ALWAYS use tuple unpacking: formatted_date, error = await format_date_for_query("date_string"). Required: date_value (string/timestamp). Optional: output_format (iso/date/time/datetime).
 
     # Tool Documentation: Format Date for API Query
     

@@ -176,7 +176,7 @@ def format_event_logs(logs: List[Dict]) -> List[Dict]:
 )
 async def get_logs(client, query_params=None):
     """
-    Fetches Okta System Log events. IMPORTANT: For time-based filtering, use 'since' and 'until' parameters instead of 'published' field in filter. Example: query_params={"since": "2025-05-05T00:00:00Z", "filter": 'eventType eq "user.session.start"'}
+    Fetches Okta System Log events via paginate_results. Returns LIST of event objects, NOT tuples. For time filtering use 'since' and 'until' params NOT 'published' field. Example: query_params={"since":"2025-05-05T00:00:00Z", "filter":'eventType eq "user.session.start"'}
 
     # Tool Documentation: Get Okta System Log Events
     #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.

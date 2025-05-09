@@ -19,10 +19,10 @@ logger = get_logger(__name__)
 )
 async def list_applications(client, q=None, filter=None, limit=None, after=None, expand=None, include_non_deleted=False, use_optimization=False):
     """
-    Lists all applications in the Okta organization with pagination support. Returns application information including ID, name, label, and status.
+    Lists Okta applications matching search criteria. Returns a LIST of application objects, NOT tuples. Use q= for name/label searches, filter= for exact property matches. For multiple distinct applications, use separate searches. Pagination handled automatically.
 
     # Tool Documentation: Okta Application Search API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves and searches for applications in the Okta directory based on specified criteria.
@@ -137,10 +137,10 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
 )
 async def get_application(client, app_id):
     """
-    Retrieves detailed information about a specific Okta application by ID. Returns application profile data including ID, name, label, status, creation date, sign-on mode, and accessPolicyId.
+    Retrieves ONE specific Okta application by ID. Returns a DICTIONARY with application details, NOT a tuple. Extracts and adds policyIds.accessPolicy from _links for policy evaluation. Always verify result isn't an error object before extracting fields.
 
     # Tool Documentation: Okta Get Application Details API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta application by ID, including any associated policy IDs.
@@ -231,10 +231,10 @@ async def get_application(client, app_id):
 )
 async def list_application_users(client, app_id, expand="user", q=None, limit=None, after=None):
     """
-    Retrieves all users that are assigned to an Okta application by application ID. Returns user information including ID, name, and status for each user assigned to the application.
+    Lists ALL users assigned to ONE specific Okta application by app_id. Returns a LIST of user objects, NOT tuples. Uses automatic pagination to retrieve all assignments regardless of count.
 
     # Tool Documentation: Okta List Application Users API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all users that are assigned to an Okta application.
@@ -313,10 +313,10 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
 )
 async def list_application_group_assignments(client, app_id, q=None, limit=None, after=None, expand=None):
     """
-    Retrieves all groups that are assigned to an Okta application by application ID. Returns group information including ID, name, and type for each group assigned to the application.
+        Lists ALL groups assigned to ONE specific Okta application by app_id. Returns a LIST of group assignment objects, NOT tuples. Use expand=group for complete group data. Uses automatic pagination to retrieve all group assignments regardless of count.
 
     # Tool Documentation: Okta List Application Groups API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all groups that are assigned to an Okta application.

@@ -19,9 +19,10 @@ logger = get_logger(__name__)
 )
 async def list_policy_rules(client, policy_id: str, query_params: Optional[Dict] = None):
     """
-    Retrieves all policy rules associated with the specified policy ID and extracts network zone IDs.
+    Retrieves rules for ONE specific policy ID. Returns OBJECT with rules array and extracted zone_ids, NOT tuples. Required: policy_id (string). Always check for error status VALUES (error/not_found), not just presence of status field. Can be used in app-policy-rule flows.
 
     # Tool Documentation: Okta List Policy Rules API Tool
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     List all rules for a specific policy ID (typically an access policy) and extract relevant network zone IDs.
@@ -109,10 +110,10 @@ async def list_policy_rules(client, policy_id: str, query_params: Optional[Dict]
 )
 async def list_network_zones(client, zone_ids: Optional[List[str]] = None):
     """
-    Lists network zones defined in the Okta organization. Can retrieve all zones or specific ones by ID.
+    Lists Okta network zones. Returns LIST of zone objects via paginate_results, NOT tuples. Optional: zone_ids list to filter specific zones. Each zone contains ID, name, status, gateways (IPs), proxies, type (IP/DYNAMIC). Access fields using zone["property"] dictionary syntax.
 
     # Tool Documentation: Okta List Network Zones API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves network zones defined in an Okta organization, either all zones or specific zones by ID.
@@ -177,10 +178,10 @@ async def list_network_zones(client, zone_ids: Optional[List[str]] = None):
 )
 async def get_network_zone(client, zone_id):
     """
-    Retrieves detailed information about a specific Okta network zone by ID. Returns complete configuration of the zone including name, status, gateways, proxies, and IP ranges.
+    Retrieves ONE specific network zone by ID. Use with handle_single_entity_request which returns a DICTIONARY, NOT tuple. Required: zone_id (string). Contains complete zone config including gateways, proxies, IP ranges. Check response for status="error" or status="not_found".
 
     # Tool Documentation: Okta Get Network Zone Details API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta network zone.
