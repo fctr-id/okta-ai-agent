@@ -10,6 +10,7 @@ from src.utils.security_config import (
 )
 # Add import for tool registry
 from src.utils.tool_registry import get_tool_prompt
+from pydantic_ai.models.gemini import GeminiModelSettings
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,10 @@ class CodingAgent:
         self.agent = Agent(
             model,
             system_prompt="You are an expert at writing Python code for Okta SDK operations.",
-            retries=2
+            retries=2,
+            model_settings=GeminiModelSettings(
+                include_thoughts=False
+            )
             # No result_type as we'll parse the output manually
         )
         
@@ -231,6 +235,8 @@ class CodingAgent:
         return processed_step_2_data
         </STEP-2>
         ... and so on for all steps.
+        
+        EXTREMELY IMPORTANT: Every STEP must have a start <STEP-1> and end tag </STEP-1> If NOT, throw an error.
 
         ---
         Please generate all {len(plan.steps)} steps now, with clear Python code for each step, following all the rules meticulously.
