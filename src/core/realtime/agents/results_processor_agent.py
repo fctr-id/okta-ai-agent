@@ -498,14 +498,14 @@ class ResultsProcessorAgent:
         Your code will be executed with the FULL dataset (available as variable 'full_results') 
         to transform it into a user-friendly format.
         
-        IMPORTANT: Place your code between <CODE> and </CODE> tags.
+        IMPORTANT: Place your code between <CODE> and </CODE> tags. There MUST be the start tag <CODE> and the end tag </CODE> in your response. if NOT, throw an error.
         
-    ## Data Structure Guidelines
-        - INSPECT THE DATA FIRST: Debug the structure before processing
-        - INSPECT THE STEPS, CODE and RESULTS and then decide what to do with them. If the results already contain the answer to the user's query, you can just return them as is. 
+        ## Data Structure Guidelines
+        - ALWAYS START BY DEBUGGING THE DATA STRUCTURE: Print the structure before processing
+        - IMPORTANT: Results may be structured in two ways - direct objects OR lists containing objects
         - Step results are numbered - key "1" contains results from step 1, etc.
-        - Check data types and content before assuming what's in each key
-        - Use print statements to understand the full data structure
+        - NEVER assume data format without first checking its type
+        - NEVER hardcode entity names - always extract names from the data dynamically
         
         ## Security Restrictions
         - DO NOT USE 'import' statements - modules like json are already available
@@ -534,22 +534,56 @@ class ResultsProcessorAgent:
         Example:
         
         <CODE>
-        # Extract the main data from results
-        # The 'full_results' variable will be available to your code
-        # Key "1" contains all users from Step 1
-        all_users = full_results.get("1", [])
-        # Key "2" contains FILTERED users without push factors from Step 2
-        users_without_push = full_results.get("2", [])
+        # Start by debugging the structure to understand what we're working with
+        print(f"DEBUG: full_results keys: {{list(full_results.keys())}}")
+        for key in full_results:
+            print(f"DEBUG: full_results[{{key}}] type: {{type(full_results[key]).__name__}}")
+            if isinstance(full_results[key], list):
+                print(f"DEBUG: full_results[{{key}}] has {{len(full_results[key])}} items")
         
-        # Process the filtered users list directly
+        # Extract data from Step 1 - Handle both list and direct object cases
+        group1_data = full_results.get("1", [])
+        # Access the group - handle case where it might be a list or direct object
+        if isinstance(group1_data, list) and len(group1_data) > 0:
+            group1 = group1_data[0]  # Get first item if it's a list
+        else:
+            group1 = group1_data  # Use directly if not a list
+        
+        # Extract data from Step 2 - Handle both list and direct object cases
+        group2_data = full_results.get("2", [])
+        if isinstance(group2_data, list) and len(group2_data) > 0:
+            group2 = group2_data[0]  # Get first item if it's a list
+        else:
+            group2 = group2_data  # Use directly if not a list
+        
+        # Extract group names dynamically (never hardcode names)
+        group1_name = group1.get("profile", {{}}).get("name", "First Group") if isinstance(group1, dict) else "First Group"
+        group2_name = group2.get("profile", {{}}).get("name", "Second Group") if isinstance(group2, dict) else "Second Group"
+        
+        # Get user lists - these should always be lists
+        users1 = full_results.get("3", [])
+        users2 = full_results.get("4", [])
+        
+        # Collect all users in the second group by their IDs
+        group2_user_ids = []
+        for user in users2:
+            if isinstance(user, dict) and "id" in user:
+                user_id = user.get("id")
+                if user_id and user_id not in group2_user_ids:
+                    group2_user_ids.append(user_id)
+        
+        # Process users in first group and filter out those in second group
         items = []
-        
-        # Process each user from the filtered list (already without push factors)
-        for user in users_without_push:
+        for user in users1:
             if not isinstance(user, dict):
                 continue
                 
             user_id = user.get("id", "")
+            
+            # Skip if user is in the second group
+            if user_id in group2_user_ids:
+                continue
+                
             profile = user.get("profile", {{}})
             
             # Extract user information
@@ -595,7 +629,7 @@ class ResultsProcessorAgent:
             {{
                 "key": "email",
                 "sortable": True,
-                "title": "Email / Login"
+                "title": "Email"
             }},
             {{
                 "key": "status",
@@ -609,7 +643,7 @@ class ResultsProcessorAgent:
             }}
         ]
             
-        # Create the final result structure
+        # Create the final result structure with dynamic description
         result = {{
             "display_type": "table",
             "content": {{
@@ -618,24 +652,22 @@ class ResultsProcessorAgent:
             }},
             "metadata": {{
                 "totalItems": len(items),
-                "description": "Users without PUSH factor registered"
+                "description": f"Users in 'group1_name' group but NOT in 'group2_name' group"
             }}
         }}
         </CODE>
         
         NOTES:
-        - DO NOT use imports or define any functions - these will cause security errors
         - Your code will have access to a 'full_results' variable containing all execution results
         - Keys in full_results are step numbers: "1", "2", "3", etc.
+        - Always check if an item is a list before trying to access its first element
+        - Always extract entity names from the data instead of hardcoding specific names
         - Your code must create a 'result' variable with the final output
         - The result must have keys: display_type, content, and metadata
         - Choose display_type as either "markdown" or "table" (not both)
         - For tables, content MUST be a dictionary with "headers" and "items" arrays
         - For markdown, content should be a formatted string
         - Include useful metadata such as totalItems for the number of records processed
-        
-        
-      
         
         IMPORTANT: Place your code ONLY between <CODE> and </CODE> tags.
         DO NOT use markdown code blocks or other formatting.
