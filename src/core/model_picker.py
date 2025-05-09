@@ -8,6 +8,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from openai import AsyncAzureOpenAI
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.models.anthropic import AnthropicModel
+from pydantic_ai.models.gemini import GeminiModelSettings
 from pydantic_ai import Agent
 import os, json
 import httpx
@@ -67,7 +68,6 @@ class ModelConfig:
                 ModelType.CODING: GeminiModel(
                     coding_model_name,
                     provider=vertex_provider
-                    
                 )
             }
         
@@ -143,6 +143,13 @@ class ModelConfig:
             return {
                 ModelType.REASONING: AnthropicModel(
                     model_name=os.getenv('ANTHROPIC_REASONING_MODEL', 'claude-3-5-sonnet-latest'),
+                    model_settings={
+                         'extra_body' :{
+                             "thinking" :{
+                                 "type": "enabled",
+                             }
+                         }
+                    },
                     provider=anthropic_provider
                 ),
                 ModelType.CODING: AnthropicModel(
