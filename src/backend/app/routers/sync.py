@@ -27,7 +27,10 @@ from src.core.auth.dependencies import get_db_session
 from sqlalchemy import func, select, and_
 from datetime import timezone, datetime
 from asyncio import CancelledError
-from src.utils.logging import sync_logger
+from src.utils.logging import get_logger
+
+# Create a logger instance for this module
+sync_logger = get_logger(__name__)
 
 # Add this helper function
 def get_utc_now():
