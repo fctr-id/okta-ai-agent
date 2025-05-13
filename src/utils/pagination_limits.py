@@ -99,31 +99,98 @@ def normalize_okta_response(response):
     except Exception as e:
         return None, resp_obj, f"Error normalizing response: {str(e)}"
 
-async def paginate_results(client_method, method_args=None, method_kwargs=None, 
-                          entity_name="items", flow_id=None, preserve_links=False):
+async def paginate_results(client_method=None, method_name=None, method_args=None, 
+                          method_kwargs=None, query_params=None, entity_name="items", 
+                          flow_id=None, preserve_links=False, client=None):
     """
-    Handle pagination for Okta API calls with rate limiting.
+    Handle pagination for Okta API calls with support for both method objects and string names.
     
     Args:
-        client_method: The client method to call (e.g., client.list_groups)
-        method_args: Arguments to pass to the method
-        method_kwargs: Keyword arguments to pass to the method
+        client_method: The client method to call (legacy parameter, e.g., client.list_groups)
+        method_name: String name of the client method (preferred parameter, e.g., "list_groups")
+        method_args: List of positional arguments (e.g., [user_id] for list_user_groups)
+        method_kwargs: Dictionary of keyword arguments (legacy parameter)
+        query_params: Dictionary of query parameters (preferred parameter)
         entity_name: Name of the entity for logging
         flow_id: Flow ID for logging context
-        preserve_links: Whether to preserve _links in the response (defaults to False)
+        preserve_links: Whether to preserve _links in the response
+        client: Optional client instance (only needed if method_name is provided)
         
     Returns:
-        List of all items across pages, or error dict
+        List of items across all pages, or error dict
     """
+    import inspect
+    
+    # Initialize parameters
     if method_args is None:
         method_args = []
     if method_kwargs is None:
         method_kwargs = {}
+    if query_params is None:
+        query_params = {}
+    
+    # Merge query_params into method_kwargs for backward compatibility
+    if query_params:
+        if 'query_params' in method_kwargs:
+            # If both are provided, merge query_params into the existing one
+            method_kwargs['query_params'].update(query_params)
+        else:
+            method_kwargs['query_params'] = query_params
+    
+    log_prefix = f"[FLOW:{flow_id}] " if flow_id else ""
+    
+    # Handle string method name if provided
+    if method_name and not client_method:
+        if not client:
+            logger.error(f"{log_prefix}Client is required when using method_name")
+            return {"status": "error", "error": "Client is required when using method_name"}
+        
+        try:
+            client_method = getattr(client, method_name)
+            logger.debug(f"{log_prefix}Successfully resolved method '{method_name}'")
+        except AttributeError:
+            logger.error(f"{log_prefix}Method not found: {method_name}")
+            return {"status": "error", "error": f"Unknown method: {method_name}"}
+    
+    # Verify we have a callable method
+    if not client_method or not callable(client_method):
+        logger.error(f"{log_prefix}No callable method provided")
+        return {"status": "error", "error": "No callable method provided"}
+    
+    # Extract method name for logging
+    method_display_name = method_name or (client_method.__name__ if hasattr(client_method, '__name__') else 'unknown')
+    
+    # Handle query_params specifically based on method signature
+    if 'query_params' in method_kwargs:
+        query_params_value = method_kwargs.pop('query_params', {})
+        if query_params_value:
+            # Use inspection to determine correct parameter passing
+            try:
+                sig = inspect.signature(client_method)
+                param_names = list(sig.parameters.keys())
+                
+                # Skip 'self' parameter
+                if param_names and param_names[0] == 'self':
+                    param_names = param_names[1:]
+                
+                # If the method accepts query_params as a parameter, pass it as kwarg
+                if 'query_params' in param_names:
+                    logger.debug(f"{log_prefix}Method {method_display_name} accepts query_params parameter")
+                    method_kwargs['query_params'] = query_params_value
+                else:
+                    # For methods that don't accept query_params, expand it as direct kwargs
+                    logger.debug(f"{log_prefix}Adding query params as direct kwargs for {method_display_name}")
+                    method_kwargs.update(query_params_value)
+            except Exception as e:
+                # If inspection fails, default to passing as query_params
+                logger.warning(f"{log_prefix}Error inspecting method: {str(e)}, using default query_params handling")
+                method_kwargs['query_params'] = query_params_value
     
     # Automatically preserve links for application entities
     should_preserve_links = preserve_links or entity_name in ["application", "applications"]
     
-    log_prefix = f"[FLOW:{flow_id}] " if flow_id else ""
+    logger.debug(f"{log_prefix}Calling {method_display_name} with args={method_args}, kwargs={method_kwargs}")
+    
     all_items = []
     page_count = 0
     
@@ -205,7 +272,9 @@ async def paginate_results(client_method, method_args=None, method_kwargs=None,
         logger.info(f"{log_prefix}Pagination cancelled for {entity_name}")
         return all_items
     except Exception as e:
-        logger.error(f"{log_prefix}Error in pagination: {str(e)}")
+        logger.error(f"{log_prefix}Error in pagination for {method_display_name}: {str(e)}")
+        import traceback
+        logger.error(f"{log_prefix}Traceback: {traceback.format_exc()}")
         return {"status": "error", "error": str(e)}
 
 async def handle_single_entity_request(client_method, entity_type, entity_id, 
