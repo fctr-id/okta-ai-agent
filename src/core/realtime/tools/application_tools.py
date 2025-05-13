@@ -19,10 +19,10 @@ logger = get_logger(__name__)
 )
 async def list_applications(client, q=None, filter=None, limit=None, after=None, expand=None, include_non_deleted=False, use_optimization=False):
     """
-    Lists Okta applications matching search criteria. Returns a LIST of application objects, NOT tuples. Use q= for name/label searches, filter= for exact property matches. For multiple distinct applications, use separate searches. Pagination handled automatically.
+    Lists Okta applications matching search criteria. Returns a LIST of application objects, NOT tuples. Use q= for name/label searches, filter= for exact property matches. For multiple distinct applications, use separate searches. can filter applications by userID (used to fetch apps assigned to user)
 
     # Tool Documentation: Okta Application Search API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves and searches for applications in the Okta directory based on specified criteria.
@@ -73,46 +73,43 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
         *   Default: false
         *   Parameter name in URL: useOptimization
 
+    ## Multi-Step Usage
+    *   This tool can be used in the first step to find applications
+    *   Store results in a variable named `applications` for clarity
+    *   If searching for a specific app, store the first result in `app_result` for later steps
+    *   Extract app ID with `app_id = app_result.get("id")` for use in later steps
+
     ## Example Usage
     ```python
-    # Build query parameters
-    query_params = {"limit": 200}
+    query_params = {"limit": 200, "expand": "user"}
     
-    # To search by application display name (most common case)
-    query_params["q"] = "Workday"  # Searches both name and label fields
+    if q:
+        query_params["q"] = q
     
-    # To filter by specific attributes (exact matches only)
-    # query_params["filter"] = 'status eq "ACTIVE"'
-    
-    # Add pagination and other parameters if needed
-    if limit:
-        query_params["limit"] = limit
+    if filter:
+        query_params["filter"] = filter
+        
     if after:
         query_params["after"] = after
-    if expand:
-        query_params["expand"] = expand
     if include_non_deleted:
         query_params["includeNonDeleted"] = "true"
     if use_optimization:
         query_params["useOptimization"] = "true"
     
-    # Get applications with pagination 
-    apps = await paginate_results(
-        "list_applications",
+    applications = await paginate_results(
+        method_name="list_applications",
         query_params=query_params,
         entity_name="applications"
     )
     
-    # Check for errors
-    if isinstance(apps, dict) and "status" in apps and apps["status"] == "error":
-        return apps
+    if isinstance(applications, dict) and applications.get("operation_status") in ["error", "not_found", "dependency_failed"]:
+        return applications
 
-    # Return results directly - the results processor will handle formatting
-    return apps
+    return applications
     ```
 
     ## Error Handling
-    If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
+    If the API call fails, returns an error object: `{"operation_status": "error", "error": error_message}`
     If no applications are found, returns an empty list `[]`
 
     ## Important Notes
@@ -122,11 +119,8 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
     - Use the `filter` parameter only with the eq operator for exact matches
     - Double quotes must be used inside filter strings and properly escaped
     - Return data directly without additional transformation
-    - The results processor will handle filtering fields based on query context
     - DO NOT use filter='label eq "Workday"' - this will cause an error (label is not supported in filter)
     """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
     pass
 
 
@@ -140,7 +134,7 @@ async def get_application(client, app_id):
     Retrieves ONE specific Okta application by ID. Returns a DICTIONARY with application details, NOT a tuple. Extracts and adds policyIds.accessPolicy from _links for policy evaluation. Always verify result isn't an error object before extracting fields.
 
     # Tool Documentation: Okta Get Application Details API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta application by ID, including any associated policy IDs.
@@ -165,20 +159,14 @@ async def get_application(client, app_id):
     - signOnMode: Application's sign-on mode (e.g., SAML, BROWSER_PLUGIN)
     - _links: Contains important relationships including policy links
 
+    ## Multi-Step Usage
+    *   Can be used in a first step or after finding an application with list_applications
+    *   Store the result in a variable named `app_result` for clarity
+    *   Later steps can access the `app_result` variable directly
+    *   Important: Always extract and append the policy ID to the response if available
+
     ## Example Usage
     ```python
-    # Check if the input app object has an error status - it's very important to check
-    # for ERROR STATUS VALUES specifically, not just the presence of a status field
-    if isinstance(workday_app, dict) and "status" in workday_app and workday_app["status"] in ["error", "not_found", "dependency_failed"]:
-        return {"status": "dependency_failed", "dependency": "list_applications", "error": workday_app.get("error", "Application not found")}
-
-    # Extract the app ID
-    app_id = workday_app.get("id")
-    if not app_id:
-        return {"status": "error", "error": "Application ID not found in previous step"}
-
-    # Get application details by ID using handle_single_entity_request
-    
     app_result = await handle_single_entity_request(
         method_name="get_application",
         entity_type="application",
@@ -186,12 +174,10 @@ async def get_application(client, app_id):
         method_args=[app_id]
     )
     
-    # Check if the API call returned an error
-    if isinstance(app_result, dict) and "status" in app_result and app_result["status"] in ["error", "not_found", "dependency_failed"]:
+    if isinstance(app_result, dict) and app_result.get("operation_status") in ["error", "not_found", "dependency_failed"]:
         return app_result
         
-    # CRITICAL: Extract the access policy ID and ADD IT TO THE RESULT OBJECT
-    # Variables don't pass between steps, so we must add this to the returned object
+    # Extract the access policy ID and add it to the result object
     if "_links" in app_result and "accessPolicy" in app_result["_links"]:
         access_policy_href = app_result["_links"]["accessPolicy"]["href"]
         access_policy_id = access_policy_href.split("/")[-1]
@@ -201,26 +187,22 @@ async def get_application(client, app_id):
             app_result["policyIds"] = {}
         app_result["policyIds"]["accessPolicy"] = access_policy_id
     
-    # Return the modified application object with embedded policy ID
     return app_result
     ```
 
     ## Error Handling
-    If the application doesn't exist, returns: `{"status": "not_found", "entity": "application", "id": app_id}`
-    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If the application doesn't exist, returns: `{"operation_status": "not_found", "entity": "application", "id": app_id}`
+    If another error occurs, returns: `{"operation_status": "error", "error": error_message}`
 
     ## Important Notes
     - CRITICAL: Normal Okta application objects have a "status" field with values like "ACTIVE"
-    - When checking for errors, always check BOTH the presence of "status" AND that its value is an error value
+    - When checking for errors, check that operation_status is an error value
     - Error status values include: "error", "not_found", "dependency_failed"
-    - Variables defined in one step are NOT available in subsequent steps
     - You MUST add the access policy ID to the app_result object before returning it
     - Extract the access policy ID from app_result["_links"]["accessPolicy"]["href"]
     - The next step will look for the policy ID in app_result["policyIds"]["accessPolicy"]
     - Always modify and return the original app_result object rather than creating a new one
-    - Data returned is already in dictionary format - use dictionary syntax for access
     """
-    # Implementation will be handled by code generation
     pass
 
 
@@ -234,7 +216,7 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
     Lists ALL users assigned to ONE specific Okta application by app_id. Returns a LIST of user objects, NOT tuples. Uses automatic pagination to retrieve all assignments regardless of count.
 
     # Tool Documentation: Okta List Application Users API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all users that are assigned to an Okta application.
@@ -247,11 +229,6 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
         *   The unique identifier of the application.
         *   Must be an Okta application ID (e.g., "0oafxqCAJWWGELFTYASJ")
 
-    *   **`expand`** (String):
-        *   A parameter to include additional information.
-        *   Default value: "user" - returns full User objects in _embedded property
-        *   This parameter is recommended for proper user information extraction
-
     *   **`q`** (String):
         *   Filters users based on profile attributes. 
         *   Matches the beginning of userName, firstName, lastName, and email.
@@ -261,35 +238,37 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
         *   Pagination cursor for the next page of results.
         *   Obtained from a previous response's next link.
 
+    ## Multi-Step Usage
+    *   Typically used after retrieving app details with get_application
+    *   In Step 2+, obtain app_id from previous step: `app_id = app_result.get("id")`
+    *   If in Step 3+, check for app_id in earlier steps: `if "app_result" in globals()...`
+    *   Store results in a variable named 'app_users' for consistency
+
     ## Example Usage
     ```python
-    # Build query parameters
-    query_params = {"expand": "user", "limit" : 500}  # Always include expand=user for better data
+    query_params = {"expand": "user", "limit": 500}
     
     if q:
         query_params["q"] = q
     if after:
         query_params["after"] = after
     
-    # Get all users for this application with pagination
-    users = await paginate_results(
-        "list_application_users",
-        method_args=[app_id],  # Pass app_id as a positional argument
+    app_users = await paginate_results(
+        method_name="list_application_users",
+        method_args=[app_id],
         query_params=query_params,
         entity_name="users"
     )
     
-    # Check for errors
-    if isinstance(users, dict) and "status" in users and users["status"] == "error":
-        return users
+    if isinstance(app_users, dict) and app_users.get("operation_status") in ["error", "not_found", "dependency_failed"]:
+        return app_users
     
-    # Return results directly - the results processor will handle formatting
-    return users
+    return app_users
     ```
 
     ## Error Handling
-    If the application doesn't exist, returns: `{"status": "not_found", "entity": "application", "id": app_id}`
-    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If the application doesn't exist, returns: `{"operation_status": "not_found", "entity": "application", "id": app_id}`
+    If another error occurs, returns: `{"operation_status": "error", "error": error_message}`
     If no users are found, returns an empty list `[]`
 
     ## Important Notes
@@ -298,11 +277,8 @@ async def list_application_users(client, app_id, expand="user", q=None, limit=No
     - Always include expand=user in query parameters for better user information
     - Application users have a different schema than regular users
     - User information is in both the app user object and the _embedded.user object
-    - Return data directly without additional transformation
-    - The results processor will handle filtering fields based on query context
+    - In multi-step flows, check if app_id exists in previous steps if not available in current result
     """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
     pass
 
 
@@ -316,7 +292,7 @@ async def list_application_group_assignments(client, app_id, q=None, limit=None,
         Lists ALL groups assigned to ONE specific Okta application by app_id. Returns a LIST of group assignment objects, NOT tuples. Use expand=group for complete group data. Uses automatic pagination to retrieve all group assignments regardless of count.
 
     # Tool Documentation: Okta List Application Groups API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all groups that are assigned to an Okta application.
@@ -344,38 +320,41 @@ async def list_application_group_assignments(client, app_id, q=None, limit=None,
             * "group" - returns full Group objects in _embedded property
             * "metadata" - returns group assignment metadata details
 
+    ## Multi-Step Usage
+    *   Typically used after retrieving app details with get_application
+    *   In Step 2+, get app_id from previous step: `app_id = app_result.get("id")`
+    *   If in Step 3+, check for app_id in earlier steps: `if "app_result" in globals()...`
+    *   Store results in a variable named 'app_groups' for consistency
+
     ## Example Usage
     ```python
-    # Build query parameters
-    query_params = {"limit": 200}
+    query_params = {"limit": 200, "expand": "group"}
     
     if q:
         query_params["q"] = q
-    
     if after:
         query_params["after"] = after
-
-    query_params["expand"] = group
+    if expand:
+        query_params["expand"] = expand
+    else:
+        query_params["expand"] = "group"
     
-    # Get all groups for this application with pagination
-    groups = await paginate_results(
-        "list_application_group_assignments",
+    app_groups = await paginate_results(
+        method_name="list_application_group_assignments",
         method_args=[app_id], 
         query_params=query_params,
         entity_name="groups"
     )
     
-    # Check for errors
-    if isinstance(groups, dict) and "status" in groups and groups["status"] == "error":
-        return groups
+    if isinstance(app_groups, dict) and app_groups.get("operation_status") in ["error", "not_found", "dependency_failed"]:
+        return app_groups
     
-    # Return results directly - the results processor will handle formatting
-    return groups
+    return app_groups
     ```
 
     ## Error Handling
-    If the application doesn't exist, returns: `{"status": "not_found", "entity": "application", "id": app_id}`
-    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If the application doesn't exist, returns: `{"operation_status": "not_found", "entity": "application", "id": app_id}`
+    If another error occurs, returns: `{"operation_status": "error", "error": error_message}`
     If no groups are found, returns an empty list `[]`
 
     ## Important Notes
@@ -383,11 +362,8 @@ async def list_application_group_assignments(client, app_id, q=None, limit=None,
     - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)
     - Use expand=group to get full group information in the _embedded.group property
     - Application group assignments have a different structure than regular groups
-    - Return data directly without additional transformation
-    - The results processor will handle filtering fields based on query context
+    - In multi-step flows, check if app_id exists in previous steps if not available in current result
     """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
     pass
 
 logger.info("Registered application tools")

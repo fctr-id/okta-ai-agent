@@ -179,7 +179,7 @@ async def get_logs(client, query_params=None):
     Fetches Okta System Log events via paginate_results. Returns LIST of event objects, NOT tuples. For time filtering use 'since' and 'until' params NOT 'published' field. Example: query_params={"since":"2025-05-05T00:00:00Z", "filter":'eventType eq "user.session.start"'}
 
     # Tool Documentation: Get Okta System Log Events
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool queries the Okta System Log API to retrieve audit events using SCIM filter syntax.
@@ -212,108 +212,46 @@ async def get_logs(client, query_params=None):
     - published: UTC timestamp of when the event occurred
     - displayMessage: Human-readable description of the event
 
-    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    ## Multi-Step Usage
+    *   Can be used as a first step or after retrieving user or application details
+    *   When filtering by user, prefer using the Okta ID rather than email/login
+    *   If in Step 2+, get user_id from previous step: `user_id = user_result.get("id")`
+    *   If in Step 3+, check earlier steps: `if "user_result" in globals()...`
+    *   For time calculations, use parse_relative_time helper: `time_value, err = await parse_relative_time("7 days ago")`
+    *   Store results in a variable named 'log_results' or 'events' for consistency
 
     ## Example Usage
     ```python
-    # Example 1: Basic search by user who performed actions
-    # RECOMMENDED: Use 'since' parameter instead of 'published gt' in filter
-    two_days_ago, err = await parse_relative_time("2 days ago")
-    if err:
-        return {"status": "error", "error": err["error"]}
+    if not query_params:
+        query_params = {}
     
-    query_params = {
-        "since": two_days_ago,
-        "filter": 'actor.alternateId eq "user@example.com"',
-        "limit": 100
-    }
+    # Add default limit if not specified
+    if "limit" not in query_params:
+        query_params["limit"] = 100
+    
+    # Get time for relative time if needed
+    if "timeframe" in globals() and timeframe:
+        time_result, err = await parse_relative_time(timeframe)
+        if not err:
+            query_params["since"] = time_result
     
     log_results = await paginate_results(
-        "get_logs",
+        method_name="get_logs",
         query_params=query_params,
         entity_name="events"
     )
     
-    if isinstance(log_results, dict) and "status" in log_results and log_results["status"] == "error":
+    if isinstance(log_results, dict) and log_results.get("operation_status") in ["error", "not_found", "dependency_failed"]:
         return log_results
-        
+    
     if not log_results:
         return []
-        
-    return log_results
-
-    # Example 2: Multi-step workflow with time calculation
-    # Step 1: Get time for 7 days ago
-    time_result, err = await parse_relative_time("7 days ago")
-    if err:
-        return {"status": "error", "error": err["error"]}
     
-    # Step 2: Get logs for login and password change events
-    # RECOMMENDED: Using since parameter for time filtering
-    query_params = {
-        "since": time_result,
-        "filter": '(eventType eq "user.session.start" or eventType eq "user.account.update_password")',
-        "limit": 100
-    }
-    
-    # Step 3: Get logs with pagination
-    log_results = await paginate_results(
-        "get_logs",
-        query_params=query_params,
-        entity_name="events"
-    )
-    
-    if isinstance(log_results, dict) and "status" in log_results and log_results["status"] == "error":
-        return log_results
-        
-    if not log_results:
-        return []
-        
-    return log_results
-
-    # Example 3: Using results from previous steps with time window
-    # Step 1: Get user
-    user_result = await handle_single_entity_request(
-        method_name="get_user",
-        entity_type="user",
-        entity_id=user_email,
-        method_args=[user_email]
-    )
-    
-    if isinstance(user_result, dict) and "status" in user_result:
-        return user_result
-    
-    # Step 2: Extract user ID and get timestamps
-    user_id = user_result["id"]
-    two_days_ago, err = await parse_relative_time("2 days ago")
-    if err:
-        return {"status": "error", "error": err["error"]}
-    
-    # Note: Use since parameter for time filtering and actor.id for user filtering
-    query_params = {
-        "since": two_days_ago,
-        "filter": 'actor.id eq "' + user_id + '"',
-        "limit": 100
-    }
-    
-    # Step 3: Get logs with pagination
-    log_results = await paginate_results(
-        "get_logs",
-        query_params=query_params,
-        entity_name="events"
-    )
-    
-    if isinstance(log_results, dict) and "status" in log_results and log_results["status"] == "error":
-        return log_results
-        
-    if not log_results:
-        return []
-        
     return log_results
     ```
 
     ## Common Filter Patterns
-    ```python
+    ```
     # Login events
     'eventType eq "user.session.start"'
     
@@ -334,14 +272,13 @@ async def get_logs(client, query_params=None):
     ```
 
     ## Error Handling
-    - If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
+    - If the API call fails, returns an error object: `{"operation_status": "error", "reason": "Error message"}`
     - If no events are found, returns an empty list `[]`
-    - If a previous step fails, use: `return {"status": "dependency_failed", "dependency": "step_name", "error": error_message}`
+    - If a previous step fails, use: `return {"operation_status": "dependency_failed", "dependency": "step_name", "reason": "Error message"}`
 
     ## Important Notes
     - For time-based filtering, use 'since' and 'until' parameters instead of 'published' field in filter
     - Data returned by paginate_results is already in dictionary format (not objects)
-    - Do NOT call as_dict() on the results - this will cause errors
     - Use actor.id/alternateId for searching who performed actions
     - Use target.id/alternateId for searching what was affected
     - SCIM filter syntax requires individual comparisons with 'or', not 'in' operators
@@ -349,7 +286,7 @@ async def get_logs(client, query_params=None):
     - Date values must use ISO 8601 format: YYYY-MM-DDTHH:mm:ss.SSSZ
     - The System Log API uniquely supports 'co' (contains) and 'ew' (ends with) operators
     - For multi-step workflows, always properly reference previous step variables
-    - Never use underscore (_) as a variable name for previous step results
+    - In multi-step flows, check if query parameters from previous steps exist
     """
     # Implementation will be handled by code generation
     # This function is just a placeholder for registration

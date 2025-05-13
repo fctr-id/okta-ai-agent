@@ -7,7 +7,6 @@ from typing import List, Dict, Any
 from src.utils.tool_registry import register_tool
 from src.utils.logging import get_logger
 
-# Configure logging
 logger = get_logger(__name__)
 
 # ---------- Tool Registration ----------
@@ -27,7 +26,6 @@ async def list_users(client, search=None, limit=None):
     ## Goal
     This tool searches for users in the Okta directory based on specified criteria.
     
-
     ## Core Functionality
     Searches for Okta users using advanced search expressions with support for pagination.
 
@@ -53,39 +51,34 @@ async def list_users(client, search=None, limit=None):
     *   **ge/le**: Greater than or equal/Less than or equal
     *   Combine with `and`, `or`, and parentheses for complex queries
 
+    ## Multi-Step Usage
+    *   This tool can be used in the first step to find users
+    *   In later steps you can reference this step's results as `users` if they were stored with that variable name
+
     ## Example Usage
     ```python
-    # Build query parameters
     query_params = {"limit": 200}
     
-    # Example: To search by email or login (always use profile prefix)
     if search:
         query_params["search"] = search
     else:
-        # If looking for a specific user by email
         user_email = "aiden.garcia@fctr.io"
         query_params["search"] = f'profile.email eq "{user_email}"'
-        # Or by login
-        # query_params["search"] = f'profile.login eq "{user_email}"'
         
-    
-    # Get users with pagination 
     users = await paginate_results(
-        "list_users",
+        method_name="list_users",
         query_params=query_params,
         entity_name="users"
     )
     
-    # Check for errors
-    if isinstance(users, dict) and "status" in users and users["status"] == "error":
+    if isinstance(users, dict) and users.get("operation_status") in ["error", "not_found", "dependency_failed"]:
         return users
-
-    # Return the results directly - filtering/formatting will be handled by the results processor
+    
     return users
     ```
 
     ## Error Handling
-    If the API call fails, returns an error object: `{"status": "error", "error": error_message}`
+    If the API call fails, returns an error object: `{"operation_status": "error", "error": error_message}`
 
     ## Important Notes
     - Data returned by paginate_results is already in dictionary format (not objects)
@@ -96,8 +89,6 @@ async def list_users(client, search=None, limit=None):
     - DO NOT use attributes without the profile prefix (e.g., 'login eq "value"' will fail)
     - DO NOT use single quotes for the search values
     """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
     pass
 
 
@@ -111,7 +102,7 @@ async def get_user(client, user_id_or_login):
     Retrieves ONE specific user by ID or login/email. Returns a DICTIONARY with user details, NOT a tuple. Contains normalized profile data with common fields like id, email, firstName, lastName, login, and status. Use handle_single_entity_request to process errors properly.
 
     # Tool Documentation: Okta Get User Details API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves detailed information about a specific Okta user by ID or login.
@@ -140,27 +131,33 @@ async def get_user(client, user_id_or_login):
     If the user specifically asks for different attributes, return those instead of the default fields.
     If the user asks for "all" or "complete" data, return the full user object.
 
+    ## Multi-Step Usage
+    *   This tool is often the first step in multi-step workflows
+    *   Store the result in a variable named `user_result` for clarity
+    *   Extract the user ID with `user_id = user_result.get("id")` for use in later steps
+    *   Later steps can access both the `user_result` and `user_id` variables
+
     ## Example Usage
     ```python
-    # Get user by ID or email using handle_single_entity_request
     user_result = await handle_single_entity_request(
         method_name="get_user",
-        entity_type="user",
+        entity_type="user", 
         entity_id=user_id_or_login,
         method_args=[user_id_or_login]
     )
     
-    # Check for errors or not found status
-    if isinstance(user_result, dict) and "status" in user_result:
+    if isinstance(user_result, dict) and user_result.get("operation_status") in ["error", "not_found", "dependency_failed"]:
         return user_result
     
-    # Return the user data directly - the results processor will handle formatting
+    # Extract and store user_id for later steps if needed
+    user_id = user_result.get("id")
+    
     return user_result
     ```
 
     ## Error Handling
-    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id_or_login}`
-    If another error occurs, returns: `{"status": "error", "error": error_message}`
+    If the user doesn't exist, returns: `{"operation_status": "not_found", "entity": "user", "id": user_id_or_login}`
+    If another error occurs, returns: `{"operation_status": "error", "error": error_message}`
 
     ## Important Notes
     - Data returned by handle_single_entity_request is already in dictionary format
@@ -169,8 +166,6 @@ async def get_user(client, user_id_or_login):
     - Return the data directly without additional transformation
     - The results processor will handle filtering fields based on query context
     """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
     pass
 
 
@@ -179,12 +174,12 @@ async def get_user(client, user_id_or_login):
     entity_type="user",
     aliases=["user_groups", "get_user_groups"]
 )
-async def list_user_groups(client, user_id_or_login):
+async def list_user_groups(client, user_id):
     """
-    Lists ALL groups that ONE specific Okta user belongs to. Returns a LIST of group objects, NOT tuples. Accepts user ID or login/email. For login/email, converts to ID first. Uses automatic pagination to retrieve all group memberships regardless of count.
+    Lists ALL groups that ONE specific Okta user belongs to. Returns a LIST of group objects, NOT tuples. Accepts user ID. Uses automatic pagination to retrieve all group memberships regardless of count.
 
     # Tool Documentation: Okta List User Groups API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all groups that an Okta user belongs to.
@@ -193,11 +188,11 @@ async def list_user_groups(client, user_id_or_login):
     Retrieves groups associated with a specific user.
 
     ## Parameters
-    *   **`user_id_or_login`** (Required, String):
-        *   The unique identifier or login (usually email) of the user.
-        *   Can be either:
-            *   An Okta user ID (e.g., "00u1ero7vZFVEIYLWPBN")
-            *   A user's login/email (e.g., "john.doe@example.com")
+    *   **`user_id`** (Required, String):
+        *   The unique identifier of the user.
+        *   Must be an Okta user ID (e.g., "00u1ero7vZFVEIYLWPBN")
+        *   Note: If you have a user's email or login, first convert it to a user ID using the get_user tool
+        *   In multi-step workflows, this value usually comes from a previous step's result
 
     ## Default Output Fields
     If no specific attributes are requested, return these minimal fields for each group:
@@ -205,33 +200,29 @@ async def list_user_groups(client, user_id_or_login):
     - name: Group name (from profile.name)
     - type: Group type (Usually "OKTA_GROUP")
 
+    ## Multi-Step Usage
+    *   Typically used after retrieving user details with get_user
+    *   In Step 2+, get user_id from previous step: `user_id = user_result.get("id")`
+    *   If in Step 3+, check if user_id exists in previous variables: `if "user_result" in globals()...`
+    *   Store results in a variable named 'groups' for consistency
+
     ## Example Usage
     ```python
-    # Convert email to user ID if needed
-    if "@" in user_id_or_login:
-        user, resp, err = normalize_okta_response(await client.get_user(user_id_or_login))
-        if err or not user:
-            return {"status": "error" if err else "not_found", "id": user_id_or_login}
-        user_id = user.id
-    else:
-        user_id = user_id_or_login
-    
-    # Get groups for this user
     groups = await paginate_results(
-        "list_user_groups",
-        method_args=[user_id],  # Must be in a list
+        method_name="list_user_groups",
+        method_args=[user_id],
         entity_name="groups"
     )
     
-    # Return results directly
-    if isinstance(groups, dict) and "status" in groups:
+    if isinstance(groups, dict) and groups.get("operation_status") in ["error", "not_found", "dependency_failed"]:
         return groups
+    
     return groups
     ```
 
     ## Error Handling
-    If the user doesn't exist, returns: `{"status": "not_found", "id": user_id_or_login}`
-    If another error occurs, returns: `{"status": "error", "error": message}`
+    If the user doesn't exist, returns: `{"operation_status": "not_found", "id": user_id}`
+    If another error occurs, returns: `{"operation_status": "error", "error": message}`
     If no groups are found, returns an empty list `[]`
 
     ## Important Notes
@@ -239,9 +230,9 @@ async def list_user_groups(client, user_id_or_login):
     - Access fields using dictionary syntax: item["property"]["field"] (not object.attribute syntax)    
     - Pass user_id in method_args as a list
     - Return data directly without transformation
+    - This tool expects a valid Okta user ID, not an email or login
+    - In multi-step flows, check if user_id exists in previous steps if not available in current result
     """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
     pass
 
 
@@ -250,12 +241,12 @@ async def list_user_groups(client, user_id_or_login):
     entity_type="user",
     aliases=["user_factors", "get_user_factors", "list_factors", "authentication_factors"]
 )
-async def list_factors(client, user_id_or_login):
+async def list_factors(client, user_id):
     """
-    Lists ALL authentication factors enrolled for ONE specific user. Returns a LIST of factor objects, NOT tuples. REQUIRES user ID (not login/email) - convert emails to IDs first. Contains factor types, providers, and status. Uses automatic pagination.
+    Lists ALL authentication factors enrolled for ONE specific user. Returns a LIST of factor objects, NOT tuples. REQUIRES user ID. Contains factor types, providers, and status. Uses automatic pagination.
 
     # Tool Documentation: Okta List User Factors API Tool
-    #IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
+    IMPORTANT: YOU MUST ALWAYS PROVIDE CODE AS MENTIONED IN THE EXAMPLE USAGE or THAT MATCHES IT. DO NOT ADD ANYTHING ELSE.
 
     ## Goal
     This tool retrieves all authentication factors that an Okta user has enrolled.
@@ -264,10 +255,11 @@ async def list_factors(client, user_id_or_login):
     Retrieves MFA factors associated with a specific user with detailed factor information.
 
     ## Parameters
-    *   **`user_id_or_login`** (Required, String):
+    *   **`user_id`** (Required, String):
         *   The unique identifier of the user.
         *   Must be a valid Okta user ID (e.g., "00ub0oNGTSWTBKOLGLNR")
-        *   Cannot be a login or email - must be converted to ID first if needed
+        *   Note: If you have a user's email or login, first convert it to a user ID using the get_user tool
+        *   In multi-step workflows, may come from user_result.id from a prior get_user step
 
     ## API Details
     * Endpoint: GET /api/v1/users/{userId}/factors
@@ -282,52 +274,40 @@ async def list_factors(client, user_id_or_login):
     - status: Current status of the factor (e.g., "ACTIVE", "PENDING_ACTIVATION")
     - created: When the factor was enrolled
 
+    ## Multi-Step Usage
+    *   Typically used after retrieving user details with get_user
+    *   May be used after listing groups or other user operations
+    *   For Step 3+, when user_id isn't in the immediate result:
+        - First check previous step variables: `if "user_result" in globals()...`
+        - Then extract user_id from the appropriate variable
+    *   Store results in a variable named 'factors' for consistency
+
     ## Example Usage
     ```python
-    # Get user ID first if needed (usually when user_id_or_login is an email or login)
-    user_result = await handle_single_entity_request(
-        method_name="get_user",
-        entity_type="user",
-        entity_id=user_id_or_login,
-        method_args=[user_id_or_login]
-    )
-    
-    # Check if user retrieval failed
-    if isinstance(user_result, dict) and "status" in user_result and user_result["status"] in ["not_found", "error"]:
-        return user_result
-    
-    # Extract user ID from the user result
-    user_id = user_result["id"]
-    
-    # Now get factors for this user ID using paginate_results for list operations
     factors = await paginate_results(
-        "list_factors",
-        query_params={},  # No query params needed for this operation
+        method_name="list_factors",
         method_args=[user_id],
         entity_name="factors"
     )
     
-    # Check for errors in the factors result
-    if isinstance(factors, dict) and "status" in factors and factors["status"] == "error":
+    if isinstance(factors, dict) and factors.get("operation_status") in ["error", "not_found", "dependency_failed"]:
         return factors
-        
+    
     return factors
     ```
 
     ## Error Handling
-    If the user doesn't exist, returns: `{"status": "not_found", "entity": "user", "id": user_id}`
-    If another error occurs, returns: `{"status": "error", "error": message}`
+    If the user doesn't exist, returns: `{"operation_status": "not_found", "entity": "user", "id": user_id}`
+    If another error occurs, returns: `{"operation_status": "error", "error": message}`
     If no factors are found, returns an empty list `[]`
 
     ## Important Notes
     - This tool requires a valid Okta user ID to retrieve factors
-    - If you have a login or email, you MUST first perform a user lookup to get the ID
-    - IMPORTANT: Use paginate_results (not handle_single_entity_request) when retrieving multiple items
-    - handle_single_entity_request is only for single entity operations (like get_user)
-    - paginate_results is for operations that return lists/collections (like list_factors)
+    - If you have a login or email, first perform a user lookup to get the ID in a separate step
+    - Use paginate_results for retrieving multiple items in a collection
+    - Variables from all previous steps remain available - check user_result or user_id from earlier steps
+    - When used in Step 3+, check for user_id in earlier steps if not in immediate previous result
     """
-    # Implementation will be handled by code generation
-    # This function is just a placeholder for registration
     pass
 
 logger.info("Registered user tools")
