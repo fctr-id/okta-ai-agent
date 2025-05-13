@@ -32,6 +32,9 @@ from src.core.realtime.tools.logevents_tools import format_event_logs
 from src.utils.security_config import (
     is_code_safe
 )
+# Error status constants
+ERROR_STATUSES = {"error", "not_found", "dependency_failed"}
+OPERATION_STATUS_FIELD = "operation_status"
 
 class ReturnValueException(Exception):
     """Exception used to capture return statements in executed code."""
@@ -98,14 +101,20 @@ def prepare_execution_environment(
     # Add any variables from previous steps
     if extra_context:
         if isinstance(extra_context, dict):
+            # First, ensure 'result' is directly accessible regardless of nesting
+            if 'result' in extra_context:
+                namespace['result'] = extra_context['result']
+                
             # Extract variables from extra_context
             for key, value in extra_context.items():
-                if isinstance(value, dict) and 'variables' in value:
-                    # This is a structured result from a previous step
-                    namespace.update(value['variables'])
-                else:
-                    # This is a simple variable
-                    namespace[key] = value
+                # Skip 'result' since we already handled it above
+                if key != 'result':
+                    if isinstance(value, dict) and 'variables' in value:
+                        # Update with variables from structured result
+                        namespace.update(value['variables'])
+                    else:
+                        # Normal variable handling
+                        namespace[key] = value
     
     return namespace
 
@@ -156,7 +165,7 @@ def wrap_code_in_function(code: str) -> str:
     return f"""
 async def _execute_step():
     # Make context variables available
-    result = None
+    result = globals().get('result', None)
     
     # Execute the generated code
     try:
@@ -165,7 +174,7 @@ async def _execute_step():
         result = rv.value
     except Exception as exec_error:
         # Trap exceptions inside the execution function
-        result = {{"status": "error", "error": str(exec_error)}}
+        result = {{"{OPERATION_STATUS_FIELD}": "error", "error": str(exec_error)}}
         
     # Return all local variables
     return_dict = locals()
@@ -206,7 +215,7 @@ def process_execution_result(
     # Check for Okta errors if using tuple unpacking
     if has_tuple_unpacking and 'err' in variables and variables['err'] is not None:
         result = {
-            "status": "error", 
+            OPERATION_STATUS_FIELD: "error", 
             "error": str(variables['err']),
             "data": None
         }
@@ -227,7 +236,7 @@ def process_execution_result(
                     data, resp, err = variables[name]
                     if err:
                         result = {
-                            "status": "error",
+                            OPERATION_STATUS_FIELD: "error",
                             "error": str(err),
                             "data": None
                         }
@@ -248,9 +257,9 @@ def process_execution_result(
     if result is not None and not isinstance(result, (str, int, float, bool)):
         if is_error_result(result):
             # Already contains error information, make sure it's properly structured
-            if isinstance(result, dict) and "status" not in result and "error" in result:
+            if isinstance(result, dict) and OPERATION_STATUS_FIELD not in result and "error" in result:
                 result = {
-                    "status": "error",
+                    OPERATION_STATUS_FIELD: "error",
                     "error": result["error"],
                     "data": None
                 }
@@ -280,13 +289,9 @@ def is_error_result(result: Any) -> bool:
     if result is None:
         return False
     
-    # Error statuses - include "not_found" as an error for critical steps
-    # This ensures processing stops when an entity isn't found
-    ERROR_STATUSES = {"error", "dependency_failed", "not_found"}
-    
     # Check dictionary with standard error structure
     if isinstance(result, dict):
-        if "status" in result and result["status"] in ERROR_STATUSES:
+        if OPERATION_STATUS_FIELD in result and result[OPERATION_STATUS_FIELD] in ERROR_STATUSES:
             return True
         if "error" in result and result["error"]:  # Only if error has a value
             return True
@@ -305,20 +310,20 @@ def normalize_result(result: Any) -> Dict[str, Any]:
         A standardized result dictionary
     """
     # Already properly structured
-    if isinstance(result, dict) and "status" in result:
+    if isinstance(result, dict) and OPERATION_STATUS_FIELD in result:
         return result
         
     # Error dictionary without status
     if isinstance(result, dict) and "error" in result:
         return {
-            "status": "error",
+            OPERATION_STATUS_FIELD: "error",
             "error": result["error"],
             "data": None
         }
         
     # Regular success result
     return {
-        "status": "success",
+        OPERATION_STATUS_FIELD: "success",
         "data": result,
         "error": None
     }
@@ -418,7 +423,7 @@ async def async_execute_with_timeout(
             # Return structured error information
             return False, {
                 "result": {
-                    "status": "error", 
+                    OPERATION_STATUS_FIELD: "error", 
                     "error": f"{type(e).__name__}: {str(e)}",
                     "traceback": error_tb
                 }
@@ -436,7 +441,7 @@ async def async_execute_with_timeout(
         
         return False, {
             "result": {
-                "status": "error", 
+                OPERATION_STATUS_FIELD: "error", 
                 "error": f"Setup error: {type(outer_e).__name__}: {str(outer_e)}",
                 "traceback": error_tb
             }
@@ -467,6 +472,13 @@ async def execute_okta_code(
     """
     start_time = time.time()
     logger.info(f"[{query_id}] Validating and executing generated code")
+    logger.debug(f"[{query_id}] Starting code execution with extra_context keys: {list(extra_context.keys()) if extra_context else 'None'}")
+    if extra_context and 'result' in extra_context:
+        logger.debug(f"[{query_id}] extra_context['result'] type: {type(extra_context['result']).__name__}")
+        
+        # If it's a dict and has 'result' key (double nested)
+        if isinstance(extra_context['result'], dict) and 'result' in extra_context['result']:
+            logger.debug(f"[{query_id}] extra_context['result']['result'] found! ID: {extra_context['result']['result'].get('id', 'NO_ID')}")    
     
     try:
         # Step 1: Validate code for security
@@ -481,7 +493,7 @@ async def execute_okta_code(
             logger.warning(f"[{query_id}] Code validation failed: {error_message}")
             return {
                 "result": {
-                    "status": "error",
+                    OPERATION_STATUS_FIELD: "error",
                     "error": f"Code validation failed: {error_message}",
                     "data": None
                 },
@@ -492,6 +504,11 @@ async def execute_okta_code(
         
         # Step 2: Prepare execution environment
         namespace = prepare_execution_environment(okta_client, extra_context)
+        logger.debug(f"[{query_id}] Execution namespace keys: {list(namespace.keys())}")
+        if 'result' in namespace:
+            logger.debug(f"[{query_id}] Execution namespace 'result' type: {type(namespace['result']).__name__}")
+            if isinstance(namespace['result'], dict):
+                logger.debug(f"[{query_id}] Execution namespace 'result' ID: {namespace['result'].get('id', 'NO_ID')}")
         
         # Step 3: Detect code patterns
         has_tuple_unpacking = re.search(r'(\w+),\s*(\w+),\s*(\w+)\s*=\s*await\s+client\.', code) is not None
@@ -513,7 +530,7 @@ async def execute_okta_code(
             logger.warning(f"[{query_id}] Execution timed out after {execution_timeout}s")
             return {
                 "result": {
-                    "status": "error",
+                    OPERATION_STATUS_FIELD: "error",
                     "error": f"Execution timed out after {execution_timeout} seconds",
                     "data": None
                 },
@@ -552,7 +569,7 @@ async def execute_okta_code(
         logger.error(f"[{query_id}] Unexpected error after {elapsed:.2f}ms: {str(e)}")
         return {
             "result": {
-                "status": "error",
+                OPERATION_STATUS_FIELD: "error",
                 "error": format_error_for_user(error),
                 "data": None
             },
