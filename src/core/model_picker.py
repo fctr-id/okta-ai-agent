@@ -67,7 +67,7 @@ class ModelConfig:
                 ),
                 ModelType.CODING: GeminiModel(
                     coding_model_name,
-                    provider=vertex_provider
+                    provider=vertex_provider,
                 )
             }
         
@@ -90,7 +90,10 @@ class ModelConfig:
                 ),
                 ModelType.CODING: OpenAIModel(
                     model_name=coding_model_name,
-                    provider=openai_compat_provider
+                    provider=openai_compat_provider,
+                    model_settings={
+                        'temperature': 0.2
+                    }
                 )
             }
             
@@ -143,13 +146,6 @@ class ModelConfig:
             return {
                 ModelType.REASONING: AnthropicModel(
                     model_name=os.getenv('ANTHROPIC_REASONING_MODEL', 'claude-3-5-sonnet-latest'),
-                    model_settings={
-                         'extra_body' :{
-                             "thinking" :{
-                                 "type": "enabled",
-                             }
-                         }
-                    },
                     provider=anthropic_provider
                 ),
                 ModelType.CODING: AnthropicModel(
