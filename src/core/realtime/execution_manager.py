@@ -17,12 +17,13 @@ import time
 import uuid
 from datetime import datetime
 import sys
+import asyncio
 from pydantic import BaseModel, Field
 # Add these imports at the top
 from pydantic_ai import capture_run_messages
 from datetime import datetime
-from typing import Dict, Any, List, Optional
-from src.utils.pagination_limits import paginate_results as _base_paginate_results, handle_single_entity_request as _base_handle_single_entity_request, make_async_request
+from typing import Dict, List, Any, Optional, Union, Set, Tuple, Callable, AsyncGenerator
+from src.utils.pagination_limits import paginate_results as _base_paginate_results, handle_single_entity_request as _base_handle_single_entity_request, make_async_request, normalize_okta_response
 from src.core.realtime.tools.specialized_tools.user_app_access import can_user_access_application
 
 
@@ -50,6 +51,7 @@ logger = get_logger(__name__)
 
 # Error status constants
 ERROR_STATUSES = {"error", "not_found", "dependency_failed"}
+OPERATION_STATUS_FIELD = "operation_status"
 
 # Character limit before using sampling for results processing
 MAX_CHARS_FOR_FULL_RESULTS = 60000
@@ -248,6 +250,15 @@ class ExecutionManager:
                 
                 # Store results and update context for next steps
                 results[str(step_number)] = result_data
+                
+                # In _execute_step after unpacking step_result:
+                if isinstance(result_data, dict) and 'result' in result_data:
+                    step_context["result"] = result_data['result']  # Unwrap the inner result
+                else:
+                    step_context["result"] = result_data  # Keep as is if not nested
+                
+
+                #logger.debug(f"[{correlation_id}] Setting result in step_context: {type(result_data).__name__}, value: {result_data}")
                 if step_vars:
                     step_context.update(step_vars)
                 
@@ -305,6 +316,340 @@ class ExecutionManager:
             logger.error(f"[{correlation_id}] Execution failed after {elapsed_time:.2f}s: {str(e)}")
             error.log()
             return error
+
+    async def async_execute_plan_streaming(
+        self,
+        plan_model: ExecutionPlan, # This is the ExecutionPlan model from reasoning_agent
+        query: str,
+        correlation_id: str, # This is the process_id from realtime.py
+        cancellation_callback: Callable[[], bool],
+        # plan_confidence was passed from realtime.py in previous suggestions,
+        # but it's already correctly derived from plan_model.confidence inside this method.
+        # So, no need to pass it as a separate argument if plan_model is always ExecutionPlan.
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """
+        Executes a plan by generating code, running steps sequentially, and processing results,
+        yielding events for each stage to be streamed via SSE.
+        """
+        self.okta_deps.query_id = correlation_id # For consistent tracing in OktaRealtimeDeps
+        start_time = time.time()
+        
+        step_results_for_processing: Dict[str, Any] = {} 
+        all_step_errors: List[StepError] = [] 
+
+        if not plan_model or not hasattr(plan_model, 'steps'):
+            logger.error(f"[{correlation_id}] Invalid plan structure: 'plan_model.steps' is missing. Plan: {plan_model}")
+            yield {
+                "event_type": "plan_error",
+                "data": {OPERATION_STATUS_FIELD: "error", "message": "Invalid plan structure received for execution."}
+            }
+            await asyncio.sleep(0.01) # ADDED SLEEP
+            return
+        
+        actual_steps = plan_model.steps 
+        plan_reasoning = plan_model.reasoning if hasattr(plan_model, 'reasoning') else "No reasoning provided."
+        plan_confidence = plan_model.confidence if hasattr(plan_model, 'confidence') else None
+
+
+        if not actual_steps: 
+            logger.warning(f"[{correlation_id}] Plan has no steps to execute for query: \"{query}\"")
+            yield {
+                "event_type": "plan_status",
+                "data": {
+                    "status": "completed_no_steps",
+                    "message": "Plan generated with no executable steps.",
+                    "plan_details": {
+                        "original_query": query,
+                        "reasoning": plan_reasoning,
+                        "confidence": plan_confidence, 
+                        "steps_summary": []
+                    }
+                }
+            }
+            await asyncio.sleep(0.01) # ADDED SLEEP
+            yield { 
+                "event_type": "final_result",
+                "data": {
+                    "status": "completed_no_steps",
+                    "message": "Plan execution finished: No steps to execute.",
+                    "result_content": "No actions were taken as the plan had no steps.",
+                    "display_type": "markdown",
+                    "display_hints": {},
+                    "errors": None,
+                    "execution_time_ms": int((time.time() - start_time) * 1000),
+                    "metadata": {
+                        "steps_total": 0,
+                        "errors_count": 0,
+                    }
+                }
+            }
+            await asyncio.sleep(0.01) # ADDED SLEEP
+            return
+
+        logger.info(f"[{correlation_id}] Starting STREAMING execution of plan with {len(actual_steps)} steps for query: \"{query}\"")
+        
+        initial_plan_steps_summary = []
+        for i, step_obj in enumerate(actual_steps): 
+            initial_plan_steps_summary.append({
+                "step_index": i,
+                "tool_name": getattr(step_obj, 'tool_name', 'UnknownTool'),
+                "reason": getattr(step_obj, 'reason', ''),
+                "critical": getattr(step_obj, 'critical', False),
+                "query_context": getattr(step_obj, 'query_context', {})
+            })
+
+        yield {
+            "event_type": "plan_status",
+            "data": {
+                "status": "starting_execution",
+                "message": f"Starting execution of plan with {len(actual_steps)} steps.",
+                "plan_details": { 
+                    "original_query": query,
+                    "reasoning": plan_reasoning, 
+                    "confidence": plan_confidence, 
+                    "steps_summary": initial_plan_steps_summary
+                }
+            }
+        }
+        await asyncio.sleep(0.01) # ADDED SLEEP
+
+        try:
+            if cancellation_callback():
+                yield {"event_type": "plan_cancelled", "data": {"message": "Execution cancelled before tool documentation."}}
+                await asyncio.sleep(0.01) # ADDED SLEEP
+                return
+
+            yield {"event_type": "phase_update", "data": {"phase": "collecting_tool_docs", "message": "Collecting tool documentation..."}}
+            await asyncio.sleep(0.01) # ADDED SLEEP
+            tool_docs_start_time = time.time()
+            tool_docs, queried_entities = self._collect_tool_documentation(plan_model, correlation_id)
+            logger.debug(f"[{correlation_id}] Collected tool documentation in {time.time() - tool_docs_start_time:.2f}s")
+            yield {
+                "event_type": "tool_docs_collected", 
+                "data": {
+                    "num_tools": len(actual_steps), 
+                    "queried_entities": list(queried_entities),
+                    "message": "Tool documentation collected."
+                }
+            }
+            await asyncio.sleep(0.01) # ADDED SLEEP
+
+            if cancellation_callback():
+                yield {"event_type": "plan_cancelled", "data": {"message": "Execution cancelled before code generation."}}
+                await asyncio.sleep(0.01) # ADDED SLEEP
+                return
+
+            yield {"event_type": "phase_update", "data": {"phase": "generating_code", "message": "Generating code for steps..."}}
+            await asyncio.sleep(0.01) # ADDED SLEEP
+            code_gen_start_time = time.time()
+            code_generation_result, gen_error = await safe_execute_async(
+                self._generate_code_for_steps,
+                plan_model, 
+                tool_docs,
+                correlation_id,
+                error_message="Failed to generate code for execution plan"
+            )
+            code_gen_duration = time.time() - code_gen_start_time
+
+            if gen_error:
+                logger.error(f"[{correlation_id}] Code generation failed: {gen_error}")
+                yield {
+                    "event_type": "plan_error",
+                    "data": {
+                        OPERATION_STATUS_FIELD: "error",
+                        "message": "Code generation failed.",
+                        "details": format_error_for_user(gen_error)
+                    }
+                }
+                await asyncio.sleep(0.01) # ADDED SLEEP
+                return 
+
+            step_codes = code_generation_result 
+            logger.info(f"[{correlation_id}] Generated code for {len(actual_steps)} steps in {code_gen_duration:.2f}s")
+            yield {
+                "event_type": "code_generation_complete",
+                "data": {
+                    "num_steps_with_code": len(step_codes) if step_codes else 0,
+                    "message": "Code generation completed successfully."
+                }
+            }
+            await asyncio.sleep(0.01) # ADDED SLEEP
+            
+            if not step_codes or len(step_codes) != len(actual_steps):
+                logger.error(f"[{correlation_id}] Mismatch between number of steps and generated codes. Steps: {len(actual_steps)}, Codes: {len(step_codes) if step_codes else 0}")
+                yield {
+                    "event_type": "plan_error",
+                    "data": {
+                        OPERATION_STATUS_FIELD: "error",
+                        "message": "Code generation resulted in an incorrect number of code blocks.",
+                    }
+                }
+                await asyncio.sleep(0.01) # ADDED SLEEP
+                return
+
+            step_context = {} 
+
+            for i, (step_model_obj, code_for_step) in enumerate(zip(actual_steps, step_codes)): 
+                step_index = i 
+                step_number_display = i + 1 
+                step_correlation_id = f"{correlation_id}-s{step_number_display}"
+
+                if cancellation_callback():
+                    yield {"event_type": "plan_cancelled", "data": {"message": f"Execution cancelled before step {step_number_display}."}}
+                    await asyncio.sleep(0.01) # ADDED SLEEP
+                    return
+
+                current_tool_name = getattr(step_model_obj, 'tool_name', 'UnknownTool')
+                is_critical_step = getattr(step_model_obj, 'critical', False)
+
+                yield {
+                    "event_type": "step_status_update",
+                    "data": {
+                        "step_index": step_index,
+                        "tool_name": current_tool_name,
+                        "status": "running",
+                        "message": f"Executing step {step_number_display}: {current_tool_name}",
+                        "code_snippet": code_for_step.split('\n')[0] + "..." if code_for_step else "N/A"
+                    }
+                }
+                await asyncio.sleep(0.01) # ADDED SLEEP
+                
+                step_exec_start_time = time.time()
+                step_execution_outcome, step_exec_error_obj = await safe_execute_async(
+                    self._execute_step,
+                    step=step_model_obj, 
+                    code=code_for_step,
+                    step_number=step_number_display,
+                    step_context=step_context,
+                    total_steps=len(actual_steps),
+                    correlation_id=step_correlation_id,
+                    error_message=f"Failed to execute step {step_number_display}: {current_tool_name}"
+                )
+                step_exec_duration = time.time() - step_exec_start_time
+
+                if step_exec_error_obj: 
+                    logger.warning(f"[{step_correlation_id}] Step {step_number_display} infrastructure execution failed: {format_error_for_user(step_exec_error_obj)}")
+                    yield {
+                        "event_type": "step_status_update",
+                        "data": {
+                            "step_index": step_index, "tool_name": current_tool_name, OPERATION_STATUS_FIELD: "error",
+                            "error_message": f"Execution infrastructure error: {format_error_for_user(step_exec_error_obj)}",
+                            "details": {"critical": is_critical_step}
+                        }
+                    }
+                    await asyncio.sleep(0.01) # ADDED SLEEP
+                    if is_critical_step:
+                        yield {"event_type": "plan_error", "data": {OPERATION_STATUS_FIELD: "error", "message": f"Critical step {step_number_display} infrastructure failed.", "details": format_error_for_user(step_exec_error_obj)}}
+                        await asyncio.sleep(0.01) # ADDED SLEEP
+                        return
+                    all_step_errors.append(StepError(step=current_tool_name, error=format_error_for_user(step_exec_error_obj), critical=is_critical_step, entity_type=self._get_entity_type(current_tool_name), step_number=step_number_display))
+                    continue 
+
+                if isinstance(step_execution_outcome, BaseError):
+                    critical_step_error_msg = format_error_for_user(step_execution_outcome)
+                    logger.error(f"[{step_correlation_id}] Critical error in step {step_number_display} logic: {critical_step_error_msg}")
+                    yield {
+                        "event_type": "step_status_update",
+                        "data": {
+                            "step_index": step_index, "tool_name": current_tool_name, OPERATION_STATUS_FIELD: "error",
+                            "error_message": critical_step_error_msg,
+                            "details": {"critical": True, "error_type": step_execution_outcome.__class__.__name__}
+                        }
+                    }
+                    await asyncio.sleep(0.01) # ADDED SLEEP
+                    yield {"event_type": "plan_error", "data": {OPERATION_STATUS_FIELD: "error", "message": f"Critical step {step_number_display} logic failed.", "details": critical_step_error_msg}}
+                    await asyncio.sleep(0.01) # ADDED SLEEP
+                    return 
+
+                step_result_data_wrapper, new_vars_from_step, non_critical_step_error_obj = step_execution_outcome
+                
+                step_results_for_processing[str(step_number_display)] = step_result_data_wrapper.get('result') if isinstance(step_result_data_wrapper, dict) else step_result_data_wrapper
+
+                if new_vars_from_step:
+                    step_context.update(new_vars_from_step)
+
+                if non_critical_step_error_obj:
+                    logger.warning(f"[{step_correlation_id}] Step {step_number_display} completed with non-critical error: {non_critical_step_error_obj.error}")
+                    all_step_errors.append(non_critical_step_error_obj)
+                    yield {
+                        "event_type": "step_status_update",
+                        "data": {
+                            "step_index": step_index, "tool_name": current_tool_name, "status": "completed_with_error",
+                            "error_message": non_critical_step_error_obj.error,
+                            "result_summary": self._get_result_summary(step_results_for_processing.get(str(step_number_display))),
+                            "details": {"critical": False}
+                        }
+                    }
+                    await asyncio.sleep(0.01) # ADDED SLEEP
+                else:
+                    result_summary = self._get_result_summary(step_results_for_processing.get(str(step_number_display)))
+                    logger.info(f"[{step_correlation_id}] Step {step_number_display} completed successfully in {step_exec_duration:.2f}s. Summary: {result_summary}")
+                    yield {
+                        "event_type": "step_status_update",
+                        "data": {
+                            "step_index": step_index, "tool_name": current_tool_name, "status": "completed",
+                            "result_summary": result_summary,
+                        }
+                    }
+                    await asyncio.sleep(0.01) # ADDED SLEEP
+            
+            if cancellation_callback():
+                yield {"event_type": "plan_cancelled", "data": {"message": "Execution cancelled before final result processing."}}
+                await asyncio.sleep(0.01) # ADDED SLEEP
+                return
+
+            yield {"event_type": "phase_update", "data": {"phase": "processing_final_results", "message": "Processing final results..."}}
+            await asyncio.sleep(0.01) # ADDED SLEEP
+            
+            final_result_content, display_type, display_hints = await self._process_results(
+                step_results_for_processing, plan_model, query, correlation_id
+            )
+            
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            final_status = "completed_with_errors" if all_step_errors else "completed"
+
+            logger.info(f"[{correlation_id}] STREAMING Execution completed. Status: {final_status}. Total time: {execution_time_ms}ms")
+            
+            final_errors_payload = None
+            if all_step_errors:
+                final_errors_payload = [err.model_dump() for err in all_step_errors]
+
+            yield {
+                "event_type": "final_result",
+                "data": {
+                    "status": final_status,
+                    "message": "Plan execution finished.",
+                    "result_content": final_result_content,
+                    "display_type": display_type,
+                    "display_hints": display_hints,
+                    "errors": final_errors_payload, 
+                    "execution_time_ms": execution_time_ms,
+                    "metadata": {
+                        "steps_total": len(actual_steps),
+                        "errors_count": len(all_step_errors),
+                    }
+                }
+            }
+            await asyncio.sleep(0.01) # ADDED SLEEP
+
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Unhandled exception during streaming execution: {e}", exc_info=True)
+            error_obj = e if isinstance(e, BaseError) else ExecutionError(message="Unhandled error in streaming execution", original_exception=e)
+            if hasattr(error_obj, 'log') and callable(error_obj.log):
+                error_obj.log() 
+
+            yield {
+                "event_type": "plan_error",
+                "data": {
+                    OPERATION_STATUS_FIELD: "error",
+                    "message": "An unexpected error occurred during plan execution.",
+                    "details": format_error_for_user(error_obj)
+                }
+            }
+            await asyncio.sleep(0.01) # ADDED SLEEP
+        finally:
+            logger.info(f"[{correlation_id}] Streaming execution flow finished or terminated.")
+
 
     async def _process_results(
         self, 
@@ -945,7 +1290,7 @@ if 'result' not in locals():
                     )
                 except Exception as e:
                     logger.error(f"[{correlation_id}] Error in pagination: {str(e)}")
-                    return {"status": "error", "error": f"Error during pagination: {str(e)}"}
+                    return {OPERATION_STATUS_FIELD: "error", "error": f"Error during pagination: {str(e)}"}
             
             # Define the single entity request helper function
             async def handle_single_entity_request(method_name, entity_type, entity_id, method_args=None, method_kwargs=None):
@@ -977,7 +1322,7 @@ if 'result' not in locals():
                     )
                 except Exception as e:
                     logger.error(f"[{correlation_id}] Error in single entity request: {str(e)}")
-                    return {"status": "error", "error": f"Error during entity request: {str(e)}"}
+                    return {OPERATION_STATUS_FIELD: "error", "error": f"Error during entity request: {str(e)}"}
             
             # Execute the code with current context and pagination helper
             execution_start = time.time()
@@ -992,7 +1337,8 @@ if 'result' not in locals():
                     'paginate_results': paginate_results,  # Add pagination helper to context
                     'handle_single_entity_request': handle_single_entity_request,  # Add single entity helper
                     'make_async_request': make_async_request,  # Add async request helper
-                    'can_user_access_application': can_user_access_application # Add access check helper
+                    'can_user_access_application': can_user_access_application, # Add access check helper
+                    'normalize_okta_response': normalize_okta_response  # Add normalization helper
                 },
                 error_message=f"Error executing code for step {step.tool_name}"
             )
@@ -1057,7 +1403,7 @@ if 'result' not in locals():
                 
                 # For non-critical steps, just return the empty result normally
                 return execution_result, execution_result.get('variables', {}), None
-            elif isinstance(result, dict) and "status" in result and result["status"] == "not_found":
+            elif isinstance(result, dict) and OPERATION_STATUS_FIELD in result and result[OPERATION_STATUS_FIELD] == "not_found":
                 logger.info(f"[{correlation_id}] Step completed in {execution_time:.2f}s: Entity not found")
                 
                 # Display intermediate result
@@ -1073,7 +1419,7 @@ if 'result' not in locals():
                             "step_number": step_number,
                             "error_details": f"No matching {result.get('entity', 'record')} found with ID {result.get('id', 'unknown')}",
                             "entity_type": entity_type,
-                            "status": "not_found"
+                            OPERATION_STATUS_FIELD: "not_found"
                         }
                     )
                 
@@ -1188,7 +1534,7 @@ if 'result' not in locals():
             
         if isinstance(result, dict):
             # Handle error status
-            if "status" in result and result["status"] in ERROR_STATUSES:
+            if OPERATION_STATUS_FIELD in result and result[OPERATION_STATUS_FIELD] in ERROR_STATUSES:
                 return f"Error: {result.get('error', 'Unknown error')}"
             
             # Look for list data in the result using common patterns
@@ -1248,8 +1594,8 @@ if 'result' not in locals():
                 return str(result['message'])
                 
             # Status with no message
-            if 'status' in result and result['status'] in ERROR_STATUSES:
-                return f"Operation failed with status: {result['status']}"
+        if OPERATION_STATUS_FIELD in result and result[OPERATION_STATUS_FIELD] in ERROR_STATUSES:
+            return f"Operation failed with status: {result[OPERATION_STATUS_FIELD]}"
         
         # If there's a top-level error key
         if 'error' in execution_result:
