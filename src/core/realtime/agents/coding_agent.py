@@ -11,6 +11,14 @@ from src.utils.security_config import (
 # Add import for tool registry
 from src.utils.tool_registry import get_tool_prompt
 from pydantic_ai.models.gemini import GeminiModelSettings
+from pydantic_ai.models.anthropic import AnthropicModelSettings
+
+
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +27,39 @@ class CodeGenerationResult(BaseModel):
     step_codes: List[str] = Field(description="Generated code for each step")
     raw_response: str = Field(description="Raw response from the coding agent")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+# Core system prompt with security constraints and code style guidelines
+BASE_SYSTEM_PROMPT = """You are an expert at writing Python code for Okta SDK operations.
+
+## CRITICAL SECURITY CONSTRAINTS ##
+1. NEVER include secrets, tokens, or credentials in generated code
+2. ONLY use Okta SDK methods or utility functions that are explicitly provided in documentation
+3. Do NOT create or invent new tool names
+4. Any attempt to use unlisted or invented tools will be considered a security violation
+
+## CODE STYLE & SECURITY REQUIREMENTS ##
+1. ABSOLUTELY NO COMMENTS OR DOCSTRINGS - Do NOT include any comments or docstrings in the generated code
+2. Root indentation - All code within a step must start at the root indentation level
+3. No outermost function wrappers or try-except blocks wrapping the entire step
+4. No logging statements
+5. Valid Python syntax
+6. Preserve case sensitivity of entity names
+7. All returned data structures must be JSON serializable
+
+## ERROR HANDLING REQUIREMENTS ##
+1. Each step must handle potential errors gracefully
+2. On success, return unwrapped core data as shown in the tool's documentation
+3. On failure, return an error status dictionary (e.g., {"operation_status": "error", "reason": "..."})
+4. For dependent operations, always check if the previous step's result is an error before proceeding
+5. Validate all required fields from previous steps before using them
+
+## OKTA SDK USAGE PATTERNS ##
+1. Direct SDK calls using client.Method() must check for errors
+2. For tuple unpacking, use: data, response, error = await client.Method()
+3. For utility functions like paginate_results, extract core data if shown in tool documentation
+
+Follow all instructions precisely and output code blocks with <STEP-N> tags exactly as specified.
+"""
 
 class CodingAgent:
     """
@@ -29,16 +70,23 @@ class CodingAgent:
         """Initialize the coding agent with the appropriate model."""
         # Get the coding model
         model = ModelConfig.get_model(ModelType.CODING)
+    
+        ## CUSTOM MODEL SETTINGS
+        model_settings = None
+        provider_name = os.environ.get("AI_PROVIDER") 
         
-        # Create the agent
+        if provider_name == "vertex_ai":
+            model_settings = GeminiModelSettings(
+                include_thoughts=False,
+                temperature=0.2
+            )
+                
+        # Create the agent with the security-focused system prompt
         self.agent = Agent(
             model,
-            system_prompt="You are an expert at writing Python code for Okta SDK operations.",
+            system_prompt=BASE_SYSTEM_PROMPT,
             retries=2,
-            model_settings=GeminiModelSettings(
-                include_thoughts=False
-            )
-            # No result_type as we'll parse the output manually
+            model_settings=model_settings
         )
         
     async def generate_workflow_code(self, plan, tool_docs: List[str] = None, flow_id: str = "unknown") -> CodeGenerationResult:
@@ -53,7 +101,6 @@ class CodingAgent:
         Returns:
             CodeGenerationResult with code for each step
         """
-        # If tool_docs is not provided, fetch them from the registry
         if tool_docs is None:
             tool_docs = []
             for step in plan.steps:
@@ -64,33 +111,28 @@ class CodingAgent:
                     logger.warning(f"[FLOW:{flow_id}] Documentation not found for tool: {step.tool_name}")
                     tool_docs.append(f"# Documentation not available for {step.tool_name}")
 
-        # Ensure we have a doc for each step
         while len(tool_docs) < len(plan.steps):
             missing_index = len(tool_docs)
             missing_tool = plan.steps[missing_index].tool_name if missing_index < len(plan.steps) else "unknown"
+            logger.warning(f"[FLOW:{flow_id}] Appending placeholder documentation for missing tool at index {missing_index}: {missing_tool}")
             tool_docs.append(f"# Documentation not available for {missing_tool}")
             
-        # Build the prompt
-        prompt = self._build_workflow_prompt(plan, tool_docs)
+        prompt = self._build_workflow_prompt(plan, tool_docs, flow_id)
         
-        # Generate code
         logger.info(f"[FLOW:{flow_id}] Generating code for {len(plan.steps)} workflow steps")
-        result = await self.agent.run(prompt)
+        llm_response_obj = await self.agent.run(prompt) 
         logger.debug(f"[FLOW:{flow_id}] LLM response received")
         
-        # Extract the message content
-        if hasattr(result, 'message'):
-            response_text = result.message
+        if hasattr(llm_response_obj, 'message'):
+            response_text = llm_response_obj.message
         else:
-            response_text = result.output if hasattr(result, 'output') else str(result)
+            response_text = llm_response_obj.output if hasattr(llm_response_obj, 'output') else str(llm_response_obj)
         
-        # Extract code blocks for each step
         step_codes = self._extract_step_codes(response_text, len(plan.steps))
         
-        # Log debug information
         logger.debug(f"[FLOW:{flow_id}] Generated {len(step_codes)} code blocks")
         for i, code in enumerate(step_codes):
-            logger.debug(f"[FLOW:{flow_id}] Step {i+1} code preview: {code[:100]}...")
+            logger.debug(f"[FLOW:{flow_id}] Step {i+1} code preview: {code[:150]}...")
         
         return CodeGenerationResult(
             step_codes=step_codes,
@@ -101,154 +143,119 @@ class CodingAgent:
             }
         )
         
-    def _build_workflow_prompt(self, plan, tool_docs: List[str]) -> str:
+    def _build_workflow_prompt(self, plan, tool_docs: List[str], flow_id: str) -> str:
         """Build a prompt that will generate code for all steps in the workflow."""
         steps_description = []
         
         for i, (step, doc) in enumerate(zip(plan.steps, tool_docs)):
+            prev_step_info = ""
+            if i > 0: 
+                prev_step_info = f"This step follows Step {i}. The primary output of Step {i} is available in a variable named `result`."
+            
             steps_description.append(f"""
             STEP {i+1}: {step.tool_name}
             Description: {step.query_context}
-            Tool Documentation:
+            {prev_step_info}
+            Tool Documentation for {step.tool_name}:
             {doc}
             """)
         
         steps_text = "\n".join(steps_description)
         
-        # Format the allowed methods for the prompt
         sdk_methods = ", ".join(sorted(list(ALLOWED_SDK_METHODS)))
         utility_methods = ", ".join(sorted(list(ALLOWED_UTILITY_METHODS)))
         
+        # Focused user prompt with workflow-specific details
         return f"""
-        You are an AI assistant tasked with generating Python code for Okta SDK operations. You must adhere strictly to all constraints and instructions provided. Your primary goal is to produce clean, robust, and directly executable Python code snippets for multi-step Okta workflows.
-
-        ## Core Persona & Knowledge Constraint ##
-        You are an expert at writing Python code specifically for Okta SDK operations, with a strong emphasis on robust error handling as defined herein.
-        However, when it comes to Okta SDK functions themselves: **You must operate as if you have no prior knowledge of Okta functions beyond what is explicitly provided in the `AVAILABLE TOOLS` documentation for this session.** Do not assume the existence or behavior of any Okta function not listed or documented there.
-
-        ## CRITICAL: Adherence to Tool Documentation and SDK Call Structure ##
-        *   You MUST generate code for SDK calls based **EXACTLY on the structure shown in the relevant tool's 'Example Usage' snippet** (found under its '## Example Usage' section).
-        *   While the *core SDK call* follows the example, you **MUST integrate all other requirements from this prompt** (e.g., error handling, specific data extraction, variable usage from previous steps, no comments) into the code generated for each step.
-        *   Make SURE you read the tool documentation carefully before generating code for any SDK call.
-
-        ## CRITICAL SECURITY CONSTRAINTS (Tool Usage) ##
-        1.  You MUST ONLY use tools (Okta SDK methods) that are explicitly listed in the `AVAILABLE TOOLS` section.
-        2.  Do NOT use any tool names based on your general knowledge of Okta SDKs; rely SOLELY on the provided list.
-        3.  Do NOT create or invent new tool names, even if they seem logical extensions of existing ones.
-        4.  Any attempt to use unlisted tools will be considered a security violation and will be rejected.
-        5.  If a user's query cannot be solved with the available tools, you MUST state this clearly rather than attempting to invent or use unlisted tools.
-
-        ## WORKFLOW SPECIFICATION (Provided by User/System) ##
-        *   **WORKFLOW OVERVIEW:** {plan.reasoning}
-        *   **THE STEPS:** {steps_text}
-        *   **AVAILABLE OKTA SDK METHODS:** {sdk_methods}
-        *   **AVAILABLE PYTHON UTILITY METHODS:** {utility_methods}
-
-        ## MULTI-STEP CODE GENERATION RULES ##
-        1.  Generate separate, distinct code blocks for EACH step.
-        2.  Mark each code block with `<STEP-N>` (e.g., `<STEP-1>`) and ensure it ends with `</STEP-N>` (e.g., `</STEP-1>`).
-        3.  Each step's code block MUST explicitly `return` its final result.
-        4.  Variables defined in earlier steps can be directly accessed by name in later steps.
-        5.  NEVER use placeholder values like `"your_group_id_here"`. Always extract actual values from the results of previous steps.
-        6.  When using IDs or other data from previous steps, explicitly extract them (e.g., `group_id = result_from_step_1[0]["id"]` or `user_email = previous_user_data["profile"]["email"]`).
-        7.  Before accessing properties or elements of results from previous steps, ALWAYS check if the result is empty or indicates an error to prevent runtime exceptions.
-
-        ## PYTHON CODE STYLE & FORMATTING ##
-        1.  **ABSOLUTELY NO COMMENTS OR DOCSTRINGS:** Do NOT include any comments (e.g., `# This is a comment`) or docstrings (e.g., `\"\"\"This is a docstring\"\"\"`) in the generated code. This applies to imports, function definitions (if any were allowed internally, which they are not at the top level of a step), and all lines of code.
-        2.  **Root Indentation:** All code within a step block must start at the root indentation level (no initial global indent for the entire block).
-        3.  **No Outermost Wrappers:** Do not define functions (`def my_func(): ...`) or wrap the entire content of a `<STEP-N>` block in a single top-level `try...except` block. However, `try-except` blocks *within* the step, around specific operations, ARE required for robust error handling as specified below.
-        4.  **No Logging:** Do not use Python's `logging` module functions directly (e.g., `logging.info`, `logging.error`).
-        5.  **Valid Python:** Ensure all generated code is valid Python syntax that can be executed directly.
-        6.  **Case Sensitivity:** Do NOT change the case of entity or label names (like application or group names) as provided in the query or step descriptions. Okta operations often require case-sensitive matches.
-
-        ## OKTA SDK USAGE RULES (Specific to `client` object) ##
-        1.  Use `client.SomeOktaMethod(...)` for Okta SDK calls (i.e., assume an Okta client object named `client`).
-        2.  **For direct SDK methods (those listed in `{sdk_methods}` that are not utilities):**
-            *   Always use the tuple unpacking pattern: `result_object, http_response, error = await client.SomeOktaMethod(...)`
-            *   Check for errors immediately: `if error: return {{"status": "error", "error": str(error)}}`
-        3.  **IMPORTANT EXCEPTION for Utility Functions (e.g., `paginate_results` from `{utility_methods}`):**
-            *   Do NOT use tuple unpacking. Instead, assign the direct result: `users_list = await paginate_results(client.list_users, query_params={{...}})`
-            *   Error checking for utility functions: `if isinstance(users_list, dict) and 'status' in users_list and users_list['status'] == 'error': return users_list`
-        4.  Use the `.as_dict()` method to convert Okta model objects to Python dictionaries (e.g., `user_dict = user_object.as_dict()`). Do NOT use `to_dict()`.
-
-        ## ERROR HANDLING REQUIREMENTS ##
-        *   **General Principle:** Each step must handle potential errors gracefully.
-        *   **For Single Entity Operations (e.g., get_user, get_group):**
-            *   If the entity is not found (and the SDK indicates this, often via a specific error type or a 404 response check if applicable): `return {{"status": "not_found", "entity_type": "user", "identifier": entity_id_or_name}}` (adjust `entity_type` and `identifier` as appropriate).
-            *   If a general error occurs during the operation: `return {{"status": "error", "error": str(err)}}` (where `err` is from the SDK call or a caught exception).
-            *   If successful: Return the processed data directly (e.g., a dictionary for a single user, a specific requested attribute).
-        *   **For Multiple Entity Operations (e.g., list_users, search_groups):**
-            *   If no entities are found matching the criteria: Return an empty list `[]` or empty dictionary `{{}}` as appropriate for the expected data structure.
-            *   If an error occurs during the main listing/searching operation: `return {{"status": "error", "error": str(err)}}`.
-        *   **For "Foreach" Operations on Multiple Entities (e.g., iterating through a list of users to update them):**
-            *   Continue processing other entities even if one or more individual operations fail.
-            *   Track the status of each individual operation. The final result should be a list of status objects, e.g.:
-                `results = []`
-                `for item in item_list:`
-                `  # ... attempt operation ...`
-                `  if success: results.append({{"id": item_id, "status": "success", "data": {{...}}}})`
-                `  else: results.append({{"id": item_id, "status": "failed", "error": "reason"}})`
-                `return results`
-        *   **For Dependent Operations (where a step relies on the output of a previous step):**
-            *   Before proceeding, check if the result from the prerequisite step indicates an error or is unexpectedly empty.
-            *   If prerequisite failed or returned unusable data: `return {{"status": "dependency_failed", "dependency_step_name": "name_or_description_of_previous_step", "reason": "Details of why it failed, e.g., 'Previous step returned an error: <error_message>' or 'Required data not found in previous step output.'" }}`.
-
-        ## DATA EXTRACTION & SERIALIZATION ##
-        1.  **Specificity is Key:** Always extract ONLY the specific data fields or attributes mentioned in the step description.
-            *   If a step asks for "email addresses of users," return a simple list of email strings: `["user1@example.com", "user2@example.com"]`.
-            *   If a step asks for "names and departments of groups," return a list of dictionaries, each containing only 'name' and 'department' keys: `[ {{"name": "Group A", "department": "IT"}}, {{...}} ]`.
-        2.  **No Extra Fields:** Never include additional fields or the full object structure beyond what was specifically requested in the step.
-        3.  **Careful Parsing:** Parse the step description carefully to determine exactly what data to extract and in what format (simple list of values, list of objects with specific keys, etc.).
-        4.  **JSON Serializable Data Structures:**
-            *   NEVER use Python `set` literals (`{{'a', 'b'}}`) or set comprehensions, as they are not directly JSON serializable.
-            *   Always use `list` for collections. For unique items, build a list and check for existence before appending:
-                `unique_ids = []`
-                `if new_id not in unique_ids: unique_ids.append(new_id)`
-            *   For creating a unique lookup or ensuring uniqueness before adding to a list, a dictionary can be used as a temporary helper: `id_lookup = {{user["id"]: True for user in users}}` then `if some_id in id_lookup: ...`
-            *   All returned data structures must be JSON serializable (composed of `dict`, `list`, `str`, `int`, `float`, `bool`, `None`).
-
-        ## ENTITY SEARCH/LISTING RULES ##
-        1.  If the user query or step description does not explicitly state "match exactly" or use precise filter language, default to a "contains" (co) or "starts with" (sw) search where appropriate for the Okta SDK method being used (e.g., in `search` or `q` parameters).
-
-        ## RESPONSE FORMAT (Code Block Structure) ##
-        You must format your response containing the generated code as follows, with each step in its own block:
-
-        <STEP-1>
-        users_result, _, err = await client.list_users(query_params={{"search": "profile.firstName eq \\"John\\""}})
-        if err:
-            return {{"status": "error", "error": str(err)}}
-
-        if not users_result:
-            return []
-
-        extracted_data = [user.as_dict()["profile"]["email"] for user in users_result if user.as_dict().get("profile", {{}}).get("email")]
-        return extracted_data
-        </STEP-1>
-
-        <STEP-2>
-        if isinstance(extracted_data, dict) and "status" in extracted_data:
-            return {{"status": "dependency_failed", "dependency_step_name": "Step 1 - Fetch Users", "reason": f"Previous step error: {{extracted_data.get('error', 'Unknown error')}}"}}
-        if not extracted_data:
-            return []
-
-        processed_step_2_data = [email.upper() for email in extracted_data]
-        return processed_step_2_data
-        </STEP-2>
-        ... and so on for all steps.
+        ## WORKFLOW SPECIFICATION ##
+        * **WORKFLOW OVERVIEW:** {plan.reasoning}
+        * **THE STEPS:** {steps_text}
+        * **AVAILABLE OKTA SDK METHODS:** {sdk_methods}
+        * **AVAILABLE PYTHON UTILITY METHODS:** {utility_methods}
         
-        EXTREMELY IMPORTANT: Every STEP must have a start <STEP-1> and end tag </STEP-1> If NOT, throw an error.
-
-        ---
-        Please generate all {len(plan.steps)} steps now, with clear Python code for each step, following all the rules meticulously.
-        Remember: **NO COMMENTS OR DOCSTRINGS IN THE ACTUAL GENERATED PYTHON CODE.** (The Python code examples within this prompt are for *your* understanding of the required output format, not for you to reproduce comments from them).
-        The python code within the `<STEP-N>...</STEP-N>` blocks should be raw code.
+        ## MULTI-STEP CODE GENERATION INSTRUCTIONS ##
+        1. Generate separate code blocks for EACH step, marked with <STEP-N> and </STEP-N> tags.
+        2. Each step's code block MUST explicitly `return` its final result.
+        3. For steps after Step 1, access the previous step's result via the `result` variable.
+        4. NEVER use placeholder values - extract actual values from the `result` when needed.
+        5. Always validate the `result` variable before using it with robust error handling.
+        6. Variables from ALL previous steps remain available. For steps beyond Step 2, if required data isn't in the immediate previous step's result, check for variables from earlier steps (e.g., user_result, user_id).
+        7. For critical values like IDs that will be needed in later steps, extract and store them in clearly named variables (e.g., `user_id = result.get("id")`) even if not immediately needed.
+        8. Use consistent variable naming patterns:
+        - First step result should be named after its content (e.g., `user_result`)
+        - IDs should be named with the entity type prefix (e.g., `user_id`, `group_id`)
+        - Lists should use plural names (e.g., `groups`, `factors`)
+        
+        ## RESPONSE FORMAT EXAMPLES ##
+        <STEP-1>
+        user_api_response = await handle_single_entity_request(
+            method_name="get_user",
+            entity_type="user",
+            entity_id="aiden.garcia@fctr.io",
+            method_args=["aiden.garcia@fctr.io"]
+        )
+        if not isinstance(user_api_response, dict):
+            return {{"operation_status": "error", "reason": f"Expected dict response, got {{type(user_api_response).__name__}}"}}
+        if user_api_response.get("operation_status") in ["error", "not_found", "dependency_failed"]:
+            return user_api_response
+        return user_api_response
+        </STEP-1>
+        
+        <STEP-2>
+        if not result or not isinstance(result, dict):
+            return {{"operation_status": "dependency_failed", "dependency_step_name": "Step 1", "reason": "Invalid result from previous step"}}
+        if result.get("operation_status") in ["error", "not_found", "dependency_failed"]:
+            return result
+        
+        user_id = result.get("id")
+        if not user_id:
+            return {{"operation_status": "dependency_failed", "dependency_step_name": "Step 1", "reason": "Invalid result from previous step"}}
+        
+        groups_api_response = await paginate_results(
+            method_name="list_user_groups",
+            method_args=[user_id],
+            entity_name="groups"
+        )
+        if isinstance(groups_api_response, dict) and groups_api_response.get("operation_status") in ["error", "not_found", "dependency_failed"]:
+            return groups_api_response
+        return groups_api_response
+        </STEP-2>
+        <STEP-3>
+        if not isinstance(result, list):
+            return {{"operation_status": "dependency_failed", "reason": "Expected list result from previous step"}}
+        
+        # Get user_id from earlier steps if needed
+        user_id = None
+        
+        # Check if user_id is available from previous steps
+        if "user_result" in globals() and isinstance(user_result, dict):
+            user_id = user_result.get("id")
+        elif "user_id" in globals():
+            # user_id might have been extracted in an earlier step
+            pass
+        
+        if not user_id:
+            return {{"operation_status": "dependency_failed", "reason": "User ID not found in any previous step"}}
+        
+        factors = await paginate_results(
+            method_name="list_factors",
+            method_args=[user_id],
+            entity_name="factors"
+        )
+        
+        if isinstance(factors, dict) and factors.get("operation_status") in ["error", "not_found", "dependency_failed"]:
+            return factors
+        
+        return factors
+        </STEP-3>
+        
+        Please generate all {{len(plan.steps)}} steps now, with concise Python code for each step.
         """
         
     def _extract_step_codes(self, response: str, expected_steps: int) -> List[str]:
         """Extract code blocks for each step from the response."""
         code_blocks = []
         
-        # Try to extract using <STEP-X> tags first
         for i in range(1, expected_steps + 1):
             pattern = rf'<STEP-{i}>(.*?)</STEP-{i}>'
             match = re.search(pattern, response, re.DOTALL)
@@ -256,87 +263,22 @@ class CodingAgent:
             if match:
                 code_blocks.append(match.group(1).strip())
             else:
-                # Try alternative extraction methods
-                # Look for markdown code blocks with step indicators
-                block_pattern = rf'(?:Step|STEP) {i}[:\s].*?```(?:python)?\s*(.*?)```'
-                block_match = re.search(block_pattern, response, re.DOTALL)
-                
-                if block_match:
-                    code_blocks.append(block_match.group(1).strip())
+                logger.warning(f"Could not find <STEP-{i}>...</STEP-{i}> tags for step {i}. Attempting fallbacks.")
+                block_pattern_markdown = rf'(?:Step|STEP)\s*{i}\s*[:\-]*\s*.*?```(?:python)?\s*(.*?)```'
+                block_match_markdown = re.search(block_pattern_markdown, response, re.DOTALL)
+                if block_match_markdown:
+                    logger.info(f"Found step {i} using markdown block fallback.")
+                    code_blocks.append(block_match_markdown.group(1).strip())
                 else:
-                    # Last resort - look for numbered sections
-                    section_pattern = rf'(?:^|\n)(?:#{1,6}|)\s*(?:Step|STEP) {i}[:\s].*?(?:\n)(.*?)(?:\n\s*(?:#{1,6}|)(?:Step|STEP) {i+1}|$)'
-                    section_match = re.search(section_pattern, response, re.DOTALL)
-                    
-                    if section_match:
-                        # Clean the content to extract just the code
-                        content = section_match.group(1).strip()
-                        # Remove any markdown code block markers
-                        content = re.sub(r'```python|```', '', content)
-                        code_blocks.append(content.strip())
-                    else:
-                        # If all extraction methods fail, use placeholder
-                        code_blocks.append(f"# Missing code for step {i}\nraise ValueError('Code generation failed for step {i}')")
+                    logger.error(f"Failed to extract code for step {i} using any method.")
+                    code_blocks.append(f"# ERROR: Code generation failed for step {i}. Could not extract code block.\nraise ValueError('Code generation failed for step {i}')")
         
-        # If we have fewer blocks than expected, add placeholders
         while len(code_blocks) < expected_steps:
             i = len(code_blocks) + 1
-            code_blocks.append(f"# Missing code for step {i}\nraise ValueError('Code generation incomplete for step {i}')")
+            logger.error(f"Adding error placeholder for missing step {i} after initial extraction loop.")
+            code_blocks.append(f"# ERROR: Code generation incomplete. Missing step {i}.\nraise ValueError('Code generation incomplete for step {i}')")
             
-        return code_blocks
+        return code_blocks[:expected_steps] 
 
 # Create a singleton instance
 coding_agent = CodingAgent()
-
-# For interactive testing
-if __name__ == "__main__":
-    import asyncio
-    from src.core.realtime.agents.reasoning_agent import ExecutionPlan, PlanStep
-    
-    async def test():
-        # Create a simple test plan
-        plan = ExecutionPlan(
-            steps=[
-                PlanStep(
-                    tool_name="search_users",
-                    query_context="Find users with firstName Noah",
-                    critical=True,
-                    reason="To find users with the specified name"
-                ),
-                PlanStep(
-                    tool_name="get_user_details",
-                    query_context="Get email address of users found in step 1",
-                    critical=True,
-                    reason="To extract email addresses"
-                )
-            ],
-            reasoning="Find email address of user named Noah"
-        )
-        
-        # Test with tool registry (no docs needed)
-        try:
-            # Use a test flow ID
-            result = await coding_agent.generate_workflow_code(plan, flow_id="test-flow")
-            print("Generated code blocks using tool registry:")
-            for i, code in enumerate(result.step_codes):
-                print(f"\n--- STEP {i+1} ---")
-                print(code)
-        except Exception as e:
-            print(f"Error with tool registry: {e}")
-            
-        # Test with explicit docs (original behavior)
-        try:
-            tool_docs = [
-                "search_users: Search for users based on profile attributes",
-                "get_user_details: Get detailed user information by ID"
-            ]
-            result = await coding_agent.generate_workflow_code(plan, tool_docs, flow_id="test-flow")
-            print("\nGenerated code blocks with explicit docs:")
-            for i, code in enumerate(result.step_codes):
-                print(f"\n--- STEP {i+1} ---")
-                print(code)
-        except Exception as e:
-            print(f"Error with explicit docs: {e}")
-    
-    # Uncomment to test
-    # asyncio.run(test())

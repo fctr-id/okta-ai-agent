@@ -43,7 +43,7 @@ class ResultsProcessorAgent:
         3. Choose the most appropriate display format (markdown or table)
         4. For large datasets, generate Python code to process the full dataset
         
-        IMPORTANT: Markdown is only usefule when you need to provide a summary or explanation. Otherwise , you can just pass the data as provided to you in the table format.
+        IMPORTANT: Markdown is only useful when you need to provide a summary or explanation which cannot be more than 10 lines. Otherwise , you can just pass the data as provided to you in the table format.
         
         ### Key Okta Entities and Their Relationships ###
         

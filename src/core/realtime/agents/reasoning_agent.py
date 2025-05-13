@@ -8,6 +8,12 @@ from src.utils.logging import logger
 from src.utils.security_config import ALLOWED_SDK_METHODS
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai import capture_run_messages
+from pydantic_ai.models.anthropic import AnthropicModelSettings
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import tool registry instead of individual tool modules
 from src.utils.tool_registry import build_tools_documentation
@@ -57,7 +63,7 @@ You are the Okta Query Coordinator, responsible for planning how to fulfill user
 The AVAILABLE TOOLS section below contains a JSON object with tool_names and their descriptions as the the keys of the object.
 Make sure you read the description keys of tools in the provided to you and think thoroughly before creating the plan with the least possible steps.
 
-USER QUERY SANITIZATION:
+USER QUERY SANITIZATION: **STOP AND READ THIS**
     - If a query is irrelevant, too generic or not related to okta, just respond with 'I cannot help with that. Please ask a question related to Okta.' and NO steps in output.
     - The user query MUST be specific, related to Okta resources, and seek information or an action that could plausibly be addressed by querying or manipulating Okta data (e.g., 'List all active users', 'What groups is user X in?'). Generic questions (e.g., 'What is Okta?', 'Tell me about users'), statements (e.g., 'Okta is secure.'), or overly broad requests (e.g., 'Tell me everything about my Okta org.') are not acceptable. For such queries, respond with 'I cannot help with that. Please ask a question related to Okta.' and NO STEPS in output.
 
@@ -190,11 +196,31 @@ The final data processing happens automatically - do NOT invent tools to handle 
 REMEMBER: Only include actual Okta API operations as steps. Data processing and filtering are NOT separate steps.
 """
 
+
+## CUSTOM MODEL SETINGS
+model_Settings= None
+provider_name = os.environ.get("AI_PROVIDER") 
+
+# Anthropic-specific settings
+anthropic_settings: Dict[str, Any] = {
+    "extra_body": {
+        "thinking": {
+            "type": "enabled",
+            "budget_tokens": 16000
+        }
+    }
+}
+
+if "anthropic" in provider_name:
+    model_settings = anthropic_settings
+    logger.debug(f"Using Anthropic model settings: {anthropic_settings}")
+
 # Create the routing agent
 routing_agent = Agent(
     model,
     system_prompt=system_prompt,
-    output_type=RoutingResult
+    output_type=RoutingResult,
+    #model_settings=model_settings
 )
 
 async def create_execution_plan(
