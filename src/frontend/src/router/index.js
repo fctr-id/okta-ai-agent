@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import ChatInterface from '@/components/ChatInterface.vue'
 import ChatInterfaceV2 from '@/components/ChatInterfaceV2.vue'
+import ChatContainer from '@/components/views/ChatContainer.vue'
 import { useAuth } from '@/composables/useAuth'
 
 // Get auth instance
@@ -24,7 +25,7 @@ const routes = [
     path: '/',
     alias: ['/agentChat', '/agentUI'],
     name: 'Home',
-    component: ChatInterfaceV2,
+    component: ChatContainer,
     meta: { requiresAuth: true }
   },
   {
