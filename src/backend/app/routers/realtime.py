@@ -20,6 +20,8 @@ from src.core.realtime.agents.reasoning_agent import routing_agent, ExecutionPla
 from src.core.realtime.execution_manager import ExecutionManager
 from src.utils.error_handling import BaseError, format_error_for_user
 from src.utils.logging import get_logger, set_correlation_id
+from src.utils.tool_registry import build_tools_documentation
+
 
 logger = get_logger(__name__)
 
@@ -497,3 +499,19 @@ async def cancel_realtime_process_endpoint(
         logger.info(f"[{process_id}] [/cancel] Process was in '{current_status}' state, marked as '{ProcessStatus.CANCELLED}'.")
 
     return {"message": f"Cancellation signal sent for process {process_id}. If running, it will attempt to stop."}
+
+@router.get("/available-tools")
+async def get_available_tools(
+    current_user: AuthUser | None = Depends(get_current_user_dev_optional)
+):
+    """Retrieve all available tools from the tool registry."""
+    tools_json_str = build_tools_documentation()
+    tools_list = json.loads(tools_json_str)
+    
+    # Sort tools by category then name for better organization
+    tools_list.sort(key=lambda x: (x.get("category", ""), x["tool_name"]))
+    
+    return {
+        "tools_count": len(tools_list),
+        "tools": tools_list
+    }
