@@ -96,57 +96,58 @@ class ResultsProcessorAgent:
         
         EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE):
         {
-          "display_type": "table", 
-          "content": {
+        "display_type": "table",
+        "content": [
+            {
+            "name": "John Doe",
+            "email": "johndoe@example.com",
+            "status": "ACTIVE",
+            "groups": "Marketing, Sales, All Users"
+            },
+            {
+            "name": "Jane Smith",
+            "email": "jsmith@example.com",
+            "status": "ACTIVE",
+            "groups": "Engineering, All Users"
+            }
+        ],
+        "metadata": {
             "headers": [
-              {
+            {
                 "align": "start",
-                "key": "name",
+                "value": "name",
                 "sortable": true,
-                "title": "User Name"
-              },
-              {
-                "key": "email",
+                "text": "User Name"
+            },
+            {
+                "value": "email",
                 "sortable": true,
-                "title": "Email Address"
-              },
-              {
-                "key": "status",
+                "text": "Email Address"
+            },
+            {
+                "value": "status",
                 "sortable": true,
-                "title": "Account Status"
-              },
-              {
-                "key": "groups",
+                "text": "Account Status"
+            },
+            {
+                "value": "groups",
                 "sortable": false,
-                "title": "Group Memberships"
-              }
-            ],
-            "items": [
-              {
-                "name": "John Doe",
-                "email": "johndoe@example.com",
-                "status": "ACTIVE",
-                "groups": "Marketing, Sales, All Users"
-              },
-              {
-                "name": "Jane Smith",
-                "email": "jsmith@example.com",
-                "status": "ACTIVE",
-                "groups": "Engineering, All Users"
-              }
+                "text": "Group Memberships"
+            }
             ]
-          },
-          "metadata": {{}}
+         }
         }
         
-        For TABLE FORMAT, the structure exactly matches a Vue.js data table component:
-        - "content" contains both "headers" and "items" arrays . It SHOULD be be a JSON object with: content: {'headers': [], 'items': []} as shown above
-        - "headers" defines each column with key, title, alignment, and sortability
-        - "items" contains the data rows as an array of objects
-        - Each row property name must match a header key
+        For TABLE FORMAT, the structure should be as shown in "EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE)" above:
+        - "display_type" is "table".
+        - "content" MUST be an array of the data item objects (the rows).
+        - "metadata" MUST be an object.
+        - "metadata.headers" MUST be an array of header definition objects.
+        - Each header object in "metadata.headers" MUST use "text" for the display title and "value" for the data key (which corresponds to a key in the item objects). It MAY also include "align" and "sortable".
         
         WHEN TO USE MARKDOWN:
-        - When you have the "FULL" dataset and the user's original query is something you can answer with a summary in markdown
+        - When you have the "FULL" dataset and the user's original query is something you can answer with a summary in markdown and less than 5 items 
+        - you can MUST use markdown tables when you have a small dataset (5 or fewer items) and the data is not too verbose
         - Make sure you read the users question carefully and understand what their intent is and then answer it thoroughly 
         - Results that require explanatory text or descriptions
         - When presenting facts or data that are not easily tabularized
@@ -160,9 +161,16 @@ class ResultsProcessorAgent:
         - When you have a "SAMPLE" of a large dataset and need to generate Python code to process the full dataset
         - Consistent data with the same fields for each record
         
-        CRITICAL OUTPUT FORMAT REQUIREMENT: 
-        For table format, you MUST structure your response with both "headers" and "items" arrays 
-            INSIDE the "content" object. DO NOT use a top-level "columns" array.
+        ## Critical Results Requirements
+                - For tables: 
+                    - Include all items (rows) in the "content" array (which should be the top-level "content" field, not nested).
+                    - As per guideline 3, `metadata.headers` may be a selection of fields for readability if objects are verbose, but each object in the `content` (items) array must be the complete, original data for that item.
+                    - Return a dict with keys: `display_type`, `content`, and `metadata`.
+                    -  For tables, as per "EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE)":
+                    - The top-level `content` field MUST be an array of the data item objects.
+                    - The `metadata` field MUST be an object containing a `headers` array.
+                    - `metadata.headers`: An array of column definition objects. Each object MUST have `value` (string, corresponding to a property in the item objects) and `text` (string, for display). It MAY also have `align` (e.g., "start", "center", "end") and `sortable` (boolean).
+                    - `content` (items array): An array of the **complete data objects** as received or processed. The properties referenced by `header.value` (from `metadata.headers`) must exist in these objects.
         
         Always prioritize clarity and directness in answering the user's query.
         """
@@ -428,12 +436,14 @@ class ResultsProcessorAgent:
             - As per guideline 3, `headers` may be a selection of fields for readability if objects are verbose, but each object in the `items` array must be the complete, original data for that item.
         - For markdown: List all relevant items (rows) without truncation.
         
-        ## Response Format Requirements
+        ## Response Format Requirements  <--- MODIFIED SECTION
         - Return a dict with keys: `display_type`, `content`, and `metadata`.
-        - For tables, `content` MUST be a dictionary with "headers" and "items" arrays:
-          - `headers`: An array of column definition objects. Each object MUST have `key` (string, corresponding to a property in the item objects) and `title` (string, for display). It MAY also have `align` (e.g., "left", "right", "center") and `sortable` (boolean).
-          - `items`: An array of the **complete data objects** as received or processed. The properties referenced by `header.key` must exist in these objects.
-        - For markdown, `content` should be a single formatted string.
+        - **For tables, strictly follow "EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE)" from the main system prompt:**
+          - The top-level `content` field MUST be an array of the data item objects (the rows).
+          - The `metadata` field MUST be an object.
+          - `metadata.headers` MUST be an array of header definition objects.
+          - Each header object in `metadata.headers` MUST use "text" for the display title and "value" for the data key (which corresponds to a key in the item objects). It MAY also include "align" and "sortable".
+        - For markdown, `content` should be a single formatted string, and `metadata` can be an empty object or contain relevant info.
         - Include useful `metadata` such as:
           - `totalItems`: total number of records/items processed and included in the `content`.
           - `queryTime`: (Optional if available) processing time in milliseconds.
@@ -618,43 +628,42 @@ class ResultsProcessorAgent:
             # Add to our results
             items.append(user_info)
         
-        # Define headers for the table - Vue.js format
-        headers = [
-            {{
-                "align": "start",
-                "key": "name",
-                "sortable": True,
-                "title": "User Name"
-            }},
-            {{
-                "key": "email",
-                "sortable": True,
-                "title": "Email"
-            }},
-            {{
-                "key": "status",
-                "sortable": True,
-                "title": "Account Status"
-            }},
-            {{
-                "key": "id",
-                "sortable": True,
-                "title": "User ID"
+            headers = [
+                {{
+                    "align": "start",
+                    "value": "name",         
+                    "sortable": True,
+                    "text": "User Name"      
+                }},
+                {{
+                    "value": "email",        
+                    "sortable": True,
+                    "text": "Email"          
+                }},
+                {{
+                    "value": "status",       
+                    "sortable": True,
+                    "text": "Account Status" 
+                }},
+                {{
+                    "value": "id",           
+                    "sortable": True,
+                    "text": "User ID"        
+                }}
+            ]
+                
+            # Create the final result structure with dynamic description
+            # 'items' variable is assumed to be populated with the list of data objects
+            result = {{
+                "display_type": "table",
+                "content": items,  # 'items' array is now directly the content
+                "metadata": {{
+                    "headers": headers, # 'headers' array is now inside metadata
+                    "totalItems": len(items),
+                    "description": f"Users in 'group1_name' group but NOT in 'group2_name' group"
+                    # Add any other relevant metadata here
+                }}
             }}
-        ]
-            
-        # Create the final result structure with dynamic description
-        result = {{
-            "display_type": "table",
-            "content": {{
-                "headers": headers,
-                "items": items
-            }},
-            "metadata": {{
-                "totalItems": len(items),
-                "description": f"Users in 'group1_name' group but NOT in 'group2_name' group"
-            }}
-        }}
         </CODE>
         
         NOTES:
@@ -665,7 +674,7 @@ class ResultsProcessorAgent:
         - Your code must create a 'result' variable with the final output
         - The result must have keys: display_type, content, and metadata
         - Choose display_type as either "markdown" or "table" (not both)
-        - For tables, content MUST be a dictionary with "headers" and "items" arrays
+        - For tables, the 'result' variable should follow "EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE)" from the main system prompt (i.e., 'content' is the items array, 'metadata.headers' contains header definitions with 'text' and 'value').
         - For markdown, content should be a formatted string
         - Include useful metadata such as totalItems for the number of records processed
         
