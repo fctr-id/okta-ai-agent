@@ -106,7 +106,7 @@ async def process_user_factors_only(session, tenant_id, user_data):
         return factor_count
         
     except Exception as e:
-        logger.error(f"Error processing user factors for {user_data.get('okta_id')}: {str(e)}")
+        logger.error(f"Error processing user factors")
         raise
 
 async def clean_users_and_factors(session, tenant_id):

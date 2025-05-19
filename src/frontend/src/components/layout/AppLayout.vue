@@ -11,9 +11,18 @@
                         <div class="beta-badge">BETA</div>
                     </div>
                 </div>
+
                 <div class="header-actions">
                     <!-- Add SyncStatusButton here -->
-                    <SyncStatusButton v-if="showLogout" />
+                    <div class="mode-toggle" v-if="showLogout">
+                        <span class="mode-label">Database</span>
+                        <v-switch v-model="isRealtimeMode" color="primary" density="compact" hide-details class="mx-2"
+                            inset></v-switch>
+                        <span class="mode-label" :class="{ 'active': isRealtimeMode }">Realtime</span>
+                    </div>
+
+                    <div class="header-spacer"></div>
+                    <SyncStatusButton v-if="showLogout && !isRealtimeMode" />
                     <v-tooltip text="Logout" location="bottom">
                         <template v-slot:activator="{ props }">
                             <button v-if="showLogout" v-bind="props" class="logout-btn" aria-label="Logout"
@@ -48,6 +57,7 @@
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
 import SyncStatusButton from '@/components/sync/SyncStatusButton.vue'
+import { isRealtimeMode } from '@/state/chatMode.js';
 
 const props = defineProps({
     showLogout: {
@@ -70,7 +80,6 @@ const handleLogout = async () => {
 </script>
 
 <style>
-
 .app-page {
     min-height: 100vh;
     background: linear-gradient(180deg, #e5eaf5 0%, #f0f4fb 100%);
@@ -97,12 +106,15 @@ const handleLogout = async () => {
 
 /* Header */
 .floating-header {
-    position: relative; /* Changed from fixed */
-    margin: 20px auto; /* Instead of positioning with top/left/transform */
+    position: relative;
+    /* Changed from fixed */
+    margin: 20px auto;
+    /* Instead of positioning with top/left/transform */
     z-index: 100;
     width: calc(100% - 40px);
     max-width: var(--max-width);
 }
+
 .header-content {
     display: flex;
     align-items: center;
@@ -173,19 +185,23 @@ const handleLogout = async () => {
     width: calc(100% - 40px);
     max-width: var(--max-width);
     margin: 0 auto;
-    padding-top: 0; 
-    padding-bottom: 30px; /* Reduced from 80px */
-    flex-grow: 1; /* Add this to make it expand and fill space */
+    padding-top: 0;
+    padding-bottom: 30px;
+    /* Reduced from 80px */
+    flex-grow: 1;
+    /* Add this to make it expand and fill space */
 }
 
 
 /* For auth pages - centered boxes */
 .auth-content {
     display: flex;
-    flex-direction: column; /* Add this */
+    flex-direction: column;
+    /* Add this */
     justify-content: center;
     align-items: center;
-    flex-grow: 1; /* Add this to make it expand */
+    flex-grow: 1;
+    /* Add this to make it expand */
     padding: 20px 0;
 }
 
@@ -193,7 +209,8 @@ const handleLogout = async () => {
 /* Full-width footer fixed to bottom */
 .page-footer {
     position: relative;
-    margin-top: auto; /* Add this to push to the bottom */
+    margin-top: auto;
+    /* Add this to push to the bottom */
     padding: 14px 0;
     text-align: center;
     font-size: 13px;
@@ -211,11 +228,11 @@ const handleLogout = async () => {
     left: 0;
     right: 0;
     height: 1px;
-    background: linear-gradient(90deg, 
-                rgba(76, 100, 226, 0.01), 
-                rgba(76, 100, 226, 0.1) 40%, 
-                rgba(76, 100, 226, 0.1) 60%,
-                rgba(76, 100, 226, 0.01));
+    background: linear-gradient(90deg,
+            rgba(76, 100, 226, 0.01),
+            rgba(76, 100, 226, 0.1) 40%,
+            rgba(76, 100, 226, 0.1) 60%,
+            rgba(76, 100, 226, 0.01));
 }
 
 .footer-content {
@@ -279,6 +296,60 @@ const handleLogout = async () => {
     box-shadow: var(--shadow-medium);
     padding: 40px;
     animation: cardEntry 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Mode toggle container */
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  margin-right: 24px;
+  margin-left: auto;
+}
+
+/* Mode labels */
+.mode-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.mode-toggle .mode-label:first-child {
+  color: #6B63B5; /* Database color */
+  margin-right: 8px;
+}
+
+.mode-toggle .mode-label:last-child {
+  color: #4C64E2; /* Realtime color */
+  margin-left: 8px;
+}
+
+/* Active label */
+.mode-toggle .mode-label.active {
+  font-weight: 600;
+}
+
+.v-switch__track {
+	display: inline-flex;
+	align-items: center;
+	font-size: 0.5rem;
+	padding: 0 5px;
+	background-color: #6B63B5 !important;
+	border-radius: 9999px;
+	height: 14px;
+	opacity: 0.6;
+	min-width: 36px;
+	cursor: pointer;
+	transition: 0.2s background-color cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Add responsive styling */
+@media (max-width: 768px) {
+    .mode-label {
+        font-size: 12px;
+    }
+}
+
+.header-spacer {
+    flex: 1;
 }
 
 /* Animation */

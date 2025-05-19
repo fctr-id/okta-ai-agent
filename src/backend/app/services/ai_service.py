@@ -229,7 +229,7 @@ class AIService:
             # Generate SQL
             logger.info("Generating SQL...")
             sql_response = await sql_agent.run(expanded_query)
-            sql_result = extract_json_from_text(str(sql_response.data))
+            sql_result = extract_json_from_text(str(sql_response.output))
             
             # Check if cancelled
             if is_cancelled():

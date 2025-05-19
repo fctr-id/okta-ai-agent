@@ -27,7 +27,10 @@ from src.core.auth.dependencies import get_db_session
 from sqlalchemy import func, select, and_
 from datetime import timezone, datetime
 from asyncio import CancelledError
-from src.utils.logging import sync_logger
+from src.utils.logging import get_logger
+
+# Create a logger instance for this module
+sync_logger = get_logger(__name__)
 
 # Add this helper function
 def get_utc_now():
@@ -224,21 +227,43 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
 async def run_sync_with_cancellation_check(orchestrator, sync_id):
     """Run the sync operation with periodic cancellation checks"""
     
-    # Only wrap the streaming method since we've moved to pure streaming implementation
-    if hasattr(orchestrator, 'sync_model_streaming'):
-        original_sync_model_streaming = orchestrator.sync_model_streaming
-        
-        async def sync_model_streaming_with_cancellation(*args, **kwargs):
-            # Check if sync has been cancelled
-            if sync_cancellation_flags.get(sync_id, False):
-                raise CancelledError(f"Sync {sync_id} was cancelled during streaming operation")
-            return await original_sync_model_streaming(*args, **kwargs)
-        
-        # Replace with cancellation-aware version
-        orchestrator.sync_model_streaming = sync_model_streaming_with_cancellation
+    # Create an asyncio Event for cancellation that can be passed to the client
+    cancellation_event = asyncio.Event()
     
-    # Run sync operation only ONCE
-    await orchestrator.run_sync()
+    # DIAGNOSTIC: Log the initial state of the event - Fix: Use sync_logger instead of logger
+    sync_logger.info(f"Created cancellation event for sync {sync_id}, is_set: {cancellation_event.is_set()}")
+    
+    # Create a checker task that monitors the sync_cancellation_flags dictionary
+    async def cancellation_checker():
+        # Fix: Use sync_logger instead of logger
+        sync_logger.info(f"Starting cancellation checker for sync {sync_id}")
+        while True:
+            if sync_id in sync_cancellation_flags and sync_cancellation_flags[sync_id]:
+                # Fix: Use sync_logger instead of logger
+                sync_logger.info(f"Cancellation flag found for sync {sync_id}, setting event")
+                cancellation_event.set()
+                break
+            await asyncio.sleep(0.5)  # Check every half second
+    
+    # Start the checker in the background
+    checker_task = asyncio.create_task(cancellation_checker())
+    
+    try:
+        # Set the cancellation flag on the orchestrator
+        # Fix: Use sync_logger instead of logger
+        sync_logger.info(f"Setting orchestrator.cancellation_flag for sync {sync_id}")
+        orchestrator.cancellation_flag = cancellation_event
+        
+        # Run sync operation with cancellation support
+        await orchestrator.run_sync()
+        
+    finally:
+        # Clean up our checker task
+        checker_task.cancel()
+        try:
+            await checker_task
+        except asyncio.CancelledError:
+            pass
 
 @router.post("/start", response_model=SyncResponse)
 async def start_sync(

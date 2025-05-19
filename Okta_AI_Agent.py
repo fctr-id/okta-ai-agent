@@ -179,8 +179,8 @@ async def process_with_reasoning(question: str) -> Dict[str, str]:
     try:
         logger.debug("Running reasoning agent")
         response = await reasoning_agent.run(question)
-        logger.debug("Reasoning agent response received" + str(response.data))
-        expanded = json.loads(str(response.data))
+        logger.debug("Reasoning agent response received" + str(response.output))
+        expanded = json.loads(str(response.output))
         
         logger.info("Original question: " + question)
         logger.info("Expanded query: " + expanded["expanded_query"])
@@ -247,7 +247,7 @@ async def main():
             # Generate SQL using the agent
             logger.debug("Generating SQL using agent")
             sql_response = await sql_agent.run(processed_question)
-            result = extract_json_from_text(str(sql_response.data))
+            result = extract_json_from_text(str(sql_response.output))
             
                         # Add colored output for generated SQL
             print(f"\n{Colors.GREEN_BG}Generated SQL:{Colors.RESET}")

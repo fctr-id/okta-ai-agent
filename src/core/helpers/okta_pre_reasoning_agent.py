@@ -149,7 +149,7 @@ async def expand_query(question: str) -> dict:
     """Expand a user query with additional context"""
     try:
         response = await reasoning_agent.run(question)
-        return extract_json_from_text(str(response.data))
+        return extract_json_from_text(str(response.output))
     except Exception as e:
         raise ValueError(f"Failed to expand query: {str(e)}")
 
@@ -167,12 +167,12 @@ async def main():
             response = await reasoning_agent.run(question)
             print("Raw response type:", type(response))
             print("Raw response:", response)
-            print("Response data type:", type(response.data))
-            print("Response data:", response.data)
+            print("Response data type:", type(response.output))
+            print("Response data:", response.output)
             print("\nReasoning Agent Response:")
             print("-" * 40)
             print(response)
-            #print(json.dumps(json.loads(str(response.data)), indent=2))
+            #print(json.dumps(json.loads(str(response.output)), indent=2))
             
         except Exception as e:
             print(f"\nError: {str(e)}")

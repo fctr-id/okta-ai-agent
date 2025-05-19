@@ -5,7 +5,7 @@
             <div :class="['search-container', hasResults ? 'moved' : '']">
                 <!-- Title with animated gradient underline -->
                 <div :class="['title-wrapper', hasResults ? 'hidden' : '']">
-                    <h1 class="main-title">How can I help you?</h1>
+                    <h1 class="main-title">I'm Tako. How can I help you?</h1>
                     <div class="title-underline"></div>
                 </div>
 
