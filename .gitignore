@@ -63,3 +63,4 @@ docs/pydantic_ai_mcp.md
 
 scripts/okta_sdk_client_code_tests.py
 scripts/*.json
+*.txt
