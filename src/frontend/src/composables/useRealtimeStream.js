@@ -46,10 +46,10 @@ export function useRealtimeStream() {
     execution.currentStepIndex = -1
     execution.results = null
     
-    console.log('Starting realtime process with query:', query)
+    //console.log('Starting realtime process with query:', query)
 
     try {
-      console.log('Sending request to /api/realtime/start-process')
+      //console.log('Sending request to /api/realtime/start-process')
       const response = await fetch('/api/realtime/start-process', {
         method: 'POST',
         headers: {
@@ -59,12 +59,12 @@ export function useRealtimeStream() {
         body: JSON.stringify({ query: query.trim() })
       })
       
-      console.log('Response status:', response.status)
+      //console.log('Response status:', response.status)
 
       // Handle non-OK responses more explicitly
       if (!response.ok) {
         const errorText = await response.text()
-        console.error('Error response body:', errorText)
+        //console.error('Error response body:', errorText)
         
         // Try to parse as JSON, fall back to text if that fails
         let errorMessage
@@ -80,11 +80,11 @@ export function useRealtimeStream() {
 
       // Parse successful response
       const data = await response.json()
-      console.log('Process started successfully:', data)
+      //console.log('Process started successfully:', data)
       processId.value = data.process_id
       
       if (data.plan) {
-        console.log('Plan received with initial response')
+        //console.log('Plan received with initial response')
         // Initialize execution state with the plan
         execution.planGenerated = true
         execution.steps = data.plan.steps.map((step, index) => ({
@@ -127,7 +127,7 @@ export function useRealtimeStream() {
       
       // Create new EventSource connection
       const eventSourceUrl = `/api/realtime/stream-updates/${id}`
-      console.log('Connecting to EventSource:', eventSourceUrl)
+      //console.log('Connecting to EventSource:', eventSourceUrl)
       
       // Create EventSource - cookies will be sent automatically
       const eventSource = new EventSource(eventSourceUrl, {
@@ -136,48 +136,48 @@ export function useRealtimeStream() {
       activeEventSource.value = eventSource
       isStreaming.value = true
       
-      console.log('EventSource connection created')
+      //console.log('EventSource connection created')
       
       // Handle connection open event
       eventSource.onopen = () => {
-        console.log('EventSource connection opened')
+        //console.log('EventSource connection opened')
         execution.status = execution.planGenerated ? 'executing' : 'planning'
       }
       
       // Set up event handlers for different event types
       eventSource.addEventListener('plan_status', (event) => {
-        console.log('Received plan_status event:', event.data)
+        //console.log('Received plan_status event:', event.data)
         handlePlanStatusEvent(event)
       })
       
       eventSource.addEventListener('phase_update', (event) => {
-        console.log('Received phase_update event:', event.data)
+        //console.log('Received phase_update event:', event.data)
         handlePhaseUpdateEvent(event)
       })
       
       eventSource.addEventListener('step_status_update', (event) => {
-        console.log('Received step_status_update event:', event.data)
+        //console.log('Received step_status_update event:', event.data)
         handleStepStatusEvent(event)
       })
       
       eventSource.addEventListener('final_result', (event) => {
-        console.log('Received final_result event:', event.data)
+        //console.log('Received final_result event:', event.data)
         handleFinalResultEvent(event)
       })
       
       eventSource.addEventListener('plan_error', (event) => {
-        console.log('Received plan_error event:', event.data)
+        //console.log('Received plan_error event:', event.data)
         handleErrorEvent(event)
       })
       
       eventSource.addEventListener('plan_cancelled', (event) => {
-        console.log('Received plan_cancelled event:', event.data)
+        //console.log('Received plan_cancelled event:', event.data)
         handleCancelledEvent(event)
       })
       
       // Handle general messages (some backends send untyped messages)
       eventSource.onmessage = (event) => {
-        console.log('Received generic message event:', event.data)
+        //console.log('Received generic message event:', event.data)
         try {
           const data = JSON.parse(event.data)
           // Handle based on message content structure
@@ -214,7 +214,7 @@ export function useRealtimeStream() {
     try {
       const data = JSON.parse(event.data)
       
-      console.log('Processing plan status event:', data)
+      //console.log('Processing plan status event:', data)
       
       // Handle rich plan details when available
       if (data.plan_details) {
@@ -246,7 +246,7 @@ export function useRealtimeStream() {
       const handleStepStatusEvent = (event) => {
         try {
           const data = JSON.parse(event.data);
-          console.log('Processing step status update:', data);
+          //console.log('Processing step status update:', data);
           
           const stepIndex = data.step_index;
           
@@ -281,7 +281,7 @@ export function useRealtimeStream() {
             } else if (data.status === 'completed') {
               // Handle completion status outside the 'running' condition
               setTimeout(() => {
-                console.log(`Completing step ${stepIndex} after delay`);
+                //console.log(`Completing step ${stepIndex} after delay`);
                 execution.steps[stepIndex].status = 'completed';
                 if (data.result_summary) {
                   execution.steps[stepIndex].result_summary = data.result_summary;
@@ -310,7 +310,7 @@ export function useRealtimeStream() {
     const handleFinalResultEvent = (event) => {
       try {
         const data = JSON.parse(event.data);
-        console.log('Processing final result:', data);
+        //console.log('Processing final result:', data);
   
         const agentDisplayMetadata = data.display_hints || {};
   
@@ -327,7 +327,7 @@ export function useRealtimeStream() {
   
         // Close the connection
         if (activeEventSource.value) {
-          console.log('Closing EventSource after receiving final result');
+          //console.log('Closing EventSource after receiving final result');
           activeEventSource.value.close();
           activeEventSource.value = null;
         }
@@ -373,7 +373,7 @@ export function useRealtimeStream() {
       
       // Close the connection
       if (activeEventSource.value) {
-        console.log('Closing EventSource after error event')
+        //console.log('Closing EventSource after error event')
         activeEventSource.value.close()
         activeEventSource.value = null
       }
@@ -392,7 +392,7 @@ export function useRealtimeStream() {
     
     // Close the connection
     if (activeEventSource.value) {
-      console.log('Closing EventSource after cancellation')
+      //console.log('Closing EventSource after cancellation')
       activeEventSource.value.close()
       activeEventSource.value = null
     }
@@ -429,7 +429,7 @@ export function useRealtimeStream() {
     }
     
     try {
-      console.log('Cancelling process:', processId.value)
+      //console.log('Cancelling process:', processId.value)
       
       const response = await fetch(`/api/realtime/cancel/${processId.value}`, {
         method: 'POST',
@@ -437,9 +437,9 @@ export function useRealtimeStream() {
       })
       
       if (!response.ok) {
-        console.error('Failed to cancel process:', response.statusText)
+        //console.error('Failed to cancel process:', response.statusText)
       } else {
-        console.log('Process cancelled successfully')
+        //console.log('Process cancelled successfully')
       }
       
       execution.status = 'cancelled'
@@ -448,12 +448,12 @@ export function useRealtimeStream() {
       
       // Close the connection
       if (activeEventSource.value) {
-        console.log('Closing EventSource after cancellation')
+        //console.log('Closing EventSource after cancellation')
         activeEventSource.value.close()
         activeEventSource.value = null
       }
     } catch (err) {
-      console.error('Error cancelling process:', err)
+      //console.error('Error cancelling process:', err)
     }
   }
   
@@ -541,7 +541,7 @@ export function useRealtimeStream() {
    */
   const cleanup = () => {
     if (activeEventSource.value) {
-      console.log('Cleaning up EventSource connection')
+      //console.log('Cleaning up EventSource connection')
       activeEventSource.value.close()
       activeEventSource.value = null
     }
@@ -551,7 +551,7 @@ export function useRealtimeStream() {
   // Automatically clean up EventSource when process ID changes to null
   watch(() => processId.value, (newVal) => {
     if (!newVal && activeEventSource.value) {
-      console.log('Process ID reset, cleaning up EventSource')
+      //console.log('Process ID reset, cleaning up EventSource')
       cleanup()
     }
   })
