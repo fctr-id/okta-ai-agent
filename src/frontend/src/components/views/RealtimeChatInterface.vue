@@ -47,9 +47,8 @@
             <!-- Search input -->
             <v-text-field v-model="userInput" @keydown.enter.prevent="handleQuerySubmit"
               placeholder="Ask a question about your Okta tenant..." variant="plain" color="#4C64E2"
-              bg-color="transparent" hide-details class="search-input" :clearable="true" :disabled="isProcessing" />
-
-            <!-- Send button -->
+              bg-color="transparent" hide-details class="search-input" :clearable="true" :disabled="isProcessing"           
+              </v-text-field>
             <v-tooltip text="Send query" location="top">
               <template v-slot:activator="{ props }">
                 <button v-bind="props" class="action-btn send-btn" :disabled="!canSubmitQuery" :loading="isSubmitting"
@@ -99,8 +98,8 @@
           class="results-container mt-8" @scroll="handleScroll">
 
           <div class="content-wrapper">
-            <!-- Progress Area with Stepper -->
-            <div v-if="showProgressDisplayArea" class="unified-progress-area">
+            <!-- Progress Area with Stepper - Show for both processing and errors -->
+            <div v-if="showProgressDisplayArea || (rtExecutionStatus === 'error' && rtSteps.length > 0)" class="unified-progress-area">
               <div :class="['stepper-container-wrapper', { 'expanded': hasStepperExpanded }]">
                 <v-stepper v-model="currentProgressStepId" class="elevation-0 transparent-stepper" flat hide-actions>
                   <v-stepper-header>
@@ -121,23 +120,25 @@
                     </transition-group>
                   </v-stepper-header>
                 </v-stepper>
+                
+                <!-- Error message under stepper -->
+                <div v-if="rtExecutionStatus === 'error' && rtError" 
+                     class="error-details mt-3 mx-4 mb-3 pa-3 rounded bg-red-lighten-5">
+                  <div class="d-flex align-center text-red-darken-2">
+                    <v-icon color="error" class="me-2">mdi-alert-circle-outline</v-icon>
+                    <span class="font-weight-medium">Step failed: {{ getFailedStepName() }}</span>
+                  </div>
+                  <div class="error-message mt-2">{{ rtError }}</div>
+                </div>
               </div>
             </div>
 
-            <!-- Final Results/Error/Cancelled Display -->
-            <div v-if="showFinalOutcomeArea" class="full-width-section">
+            <!-- Final Results/Cancelled Display (only show when not error) -->
+            <div v-if="showFinalOutcomeArea && rtExecutionStatus !== 'error'" class="full-width-section">
               <div v-if="rtResults" class="final-results mt-4">
                 <!--<h3 class="text-subtitle-1 mb-3 px-4">Results</h3>-->
                 <data-display :content="rtResults.content" :type="determineDisplayType(rtResults.display_type)"
                   :metadata="rtResults.metadata || {}" />
-              </div>
-
-              <div v-if="rtExecutionStatus === 'error' && rtError"
-                class="error-container mt-3 pa-3 rounded bg-red-lighten-5">
-                <div class="d-flex align-center text-red-darken-2">
-                  <v-icon color="error" class="me-2">mdi-alert-circle-outline</v-icon>
-                  <span class="font-weight-medium">{{ rtError }}</span>
-                </div>
               </div>
 
               <div v-if="rtExecutionStatus === 'cancelled'"
@@ -212,6 +213,8 @@
     </main>
   </AppLayout>
 </template>
+
+
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
@@ -295,6 +298,18 @@ const handleQuerySubmit = async () => {
   }
 };
 
+
+const getFailedStepName = () => {
+  const failedStep = rtSteps.value?.find(step => 
+    step.status === 'error' || step.operation_status === 'error'
+  );
+  
+  if (failedStep) {
+    return failedStep.tool_name || `Step ${failedStep.step_index + 1}`;
+  }
+  return 'Unknown step';
+};
+
 const hasStepperExpanded = computed(() => {
   // Expand the stepper container when:
   // 1. Plan has been generated AND
@@ -364,16 +379,17 @@ const progressSteps = computed(() => {
   // Add the new Generating Code step when plan is generated
   if (rtPlanGenerated.value) {
     const isGeneratingCode = rtExecutionStatus.value === 'generating_code';
-    const hasStepsStarted = rtSteps.value?.some(step => step.status === 'active' || step.status === 'in_progress' ||
-      step.status === 'running' || step.status === 'completed');
-
+    // Check if any step has started or completed - this works even without phase="executing"
+    const hasStepsStarted = rtSteps.value?.some(step => 
+      step.status === 'active' || 
+      step.status === 'in_progress' ||
+      step.status === 'running' || 
+      step.status === 'completed');
+  
     items.push({
       id: GENERATING_CODE_ID,
       title: 'generating_code',
-      status: isGeneratingCode ? 'active' :
-        (hasStepsStarted || rtExecutionStatus.value === 'executing' ||
-          rtExecutionStatus.value === 'processing_final_results' ||
-          ['completed', 'error', 'cancelled'].includes(rtExecutionStatus.value) ? 'completed' : 'pending'),
+      status: isGeneratingCode && !hasStepsStarted ? 'active' : 'completed',
     });
   }
 
@@ -1254,6 +1270,20 @@ watch(showToolsModal, (newVal) => {
 .fade-up-leave-to {
   opacity: 0;
   transform: translateY(20px);
+}
+
+
+/* Add these styles */
+.error-details {
+  border-left: 3px solid #ef4444;
+  background-color: #fef2f2;
+}
+
+.error-message {
+  font-size: 14px;
+  color: #b91c1c;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 /* Responsive styles */

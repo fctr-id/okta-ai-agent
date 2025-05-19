@@ -694,97 +694,174 @@ watch(() => props.content, (newContent) => {
     border-top: 1px solid #eef1ff;
 }
 
-/* Enhanced markdown styling with better padding */
+/* Compact markdown styling with consistent background */
 .markdown-content {
-    padding: 16px 24px;
-    /* Increased overall padding */
-    line-height: 1.6;
-    font-size: 14px;
-    color: #4b5563;
-    width: 100%;
-    overflow-wrap: break-word;
+  padding: 16px;
+  line-height: 1.5;
+  font-size: 14px;
+  color: #374151;
+  width: 100%;
+  overflow-wrap: break-word;
+  background-color: #f8fafc; /* Consistent light background for entire content */
+  border-radius: 8px;
+  border: 1px solid #edf2f7;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
 }
 
-/* Base spacing for all elements */
-.markdown-content :deep(p),
-.markdown-content :deep(h3),
-.markdown-content :deep(h4),
-.markdown-content :deep(ul),
-.markdown-content :deep(ol),
-.markdown-content :deep(pre) {
-    margin-bottom: 1rem;
-    padding-left: 4px;
-    /* Small indent for all content */
+/* Headings with modern styling */
+.markdown-content :deep(h1), 
+.markdown-content :deep(h2), 
+.markdown-content :deep(h3), 
+.markdown-content :deep(h4) {
+  margin: 1rem 0 0.5rem;
+  font-weight: 500;
+  color: #1f2937;
+  line-height: 1.3;
 }
 
-/* Top-level headers like "Results" */
 .markdown-content :deep(h3) {
-    font-size: 1.25rem;
-    font-weight: 500;
-    color: #374151;
-    margin-top: 0;
-    margin-bottom: 1.25rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #f1f5f9;
+  font-size: 1.15rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-/* User header styling */
-.markdown-content :deep(p):first-of-type {
-    font-weight: 500;
-    font-size: 1.1rem;
-    color: #374151;
-    background-color: #f9fafb;
-    padding: 12px 16px;
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
+/* Tighter paragraph and list spacing */
+.markdown-content :deep(p), 
+.markdown-content :deep(ul), 
+.markdown-content :deep(ol) {
+  margin-bottom: 0.6rem;
+  margin-top: 0.4rem;
 }
 
-/* Section headers like "Authentication Factors (5)" */
-.markdown-content :deep(p) strong {
-    display: block;
-    font-size: 1.05rem;
-    font-weight: 500;
-    margin: 1.5rem 0 1rem;
-    color: #374151;
-    padding-bottom: 0.3rem;
-    border-bottom: 1px solid #f1f5f9;
+/* Compact lists without extra spacing */
+.markdown-content :deep(ul), 
+.markdown-content :deep(ol) {
+  padding-left: 1.25rem;
+  margin-top: 0.3rem;
+  margin-bottom: 0.5rem;
 }
 
-/* Factor blocks ("signed_nonce", "email", etc) */
+/* Fix spacing between main list items (users) */
+.markdown-content :deep(ul > li) {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* First user shouldn't have top margin */
+.markdown-content :deep(ul > li:first-child) {
+  margin-top: 0;
+}
+
+/* Fix nested list spacing */
+.markdown-content :deep(ul ul),
+.markdown-content :deep(ul ol) {
+  margin-top: 0.1rem;
+  margin-bottom: 0;
+  padding-left: 1rem;
+}
+
+/* Reduce spacing in nested list items */
+.markdown-content :deep(li li) {
+  margin: 0.1rem 0;
+}
+
+/* Default list item spacing */
+.markdown-content :deep(li) {
+  margin-bottom: 0.2rem;
+  line-height: 1.4;
+}
+
+.markdown-content :deep(li:last-child) {
+  margin-bottom: 0;
+}
+
+/* User listing specific styling */
+.markdown-content :deep(li strong) {
+  display: inline-block;
+  padding-bottom: 0.1rem;
+}
+
+/* Modern code styling - slightly darker background to stand out */
+.markdown-content :deep(code) {
+  background: #f1f5f9;
+  padding: 0.2em 0.4em;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Courier New', monospace;
+  font-size: 0.9em;
+  color: #4C64E2;
+  border: 1px solid rgba(76, 100, 226, 0.1);
+}
+
 .markdown-content :deep(pre) {
-    margin-left: 12px;
-    /* Indent factor blocks */
-    margin-bottom: 1.25rem;
+  background: #f1f5f9;
+  padding: 0.8em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.8em 0;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
-/* First level of indentation */
-.markdown-content :deep(pre) code {
-    display: block;
-    padding-left: 16px;
-    border-left: 2px solid #e5e7eb;
+/* Enhanced table styling */
+.markdown-content :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+  font-size: 0.95em;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-/* Factor name styling */
-.markdown-content :deep(pre) strong {
-    color: #4C64E2;
-    font-weight: 500;
-    display: block;
-    margin-left: -8px;
-    /* Pull factor names slightly left */
-    margin-bottom: 0.5rem;
+.markdown-content :deep(th) {
+  background-color: #f1f5f9;
+  font-weight: 500;
+  color: #4b5563;
+  border: 1px solid #e5e7eb;
+  padding: 8px 10px;
 }
 
-/* Nested attributes (key-value pairs) */
-.markdown-content :deep(pre) code {
-    line-height: 1.6;
+.markdown-content :deep(td) {
+  border: 1px solid #e5e7eb;
+  padding: 8px 10px;
+  background-color: #fff;
 }
 
-/* Furthest nested level (like Profile items) */
-.markdown-content :deep(pre) code em {
-    display: block;
-    padding-left: 16px;
-    border-left: 1px solid #e5e7eb;
-    font-style: normal;
+/* Remove special background for first paragraph */
+.markdown-content :deep(p):first-of-type {
+  font-weight: 500;
+  padding: 0;
+  margin-bottom: 1rem;
+  border: none;
+  background-color: transparent;
+}
+
+.markdown-content :deep(p) strong {
+  font-weight: 600;
+  color: #1f2937;
+  display: block;
+  margin-top: 0.8rem;
+  margin-bottom: 0.3rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+/* Fix adjacent list spacing */
+.markdown-content :deep(ul) + :deep(p),
+.markdown-content :deep(ol) + :deep(p) {
+  margin-top: 0.6rem;
+}
+
+/* Clean links */
+.markdown-content :deep(a) {
+  color: #4C64E2;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.markdown-content :deep(a:hover) {
+  text-decoration: underline;
+  color: #3b4fc1;
 }
 
 /* Container when inside cards or boxes */

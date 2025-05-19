@@ -243,46 +243,64 @@ export function useRealtimeStream() {
   /**
    * Handle step status update events
    */
-    const handleStepStatusEvent = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      console.log('Processing step status update:', data);
-      
-      const stepIndex = data.step_index;
-      if (stepIndex >= 0 && stepIndex < execution.steps.length) {
-        // Important: Map 'running' to 'active' (not 'in_progress')
-        if (data.status === 'running') {
-          // This needs to be 'active' to match the template condition
-          execution.steps[stepIndex].status = 'active';
-          execution.currentStepIndex = stepIndex;
+      const handleStepStatusEvent = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('Processing step status update:', data);
           
-          // For completion status
-          if (data.status === 'completed') {
-            // Store the completion data for delayed execution
-            setTimeout(() => {
-              console.log(`Completing step ${stepIndex} after delay`);
-              execution.steps[stepIndex].status = 'completed';
-              if (data.result_summary) {
-                execution.steps[stepIndex].result_summary = data.result_summary;
+          const stepIndex = data.step_index;
+          
+          // First check if this is an error status update
+          if (data.operation_status === 'error') {
+            // Mark the step as error immediately
+            if (stepIndex >= 0 && stepIndex < execution.steps.length) {
+              execution.steps[stepIndex].status = 'error';
+              execution.steps[stepIndex].error = true; // Explicitly set error flag for v-stepper-item
+              execution.steps[stepIndex].error_message = data.error_message;
+              
+              // Also update execution status to prevent finalizing steps from going green
+              execution.status = 'error';
+              
+              // Mark any remaining future steps as cancelled/disabled
+              for (let i = stepIndex + 1; i < execution.steps.length; i++) {
+                if (execution.steps[i].status === 'pending' || execution.steps[i].status === 'active') {
+                  execution.steps[i].status = 'pending';
+                  execution.steps[i].disabled = true;
+                }
               }
-            }, 0); // Increase to 3 seconds for better visibility
-            
+            }
             return;
           }
-        } else {
-          // For other statuses, map correctly
-          const statusMap = {
-            'running': 'active',
-            'completed': 'completed',
-            'error': 'error'
-          };
-          execution.steps[stepIndex].status = statusMap[data.status] || data.status;
+          
+          // Handle normal status updates for valid steps
+          if (stepIndex >= 0 && stepIndex < execution.steps.length) {
+            // Map statuses correctly
+            if (data.status === 'running') {
+              execution.steps[stepIndex].status = 'active';
+              execution.currentStepIndex = stepIndex;
+            } else if (data.status === 'completed') {
+              // Handle completion status outside the 'running' condition
+              setTimeout(() => {
+                console.log(`Completing step ${stepIndex} after delay`);
+                execution.steps[stepIndex].status = 'completed';
+                if (data.result_summary) {
+                  execution.steps[stepIndex].result_summary = data.result_summary;
+                }
+              }, 0);
+            } else {
+              // For other statuses, map correctly
+              const statusMap = {
+                'running': 'active',
+                'completed': 'completed',
+                'error': 'error'
+              };
+              execution.steps[stepIndex].status = statusMap[data.status] || data.status;
+            }
+          }
+        } catch (err) {
+          console.error('Error processing step status event:', err);
         }
       }
-    } catch (err) {
-      console.error('Error processing step status event:', err);
-    }
-  }
 
 
 
