@@ -81,7 +81,7 @@ async def list_applications(client, q=None, filter=None, limit=None, after=None,
 
     ## Example Usage
     ```python
-    query_params = {"limit": 200, "expand": "user"}
+    query_params = {"limit": 200}
     
     if q:
         query_params["q"] = q
