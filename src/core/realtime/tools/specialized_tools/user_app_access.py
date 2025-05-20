@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 )
 async def can_user_access_application(client, user_identifier=None, group_identifier=None, app_identifier=None, ip_address=None):
     """
-    #SPECIAL TOOL: Use this single use special tool call to answer the questions like : "Can a user or group access a specific application?", "Can user X access application Y?"
+    #SPECIAL TOOL: Use this single use special tool call to answer the questions like : "Can a user or group access a specific application?", "Can user X access application Y?". No other tool is needed to answer this question.
 
     # Tool Documentation: Can User Access Application
 
