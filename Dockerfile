@@ -1,5 +1,5 @@
 # Stage 1: Build the frontend
-FROM node:18-slim AS frontend-builder
+FROM node:24-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
