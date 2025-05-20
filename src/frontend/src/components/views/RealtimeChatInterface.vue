@@ -45,7 +45,7 @@
             </transition>
 
             <!-- Search input -->
-            <v-text-field v-model="userInput" @keydown.enter.prevent="handleQuerySubmit"
+            <v-text-field v-model="userInput" @keydown="handleKeyDown" @keydown.enter.prevent="handleQuerySubmit"
               placeholder="Ask a question about your Okta tenant..." variant="plain" color="#4C64E2"
               bg-color="transparent" hide-details class="search-input" :clearable="true" :disabled="isProcessing"           
               </v-text-field>
@@ -60,9 +60,19 @@
           </div>
         </div>
 
+
+
         <!-- Suggestions -->
         <transition name="fade-up">
           <div v-if="messages.length === 0 && !isProcessing" class="suggestions-wrapper">
+            <!-- Add note about case-sensitivity -->
+            <div class="case-sensitivity-note mt-n8">
+              <div class="note-content">
+                <v-icon color="info" size="small" class="note-icon">mdi-information</v-icon>
+                <span>Note: Application and group names are case-sensitive. Please enter them exactly as they appear in Okta.</span>
+              </div>
+            </div>
+            
             <div class="tools-button-container">
               <v-btn
                 color="primary"
@@ -77,7 +87,11 @@
             </div>
           </div>
         </transition>
+
+
       </div>
+
+      
 
       <!-- Display User question -->
       <transition name="fade">
@@ -91,6 +105,22 @@
           </div>
         </div>
       </transition>
+
+      
+          <!-- Add this after the search container - ERROR -->
+        <transition name="fade">
+          <div v-if="rtError" class="error-container mt-4">
+            <v-alert
+              type="error"
+              variant="tonal"
+              border="start"
+              class="mx-auto"
+              style="max-width: 800px;"
+            >
+              {{ rtError }}
+            </v-alert>
+          </div>
+        </transition>
 
       <!-- Unified Progress Display OR Final Outcome Area -->
       <transition name="fade-up">
@@ -217,7 +247,7 @@
 
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import AppLayout from '@/components/layout/AppLayout.vue';
 import DataDisplay from '@/components/messages/DataDisplay.vue';
 import { useRealtimeStream } from '@/composables/useRealtimeStream';
@@ -249,6 +279,13 @@ const availableTools = ref([]);
 const isLoadingTools = ref(false);
 const toolSearch = ref('');
 
+// Add message history management
+const CONFIG = {
+  MAX_HISTORY: 5
+};
+const messageHistory = ref([]);
+const historyIndex = ref(-1);
+
 const exampleQueries = ref([
   'Find user dan@fctr.io and fetch factors',
   'List all users created last month',
@@ -258,6 +295,18 @@ const exampleQueries = ref([
 const canSubmitQuery = computed(() => userInput.value.trim().length > 0 && !isProcessing.value);
 const canCancelQuery = computed(() => isProcessing.value && rtProcessId.value && !isCancelling.value && rtExecutionStatus.value !== 'completed' && rtExecutionStatus.value !== 'error' && rtExecutionStatus.value !== 'cancelled');
 
+// Load saved history on component mount
+onMounted(() => {
+  try {
+    const savedHistory = localStorage.getItem('realtimeMessageHistory');
+    if (savedHistory) {
+      messageHistory.value = JSON.parse(savedHistory);
+    }
+  } catch (error) {
+    console.error('Failed to load realtime message history:', error);
+    localStorage.removeItem('realtimeMessageHistory');
+  }
+});
 
 const formatTime = (timestamp) => {
   if (!timestamp) return '';
@@ -272,9 +321,57 @@ const insertExampleQuery = (query) => {
   });
 };
 
+// Update the message history when sending a query
+const updateMessageHistory = (query) => {
+  if (!query || !query.trim()) return;
+  
+  const sanitizedQuery = query.trim();
+  const existingIndex = messageHistory.value.indexOf(sanitizedQuery);
+
+  if (existingIndex === -1) {
+    // New message - add to front of history
+    messageHistory.value = [sanitizedQuery, ...messageHistory.value.slice(0, CONFIG.MAX_HISTORY - 1)];
+  } else {
+    // Existing message - move to front of history
+    messageHistory.value = [
+      sanitizedQuery,
+      ...messageHistory.value.slice(0, existingIndex),
+      ...messageHistory.value.slice(existingIndex + 1)
+    ];
+  }
+
+  // Save to localStorage and reset index
+  localStorage.setItem('realtimeMessageHistory', JSON.stringify(messageHistory.value));
+  historyIndex.value = -1;
+};
+
+// Add keyboard navigation handler
+const handleKeyDown = (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    handleQuerySubmit();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (historyIndex.value < messageHistory.value.length - 1) {
+      historyIndex.value++;
+      userInput.value = messageHistory.value[historyIndex.value];
+    }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (historyIndex.value > -1) {
+      historyIndex.value--;
+      userInput.value = historyIndex.value === -1 ? '' : messageHistory.value[historyIndex.value];
+    }
+  }
+};
+
 const handleQuerySubmit = async () => {
   if (!canSubmitQuery.value) return;
   const query = userInput.value.trim();
+  
+  // Update message history with this query
+  updateMessageHistory(query);
+  
   messages.value = [
     { role: 'user', content: query, timestamp: new Date() },
   ];
@@ -287,7 +384,7 @@ const handleQuerySubmit = async () => {
     } else {
       console.error("Failed to start process, no process ID received.");
       rtExecutionStatus.value = 'error';
-      rtError.value = "Failed to initiate the query process.";
+      rtError.value = "Error! Please check the backend and try again.";
     }
   } catch (error) {
     console.error('Error submitting query:', error);
@@ -297,7 +394,6 @@ const handleQuerySubmit = async () => {
     isSubmitting.value = false;
   }
 };
-
 
 const getFailedStepName = () => {
   const failedStep = rtSteps.value?.find(step => 
@@ -326,6 +422,7 @@ const resetInterface = async () => {
   cleanup();
   isCancelling.value = false;
   autoScroll.value = true;
+  // Don't clear history when resetting interface
 };
 
 const handleCancelExecution = async () => {
@@ -474,7 +571,6 @@ watch([rtExecutionStatus, rtSteps, rtResults, rtError, rtPlanGenerated, rtCurren
 watch(messages, () => {
   scrollToBottom();
 }, { deep: true });
-
 
 // Filter tools based on search
 const filteredTools = computed(() => {
@@ -885,7 +981,7 @@ watch(showToolsModal, (newVal) => {
 
 .error-container,
 .cancelled-container {
-  border: 1px solid currentColor;
+  border: 0px solid currentColor;
 }
 
 /* Stepper styles */
@@ -1329,4 +1425,29 @@ watch(showToolsModal, (newVal) => {
     font-size: 24px;
   }
 }
+
+/* Case sensitivity note styles */
+.case-sensitivity-note {
+  background-color: #e8f4fd;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 24px;
+  border-left: 3px solid #42a5f5;
+  max-width: 800px;
+  width: 100%;
+}
+
+.note-content {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  color: #0277bd;
+  line-height: 1.4;
+}
+
+.note-icon {
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
 </style>

@@ -29,7 +29,8 @@
 
                                     <div class="sync-info">
                                         <v-icon class="sync-icon" size="small">mdi-update</v-icon>
-                                        <span>Last Updated: {{ getLastSyncTime }}</span>
+                                        <span v-if="isRealtimeMode">Realtime Mode</span>
+                                        <span v-else>Last Updated: {{ getLastSyncTime }}</span>
                                     </div>
                                 </div>
 
@@ -65,6 +66,7 @@
 import { marked } from 'marked'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
+import { isRealtimeMode } from '@/state/chatMode.js'
 
 const clearSearch = () => {
     search.value = ''

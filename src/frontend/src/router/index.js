@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import ChatInterface from '@/components/ChatInterface.vue'
 import ChatInterfaceV2 from '@/components/ChatInterfaceV2.vue'
-import ChatContainer from '@/components/views/ChatContainer.vue'
+import ChatContainer from '@/components/views/chatContainer.vue'
 import { useAuth } from '@/composables/useAuth'
 
 // Get auth instance
