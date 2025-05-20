@@ -7,7 +7,10 @@
                     <img src="@/assets/fctr-logo.png" alt="Okta Logo" height="24" />
                     <div class="brand-divider"></div>
                     <div class="title-with-badge">
-                        <span>AI Agent for Okta</span>
+                        <div class="tako-title-container">
+                            <span class="tako-name">Tako AI</span>
+                            <!--<span class="tako-subtitle">AI Agent for Okta</span>-->
+                        </div>
                         <div class="beta-badge">BETA</div>
                     </div>
                 </div>
@@ -158,11 +161,12 @@ const handleLogout = async () => {
 .beta-badge {
     background: var(--primary-light);
     color: var(--primary);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     padding: 4px 8px;
     border-radius: 6px;
     letter-spacing: 0.5px;
+    margin-top: -5px;
 }
 
 .logout-btn {
@@ -299,46 +303,90 @@ const handleLogout = async () => {
 }
 
 /* Mode toggle container */
+/* Mode toggle container */
 .mode-toggle {
-  display: flex;
-  align-items: center;
-  margin-right: 24px;
-  margin-left: auto;
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 5px 12px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.15);
+    margin-right: 12px;
+    transition: all 0.25s ease;
+    border: 1px solid rgba(76, 100, 226, 0.12);
+    position: relative;
+    overflow: hidden;
 }
 
-/* Mode labels */
+/* Add subtle gradient background */
+.mode-toggle::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg,
+            rgba(76, 100, 226, 0.03) 0%,
+            rgba(94, 114, 228, 0.05) 100%);
+    z-index: 0;
+}
+
+/* Ensure content shows above gradient */
+.mode-toggle>* {
+    position: relative;
+    z-index: 1;
+}
+
+.mode-toggle:hover {
+    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.25);
+    transform: translateY(-2px);
+    border-color: rgba(76, 100, 226, 0.2);
+}
+
+/* Mode labels with enhanced styling */
 .mode-label {
-  font-size: 13px;
-  font-weight: 500;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.25s ease;
+    padding: 3px 6px;
+    border-radius: 6px;
 }
 
 .mode-toggle .mode-label:first-child {
-  color: #6B63B5; /* Database color */
-  margin-right: 8px;
+    color: #6B63B5;
+    margin-right: 8px;
+    opacity: 0.7;
+}
+
+.mode-toggle .mode-label.active:first-child {
+    opacity: 1;
+    background: rgba(107, 99, 181, 0.1);
+    text-shadow: 0 0 10px rgba(107, 99, 181, 0.2);
 }
 
 .mode-toggle .mode-label:last-child {
-  color: #4C64E2; /* Realtime color */
-  margin-left: 8px;
+    color: #4C64E2;
+    margin-left: 8px;
+    opacity: 0.7;
 }
 
-/* Active label */
 .mode-toggle .mode-label.active {
-  font-weight: 600;
+    font-weight: 600;
+    opacity: 1;
+    background: rgba(76, 100, 226, 0.1);
+    text-shadow: 0 0 10px rgba(76, 100, 226, 0.2);
 }
 
 .v-switch__track {
-	display: inline-flex;
-	align-items: center;
-	font-size: 0.5rem;
-	padding: 0 5px;
-	background-color: #6B63B5 !important;
-	border-radius: 9999px;
-	height: 14px;
-	opacity: 0.6;
-	min-width: 36px;
-	cursor: pointer;
-	transition: 0.2s background-color cubic-bezier(0.4, 0, 0.2, 1);
+    display: inline-flex;
+    align-items: center;
+    font-size: 0.5rem;
+    padding: 0 5px;
+    background-color: #6B63B5 !important;
+    border-radius: 9999px;
+    height: 14px;
+    opacity: 0.6;
+    min-width: 36px;
+    cursor: pointer;
+    transition: 0.2s background-color cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* Add responsive styling */
@@ -381,5 +429,51 @@ const handleLogout = async () => {
     .app-card {
         padding: 30px 20px;
     }
+}
+
+.title-with-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.tako-title-container {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.tako-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary, #4C64E2);
+  letter-spacing: -0.5px;
+}
+
+.tako-subtitle {
+  font-size: 16px;
+  font-weight: 400;
+  color: #666;
+  opacity: 0.7;
+}
+
+
+
+/* For mobile responsiveness */
+@media (max-width: 600px) {
+  .tako-title-container {
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  
+  .tako-name {
+    font-size: 24px;
+  }
+  
+  .tako-subtitle {
+    font-size: 14px;
+  }
 }
 </style>
