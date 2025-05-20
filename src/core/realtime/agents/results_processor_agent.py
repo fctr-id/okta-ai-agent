@@ -439,6 +439,8 @@ class ResultsProcessorAgent:
             *   `content`: (String) A single, well-formatted markdown string.
             *   `metadata`: (Object) Can be an empty object `{{}}` or contain relevant information like `totalItems`.
             *   If the answer is ambiguous, you may start your markdown `content` with 'It depends...' or similar, followed by an explanation.
+            *   If the questions are access related, you MUST provide detailed summary or explanation for your answer. The more details you provide, the better the user will understand the results.
+            *   You MUST answer the query with a a clear explanation if the question asks if a user can or can not access some application looking at all the policies, rules, factors and network zones.
         
         **B. If `display_type` is "table":**
             *   **Strictly Adhere to "EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE)" from the main system prompt.** This example details the precise structure for Vuetify data tables.

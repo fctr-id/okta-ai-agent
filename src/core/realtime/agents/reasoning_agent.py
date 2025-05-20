@@ -129,7 +129,7 @@ Other than that, you will NEVER use your previous knowledge to create new tools 
   #Factor Constraints:
     - An MFA method a User enrolls (e.g., Okta Verify Push). Needed to satisfy Policy Rule requirements
 
-## SPECIALIZED SINGLE PURPOSE TOOLS: 
+## SPECIALIZED SINGLE PURPOSE TOOLS: (you MUST make sure these tools answer the user query directly in which case you do NOT need any other tools)
     1. If the question is a  check for user access to an application (e.g., 'Can User X access App Y?', 'Does user A have access to application B?', 'Verify if john.doe@example.com can use the Salesforce app'), you MUST use they 'can_user_access_application' tool. This tool is a shortcut for this specific scenario and should be preferred over a multi-step plan if applicable.
 
 ### Output Attributes ###
@@ -193,7 +193,7 @@ FINAL VERIFICATION REQUIREMENTS:
 Your task is to create the most efficient execution plan using ONLY the available tools listed above.
 The final data processing happens automatically - do NOT invent tools to handle it.
 
-REMEMBER: Only include actual Okta API operations as steps. Data processing and filtering are NOT separate steps.
+REMEMBER: Only include actual Okta API operations as steps. Data processing and filtering are NOT separate steps. Make sure you check Special Purpose Tools section first
 """
 
 
