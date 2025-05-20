@@ -4,9 +4,9 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.3.6-BETA)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.5.0-beta)</h2>
 
-Meet Tako, the first AI agent of its kind that lets you use natural language to query your Okta tenant's details. Built specifically for administrators, IAM managers, IT GRC teams and auditors, Tako leverages enterprise AI models to translate plain English questions into accurate data insights. Our vision is to evolve Tako into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
+Meet Tako, the first AI agent of its kind that offers dual capabilities - both powerful database queries and real-time API operations through natural language. Built specifically for administrators, IAM managers, IT GRC teams and auditors, Tako leverages enterprise AI models to translate plain English questions into accurate data insights from synced databases or direct Okta API interactions. Our vision is to evolve Tako into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
 <div align="center">
 <h3>A new web interface!</h3>
@@ -39,14 +39,21 @@ Meet Tako, the first AI agent of its kind that lets you use natural language to 
   - [Launching the Application](#launching-the-application)
   - [Tailing docker logs](#tailing-docker-logs)
   - [Access the Web Interface](#access-the-web-interface)
-- [🆕 What's New in v0.3.0](#-whats-new-in-v030)
+- [🆕 What's New in v0.5.0](#-whats-new-in-v050)
+  - [Dual Operation Modes](#dual-operation-modes)
+  - [When to Use Each Mode](#when-to-use-each-mode)
+  - [Realtime Agent Capabilities](#realtime-agent-capabilities)
+  - [Additional Improvements](#additional-improvements)
+  - [Available Tools for Realtime Mode](#available-tools-for-realtime-mode)
+  - [LLM Requirements for Realtime Mode](#llm-requirements-for-realtime-mode)
 - [🛡️ Security \& Privacy](#️-security--privacy)
-  - [Data Control](#data-control)
-    - [Technical Safeguards](#technical-safeguards)
+  - [Common Security Features](#common-security-features)
     - [Access Management](#access-management)
     - [AI Provider Options](#ai-provider-options)
-  - [Data Privacy](#data-privacy)
-  - [Data Model Overview](#data-model-overview)
+  - [Data Privacy by Mode](#data-privacy-by-mode)
+    - [Database Mode](#database-mode)
+    - [Realtime Mode](#realtime-mode)
+  - [Database Mode Data Model](#database-mode-data-model)
 - [⚠️ Good to Know](#️-good-to-know)
   - [Beta Release 🧪](#beta-release-)
   - [Security First 🛡️](#security-first-️)
@@ -60,21 +67,28 @@ Meet Tako, the first AI agent of its kind that lets you use natural language to 
 - [🆘 Need Help?](#-need-help)
 - [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
 - [👥 Contributors](#-contributors)
+- [💌 Thank You](#-thank-you)
 - [⚖️ Legal Stuff](#️-legal-stuff)
 
 &nbsp;
 
 ## ⚠️ BREAKING CHANGES ALERT
-> **IMPORTANT**: Version 0.3.5-beta contains breaking changes. If you are using v0.3.5-beta or above, or installed after 03/26/2025, you will need to completely redo your setup to ensure compatibility. (Delete sqlLite DB and start fresh)
+> **IMPORTANT**: Version 0.5.0-beta contains breaking changes. If you are using previous versions or installed before 05/20/2025, you will need to completely redo your setup to ensure compatibility with the new realtime capabilities.
+> 
+> **Docker users:** Stop containers, delete SQLite files (`rm sqlite_db/*.db`), then restart.
+> 
+> **Repository Clone users:** Delete database files (`rm *.db sqlite_db/*.db`), update dependencies (`pip install -r requirements.txt`), then restart.
 
 ## ✨ What's Special?
 
 * 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLite DB
 * 💡 **Natural Language Queries** - Talk to your Okta data with Tako using simple English
+* 🔄 **Real-time Operation Mode** - Direct API interaction for up-to-the-second data access
 * ⚡ **Multiple AI Providers** - Tako leverages the power of leading AI providers:
-     -  Google Vertex AI (Gemini 1.5 Pro)
-     -  OpenAI (GPT-4)
+     -  Google Vertex AI (Gemini 1.5 Pro, 2.5 Pro)
+     -  OpenAI (GPT-4, o4-mini)
      -  Azure OpenAI (GPT-4)
+     -  Anthropic (Claude 3.7 Sonnet)
      -  Ollama (Local, Self-hosted, use 32B+ models)
      -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
 * 🖥️ **Web Interface** - Modern UI for easier interaction with Tako and your Okta data
@@ -177,32 +191,70 @@ docker compose logs -f
 - 🌐 Open your browser and go to: https://localhost:8001 to start using Tako 🌐
 
 
-## 🆕 What's New in v0.3.0
+## 🆕 What's New in v0.5.0
 
-- **Web Interface** - Modern web UI for interacting with Tako, including:
-  - Natural language query capabilities
-  - Okta data synchronization controls
-  - Entity counts and statistics dashboard
-  - CSV export functionality for reporting and compliance
-  - Advanced filtering and sorting of results for quick data discovery
-- **Improved Data Sync Versioning & Maintenance** - Better versioning control and maintenance of synchronized data, reducing sync errors by 75%
-- **Enhanced Logging System** - More comprehensive and detailed logging for better troubleshooting and audit trails
-- **Improved Query Processing** - Tako now handles complex natural language queries with 40% more accurate responses
-- **Additional AI Provider Support** - Expanded model options including Google Vertex AI (Gemini 1.5 Pro) and self-hosted Ollama models
-- **Bug Fixes and Performance Improvements** - Enhanced stability and response quality for enterprise environments
-- **Major Sync Performance Improvements** - Up to 5x faster entity synchronization from Okta with parallel processing
+### Dual Operation Modes
+
+Tako now offers two powerful ways to interact with your Okta tenant:
+
+- **Database Mode** - The original query engine for fast insights from synced data
+- **Realtime Mode** - Direct API operations for up-to-the-second data access and complex workflows
+
+### When to Use Each Mode
+
+| Feature | Database Mode | Realtime Mode |
+|---------|--------------|---------------|
+| **Best for** | Historical analysis, reporting, bulk queries | Up-to-the-minute data, complex workflows |
+| **Data freshness** | Limited to last sync time | Always current (direct API) |
+| **Setup required** | Initial DB sync | None (instant access) |
+| **Security** | No Okta data sent to LLMs | Small samples sent for processing |
+| **Query complexity** | Better for simple queries | Handles multi-step operations |
+| **Performance** | Faster for large data sets | Better for targeted lookups |
+
+### Realtime Agent Capabilities
+
+- **Direct API Integration** - Tako now connects directly to Okta's API for real-time data access
+- **Intelligent Code Generation** - Safely generates and executes Python code based on your natural language queries
+- **Multi-step Processing** - Complex queries are broken down into manageable steps with intelligent results processing
+- **Command Line Interface** - New CLI script allows advanced queries without context limitations
+
+### Additional Improvements
+
+- **Anthropic Support** - Added Claude models as another AI provider option
+- **Custom HTTP Headers** - Support for LLM proxies and security solutions
+- **Enhanced Sync Process** - Better API-DB synchronization with cleaner logging
+- **Performance Optimizations** - Faster response times and improved stability
+
+### Available Tools for Realtime Mode
+
+| Category | Tools |
+|----------|-------|
+| **User** | list_users, get_user, list_user_groups, list_factors |
+| **Application** | list_applications, get_application, list_application_users, list_application_group_assignments |
+| **Group** | list_groups, list_group_users, list_assigned_applications_for_group |
+| **Events** | get_logs |
+| **Network & Policy** | list_policy_rules, list_network_zones, get_network_zone |
+| **DateTime Utilities** | get_current_time, parse_relative_time, format_date_for_query |
+
+### LLM Requirements for Realtime Mode
+
+> **IMPORTANT NOTICE**: Realtime agent functionality requires modern reasoning LLMs released after December 2024 to work effectively. Older models may not properly reason through complex API calls and data relationships.
+
+**Tested and Compatible Models:**
+- OpenAI - o4-mini
+- Google Vertex AI - Gemini Pro 2.5
+- Anthropic - Claude 3.7 Sonnet (with thinking)
+- DeepSeek v3
+
+Using older or less capable models may result in degraded performance or incorrect API calls when in realtime mode.
 
 ## 🛡️ Security & Privacy 
 
 <p align="center">
-  <img src="docs/okta_ai_agent_architecture.png" alt="Tako Architecture" width="800" height="auto">
+  <img src="docs/media/tako_dual_models.png" alt="Tako Architecture" width="800" height="auto">
 </p>
 
-### Data Control
-
-#### Technical Safeguards
-- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
-- **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
+### Common Security Features
 
 #### Access Management
 - **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
@@ -214,23 +266,22 @@ docker compose logs -f
   - Deploy Ollama locally for a completely air-gapped environment
   - Full control over model selection and data boundaries
 
-### Data Privacy 
+### Data Privacy by Mode
 
-- ✅ **What's Sent to LLMs**:
-  - User queries (user prompts)
-  - System prompts 
-- ❌ **What's Not Sent**:
-  - No Okta user data
-  - No organizational data
-  - No synced database contents
-  
+#### Database Mode
+- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
+- **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
+- **No Okta Data to LLMs**: Only user queries and system prompts are sent to AI providers
 
-⚠️ **Future Features Notice** ⚠️
+#### Realtime Mode
+- **Direct API Access**: Queries Okta API directly with no local storage
+- **Limited Data Sampling**: Small samples of query results are sent to AI providers for processing
+- **Sandboxed Execution**: All code runs in a secure, isolated environment
+- **Data Minimization**: Only data necessary to fulfill specific queries is processed
 
-Future Tako releases may introduce optional features that require sending Okta data to LLMs for summarization.
-All such changes will be clearly documented in release notes.
+### Database Mode Data Model
 
-### Data Model Overview 
+The following data model applies only when using Database Mode with a synced SQLite database:
 
 | Entity | Core Fields |
 |--------|-------------|
@@ -239,11 +290,6 @@ All such changes will be clearly documented in release notes.
 | Applications | `name`, `label`, `status`, `sign_on_mode`, `metadata_url`, `sign_on_url`, `audience`, `destination`, `signing_kid`, `username_template`, `username_template_type`, `admin_note`, `attribute_statements`, `honor_force_authn`, `hide_ios`, `hide_web`, `policy_id`, `settings`, `features`, `visibility`, `credentials`, `licensing`, `embedded_url`, `accessibility`, `user_name_template`, `app_settings`, `app_embedded_url` |
 | UserFactors | `factor_type`, `provider`, `status`, `email`, `phone_number`, `device_type`, `device_name`, `platform` |
 | Policies | `name`, `description`, `status`, `type` |
-
-
-The relationship data for users -> factors, users -> groups, users -> applications 
-
-Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
 
 > **Note**: You can view the data saved to your SQLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
 
@@ -292,11 +338,11 @@ Each entity includes: `tenant_id`, `okta_id`, `created_at`, `updated_at`
   - Progress tracking and analytics
 
 ### Phase 3: Real-time Operations
-- [ ] Live user summary
+- [x] Live user summary
   - Profile, factors & activity snapshots
   - Risk indicators
   - Session management
-- [ ] Event Log Analytics
+- [x] Event Log Analytics
   - Natural language log queries
   - Anomaly detection
   - Custom report generation
@@ -326,7 +372,9 @@ Before raising an issue with Tako, check:
 3. 🤖 AI provider setup
 4. 📊 `logs` directory
 
-Still having problems? Open an issue on GitHub or email support@fctr.io (response times may vary)
+Still having problems? Open an issue on GitHub, email support@fctr.io, or contact Dan directly:
+- Email: dan@fctr.io
+- Slack: dan@fctr.io
 
 ## 💡 Feature Requests & Ideas
 
@@ -335,6 +383,10 @@ Have an idea or suggestion? [Open a feature request](https://github.com/fctr-id/
 ## 👥 Contributors
 
 Interested in contributing? We'd love to have you! Reach out to dan@fctr.io
+
+## 💌 Thank You
+
+Thank you for all the interest shown by users who have reached out to us for support and feature requests. We greatly appreciate your feedback and enthusiasm for Tako. Your suggestions help us make the product better!
 
 ## ⚖️ Legal Stuff
 
