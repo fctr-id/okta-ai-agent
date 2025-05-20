@@ -170,10 +170,10 @@ class OktaRealtimeAgentCLI:
             return
             
         # Phase 2: Ask for confirmation
-        if not self._confirm_execution():
-            logger.info("User cancelled plan execution")
-            print("Execution cancelled.")
-            return
+        #if not self._confirm_execution():
+        #    logger.info("User cancelled plan execution")
+        #    print("Execution cancelled.")
+        #    return
             
         # Phase 3: Plan Execution
         await self._execute_plan(plan_result.plan, query)
