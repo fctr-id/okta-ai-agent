@@ -380,79 +380,103 @@ class ResultsProcessorAgent:
             results_str = results_str[:10000] + "... [truncated]"
         
         return f"""
-         # Results Processing Task
-                
-        ## Original User Query
-        {query}
-                
-        ## Execution Plan Reasoning
-        {plan_reasoning}
-                
-        ## Complete Execution Results
-        {results_str}
-                
-       ## Your Task
-        Process these results and format them to directly answer the user's query. 
-                
-        Return your response in JSON format with:
-        1. A display_type of either "markdown" or "table" (choose one)
-        2. Content formatted according to the chosen display type
+        # Role: Expert Data Formatter & Presenter
         
-        ## Display Type Selection Guidelines
-        Choose the most readable and useful display format. Consider the number of items, complexity of data, and the nature of the user's query.
-
-        **1. MARKDOWN is generally preferred for:**
-           *   **Small Datasets (5 or fewer items):**
-               *   When displaying **5 or fewer items** (e.g., users, groups, log entries, etc.).
-               *   If the items are verbose (e.g., detailed JSON objects like individual raw log events), present each item clearly within the markdown. This could be as formatted code blocks for each JSON, or a summarized list of key-value pairs for each item.
-           *   **Summaries & Narratives:**
-               *   Creating a brief summary with a few key points (typically less than 5 key points in total).
-               *   Presenting hierarchical or deeply nested information that does not naturally fit a flat tabular structure, especially when item count is low.
-               *   Creating a narrative explanation or answering "why" or "how" questions.
-               *   Showing statistical summaries or aggregated insights.
-
-        **2. TABLES are generally preferred for:**
-           *   **Larger Datasets of Entities (more than 5 items):**
-               *   When displaying **more than 5 items** that are lists of entities (e.g., users, applications, groups, log entries) where items share common attributes suitable for columns.
-           *   **Structured Comparison Focus:**
-               *   When the data, even if few items, primarily benefits from direct, column-by-column comparison, sorting, or clear columnar organization (e.g., a list of product SKUs, prices, and stock levels).
-           *   **User Request for Tabular Format:** If the user's query explicitly asks for a table or implies a need for columnar data (e.g., "list users with columns for email and status").
-
-        **3. Specific Guidance for Lists of Entities (users, apps, groups, logs, etc.):**
-            *   If the list contains **5 or fewer entities**:
-                *   Default to **MARKDOWN**. Present each entity's information clearly and fully. For example, for 3 log entries, you might list the key details of each log sequentially in markdown, or show each complete JSON object in a formatted code block.
-            *   If the list contains **more than 5 entities**:
-                *   Default to **TABLE** format.
-                *   **Column Selection for Tables from Verbose Objects:** For entities with many fields (like verbose log objects), you MUST select a set of the most **common, important, and representative fields** for the table `headers`. The goal is to make the table initially readable and useful, not excessively wide.
-                *   The `items` array in the table content, however, should still contain the **complete, unmodified data objects** for each item. The headers guide the display, but the full data remains available in each item object.
-
-        ## Critical Results Requirements
-        - NEVER limit the number of items (rows) displayed in either format.
-        - ALWAYS include ALL items (rows) in your response regardless of format.
-        - NEVER include notes about "showing only a subset" of items (rows).
-        - NEVER use phrases like "first few results" or "due to space" when referring to the number of items (rows).
-        - For tables: 
-            - Include all items (rows) in the "items" array.
-            - As per guideline 3, `headers` may be a selection of fields for readability if objects are verbose, but each object in the `items` array must be the complete, original data for that item.
-        - For markdown: List all relevant items (rows) without truncation.
+        You are an expert at processing raw execution results and transforming them into a clear, user-friendly JSON response. Your primary goal is to directly answer the user's query using the provided data.
         
-        ## Response Format Requirements  <--- MODIFIED SECTION
-        - Return a dict with keys: `display_type`, `content`, and `metadata`.
-        - **For tables, strictly follow "EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE)" from the main system prompt:**
-          - The top-level `content` field MUST be an array of the data item objects (the rows).
-          - The `metadata` field MUST be an object.
-          - `metadata.headers` MUST be an array of header definition objects.
-          - Each header object in `metadata.headers` MUST use "text" for the display title and "value" for the data key (which corresponds to a key in the item objects). It MAY also include "align" and "sortable".
-        - For markdown, `content` should be a single formatted string, and `metadata` can be an empty object or contain relevant info.
-        - Include useful `metadata` such as:
-          - `totalItems`: total number of records/items processed and included in the `content`.
-          - `queryTime`: (Optional if available) processing time in milliseconds.
-        - Answer the user's query thoroughly with all available relevant information.
-        - If the answer is ambiguous or depends on factors not known, you may start your markdown content with 'It depends...' or similar, followed by the explanation.
+        ## Provided Inputs:
+        1.  **Original User Query:**
+            ```
+            {query}
+            ```
+        2.  **Execution Plan Reasoning (Context for data generation):**
+            ```
+            {plan_reasoning}
+            ```
+        3.  **Complete Execution Results (Raw data to be processed):**
+            ```
+            {results_str}
+            ```
         
-        DO NOT wrap your JSON response in markdown code blocks or add any extra text.
-        Response should be ONLY the JSON object without any extra characters.
-        EXTRA IMPORTANT: Ensure the generated JSON response itself is valid and does not contain unescaped characters or formatting issues that would break JSON parsing, especially when dealing with data that might have come from large datasets.
+        ## Your Primary Task:
+        Process the "Complete Execution Results" to directly answer the "Original User Query".
+        You MUST return your response as a single, valid JSON object.
+        
+        ## JSON Output Structure:
+        Your JSON response MUST contain the following top-level keys:
+        1.  `display_type`: (String) Either `"markdown"` or `"table"`.
+        2.  `content`: (Varies) The formatted data.
+        3.  `metadata`: (Object) Additional information about the content.
+        
+        ## Step 1: Choose `display_type` ("markdown" or "table")
+        
+        Select the most readable and useful format based on the data's nature, volume, and the user's query.
+        
+        **A. General Preference - MARKDOWN for:**
+            *   **Small Datasets & Summaries:**
+                *   When displaying **5 or fewer items** (e.g., users, groups, log entries).
+                *   For verbose items (e.g., detailed JSON objects like raw log events), present each item clearly within markdown (e.g., formatted code blocks or summarized key-value lists).
+                *   Creating brief summaries with a few key points (typically less than 5 total).
+            *   **Narratives & Non-Tabular Data:**
+                *   Presenting hierarchical or deeply nested information not suited for a flat table (especially with few items).
+                *   Answering "why" or "how" questions with a narrative explanation.
+                *   Showing statistical summaries or aggregated insights.
+        
+        **B. General Preference - TABLE for:**
+            *   **Larger Datasets of Entities:**
+                *   When displaying **more than 5 items** that are lists of similar entities (e.g., users, applications, groups, log entries) where items share common attributes suitable for columns.
+            *   **Structured Comparison Focus:**
+                *   When data, even if few items, primarily benefits from direct, column-by-column comparison or clear columnar organization (e.g., product SKUs, prices, stock).
+            *   **Explicit User Request:** If the user's query asks for a table or implies a need for columnar data (e.g., "list users with columns for email and status").
+        
+        **C. Specific Guidance for Lists of Entities (users, apps, groups, logs, etc.):**
+            *   **<= 5 Entities:** Default to **MARKDOWN**. Present each entity's information clearly and fully.
+            *   **> 5 Entities:** Default to **TABLE**.
+        
+        ## Step 2: Format `content` and `metadata` based on `display_type`
+        
+        **A. If `display_type` is "markdown":**
+            *   `content`: (String) A single, well-formatted markdown string.
+            *   `metadata`: (Object) Can be an empty object `{{}}` or contain relevant information like `totalItems`.
+            *   If the answer is ambiguous, you may start your markdown `content` with 'It depends...' or similar, followed by an explanation.
+        
+        **B. If `display_type` is "table":**
+            *   **Strictly Adhere to "EXAMPLE 2 - TABLE FORMAT (VUE-COMPATIBLE)" from the main system prompt.** This example details the precise structure for Vuetify data tables.
+            *   `content`: (Array) An array of data item objects. Each object represents one row in the table.
+            *   `metadata`: (Object) MUST contain:
+                *   `headers`: (Array) An array of header definition objects. Each header object:
+                    *   MUST include `text`: (String) The display title for the column header.
+                    *   MUST include `value`: (String) The key in the row objects (from `content`) that this column displays.
+                    *   MAY include `align`: (String, e.g., 'start', 'center', 'end').
+                    *   MAY include `sortable`: (Boolean).
+            *   **CRITICAL for Vuetify Table Cell Compatibility (Refer to System Prompt Example 2):**
+                *   Table cells (values within the row objects in `content`) expect primitive values (strings, numbers, booleans).
+                *   If a data field for an item is naturally an array or list (e.g., a user's multiple group memberships), you **MUST** convert this array/list into a single, human-readable string (e.g., `"Admin, Editor, Viewer"`) before including it as a value in the `content`'s row object. The `value` in the corresponding `metadata.header` object must then point to the key holding this processed string.
+            *   **Column Selection for Verbose Objects (Guideline from "Specific Guidance for Lists of Entities"):**
+                *   If table items are verbose objects (e.g., detailed logs), the `metadata.headers` array should define a selection of the most **common, important, and representative fields** for initial display.
+                *   However, each object within the `content` array (each row item) MUST still contain the **complete, unmodified data object** for that item. The headers guide display, but full data remains.
+        
+        ## Universal Content Requirements (Apply to BOTH Markdown and Table):
+        *   **NO ITEM TRUNCATION:**
+            *   NEVER limit the number of items (rows) displayed.
+            *   ALWAYS include ALL relevant items (rows) in your response.
+            *   NEVER include notes like "showing only a subset" or "first few results."
+            *   NEVER use phrases like "due to space" when referring to the number of items (rows).
+        *   **Thoroughness:** Answer the user's query comprehensively using all available relevant information from the "Complete Execution Results".
+        
+        ## General `metadata` Requirements (Apply to BOTH Markdown and Table):
+        *   Include `totalItems`: (Integer) The total number of primary records/items processed and included in the `content`.
+        *   Optionally include `queryTime`: (Integer) Processing time in milliseconds, if available.
+        
+        ## Final Output Constraints (VERY IMPORTANT):
+        *   Your entire response MUST be a single, valid JSON object.
+        *   DO NOT wrap the JSON response in markdown code blocks (e.g., \`\`\`json ... \`\`\`).
+        *   DO NOT add any introductory text, concluding remarks, or any characters outside the main JSON object.
+        *   **JSON VALIDITY:** Pay extreme attention to ensure the generated JSON is perfectly valid. This includes:
+            *   Correctly escaping special characters within strings (e.g., `\\`, `\"`, `\\n`).
+            *   Ensuring all strings are properly quoted.
+            *   Correctly structuring arrays and objects.
+            *   No trailing commas.
         """
     
     def _create_sample_data_prompt(self, query: str, results: Dict[str, Any], plan: Any) -> str:
@@ -544,127 +568,226 @@ class ResultsProcessorAgent:
         Example:
         
         <CODE>
-        # Start by debugging the structure to understand what we're working with
-        print(f"DEBUG: full_results keys: {{list(full_results.keys())}}")
-        for key in full_results:
-            print(f"DEBUG: full_results[{{key}}] type: {{type(full_results[key]).__name__}}")
-            if isinstance(full_results[key], list):
-                print(f"DEBUG: full_results[{{key}}] has {{len(full_results[key])}} items")
-        
-        # Extract data from Step 1 - Handle both list and direct object cases
-        group1_data = full_results.get("1", [])
-        # Access the group - handle case where it might be a list or direct object
-        if isinstance(group1_data, list) and len(group1_data) > 0:
-            group1 = group1_data[0]  # Get first item if it's a list
+        # Improved inspection of full_results, showing one level deeper for collections
+        print(f"DEBUG: Inspecting full_results structure:")
+        if isinstance(full_results, dict):
+            for step_key, step_data_val in full_results.items():
+                data_type_name = type(step_data_val).__name__
+                details = f"Type: {{data_type_name}}"
+
+                if isinstance(step_data_val, list):
+                    details += f", Item count: {{len(step_data_val)}}"
+                    if len(step_data_val) > 0:
+                        first_item = step_data_val[0]
+                        first_item_type_name = type(first_item).__name__
+                        details += f", First item type: {{first_item_type_name}}"
+                        if isinstance(first_item, dict):
+                            first_item_keys = list(first_item.keys()) if first_item else []
+                            details += f", First item keys: {{str(first_item_keys)}}"
+                        elif isinstance(first_item, list): # Example for list of lists
+                            details += f", First item is a list (length: {{len(first_item)}})"
+                            if len(first_item) > 0:
+                                inner_first_item = first_item[0]
+                                inner_first_item_type = type(inner_first_item).__name__
+                                details += f", First inner item type: {{inner_first_item_type}}"
+                                if isinstance(inner_first_item, dict):
+                                    inner_first_item_keys = list(inner_first_item.keys()) if inner_first_item else []
+                                    details += f", First inner item keys: {{str(inner_first_item_keys)}}"
+                elif isinstance(step_data_val, dict):
+                    dict_keys = list(step_data_val.keys()) if step_data_val else []
+                    details += f", Keys: {{str(dict_keys)}}"
+                print(f"DEBUG: Step '{{step_key}}' -> {{details}}")
         else:
-            group1 = group1_data  # Use directly if not a list
-        
-        # Extract data from Step 2 - Handle both list and direct object cases
-        group2_data = full_results.get("2", [])
-        if isinstance(group2_data, list) and len(group2_data) > 0:
-            group2 = group2_data[0]  # Get first item if it's a list
-        else:
-            group2 = group2_data  # Use directly if not a list
-        
-        # Extract group names dynamically (never hardcode names)
-        group1_name = group1.get("profile", {{}}).get("name", "First Group") if isinstance(group1, dict) else "First Group"
-        group2_name = group2.get("profile", {{}}).get("name", "Second Group") if isinstance(group2, dict) else "Second Group"
-        
-        # Get user lists - these should always be lists
-        users1 = full_results.get("3", [])
-        users2 = full_results.get("4", [])
-        
-        # Collect all users in the second group by their IDs
-        group2_user_ids = []
-        for user in users2:
-            if isinstance(user, dict) and "id" in user:
-                user_id = user.get("id")
-                if user_id and user_id not in group2_user_ids:
-                    group2_user_ids.append(user_id)
-        
-        # Process users in first group and filter out those in second group
+            print(f"DEBUG: full_results is not a dict, it's a {{type(full_results).__name__}}")
+
+        # --- Data Extraction and Preparation ---
+        # Step 1: Get data for the first group (e.g., Group A details)
+        group1_data_raw = full_results.get("1", {{}}) # Default to empty dict
+        group1_details = group1_data_raw[0] if isinstance(group1_data_raw, list) and len(group1_data_raw) > 0 else group1_data_raw
+        group1_name = group1_details.get("profile", {{}}).get("name", "Group A") if isinstance(group1_details, dict) else "Group A"
+
+        # Step 2: Get data for the second group (e.g., Group B details)
+        group2_data_raw = full_results.get("2", {{}}) # Default to empty dict
+        group2_details = group2_data_raw[0] if isinstance(group2_data_raw, list) and len(group2_data_raw) > 0 else group2_data_raw
+        group2_name = group2_details.get("profile", {{}}).get("name", "Group B") if isinstance(group2_details, dict) else "Group B"
+
+        # Step 3: Get users from the first group.
+        # Assume each user object is structured like:
+        # {{'user_id':'u1', 'profile':{{...}}, 'status':'ACTIVE', 
+        #  'complex_attributes':[{{'attr_name':'Firewall Access', 'attr_value':'Enabled'}}, {{'attr_name':'VPN Type', 'attr_value':'SSL'}}]}}
+        users_group1_raw = full_results.get("3", [])
+        if not isinstance(users_group1_raw, list): users_group1_raw = []
+
+        # Step 4: Get user IDs from the second group (for filtering).
+        # Assume these are simpler, e.g., [{{'id': 'u3'}}, {{'id': 'u4'}}]
+        users_group2_raw = full_results.get("4", []) # This step in the example is for filtering users.
+                                                 # The actual complex list processing is demonstrated using 'complex_attributes' from users_group1_raw.
+        if not isinstance(users_group2_raw, list): users_group2_raw = []
+
+        group2_user_ids_for_filtering = []
+        for user_g2_data in users_group2_raw:
+            if isinstance(user_g2_data, dict):
+                user_g2_id = user_g2_data.get("id")
+                if user_g2_id and user_g2_id not in group2_user_ids_for_filtering:
+                    group2_user_ids_for_filtering.append(user_g2_id)
+
+        # --- Data Processing and Transformation ---
         items = []
-        for user in users1:
-            if not isinstance(user, dict):
+        # This map will store user_id -> list of extracted attribute names
+        user_to_attribute_names_map = {{}}
+
+        # First, process the user records that might contain nested attribute dictionaries.
+        # This part simulates processing a structure like full_results["4"] from your actual query,
+        # where each record has a user_id and a list of complex objects (e.g., applications).
+        # In this example, we use 'users_group1_raw' and its 'complex_attributes' field to demonstrate this pattern.
+        # If your actual data for this pattern comes from a different step (e.g., full_results["X"]),
+        # the agent should adapt this logic to use full_results["X"].
+        
+        # Let's assume the data with the nested list is in a hypothetical step "data_with_nested_list"
+        # For this example, we'll use users_group1_raw as if it were that step.
+        # The agent should identify the correct step in the real `full_results` that matches this structure.
+        data_source_for_nested_lists = users_group1_raw # In a real scenario, this might be full_results.get("4") or similar
+
+        for user_record_with_attributes in data_source_for_nested_lists: 
+            if not isinstance(user_record_with_attributes, dict):
                 continue
-                
-            user_id = user.get("id", "")
-            
-            # Skip if user is in the second group
-            if user_id in group2_user_ids:
+
+            # Get the user ID from this record. The key for user ID should be flexible.
+            record_user_id = user_record_with_attributes.get("user_id") # Primary key to look for
+            if not record_user_id:
+                 record_user_id = user_record_with_attributes.get("id") # Fallback key
+            if not record_user_id:
+                # Try to find a user ID even if it's nested, e.g., in an 'actor' field
+                actor_info = user_record_with_attributes.get("actor")
+                if isinstance(actor_info, dict):
+                    record_user_id = actor_info.get("id")
+            if not record_user_id:
+                continue # Cannot process without a user identifier
+
+            # Get the list of attribute dictionaries (e.g., 'applications' in your real data)
+            # The key for this list should be flexible.
+            attributes_list_of_dicts = user_record_with_attributes.get("complex_attributes") # Example key
+            if not attributes_list_of_dicts: # Fallback to other common names for such lists
+                attributes_list_of_dicts = user_record_with_attributes.get("applications")
+            if not attributes_list_of_dicts:
+                attributes_list_of_dicts = user_record_with_attributes.get("assigned_apps")
+
+            if not isinstance(attributes_list_of_dicts, list):
                 continue
-                
-            profile = user.get("profile", {{}})
+
+            extracted_attr_names = []
+            for attr_dict in attributes_list_of_dicts: # Iterate the nested list of dictionaries
+                if isinstance(attr_dict, dict):
+                    # Extract a specific field from the inner dict (e.g., 'label' or 'name' for applications)
+                    # The key for the name/label should be flexible.
+                    attr_name = attr_dict.get("attr_name") # Example key
+                    if not attr_name:
+                        attr_name = attr_dict.get("label") # Common key for app name
+                    if not attr_name:
+                        attr_name = attr_dict.get("name")  # Another common key for app name
+                    if not attr_name: # Try profile.name if it's a more complex app object
+                        profile_info = attr_dict.get("profile")
+                        if isinstance(profile_info, dict):
+                            attr_name = profile_info.get("name")
+                    
+                    if attr_name:
+                        extracted_attr_names.append(attr_name)
             
-            # Extract user information
-            user_info = {{}}
+            if record_user_id not in user_to_attribute_names_map:
+                user_to_attribute_names_map[record_user_id] = []
+            # Add only unique attribute names for this user
+            for name in extracted_attr_names:
+                if name not in user_to_attribute_names_map[record_user_id]:
+                    user_to_attribute_names_map[record_user_id].append(name)
+
+
+        # Now, build the final items list using primary user data (e.g., from login events or a user list step),
+        # filtering if necessary, and enriching with attributes from the map we just built.
+        # For this example, we'll iterate through users_group1_raw again, assuming it's the primary list of users.
+        # The agent should identify the correct step in `full_results` that contains the primary user list.
+        primary_user_list_source = users_group1_raw # In a real scenario, this might be full_results.get("3")
+
+        for user_g1_data in primary_user_list_source:
+            if not isinstance(user_g1_data, dict):
+                continue
+
+            current_user_id = user_g1_data.get("user_id")
+            if not current_user_id: # Fallback for user ID
+                current_user_id = user_g1_data.get("id")
+            # If user ID is in a nested structure like 'actor' (common in event logs)
+            if not current_user_id:
+                actor_info = user_g1_data.get("actor")
+                if isinstance(actor_info, dict):
+                    current_user_id = actor_info.get("id")
+            
+            if not current_user_id:
+                continue # Skip if no identifiable ID
+
+            # Filter: Skip if user is in the second group (if users_group2_raw was populated and relevant)
+            if group2_user_ids_for_filtering and current_user_id in group2_user_ids_for_filtering:
+                continue
+
+            profile = user_g1_data.get("profile", {{}})
+            if not isinstance(profile, dict): # If profile is not a dict, try to get info from actor
+                actor_info = user_g1_data.get("actor", {{}})
+                profile = {{ # Reconstruct a profile-like object from actor
+                    "displayName": actor_info.get("displayName"),
+                    "alternateId": actor_info.get("alternateId") 
+                    # Add other mappings if actor has more relevant fields
+                }}
+
+            # Get processed attributes for this user from the map
+            final_attribute_names = user_to_attribute_names_map.get(current_user_id, [])
+            attributes_str = ", ".join(final_attribute_names) if final_attribute_names else "N/A"
+
+            # Determine best name to display, being flexible with source (profile or actor)
             display_name = profile.get("displayName", "")
             first_name = profile.get("firstName", "")
             last_name = profile.get("lastName", "")
-            email = profile.get("email", "")
+            email = profile.get("email", "") or profile.get("alternateId", "") # Use alternateId as fallback for email
             login = profile.get("login", "")
             
-            # Determine best name to display
-            if display_name:
-                user_info["name"] = display_name
-            elif first_name and last_name:
-                user_info["name"] = f"{{first_name}} {{last_name}}"
-            elif first_name:
-                user_info["name"] = first_name
-            elif last_name:
-                user_info["name"] = last_name
-            elif email:
-                user_info["name"] = email
-            elif login:
-                user_info["name"] = login
-            else:
-                user_info["name"] = "Unknown"
-                
-            # Other user information
-            user_info["email"] = email or login or "Unknown"
-            user_info["status"] = user.get("status", "Unknown")
-            user_info["id"] = user_id
+            name_to_display = "Unknown"
+            if display_name: name_to_display = display_name
+            elif first_name and last_name: name_to_display = f"{{first_name}} {{last_name}}"
+            elif first_name: name_to_display = first_name
+            elif last_name: name_to_display = last_name
+            elif email: name_to_display = email 
+            elif login: name_to_display = login
+            elif current_user_id: name_to_display = current_user_id # Fallback to ID if no name
             
-            # Add to our results
-            items.append(user_info)
-        
-            headers = [
-                {{
-                    "align": "start",
-                    "value": "name",         
-                    "sortable": True,
-                    "text": "User Name"      
-                }},
-                {{
-                    "value": "email",        
-                    "sortable": True,
-                    "text": "Email"          
-                }},
-                {{
-                    "value": "status",       
-                    "sortable": True,
-                    "text": "Account Status" 
-                }},
-                {{
-                    "value": "id",           
-                    "sortable": True,
-                    "text": "User ID"        
-                }}
-            ]
-                
-            # Create the final result structure with dynamic description
-            # 'items' variable is assumed to be populated with the list of data objects
-            result = {{
-                "display_type": "table",
-                "content": items,  # 'items' array is now directly the content
-                "metadata": {{
-                    "headers": headers, # 'headers' array is now inside metadata
-                    "totalItems": len(items),
-                    "description": f"Users in 'group1_name' group but NOT in 'group2_name' group"
-                    # Add any other relevant metadata here
-                }}
+            items.append({{
+                "name": name_to_display,
+                "email": email or login or "N/A",
+                "status": user_g1_data.get("status", "Unknown"), # Assuming status is top-level in user_data
+                "user_id": current_user_id,
+                "attributes_summary": attributes_str # Changed field name for clarity
+            }})
+
+        # --- Result Formatting ---
+        headers = [
+            {{"text": "User Name", "value": "name", "sortable": True, "align": "start"}},
+            {{"text": "Email", "value": "email", "sortable": True, "align": "start"}},
+            {{"text": "Account Status", "value": "status", "sortable": True, "align": "start"}},
+            {{"text": "User ID", "value": "user_id", "sortable": True, "align": "start"}},
+            {{"text": "Attributes Summary", "value": "attributes_summary", "sortable": True, "align": "start"}} # New header
+        ]
+            
+        result = {{
+            "display_type": "table",
+            "content": items,
+            "metadata": {{
+                "headers": headers,
+                "totalItems": len(items),
+                "description": f"Users from the primary list (potentially filtered), with a summary of their complex attributes/applications."
             }}
+        }}
+        print(f"DEBUG: Result keys: {{list(result.keys()) if isinstance(result, dict) else 'N/A'}}")
         </CODE>
+        
+                **CRITICAL**:
+        - When processing data from steps that return lists of dictionaries (e.g., a list of users, where each user dictionary might contain a list of their applications or attributes), pay close attention to the exact key names used in the full_results data. For example, a user identifier might be id, user_id, or actor.id depending on the source step. Your generated code must use the correct key present in the data.
+        - The example code demonstrates common patterns. You MUST adapt these patterns to the specific structure and key names found in the full_results for the current query. Use the debug prints of full_results to guide your key selection.
         
         NOTES:
         - Your code will have access to a 'full_results' variable containing all execution results
@@ -680,6 +803,8 @@ class ResultsProcessorAgent:
         
         IMPORTANT: Place your code ONLY between <CODE> and </CODE> tags.
         DO NOT use markdown code blocks or other formatting.
+        
+
         """
 
 # Create a singleton instance

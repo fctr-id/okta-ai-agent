@@ -45,6 +45,8 @@ BASE_SYSTEM_PROMPT = """You are an expert at writing Python code for Okta SDK op
 5. Valid Python syntax
 6. Preserve case sensitivity of entity names
 7. All returned data structures must be JSON serializable
+8. Avoid using Python `set` objects for intermediate variables; use `list` objects if a collection of unique items is needed.
+
 
 ## ERROR HANDLING REQUIREMENTS ##
 1. Each step must handle potential errors gracefully
@@ -185,6 +187,25 @@ class CodingAgent:
         - First step result should be named after its content (e.g., `user_result`)
         - IDs should be named with the entity type prefix (e.g., `user_id`, `group_id`)
         - Lists should use plural names (e.g., `groups`, `factors`)
+        9. STRUCTURING RESULTS FROM ITERATIVE CALLS: If a step involves iterating over a list of items (e.g., user IDs from a previous step) and calling a tool for each item, the step should return a list of dictionaries. Each dictionary in this list should clearly associate the input item (e.g., the user_id) with the result of the tool call for that item.
+           For example, if fetching applications for multiple user IDs:
+           ```python
+           # user_ids would be a list like ['id1', 'id2'] from a previous step
+           # user_applications_results = []
+           # for current_user_id in user_ids:
+           #     apps_for_user = await paginate_results(
+           #         method_name="list_applications",
+           #         query_params={{"filter": f'user.id eq "{{current_user_id}}"}}, # Corrected f-string in example
+           #         entity_name="applications"
+           #     )
+           #     # Handle errors for apps_for_user as per standard error handling
+           #     if isinstance(apps_for_user, dict) and apps_for_user.get("operation_status") in ["error", "not_found"]:
+           #         user_applications_results.append({{"user_id": current_user_id, "applications": [], "error_details": apps_for_user}})
+           #     else:
+           #         user_applications_results.append({{"user_id": current_user_id, "applications": apps_for_user if apps_for_user else []}})
+           # return user_applications_results
+           ```
+           Do NOT simply extend a single flat list with all results if the association with the input item (like user_id) is important for subsequent processing by other agents (like the ResultsProcessorAgent). The goal is to provide a structured list that maps each input item to its corresponding output.        
         
         ## RESPONSE FORMAT EXAMPLES ##
         <STEP-1>
