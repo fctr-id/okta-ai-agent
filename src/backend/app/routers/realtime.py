@@ -2,6 +2,7 @@ import asyncio
 import os
 import uuid
 import json
+from enum import Enum
 import time # Added for process timestamping
 from typing import Dict, Any, AsyncGenerator, List, Optional, Callable
 
@@ -26,7 +27,8 @@ from src.utils.tool_registry import build_tools_documentation
 logger = get_logger(__name__)
 
 # --- Process Status Enum (Optional but good practice) ---
-class ProcessStatus:
+class ProcessStatus(str, Enum):  
+    IDLE = "idle"
     PLAN_GENERATION = "plan_generation"
     PLAN_GENERATED = "plan_generated"
     RUNNING_EXECUTION = "running_execution"
@@ -166,16 +168,20 @@ async def run_execution_and_stream(
     query: str,
     actual_core_execution_plan: CoreExecutionPlan,
     user: AuthUser | None
-) -> AsyncGenerator[Dict[str, str], None]: # MODIFIED: Type hint to Dict[str, str]
+) -> AsyncGenerator[Dict[str, str], None]:
     global active_processes
     set_correlation_id(process_id)
     logger.info(f"[{process_id}] Starting execution stream for query: \"{query}\"")
 
     def check_cancellation() -> bool:
         proc_data = active_processes.get(process_id)
-        cancelled = proc_data.get("cancelled", False) if proc_data else True
+        # Ensure comparison is with the enum member if status is stored as enum
+        cancelled_by_status = proc_data.get("status") == ProcessStatus.CANCELLED if proc_data else False
+        explicitly_cancelled_flag = proc_data.get("cancelled", False) if proc_data else True # Legacy or explicit flag
+        
+        cancelled = cancelled_by_status or explicitly_cancelled_flag
         if cancelled:
-            logger.info(f"[{process_id}] Cancellation flag checked: True")
+            logger.info(f"[{process_id}] Cancellation flag/status checked: True")
         return cancelled
 
     okta_deps = None
@@ -184,18 +190,17 @@ async def run_execution_and_stream(
             logger.error(f"[{process_id}] Process data missing at the start of execution stream. Aborting.")
             yield {
                 "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': 'Internal error: Process data lost before execution.'})
+                "data": json.dumps({'process_id': process_id, 'status': ProcessStatus.ERROR.value, 'message': 'Internal error: Process data lost before execution.'})
             }
             await asyncio.sleep(0.01)
             return
 
-        active_processes[process_id]["status"] = ProcessStatus.RUNNING_EXECUTION # Use Enum value
-        # MODIFIED: Yield a dictionary
+        active_processes[process_id]["status"] = ProcessStatus.RUNNING_EXECUTION
         yield {
             "event": "plan_status",
             "data": json.dumps({
                 'process_id': process_id,
-                'status': ProcessStatus.RUNNING_EXECUTION, # Use Enum value
+                'status': ProcessStatus.RUNNING_EXECUTION.value, # Send string value
                 'message': 'Execution of the plan is starting.'
             })
         }
@@ -215,11 +220,11 @@ async def run_execution_and_stream(
         ):
             event_type = event_dict_from_manager.get("event_type", "generic_update")
             event_data = event_dict_from_manager.get("data", {})
-            if "process_id" not in event_data: # Ensure process_id is present
+            if "process_id" not in event_data:
                  event_data["process_id"] = process_id
 
+            # Assuming event_data from manager already contains status as a string if present
             logger.debug(f"[{process_id}] Yielding SSE event: {event_type}, data: {json.dumps(event_data)}")
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": event_type,
                 "data": json.dumps(event_data)
@@ -231,14 +236,18 @@ async def run_execution_and_stream(
                 logger.info(f"[{process_id}] Execution stream: Plan cancelled event received.")
                 break
             elif event_type == "final_result":
-                final_event_status_str = event_data.get("status", ProcessStatus.COMPLETED)
+                # Expect status from event_data to be a string (e.g., "completed", "error")
+                final_event_status_str = event_data.get("status", ProcessStatus.COMPLETED.value)
                 try:
-                    active_processes[process_id]["status"] = ProcessStatus[final_event_status_str.upper()] if isinstance(final_event_status_str, str) else final_event_status_str
-                except (KeyError, AttributeError): # Handle if status is not a valid string for Enum
-                    logger.warning(f"[{process_id}] Invalid status '{final_event_status_str}' in final_result, defaulting to COMPLETED.")
-                    active_processes[process_id]["status"] = ProcessStatus.COMPLETED
+                    # Convert the string to the corresponding ProcessStatus enum member
+                    status_enum_member = ProcessStatus(final_event_status_str)
+                    active_processes[process_id]["status"] = status_enum_member
+                except ValueError: # Raised if final_event_status_str is not a valid value for the enum
+                    logger.warning(f"[{process_id}] Invalid status string '{final_event_status_str}' in final_result, defaulting to {ProcessStatus.COMPLETED.value}.")
+                    active_processes[process_id]["status"] = ProcessStatus.COMPLETED # Assign the enum member
+
                 active_processes[process_id]["final_result_data"] = event_data
-                logger.info(f"[{process_id}] Execution stream: Final result event received. Status: {active_processes[process_id]['status']}")
+                logger.info(f"[{process_id}] Execution stream: Final result event received. Status: {active_processes[process_id]['status'].value}")
                 break
             elif event_type == "plan_error":
                 active_processes[process_id]["status"] = ProcessStatus.ERROR
@@ -246,33 +255,38 @@ async def run_execution_and_stream(
                 logger.info(f"[{process_id}] Execution stream: Plan error event received.")
                 break
 
+        # Post-loop status checks
         current_process_status = active_processes.get(process_id, {}).get("status")
         terminal_statuses_for_check = [
             ProcessStatus.CANCELLED, ProcessStatus.COMPLETED,
             ProcessStatus.COMPLETED_WITH_ERRORS, ProcessStatus.ERROR
         ]
+
+        # If check_cancellation() is true now, and we haven't hit a terminal status from events
         if check_cancellation() and current_process_status not in terminal_statuses_for_check:
             active_processes[process_id]["status"] = ProcessStatus.CANCELLED
             logger.info(f"[{process_id}] Execution stream ended; process marked cancelled post-loop because flag was set.")
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_cancelled",
-                "data": json.dumps({'process_id': process_id, 'message': 'Execution cancelled post-loop.'})
+                "data": json.dumps({'process_id': process_id, 'status': ProcessStatus.CANCELLED.value, 'message': 'Execution cancelled post-loop.'})
             }
             await asyncio.sleep(0.01)
+        # If stream ended while still "running" and not explicitly cancelled by flag/event
         elif current_process_status == ProcessStatus.RUNNING_EXECUTION:
-            logger.warning(f"[{process_id}] ExecutionManager stream ended without a clear terminal status event. Marking as 'error'.")
+            logger.warning(f"[{process_id}] ExecutionManager stream ended without a clear terminal status event. Marking as '{ProcessStatus.ERROR.value}'.")
             active_processes[process_id]["status"] = ProcessStatus.ERROR
             active_processes[process_id]["error_message"] = "Execution ended abruptly without a final status."
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': active_processes[process_id]["error_message"]})
+                "data": json.dumps({'process_id': process_id, 'status': ProcessStatus.ERROR.value, 'message': active_processes[process_id]["error_message"]})
             }
             await asyncio.sleep(0.01)
 
     except HTTPException:
         logger.warning(f"[{process_id}] HTTPException during execution stream.", exc_info=True)
+        # Ensure status is set to ERROR before re-raising
+        if process_id in active_processes:
+            active_processes[process_id]["status"] = ProcessStatus.ERROR
         raise
     except Exception as e:
         logger.error(f"[{process_id}] Unhandled error during plan execution stream: {e}", exc_info=True)
@@ -281,24 +295,26 @@ async def run_execution_and_stream(
             error_detail = format_error_for_user(e) if isinstance(e, BaseError) else "An unexpected error occurred during execution."
             active_processes[process_id]["error_message"] = error_detail
         else:
+            # This case should ideally not happen if the initial check for process_id is robust
             error_detail = "Critical error: Process context lost during exception."
         try:
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': error_detail})
+                "data": json.dumps({'process_id': process_id, 'status': ProcessStatus.ERROR.value, 'message': error_detail})
             }
             await asyncio.sleep(0.01)
         except Exception as send_err:
             logger.error(f"[{process_id}] Failed to send plan_error SSE event after an exception: {send_err}")
     finally:
         final_status_in_dict = active_processes.get(process_id, {}).get('status', ProcessStatus.UNKNOWN)
-        logger.info(f"[{process_id}] SSE stream processing ended for run_execution_and_stream. Final process status in dict: {final_status_in_dict}")
+        # Log the string value of the enum for clarity
+        logger.info(f"[{process_id}] SSE stream processing ended for run_execution_and_stream. Final process status in dict: {final_status_in_dict.value if isinstance(final_status_in_dict, Enum) else final_status_in_dict}")
         if okta_deps and hasattr(okta_deps, 'close_clients') and asyncio.iscoroutinefunction(okta_deps.close_clients):
             try:
                 await okta_deps.close_clients()
             except Exception as close_ex:
                 logger.error(f"[{process_id}] Error closing OktaRealtimeDeps for execution: {close_ex}", exc_info=True)
+
 
 
 @router.post("/start-process", response_model=StartProcessResponse)
