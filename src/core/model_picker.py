@@ -90,10 +90,7 @@ class ModelConfig:
                 ),
                 ModelType.CODING: OpenAIModel(
                     model_name=coding_model_name,
-                    provider=openai_compat_provider,
-                    model_settings={
-                        'temperature': 0.2
-                    }
+                    provider=openai_compat_provider
                 )
             }
             
