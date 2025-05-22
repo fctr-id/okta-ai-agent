@@ -2,19 +2,21 @@ import asyncio
 import os
 import uuid
 import json
+import re
+import time
 from enum import Enum
-import time # Added for process timestamping
-from typing import Dict, Any, AsyncGenerator, List, Optional, Callable
+from typing import Dict, Any, AsyncGenerator, List, Optional, Callable, Tuple, Union
 
-from fastapi import APIRouter, HTTPException, Request, Depends, Body # Added Body
+from fastapi import APIRouter, HTTPException, Request, Depends, Body, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
+from html_sanitizer import Sanitizer
 
 # --- Project-specific Imports ---
-# Assuming these are the correct paths based on your project structure
-from src.core.auth.dependencies import get_current_user
+from src.core.auth.dependencies import get_current_user, get_db_session
 from src.okta_db_sync.db.models import AuthUser, UserRole
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.realtime.okta_realtime_client import get_okta_realtime_deps
 from src.core.realtime.agents.reasoning_agent import routing_agent, ExecutionPlan as CoreExecutionPlan, RoutingResult
@@ -23,10 +25,61 @@ from src.utils.error_handling import BaseError, format_error_for_user
 from src.utils.logging import get_logger, set_correlation_id
 from src.utils.tool_registry import build_tools_documentation
 
-
 logger = get_logger(__name__)
 
-# --- Process Status Enum (Optional but good practice) ---
+# --- Query sanitization ---
+custom_sanitizer = Sanitizer({
+    'tags': ('__nonexistent_tag__',),
+    'attributes': {},
+    'empty': set(),
+    'separate': set()
+})
+
+def sanitize_query(query: str) -> Tuple[str, List[str]]:
+    """Natural language-aware query sanitization"""
+    if not query:
+        return "", []
+        
+    warnings = []
+    
+    # Convert to string if not already
+    query = str(query)
+    
+    # Limit length to prevent DoS
+    if len(query) > 2000:
+        query = query[:2000]
+        warnings.append("Query truncated due to excessive length")
+        
+    # Control character removal
+    original_length = len(query)
+    query = re.sub(r'[\x00-\x08\x0B-\x1F\x7F]', '', query)
+    if len(query) != original_length:
+        warnings.append("Control characters removed from query")
+    
+    # Detect suspicious patterns
+    suspicious_patterns = [
+        (r'```.*?```', "code block"),
+        (r'<\s*script\b[^>]*>', "script tag"),
+        (r'javascript\s*:', "JavaScript protocol"),
+        (r'(?i)(?:select|insert|update|delete|drop|alter|create)\s+(?:from|into|table|database)', "SQL-like syntax"),
+        (r'\{\{.*?\}\}', "template expression"),
+        (r'\$\{.*?\}', "expression injection"),
+        (r'`.*?`', "command backticks"),
+        (r'\$\(.*?\)', "command substitution")
+    ]
+    
+    for pattern, description in suspicious_patterns:
+        matches = re.findall(pattern, query, re.DOTALL | re.IGNORECASE)
+        if matches:
+            match_preview = matches[0][:20] + "..." if len(matches[0]) > 20 else matches[0]
+            warnings.append(f"Suspicious {description} detected: '{match_preview}'")
+    
+    sanitized_query = custom_sanitizer.sanitize(query)
+    sanitized_query = re.sub(r'data\s*:\s*\w+/\w+\s*;\s*base64', 'data-removed', sanitized_query, flags=re.IGNORECASE)
+    
+    return sanitized_query.strip(), warnings
+
+# --- Process Status Enum ---
 class ProcessStatus(str, Enum):  
     IDLE = "idle"
     PLAN_GENERATION = "plan_generation"
@@ -37,7 +90,6 @@ class ProcessStatus(str, Enum):
     CANCELLED = "cancelled"
     ERROR = "error"
     UNKNOWN = "unknown"
-
 
 # --- API Pydantic Models ---
 class ApiStep(BaseModel):
@@ -67,23 +119,9 @@ class RealtimeQueryRequest(BaseModel):
 
 router = APIRouter()
 
-async def get_current_user_dev_optional(request: Request) -> AuthUser | None:
-    if os.getenv("APP_ENV", "production").lower() == "development":
-        logger.info("Development mode - Skipping authentication.")
-        return AuthUser(
-            id=-1,
-            username="dev_user",
-            password_hash="dummy_password_hash_not_for_prod",
-            role=UserRole.ADMIN,
-            is_active=True,
-        )
-    # Ensure get_current_user is awaitable if it does async operations
-    user = await get_current_user(request=request)
-    return user
-
-
 active_processes: Dict[str, Any] = {}
 MAX_PROCESS_AGE_SECONDS = 3600  # 1 hour
+
 
 async def cleanup_old_processes():
     """Periodically cleans up old process data."""
@@ -101,11 +139,6 @@ async def cleanup_old_processes():
 @router.on_event("startup")
 async def startup_event():
     asyncio.create_task(cleanup_old_processes())
-
-
-def sanitize_realtime_query(query: str) -> str:
-    logger.debug(f"Sanitizing query (currently placeholder): {query}")
-    return query
 
 def _map_core_step_to_api_step(core_step_obj: Any, index: int) -> ApiStep:
     raw_query_context = getattr(core_step_obj, 'query_context', None)
@@ -161,7 +194,6 @@ async def generate_and_map_plan(query: str, process_id: str, user: AuthUser | No
         logger.error(f"[{process_id}] Failed to generate and map plan: {e}", exc_info=True)
         user_message = format_error_for_user(e) if isinstance(e, BaseError) else "Failed to generate execution plan due to an internal error."
         raise HTTPException(status_code=500, detail=user_message)
-
 
 async def run_execution_and_stream(
     process_id: str,
@@ -315,12 +347,11 @@ async def run_execution_and_stream(
             except Exception as close_ex:
                 logger.error(f"[{process_id}] Error closing OktaRealtimeDeps for execution: {close_ex}", exc_info=True)
 
-
-
 @router.post("/start-process", response_model=StartProcessResponse)
 async def start_realtime_process_endpoint(
-    payload: RealtimeQueryRequest, # Use RealtimeQueryRequest which expects a JSON body
-    current_user: AuthUser | None = Depends(get_current_user_dev_optional)
+    request: Request,
+    payload: RealtimeQueryRequest,
+    current_user: AuthUser = Depends(get_current_user)  
 ):
     process_id = str(uuid.uuid4())
     username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
@@ -328,18 +359,25 @@ async def start_realtime_process_endpoint(
 
     logger.info(f"[{process_id}] [/start-process] Received for query: \"{payload.query}\" by user: {username}")
 
-    sanitized_query = sanitize_realtime_query(payload.query)
+    # Use the sanitize_query function from query.py
+    sanitized_query, warnings = sanitize_query(payload.query)
+    
+    # Log any security warnings
+    if warnings:
+        client_ip = request.client.host if request.client else "unknown"
+        logger.warning(f"Security warnings for query from user {current_user.id} (IP {client_ip}): {', '.join(warnings)}")
+
     api_plan_response, core_plan_to_execute = await generate_and_map_plan(sanitized_query, process_id, current_user)
 
     active_processes[process_id] = {
-        "process_id": process_id, # Added for easier access
+        "process_id": process_id,
         "query": sanitized_query,
-        "user_id": username, # Changed from "user" for clarity
+        "user_id": username,
         "api_plan_for_initial_response": api_plan_response.model_dump(),
         "core_plan_model_for_execution": core_plan_to_execute,
-        "status": ProcessStatus.PLAN_GENERATED, # Use Enum
+        "status": ProcessStatus.PLAN_GENERATED,
         "cancelled": False,
-        "timestamp": time.time(), # Added for cleanup logic
+        "timestamp": time.time(),
         "error_message": None,
         "final_result_data": None
     }
@@ -347,19 +385,17 @@ async def start_realtime_process_endpoint(
     logger.info(f"[{process_id}] [/start-process] Plan generated. API Plan: {api_plan_response.model_dump(exclude_none=True)}")
     return StartProcessResponse(process_id=process_id, plan=api_plan_response)
 
-
 @router.get("/stream-updates/{process_id}")
 async def stream_realtime_updates_endpoint(
     process_id: str,
     request: Request,
-    current_user: AuthUser | None = Depends(get_current_user_dev_optional)
+    current_user: AuthUser = Depends(get_current_user)
 ):
     set_correlation_id(process_id)
 
     if process_id not in active_processes:
         logger.warning(f"[{process_id}] [/stream-updates] Process not found or session expired.")
         async def not_found_generator():
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_error",
                 "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': 'Process not found or session expired.'})
@@ -381,7 +417,7 @@ async def stream_realtime_updates_endpoint(
         logger.info(f"[{process_id}] Process already in a terminal state: {current_process_status}. Sending final status and closing.")
         async def terminal_status_generator():
             event_to_send = {"process_id": process_id}
-            event_name = "generic_status" # Default event name
+            event_name = "generic_status"
 
             if current_process_status == ProcessStatus.ERROR:
                 event_name = "plan_error"
@@ -392,13 +428,12 @@ async def stream_realtime_updates_endpoint(
             elif current_process_status == ProcessStatus.CANCELLED:
                 event_name = "plan_cancelled"
                 event_to_send['message'] = 'Process was previously cancelled.'
-            else: # COMPLETED or COMPLETED_WITH_ERRORS
+            else:
                 event_name = "final_result"
                 final_data = process_info.get("final_result_data", {})
-                # Ensure final_data is a dict and merge, not overwrite event_to_send
                 if isinstance(final_data, dict):
                     event_to_send.update(final_data)
-                else: # if final_result_data was just a string or something unexpected
+                else:
                     event_to_send['result_content'] = str(final_data) if final_data is not None else "No detailed result available."
                 
                 # Ensure standard fields are present if not in final_data
@@ -406,8 +441,6 @@ async def stream_realtime_updates_endpoint(
                 if "message" not in event_to_send: event_to_send["message"] = "Process previously completed."
                 if "display_type" not in event_to_send: event_to_send["display_type"] = "markdown"
 
-
-            # MODIFIED: Yield a dictionary
             yield {"event": event_name, "data": json.dumps(event_to_send)}
             await asyncio.sleep(0.01)
         return EventSourceResponse(terminal_status_generator())
@@ -415,7 +448,6 @@ async def stream_realtime_updates_endpoint(
     if current_process_status == ProcessStatus.RUNNING_EXECUTION:
         logger.warning(f"[{process_id}] Client reconnected to an already running execution. Robust reconnect not fully implemented. Sending current status.")
         async def already_running_generator():
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_status",
                 "data": json.dumps({
@@ -425,14 +457,11 @@ async def stream_realtime_updates_endpoint(
                 })
             }
             await asyncio.sleep(0.01)
-            # This stream will end here. The original stream continues if active.
         return EventSourceResponse(already_running_generator())
-
 
     if current_process_status != ProcessStatus.PLAN_GENERATED:
         logger.warning(f"[{process_id}] Attempt to stream process with status: {current_process_status}. Aborting stream as it's not in '{ProcessStatus.PLAN_GENERATED}' state.")
         async def invalid_status_generator():
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_error",
                 "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': f'Process cannot be streamed. Current state: {current_process_status}'})
@@ -444,7 +473,6 @@ async def stream_realtime_updates_endpoint(
         logger.info(f"[{process_id}] [/stream-updates] Process was cancelled before execution stream started.")
         active_processes[process_id]["status"] = ProcessStatus.CANCELLED
         async def cancelled_generator():
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_cancelled",
                 "data": json.dumps({'process_id': process_id, 'message': 'Process was cancelled before execution started.'})
@@ -462,7 +490,6 @@ async def stream_realtime_updates_endpoint(
         active_processes[process_id]["status"] = ProcessStatus.ERROR
         active_processes[process_id]["error_message"] = 'Internal error: Core plan model not found or invalid for execution.'
         async def core_plan_error_generator():
-            # MODIFIED: Yield a dictionary
             yield {
                 "event": "plan_error",
                 "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': active_processes[process_id]["error_message"]})
@@ -478,11 +505,10 @@ async def stream_realtime_updates_endpoint(
     )
     return EventSourceResponse(event_generator)
 
-
 @router.post("/cancel/{process_id}", status_code=200)
 async def cancel_realtime_process_endpoint(
     process_id: str,
-    current_user: AuthUser | None = Depends(get_current_user_dev_optional)
+    current_user: AuthUser = Depends(get_current_user) 
 ):
     set_correlation_id(process_id)
     if process_id not in active_processes:
@@ -500,16 +526,11 @@ async def cancel_realtime_process_endpoint(
     if current_status in terminal_statuses_for_cancel_check:
         msg = f"Process {process_id} is already in a terminal state: {current_status} and cannot be cancelled."
         logger.info(f"[{process_id}] [/cancel] {msg}")
-        # Return 200 but indicate it was already terminal, or 400 if preferred.
-        # For now, let's use 200 with a clear message.
         return JSONResponse(content={"message": msg, "status": current_status}, status_code=200)
-
 
     logger.info(f"[{process_id}] [/cancel] Cancellation requested by user: {username}. Current status: {current_status}")
     active_processes[process_id]["cancelled"] = True
     
-    # If it's just planned or generating plan, we can directly set it to cancelled.
-    # If running, the check_cancellation callback in run_execution_and_stream will handle it.
     if current_status == ProcessStatus.PLAN_GENERATED or current_status == ProcessStatus.PLAN_GENERATION:
         active_processes[process_id]["status"] = ProcessStatus.CANCELLED
         logger.info(f"[{process_id}] [/cancel] Process was in '{current_status}' state, marked as '{ProcessStatus.CANCELLED}'.")
@@ -518,13 +539,12 @@ async def cancel_realtime_process_endpoint(
 
 @router.get("/available-tools")
 async def get_available_tools(
-    current_user: AuthUser | None = Depends(get_current_user_dev_optional)
+    current_user: AuthUser = Depends(get_current_user) 
 ):
     """Retrieve all available tools from the tool registry."""
     tools_json_str = build_tools_documentation()
     tools_list = json.loads(tools_json_str)
     
-    # Sort tools by category then name for better organization
     tools_list.sort(key=lambda x: (x.get("category", ""), x["tool_name"]))
     
     return {
