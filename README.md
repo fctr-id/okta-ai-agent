@@ -12,7 +12,7 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
 <h3>A new web interface!</h3>
 </div>
 <p align="center">
-  <img src="docs/agent-new-web-ui.gif" alt="Tako AI Agent Demo" width="1024px" height="auto">
+  <img src="docs/media/realitime-mode.gif" alt="Tako AI Agent Demo" width="1024px" height="auto">
 </p>
 
 <div align="center">
