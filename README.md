@@ -9,6 +9,20 @@
 Meet Tako, the first AI agent of its kind that offers dual capabilities - both powerful database queries and real-time API operations through natural language. Built specifically for administrators, IAM managers, IT GRC teams and auditors, Tako leverages enterprise AI models to translate plain English questions into accurate data insights from synced databases or direct Okta API interactions. Our vision is to evolve Tako into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
 <div align="center">
+<h3>📖 Featured Articles</h3>
+<p>Learn more about Tako's journey and capabilities:</p>
+<div style="margin: 20px 0;">
+  <a href="https://iamse.blog/2025/05/21/tako-okta-ai-agent-takes-a-huge-step-towards-becoming-autonomous/" style="margin-right: 20px;">
+    📚 Tako Takes a Huge Step Towards Becoming Autonomous (May 2025)
+  </a>
+  <br>
+  <a href="https://iamse.blog/2025/02/20/okta-ai-agent-for-natural-language-querying/">
+    📚 Okta AI Agent for Natural Language Querying (Feb 2025)
+  </a>
+</div>
+</div>
+
+<div align="center">
 <h3>A new web interface!</h3>
 </div>
 <p align="center">
