@@ -12,9 +12,122 @@ from pydantic_ai.models.gemini import GeminiModelSettings
 from pydantic_ai import Agent
 import os, json
 import httpx
+import ssl
 from dotenv import load_dotenv
+from src.utils.logging import logger
 
 load_dotenv()
+
+
+try:
+    import certifi
+    CERTIFI_AVAILABLE = True
+except ImportError:
+    CERTIFI_AVAILABLE = False
+
+def _count_certificates(file_path: str) -> int:
+    """Count certificates in a PEM file."""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            return content.count('-----BEGIN CERTIFICATE-----')
+    except Exception as e:
+        logger.debug(f"Could not count certificates in {file_path}: {e}")
+        return 0
+
+def _find_custom_ca_file(ca_filename: str) -> Optional[str]:
+    """Find custom CA file in possible locations."""
+    if not ca_filename:
+        return None
+        
+    possible_paths = [
+        os.path.join('/app/src/backend/certs', ca_filename),  # Docker path
+        os.path.join('src/backend/certs', ca_filename)        # Local path
+    ]
+    
+    for ca_path in possible_paths:
+        if os.path.isfile(ca_path):
+            logger.debug(f"Found custom CA file at: {ca_path}")
+            return ca_path
+    
+    logger.warning(f"Custom CA file '{ca_filename}' not found in any of: {possible_paths}")
+    return None
+
+def get_ca_bundle_path() -> Optional[str]:
+    """Get CA bundle path from SSL certs directory or fallback to certifi/system."""
+    ca_filename = os.getenv('SSL_CA_BUNDLE_FILENAME')
+    
+    if ca_filename:
+        logger.debug(f"Looking for custom CA bundle: {ca_filename}")
+        custom_path = _find_custom_ca_file(ca_filename)
+        if custom_path:
+            return custom_path
+    
+    # Fallback to certifi if available
+    if CERTIFI_AVAILABLE:
+        certifi_path = certifi.where()
+        logger.debug(f"Using certifi CA bundle: {certifi_path}")
+        return certifi_path
+    
+    logger.debug("Using system default CA store")
+    return None
+
+def create_http_client_with_ssl_config() -> httpx.AsyncClient:
+    """Create HTTP client with SSL configuration supporting multiple CA sources."""
+    verify_ssl = os.getenv('VERIFY_SSL', 'true').lower() == 'true'
+    
+    if not verify_ssl:
+        logger.warning("SSL verification DISABLED - ignoring all certificate errors")
+        return httpx.AsyncClient(verify=False, timeout=httpx.Timeout(60.0))
+    
+    # Check for custom CA bundle first
+    ca_filename = os.getenv('SSL_CA_BUNDLE_FILENAME')
+    custom_ca_path = _find_custom_ca_file(ca_filename) if ca_filename else None
+    
+    if custom_ca_path:
+        logger.info(f"Configuring SSL with hybrid approach: system + custom CAs")
+        
+        # Create SSL context that loads system/certifi CAs first
+        context = ssl.create_default_context()
+        
+        # Log what system CAs we're starting with
+        if CERTIFI_AVAILABLE:
+            certifi_path = certifi.where()
+            system_cert_count = _count_certificates(certifi_path)
+            logger.debug(f"Loaded {system_cert_count} system certificates from certifi: {certifi_path}")
+        else:
+            logger.debug("Loaded system default CA certificates (count unknown)")
+        
+        # Add custom certificates to the existing context
+        try:
+            context.load_verify_locations(custom_ca_path)
+            custom_cert_count = _count_certificates(custom_ca_path)
+            logger.info(f"Added {custom_cert_count} custom certificates from: {custom_ca_path}")
+            
+            # Summary log
+            if CERTIFI_AVAILABLE:
+                total_estimated = system_cert_count + custom_cert_count
+                logger.info(f"SSL context now contains ~{total_estimated} certificates (system + custom)")
+            else:
+                logger.info(f"SSL context contains system CAs + {custom_cert_count} custom certificates")
+                
+        except Exception as e:
+            logger.error(f"Failed to load custom CA bundle {custom_ca_path}: {e}")
+            logger.info("Falling back to system-only CA certificates")
+            # Context still has system CAs, so continue
+        
+        return httpx.AsyncClient(verify=context, timeout=httpx.Timeout(60.0))
+    
+    # Standard fallback - system CAs only
+    ca_bundle = get_ca_bundle_path()
+    if ca_bundle:
+        cert_count = _count_certificates(ca_bundle)
+        logger.info(f"Using system-only CA bundle with {cert_count} certificates: {ca_bundle}")
+        return httpx.AsyncClient(verify=ca_bundle, timeout=httpx.Timeout(60.0))
+    
+    logger.info("Using system default SSL configuration")
+    return httpx.AsyncClient(timeout=httpx.Timeout(60.0))
+
 
 def parse_headers() -> Dict[str, str]:
     """Parse the CUSTOM_HTTP_HEADERS environment variable into a dictionary."""
@@ -26,7 +139,7 @@ def parse_headers() -> Dict[str, str]:
         # Parse the JSON string into a Python dictionary
         return json.loads(headers_str)
     except json.JSONDecodeError as e:
-        print(f"Error parsing CUSTOM_HTTP_HEADERS: {e}")
+        logger.error(f"Error parsing CUSTOM_HTTP_HEADERS: {e}")
         return {}
 
 class AIProvider(str, Enum):
@@ -73,7 +186,10 @@ class ModelConfig:
         
         elif provider == AIProvider.OPENAI_COMPATIBLE:
             custom_headers = parse_headers()
-            client = httpx.AsyncClient(verify=False, headers=custom_headers)            
+            client = create_http_client_with_ssl_config()
+            if custom_headers:
+                # Merge custom headers with existing client headers
+                client.headers.update(custom_headers)         
             openai_compat_provider = OpenAIProvider(
                 base_url=os.getenv('OPENAI_COMPATIBLE_BASE_URL'),
                 api_key=os.getenv('OPENAI_COMPATIBLE_TOKEN'),
