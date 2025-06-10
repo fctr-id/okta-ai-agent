@@ -624,6 +624,9 @@ class OktaClientWrapper:
     async def _process_single_user(self, user) -> Dict:
         """Process single user with relationships concurrently"""
         try:
+            # Import settings here to avoid circular imports
+            from src.config.settings import settings
+            
             # Extract user ID from either object or dict
             user_okta_id = user['id'] if isinstance(user, dict) else getattr(user, 'id')
             user_dict = user if isinstance(user, dict) else user.as_dict() if hasattr(user, 'as_dict') else {}
@@ -639,6 +642,13 @@ class OktaClientWrapper:
             
             # Get profile data safely
             profile = user_dict.get('profile', {})
+            
+            custom_attributes = {}
+            for attr_name in settings.okta_user_custom_attributes_list:
+                value = profile.get(attr_name)
+                # Only store meaningful values (not None, empty string, or whitespace-only)
+                if value is not None and str(value).strip():
+                    custom_attributes[attr_name] = value
             
             transformed_user = {
                 'okta_id': user_okta_id,
@@ -658,7 +668,8 @@ class OktaClientWrapper:
                 'user_type': profile.get('userType'),
                 'country_code': profile.get('countryCode'),
                 'title': profile.get('title'),
-                'organization': profile.get('organization'),            
+                'organization': profile.get('organization'),
+                'custom_attributes': custom_attributes,  # Add custom attributes
                 'factors': factors,
                 'app_links': app_links,
                 'group_memberships': group_memberships
@@ -666,7 +677,8 @@ class OktaClientWrapper:
             
             logger.debug(
                 f"User {user_okta_id} processed with {len(app_links)} app links, "
-                f"{len(group_memberships)} groups, and {len(factors)} factors"
+                f"{len(group_memberships)} groups, {len(factors)} factors, "
+                f"and {len(custom_attributes)} custom attributes"
             )
             return transformed_user
             

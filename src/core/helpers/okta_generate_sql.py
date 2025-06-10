@@ -57,6 +57,7 @@ sql_agent = Agent(
         Keep JOIN conditions focused only on the ID relationships
         Do NOT use parameter placeholders (?) in queries
         Avoid tenant_id and is_deleted in JOIN conditions when possible
+       
         OPTIMIZATION PATTERNS:
         Instead of this complex pattern (that may fail):
         SELECT u.email, u.login FROM users u LEFT JOIN user_factors uf ON uf.user_okta_id = u.okta_id AND uf.factor_type = 'signed_nonce' AND uf.tenant_id = u.tenant_id AND uf.is_deleted = FALSE WHERE u.is_deleted = FALSE AND uf.id IS NULL
@@ -106,6 +107,35 @@ sql_agent = Agent(
         - A user can be assigned to only one manager
         - A manager can have multiple direct reporting users
         - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
+        
+       ### Custom Attributes (JSON Storage) ###
+        - Custom attributes are stored in the `custom_attributes` JSON column
+        - Use JSON_EXTRACT(custom_attributes, '$.attribute_name') to access values
+        - Use JSON functions for filtering and querying custom attributes
+        
+        ### JSON Query Examples ###
+        
+        Example: "Show users where custom_attrib_1 equals '4'"
+        SQL: SELECT email, login, first_name, last_name, 
+                    JSON_EXTRACT(custom_attributes, '$.custom_attrib_1') as custom_attrib_1
+             FROM users 
+             WHERE JSON_EXTRACT(custom_attributes, '$.custom_attrib_1') = '4' 
+             AND is_deleted = FALSE
+        
+        Example: "Find users with testAttrib containing 'hello'"
+        SQL: SELECT email, login, first_name, last_name,
+                    JSON_EXTRACT(custom_attributes, '$.testAttrib') as testAttrib
+             FROM users 
+             WHERE JSON_EXTRACT(custom_attributes, '$.testAttrib') LIKE '%hello%' 
+             AND is_deleted = FALSE
+             
+        Example: "List all users with any custom attributes"
+        SQL: SELECT email, login, first_name, last_name, custom_attributes
+             FROM users 
+             WHERE custom_attributes IS NOT NULL 
+             AND custom_attributes != '{}' 
+             AND is_deleted = FALSE
+                
 
         ##Key Columns to use in the queries##
         - Always use the following columns when answering queries unless more ore less are asked
@@ -190,7 +220,23 @@ sql_agent = Agent(
 @sql_agent.system_prompt
 async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
     """Access the complete okta database schema to answer user questions"""
-    return """
+    
+    # Get custom attributes dynamically
+    try:
+        from src.config.settings import settings
+        custom_attrs = settings.okta_user_custom_attributes_list
+    except (ImportError, AttributeError):
+        custom_attrs = []
+    
+    # Build custom attributes schema section
+    custom_attrs_schema = ""
+    if custom_attrs:
+        custom_attrs_schema = "\n            Custom Attributes from Okta Profile:"
+        for attr in custom_attrs:
+            custom_attrs_schema += f"\n            - {attr} (String)  Custom attribute: {attr}"
+    
+    # Build the schema string
+    schema = """
             ### DB Schema
             TABLE: users
             FIELDS:
@@ -216,7 +262,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
-            - is_deleted (Boolean, INDEX)
+            - is_deleted (Boolean, INDEX)""" + custom_attrs_schema + """
 
             INDEXES:
             - idx_user_tenant_email (tenant_id, email)
@@ -417,7 +463,9 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - updated_at (DateTime)
             INDEXES:
             - idx_sync_tenant_entity (tenant_id, entity_type)
-            """     
+            """  
+    return schema         
+               
 
 #@sql_agent.system_prompt
 #async def add_tenant_context(ctx: RunContext[SQLDependencies]) -> str:

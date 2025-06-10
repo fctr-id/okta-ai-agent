@@ -81,7 +81,7 @@ class DatabaseOperations:
                 await session.rollback()
                 logger.error(f"Database session error: {str(e)}")
                 raise
-
+    
     async def bulk_upsert(
         self,
         session: AsyncSession,
@@ -109,6 +109,7 @@ class DatabaseOperations:
             - Updates existing records
             - Creates new records
             - Sets sync timestamps
+            - Handles custom_attributes JSON column for User model
         """
         try:
             total_factors = 0
@@ -131,11 +132,18 @@ class DatabaseOperations:
                 if existing:
                     for key, value in record.items():
                         if hasattr(existing, key):
-                            setattr(existing, key, value)
+                            # Handle JSON column properly
+                            if key == 'custom_attributes' and isinstance(value, dict):
+                                setattr(existing, key, value)
+                            else:
+                                setattr(existing, key, value)
                     existing.last_synced_at = datetime.utcnow()
                 else:
                     record['tenant_id'] = tenant_id
                     record['last_synced_at'] = datetime.utcnow()
+                    # Ensure custom_attributes is properly set for new records
+                    if model == User and 'custom_attributes' not in record:
+                        record['custom_attributes'] = {}
                     existing = model(**record)
                     session.add(existing)
                 
@@ -151,7 +159,7 @@ class DatabaseOperations:
         except Exception as e:
             logger.error(f"Bulk upsert error for {model.__name__}: {str(e)}")
             raise
-
+    
     async def mark_deleted(
         self,
         session: AsyncSession,

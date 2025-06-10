@@ -128,6 +128,10 @@ class User(BaseModel):
     title = Column(String, nullable=True)
     organization = Column(String, nullable=True, index=True)
     
+    #JSON column for custom attributes from env variables
+    custom_attributes = Column(JSON, nullable=True, default={})
+    
+    
     #groups = relationship('Group', secondary=user_groups, back_populates='users', passive_deletes=True)
     #authenticators = relationship('Authenticator', secondary=user_authenticators, back_populates='users', passive_deletes=True)
     # Direct application assignments
