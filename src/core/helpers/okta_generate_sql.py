@@ -142,7 +142,7 @@ sql_agent = Agent(
         - For user related query Users: email, login, first_name, last_name, status
         - groups: name, description
         - applications: label, name, status
-        - factors: factor_type, provider, status
+        - factors: factor_type, provider, status, authenticator_name, device_name
             
             ### Timestamp Handling ###
                 - All database timestamps are stored in UTC
@@ -231,9 +231,10 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
     # Build custom attributes schema section
     custom_attrs_schema = ""
     if custom_attrs:
-        custom_attrs_schema = "\n            Custom Attributes from Okta Profile:"
+        custom_attrs_schema = "\n            - custom_attributes (JSON)  Contains all custom Okta attributes"
+        custom_attrs_schema += "\n            Available custom attributes (access via JSON_EXTRACT):"
         for attr in custom_attrs:
-            custom_attrs_schema += f"\n            - {attr} (String)  Custom attribute: {attr}"
+            custom_attrs_schema += f"\n              * {attr} - use JSON_EXTRACT(custom_attributes, '$.{attr}')"
     
     # Build the schema string
     schema = """
@@ -370,6 +371,25 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - uix_tenant_okta_id (tenant_id, okta_id)
             RELATIONSHIPS:
             - applications: one-to-many -> applications
+            
+            TABLE: authenticators    ### also called as factors or user factors
+            FIELDS:
+            - id (Integer, PrimaryKey)
+            - tenant_id (String, INDEX)
+            - okta_id (String, INDEX)
+            - name (String, INDEX)
+            - status (String, INDEX)
+            - type (String, INDEX)
+            - created_at (DateTime)      # From Okta 'created' field
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
+            - updated_at (DateTime)      # Local record update time
+            - last_synced_at (DateTime, INDEX)
+            - is_deleted (Boolean, INDEX)
+            INDEXES:
+            - idx_auth_tenant_name (tenant_id, name)
+            - idx_tenant_deleted (tenant_id, is_deleted)
+            UNIQUE:
+            - uix_tenant_okta_id (tenant_id, okta_id)            
 
             TABLE: user_factors
             FIELDS:
@@ -380,15 +400,18 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce(fastpass), password, webauthn(FIDO2), security_question, token, push(okta verify), totp
             - provider (String, INDEX)
             - status (String, INDEX)
+            - authenticator_name (String, INDEX)  # Human-readable authenticator name like "Google Authenticator", "Okta Verify"
             - email (String, NULL)
             - phone_number (String, NULL)
             - device_type (String, NULL)
             - device_name (String, NULL)
             - platform (String, NULL)
             - created_at (DateTime)
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
+            
             INDEXES:
             - idx_factor_tenant_user (tenant_id, user_okta_id)
             - idx_factor_okta_id (okta_id)
@@ -396,8 +419,11 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - idx_factor_provider_status (provider, status)
             - idx_factor_tenant_user_type (tenant_id, user_okta_id, factor_type)
             - idx_tenant_factor_type (tenant_id, factor_type)
+            - idx_factor_auth_name (tenant_id, authenticator_name)
+            
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
+            
             RELATIONSHIPS:
             - user: many-to-one -> users
 
