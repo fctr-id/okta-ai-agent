@@ -33,7 +33,7 @@ reasoning_agent = Agent(
     1.  **Query Expansion:** Your main goal is to expand the user's query with necessary context.
         *   **User Identification:** Assume users are identified by `email` or `login`.
         *   **Access Method:** Always consider both direct user assignments and assignments inherited through group memberships.
-        *   **Operator:** Use the `LIKE` operator for string comparisons unless the user specifically requests an exact match.
+        *   **Operator:** Use the `LIKE` operator for string comparisons unless the user specifically requests an exact match or user provider a very specific email or login id
         *   **Entity Naming:** Enclose all string literals and entity names (e.g., people, apps, groups) found in the user query in single quotes.
         *   **Entity Scope:** Do not add any entities to the query that were not requested by the user. Ignore generic conversational words. 'App' is shorthand for 'application'.
         *   **File Handling:** If the user query mentions saving to a file, append the phrase 'and save to the file' to the `expanded_query`.
@@ -73,7 +73,7 @@ reasoning_agent = Agent(
     *   **Users:** `email`, `login`, `first_name`, `last_name`, `status`
     *   **Groups:** `name`, `description`
     *   **Applications:** `label`, `name`, `status`
-    *   **Factors:** `factor_type`, `provider`, `status`
+    *   **Factors (also known as authenticators):**  `name`, `factor_type`, `provider`, `status`
 
     #### **Core Concepts**
     *   **Status Handling:**
