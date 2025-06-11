@@ -304,6 +304,9 @@ class UserFactor(BaseModel):
     provider = Column(String, index=True)
     status = Column(String, index=True)
     
+    authenticator_name = Column(String, nullable=True, index=True)
+
+    
     # New timestamp fields
     created_at = Column(DateTime(timezone=True), nullable=True)
     last_updated_at = Column(DateTime(timezone=True), nullable=True)
