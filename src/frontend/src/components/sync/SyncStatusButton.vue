@@ -85,7 +85,22 @@
                                 <div class="entity-label">Applications</div>
                             </div>
                         </div>
-                        <div class="entity-card entity-4">
+                        <!-- Conditional Devices/Policies -->
+                        <div class="entity-card entity-4" v-if="entityCounts.devices && entityCounts.devices > 0">
+                            <div class="entity-icon">
+                                <v-icon size="small">mdi-devices</v-icon>
+                            </div>
+                            <div class="entity-details">
+                                <div class="entity-count"
+                                    :class="{ 'entity-count-large': entityCounts.devices > 9999 }">
+                                    {{ entityCounts.devices }}
+                                </div>
+                                <div class="entity-label">Devices</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Show Policies only if no devices or devices count is 0 -->
+                        <div class="entity-card entity-4" v-else>
                             <div class="entity-icon">
                                 <v-icon size="small">mdi-shield-check</v-icon>
                             </div>
