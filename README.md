@@ -44,7 +44,6 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
 - [📋 Table of Contents](#-table-of-contents)
 - [⚠️ BREAKING CHANGES ALERT](#️-breaking-changes-alert)
 - [🆕 New in This Version (0.5.5-beta)](#-new-in-this-version-055-beta)
-  - [Custom User Attributes \& Device Sync](#custom-user-attributes--device-sync)
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
@@ -96,12 +95,11 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
 > **Repository Clone users:** Delete database files (`rm *.db sqlite_db/*.db`), update dependencies (`pip install -r requirements.txt`), then restart.
 
 ## 🆕 New in This Version (0.5.5-beta)
-
-### Custom User Attributes & Device Sync
 - **📋 Custom User Attributes** - You can define custom user attributes that will be synced and available for querying.
-- **📱 Devices Sync** - Full devices sync with user relationships, security context, and analytics (Optional -set ot false by default)
+- **📱 Devices Sync** - Full devices sync with user relationships, security context, and analytics (Optional - set to false by default)
 - **🔍 Enhanced Queries** - Query users by custom attributes and devices by platform, security status, etc.
-
+- **🔒 SSL Certificate Support** - Self-signed certificates and organizational CAs are now supported for the openai_compatible provider
+  
 **Note**: Device sync controlled by `SYNC_OKTA_DEVICES` environment variable in .env file.
 
 
