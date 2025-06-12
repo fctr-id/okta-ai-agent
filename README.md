@@ -99,10 +99,10 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
 
 ### Custom User Attributes & Device Sync
 - **📋 Custom User Attributes** - You can define custom user attributes that will be synced and available for querying.
-- **📱 Devices Sync** - Full devices sync with user relationships, security context, and analytics (Optional)
+- **📱 Devices Sync** - Full devices sync with user relationships, security context, and analytics (Optional -set ot false by default)
 - **🔍 Enhanced Queries** - Query users by custom attributes and devices by platform, security status, etc.
 
-**Note**: Device sync controlled by `SYNC_OKTA_DEVICES` environment variable.
+**Note**: Device sync controlled by `SYNC_OKTA_DEVICES` environment variable in .env file.
 
 
 ## ✨ What's Special?

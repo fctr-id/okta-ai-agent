@@ -1,5 +1,17 @@
 # Version History
 
+## Current Latest: v0.5.5-beta (2025-06-12)
+Custom User Attributes & Device Management:
+- Added comprehensive custom user attributes support with JSON storage and querying
+- Implemented full Okta device synchronization with user-device relationships
+- Added device security context tracking (management status, screen locks, hardware features)
+- Enhanced UI with conditional device/policy display based on sync configuration
+- Improved SQL schema documentation for device and custom attribute queries
+- Fixed sync order dependencies to ensure proper user-device relationship creation
+- Added device analytics capabilities for platform, manufacturer, and security queries
+- Update pydantic AI framework to the latest version
+- Bug fixes and minor performance improvements
+
 ## Current Latest: v0.5.0-beta (2025-05-20)
 Realtime Agents!
   _ new user interface for realtime queries
