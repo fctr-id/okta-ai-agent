@@ -202,6 +202,7 @@ class OktaClientWrapper:
     POLICY_PAGE_SIZE: Final[int] = 200
     AUTH_PAGE_SIZE: Final[int] = 100
     FACTOR_PAGE_SIZE: Final[int] = 50
+    DEVICE_PAGE_SIZE: Final[int] = 200
   
     # Rate limit delay between requests
     RATE_LIMIT_DELAY: Final[float] = 0.1
@@ -1379,3 +1380,166 @@ class OktaClientWrapper:
         except Exception as e:
             logger.error(f"Error getting apps for group {group_okta_id}: {str(e)}")
             return []
+        
+    #### DEVICES SYNC ####
+
+    
+    async def list_devices(
+        self, 
+        since: Optional[datetime] = None,
+        processor_func: Optional[Callable] = None
+    ) -> Union[List[Dict], int]:
+        """
+        List devices with user relationships using direct API calls with expand=userSummary.
+        
+        Args:
+            since: Optional timestamp for incremental sync
+            processor_func: Function to process batches immediately
+            
+        Returns:
+            If processor_func is provided: Count of processed records
+            Otherwise: List of device dictionaries with user relationships
+        """
+        try:
+            from src.utils.pagination_limits import make_async_request
+            
+            # Build the API URL with query parameters
+            query_params = [
+                f"limit={self.DEVICE_PAGE_SIZE}",
+                "expand=userSummary"
+            ]
+            
+            # Add filter for incremental sync if needed
+            if since:
+                since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                filter_param = f'filter=lastUpdated gt "{since_str}"'
+                query_params.append(filter_param)
+            
+            # Construct full URL with query parameters
+            api_url = f"/api/v1/devices?{'&'.join(query_params)}"
+            
+            logger.debug(f"Fetching devices from: {api_url}")
+            
+            # Make the API request using your existing utility
+            async with self.api_semaphore:
+                response = await make_async_request(
+                    client=self.client,
+                    method="GET",
+                    url=api_url,
+                    return_object=False
+                )
+                await asyncio.sleep(self.RATE_LIMIT_DELAY)
+            
+            # Handle error responses
+            if isinstance(response, dict) and response.get("status") == "error":
+                logger.error(f"Error fetching devices: {response.get('error')}")
+                return [] if not processor_func else 0
+            
+            # Response should be a list of devices
+            if not response or not isinstance(response, list):
+                logger.info("No device data found")
+                return [] if not processor_func else 0
+            
+            # Transform the devices
+            try:
+                transformed_devices = self._transform_device_with_embedded_users(response)
+                if not transformed_devices:
+                    logger.info("No valid devices found after transformation")
+                    return [] if not processor_func else 0
+                
+                if processor_func:
+                    # Stream processing - process devices immediately
+                    await processor_func(transformed_devices)
+                    logger.info(f"Processed {len(transformed_devices)} devices")
+                    return len(transformed_devices)
+                else:
+                    # Return all devices
+                    logger.info(f"Retrieved {len(transformed_devices)} devices")
+                    return transformed_devices
+                
+            except Exception as e:
+                logger.error(f"Error transforming devices: {str(e)}")
+                return [] if not processor_func else 0
+                
+        except Exception as e:
+            logger.error(f"Error listing devices: {str(e)}")
+            raise
+    
+    def _transform_device_with_embedded_users(self, devices) -> List[Dict]:
+        """Transform devices with embedded user relationships from expand=userSummary"""
+        transformed_devices = []
+        
+        # Handle both single device and list of devices
+        device_list = devices if isinstance(devices, list) else [devices]
+        
+        for device in device_list:
+            try:
+                # Handle both dictionary and object formats
+                device_dict = device if isinstance(device, dict) else device.as_dict() if hasattr(device, 'as_dict') else {}
+                
+                # Extract ID
+                okta_id = device_dict.get('id')
+                if not okta_id:
+                    logger.error(f"Missing required okta_id for device")
+                    continue
+    
+                # Extract profile data safely
+                profile = device_dict.get('profile', {})
+                
+                # Transform base device data
+                device_data = {
+                    'okta_id': okta_id,
+                    'status': device_dict.get('status'),
+                    'display_name': profile.get('displayName'),
+                    'platform': profile.get('platform'),
+                    'manufacturer': profile.get('manufacturer'),
+                    'model': profile.get('model'),
+                    'os_version': profile.get('osVersion'),
+                    'serial_number': profile.get('serialNumber'),
+                    'udid': profile.get('udid'),
+                    'registered': profile.get('registered', False),
+                    'secure_hardware_present': profile.get('secureHardwarePresent', False),
+                    'disk_encryption_type': profile.get('diskEncryptionType'),
+                    'created_at': parse_timestamp(device_dict.get('created')),
+                    'last_updated_at': parse_timestamp(device_dict.get('lastUpdated'))
+                }
+                
+                # Extract embedded user relationships - FIXED LOGIC
+                embedded_data = device_dict.get('_embedded', {})
+                embedded_users = embedded_data.get('users', [])
+                
+                if embedded_users:
+                    user_devices = []
+                    for user_relationship in embedded_users:
+                        # Get the nested user object
+                        user_info = user_relationship.get('user', {})
+                        user_id = user_info.get('id')  # This is the okta_id
+                        
+                        if user_id:
+                            user_device_data = {
+                                'device_okta_id': okta_id,
+                                'user_okta_id': user_id,  # This should match users.okta_id
+                                'management_status': user_relationship.get('managementStatus'),
+                                'screen_lock_type': user_relationship.get('screenLockType'),  # Note: camelCase in API
+                                'user_device_created_at': parse_timestamp(user_relationship.get('created'))
+                            }
+                            user_devices.append(user_device_data)
+                            
+                            # Debug logging
+                            logger.debug(f"Created user-device relationship: device={okta_id}, user={user_id}, mgmt={user_device_data['management_status']}")
+                    
+                    if user_devices:
+                        device_data['user_devices'] = user_devices
+                        logger.debug(f"Device {okta_id} has {len(user_devices)} user relationships")
+                else:
+                    logger.debug(f"Device {okta_id} has no embedded users")
+                
+                transformed_devices.append(device_data)
+                logger.debug(f"Transformed device: {device_data['display_name']} ({okta_id})")
+    
+            except Exception as e:
+                logger.error(f"Error transforming device: {str(e)}")
+                continue
+        
+        logger.info(f"Transformed {len(transformed_devices)} devices with embedded user relationships")
+        return transformed_devices 

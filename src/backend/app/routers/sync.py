@@ -118,7 +118,7 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
         await run_sync_with_cancellation_check(orchestrator, sync_id)
         
         # Get counts from database after sync is complete
-        from src.okta_db_sync.db.models import User, Group, Application, Policy
+        from src.okta_db_sync.db.models import User, Group, Application, Policy, Device
         
         # Check for cancellation again before counting entities
         if sync_cancellation_flags.get(sync_id, False):
@@ -129,6 +129,7 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
         groups_count = 0
         apps_count = 0
         policies_count = 0
+        devices_count = 0
         
         try:
             async with db_ops.get_session() as count_session:
@@ -159,6 +160,13 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
                 )
                 result = await count_session.execute(stmt)
                 policies_count = result.scalar() or 0
+                
+                #count devices
+                stmt = select(func.count()).select_from(Device).where(
+                    and_(Device.tenant_id == tenant_id, Device.is_deleted == False)
+                )
+                result = await count_session.execute(stmt)
+                devices_count = result.scalar() or 0
         except Exception as e:
             sync_logger.error(f"Error counting entities: {str(e)}", extra=extra)
         
@@ -177,7 +185,8 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
                 "users_count": users_count,
                 "groups_count": groups_count,
                 "apps_count": apps_count,
-                "policies_count": policies_count
+                "policies_count": policies_count,
+                "devices_count": devices_count
             }
             # Fix: Pass session and tenant_id explicitly
             await db.update_sync_history(session, sync_id, tenant_id, data)
@@ -329,7 +338,8 @@ async def get_sync_status(
                 "users": active_sync.users_count or 0,
                 "groups": active_sync.groups_count or 0,
                 "applications": active_sync.apps_count or 0,
-                "policies": active_sync.policies_count or 0
+                "policies": active_sync.policies_count or 0,
+                "devices": active_sync.devices_count or 0
             },
             start_time=active_sync.start_time
         )
@@ -348,7 +358,8 @@ async def get_sync_status(
                 "users": last_sync.users_count or 0,
                 "groups": last_sync.groups_count or 0,
                 "applications": last_sync.apps_count or 0,
-                "policies": last_sync.policies_count or 0
+                "policies": last_sync.policies_count or 0,
+                "devices": last_sync.devices_count or 0
             },
             start_time=last_sync.start_time,
             end_time=last_sync.end_time
@@ -423,7 +434,8 @@ async def get_sync_history(
                 "users": entry.users_count or 0,
                 "groups": entry.groups_count or 0,
                 "applications": entry.apps_count or 0,
-                "policies": entry.policies_count or 0
+                "policies": entry.policies_count or 0,
+                "devices": entry.devices_count or 0
             },
             start_time=entry.start_time,
             end_time=entry.end_time

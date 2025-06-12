@@ -74,6 +74,8 @@ reasoning_agent = Agent(
     *   **Groups:** `name`, `description`
     *   **Applications:** `label`, `name`, `status`
     *   **Factors (also known as authenticators):**  `name`, `factor_type`, `provider`, `status`
+    *   ** Devices:** `display_name`, `platform`, `manufacturer`, `model`, `status`
+    *   ** User_Devices:** : `management_status`, `screen_lock_type`
 
     #### **Core Concepts**
     *   **Status Handling:**

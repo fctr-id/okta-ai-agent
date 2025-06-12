@@ -143,6 +143,8 @@ sql_agent = Agent(
         - groups: name, description
         - applications: label, name, status
         - factors: factor_type, provider, status, authenticator_name, device_name
+        - devices: display_name, platform, manufacturer, model, status
+        - user_devices: management_status, screen_lock_type
             
             ### Timestamp Handling ###
                 - All database timestamps are stored in UTC
@@ -284,6 +286,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - direct_applications: many-to-many -> applications (via user_application_assignments)
             - groups: many-to-many -> groups (via user_group_memberships)
             - factors: one-to-many -> user_factors
+            - devices: many-to-many -> devices (via user_devices)
 
             TABLE: groups
             FIELDS:
@@ -372,24 +375,68 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             RELATIONSHIPS:
             - applications: one-to-many -> applications
             
-            TABLE: authenticators    ### also called as factors or user factors
+            TABLE: devices
             FIELDS:
             - id (Integer, PrimaryKey)
             - tenant_id (String, INDEX)
             - okta_id (String, INDEX)
-            - name (String, INDEX)
-            - status (String, INDEX)
-            - type (String, INDEX)
+            - status (String, INDEX)  # ACTIVE, INACTIVE, etc.
+            - display_name (String, INDEX)  # Device display name
+            - platform (String, INDEX)  # ANDROID, iOS, WINDOWS, etc.
+            - manufacturer (String, INDEX)  # samsung, AZW, Apple, etc.
+            - model (String)  # Device model
+            - os_version (String)  # Operating system version
+            - serial_number (String, INDEX)  # Device serial number
+            - udid (String, INDEX)  # Unique device identifier
+            - registered (Boolean)  # Device registration status
+            - secure_hardware_present (Boolean)  # TPM/secure hardware availability
+            - disk_encryption_type (String)  # USER, NONE, etc.
             - created_at (DateTime)      # From Okta 'created' field
             - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
+            
             INDEXES:
-            - idx_auth_tenant_name (tenant_id, name)
-            - idx_tenant_deleted (tenant_id, is_deleted)
+            - idx_device_tenant_name (tenant_id, display_name)
+            - idx_device_platform (tenant_id, platform)
+            - idx_device_manufacturer (tenant_id, manufacturer)
+            - idx_device_serial (tenant_id, serial_number)
+            - idx_device_udid (tenant_id, udid)
+            
             UNIQUE:
-            - uix_tenant_okta_id (tenant_id, okta_id)            
+            - uix_tenant_okta_id (tenant_id, okta_id)
+            
+            RELATIONSHIPS:
+            - users: many-to-many -> users (via user_devices)
+            
+            TABLE: user_devices
+            FIELDS:
+            - id (Integer, PrimaryKey)
+            - tenant_id (String, INDEX)
+            - user_okta_id (String, ForeignKey -> users.okta_id)
+            - device_okta_id (String, ForeignKey -> devices.okta_id)
+            - management_status (String)  # NOT_MANAGED, MANAGED, etc.
+            - screen_lock_type (String)  # BIOMETRIC, PIN, PASSWORD, etc.
+            - user_device_created_at (DateTime)  # When user was associated with device
+            - created_at (DateTime)
+            - last_updated_at (DateTime)
+            - updated_at (DateTime)
+            - last_synced_at (DateTime, INDEX)
+            - is_deleted (Boolean, INDEX)
+            
+            INDEXES:
+            - idx_user_device_user (tenant_id, user_okta_id)
+            - idx_user_device_device (tenant_id, device_okta_id)
+            - idx_user_device_mgmt_status (tenant_id, management_status)
+            - idx_user_device_screen_lock (tenant_id, screen_lock_type)
+            
+            UNIQUE:
+            - uix_user_device_tenant_user_device (tenant_id, user_okta_id, device_okta_id)
+            
+            RELATIONSHIPS:
+            - user: many-to-one -> users
+            - device: many-to-one -> devices           
 
             TABLE: user_factors
             FIELDS:

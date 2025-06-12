@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     OKTA_USER_CUSTOM_ATTRIBUTES: str = os.getenv("OKTA_USER_CUSTOM_ATTRIBUTES", "")
     #OKTA_USER_INDEXED_ATTRIBUTES: str = os.getenv("OKTA_USER_INDEXED_ATTRIBUTES", "")
     
+    # device syncing
+    SYNC_OKTA_DEVICES: bool = os.getenv("SYNC_OKTA_DEVICES", "false").lower() == "true"
+    
     # JWT Settings
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "CHANGE-THIS-KEY-IN-PRODUCTION-ENVIRONMENTS")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
