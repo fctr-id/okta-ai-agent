@@ -9,6 +9,7 @@ Custom User Attributes & Device Management:
 - Improved SQL schema documentation for device and custom attribute queries
 - Fixed sync order dependencies to ensure proper user-device relationship creation
 - Added device analytics capabilities for platform, manufacturer, and security queries
+- Support for self-signed and internal CA certificates for openai_compatible provider
 - Update pydantic AI framework to the latest version
 - Bug fixes and minor performance improvements
 
