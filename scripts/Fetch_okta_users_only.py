@@ -63,11 +63,11 @@ async def process_user_factors_only(session, tenant_id, user_data):
                 stmt = text("""
                     INSERT INTO user_factors
                     (tenant_id, user_okta_id, okta_id, factor_type, provider, status,
-                    email, phone_number, device_type, device_name, platform,
+                    authenticator_name, email, phone_number, device_type, device_name, platform,
                     created_at, last_updated_at, updated_at)
                     VALUES (
                         :tenant_id, :user_okta_id, :okta_id, :factor_type, :provider, :status,
-                        :email, :phone_number, :device_type, :device_name, :platform,
+                        :authenticator_name, :email, :phone_number, :device_type, :device_name, :platform,
                         :created_at, :last_updated_at, :updated_at
                     )
                     ON CONFLICT (tenant_id, user_okta_id, okta_id) 
@@ -75,6 +75,7 @@ async def process_user_factors_only(session, tenant_id, user_data):
                         factor_type = excluded.factor_type,
                         provider = excluded.provider,
                         status = excluded.status,
+                        authenticator_name = excluded.authenticator_name,
                         email = excluded.email,
                         phone_number = excluded.phone_number,
                         device_type = excluded.device_type,
@@ -84,6 +85,12 @@ async def process_user_factors_only(session, tenant_id, user_data):
                         updated_at = excluded.updated_at
                 """)
                 
+                # Use the same authenticator name mapping as the main sync
+                authenticator_name = get_authenticator_name(
+                    factor.get('factor_type'), 
+                    factor.get('provider')
+                )
+                
                 now = datetime.now(timezone.utc)
                 await session.execute(stmt, {
                     'tenant_id': tenant_id,
@@ -92,6 +99,7 @@ async def process_user_factors_only(session, tenant_id, user_data):
                     'factor_type': factor['factor_type'],
                     'provider': factor['provider'],
                     'status': factor['status'],
+                    'authenticator_name': authenticator_name,
                     'email': factor.get('email'),
                     'phone_number': factor.get('phone_number'),
                     'device_type': factor.get('device_type'),
@@ -106,8 +114,33 @@ async def process_user_factors_only(session, tenant_id, user_data):
         return factor_count
         
     except Exception as e:
-        logger.error(f"Error processing user factors")
+        logger.error(f"Error processing user factors for {user_okta_id}: {str(e)}")
         raise
+
+def get_authenticator_name(factor_type: str, provider: str) -> str:
+    """
+    Map factor type and provider to authenticator name.
+    This matches the mapping used in the main sync engine.
+    """
+    authenticator_mappings = {
+        # Okta Verify handles multiple factor types
+        ('signed_nonce', 'OKTA'): 'Okta FastPass',      # FastPass
+        ('push', 'OKTA'): 'Okta Verify',               # Push notifications  
+        ('token:software:totp', 'OKTA'): 'Okta Verify', # TOTP in Okta Verify
+        
+        # Google Authenticator
+        ('token:software:totp', 'GOOGLE'): 'Google Authenticator',
+        
+        # Other authenticators
+        ('sms', 'OKTA'): 'Phone',
+        ('email', 'OKTA'): 'Email',
+        ('password', 'OKTA'): 'Password',
+        ('security_key', 'OKTA'): 'Security Key or Biometric',
+        ('security_question', 'OKTA'): 'Security Question',
+    }
+    
+    mapping_key = (factor_type, provider)
+    return authenticator_mappings.get(mapping_key, f"Unknown ({factor_type}, {provider})")
 
 async def clean_users_and_factors(session, tenant_id):
     """Clean only users and factors tables"""
@@ -115,6 +148,17 @@ async def clean_users_and_factors(session, tenant_id):
         # Delete factors first (foreign key dependency)
         await session.execute(text("""
             DELETE FROM user_factors 
+            WHERE tenant_id = :tenant_id
+        """), {'tenant_id': tenant_id})
+        
+        # Delete user relationships
+        await session.execute(text("""
+            DELETE FROM user_application_assignments 
+            WHERE tenant_id = :tenant_id
+        """), {'tenant_id': tenant_id})
+        
+        await session.execute(text("""
+            DELETE FROM user_group_memberships 
             WHERE tenant_id = :tenant_id
         """), {'tenant_id': tenant_id})
         
@@ -131,14 +175,14 @@ async def clean_users_and_factors(session, tenant_id):
         raise
 
 async def process_batch_to_db(session, db, tenant_id, batch):
-    """Process a batch of users and their factors only"""
+    """Process a batch of users and their factors only - matches main sync approach"""
     if not batch:
         return 0, 0
         
     try:
         total_factors = 0
         
-        # Process factors for each user
+        # Process factors for each user using the same approach as main sync
         for record in batch:
             factors_count = await process_user_factors_only(session, tenant_id, record)
             total_factors += factors_count
@@ -156,9 +200,14 @@ async def process_batch_to_db(session, db, tenant_id, batch):
             
             # Filter to only include valid model fields
             filtered_user = filter_model_attributes(User, user_copy)
+            
+            # Ensure custom_attributes is properly handled
+            if 'custom_attributes' not in filtered_user:
+                filtered_user['custom_attributes'] = {}
+            
             filtered_batch.append(filtered_user)
         
-        # Process the cleaned user records
+        # Process the cleaned user records using the same bulk_upsert method
         await db.bulk_upsert(session, User, filtered_batch, tenant_id)
         
         # Return batch count and factors count
@@ -171,7 +220,7 @@ async def process_batch_to_db(session, db, tenant_id, batch):
 
 async def run_users_sync_only(tenant_id: str, db: DatabaseOperations, user_limit: int):
     """
-    Run a sync operation for users and factors only
+    Run a sync operation for users and factors only - aligned with current sync architecture
     
     Args:
         tenant_id: The Okta tenant ID
@@ -182,7 +231,7 @@ async def run_users_sync_only(tenant_id: str, db: DatabaseOperations, user_limit
     okta_client = None
     
     try:
-        # Create sync history record
+        # Create sync history record - matches main sync approach
         async with db.get_session() as session:
             sync_history = SyncHistory(
                 tenant_id=tenant_id,
@@ -201,7 +250,7 @@ async def run_users_sync_only(tenant_id: str, db: DatabaseOperations, user_limit
             # Clean only users and factors tables
             await clean_users_and_factors(session, tenant_id)
         
-        # Initialize Okta client
+        # Initialize Okta client - matches main sync initialization
         okta_client = OktaClientWrapper(tenant_id=tenant_id)
         await okta_client.__aenter__()
         
@@ -209,7 +258,7 @@ async def run_users_sync_only(tenant_id: str, db: DatabaseOperations, user_limit
         total_users = 0
         total_factors = 0
         
-        # Create a processor function for handling batches directly from API to DB
+        # Create a processor function that matches the main sync approach
         async def process_users_and_factors_only(batch_data):
             nonlocal total_users, total_factors
             
@@ -226,16 +275,17 @@ async def run_users_sync_only(tenant_id: str, db: DatabaseOperations, user_limit
                 total_users += users_count
                 total_factors += factors_count
                 
-                # Update sync history
+                # Update sync history - matches main sync updates
                 sync_history = await batch_session.get(SyncHistory, sync_id)
                 if sync_history:
                     sync_history.users_count = total_users
                     sync_history.records_processed = total_users
+                    sync_history.progress_percentage = min(int((total_users / user_limit) * 100), 100)
                     await batch_session.commit()
                 
                 logger.info(f"Processed {users_count} User records, total: {total_users}")
         
-        # Apply the limit for streaming processing
+        # Apply the limit for streaming processing - improved approach
         original_list_users = okta_client.list_users
         
         async def limited_list_users(*args, **kwargs):
@@ -263,10 +313,10 @@ async def run_users_sync_only(tenant_id: str, db: DatabaseOperations, user_limit
         okta_client.list_users = limited_list_users
         logger.info(f"Limited sync to first {user_limit} users")
         
-        # Call list_users with our custom processor
+        # Call list_users with our custom processor - matches main sync pattern
         await okta_client.list_users(processor_func=process_users_and_factors_only)
         
-        # Update sync history with results
+        # Update sync history with results - matches main sync completion
         async with db.get_session() as session:
             stmt = select(SyncHistory).where(SyncHistory.id == sync_id)
             result = await session.execute(stmt)
@@ -284,7 +334,7 @@ async def run_users_sync_only(tenant_id: str, db: DatabaseOperations, user_limit
         return True
     
     except Exception as e:
-        # Update sync history with error
+        # Update sync history with error - matches main sync error handling
         if sync_id:
             try:
                 async with db.get_session() as session:
@@ -328,7 +378,7 @@ async def main():
     user_limit = args.limit
     logger.info(f"Starting Okta USERS ONLY sync v{VERSION} (limited to {user_limit} users) for tenant: {settings.tenant_id}")
 
-    # Initialize database
+    # Initialize database - matches main sync initialization
     db = DatabaseOperations()
     await db.init_db()
 
