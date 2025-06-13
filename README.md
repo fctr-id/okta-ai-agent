@@ -4,7 +4,7 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.5.0-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.5.5-beta)</h2>
 
 Meet Tako, the first AI agent of its kind that offers dual capabilities - both powerful database queries and real-time API operations through natural language. Built specifically for administrators, IAM managers, IT GRC teams and auditors, Tako leverages enterprise AI models to translate plain English questions into accurate data insights from synced databases or direct Okta API interactions. Our vision is to evolve Tako into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
@@ -318,9 +318,6 @@ The following data model applies only when using Database Mode with a synced SQL
 | UserDevices | `management_status`, `screen_lock_type`, `user_device_created_at` (relationships between users and their devices) |
 
 > **Note**: You can view the data saved to your SQLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
-
-> **Note**: You can view the data saved to your SQLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
-
 
 ## ⚠️ Good to Know
 
