@@ -20,6 +20,7 @@ export function useSync() {
         groups: 0,
         applications: 0,
         policies: 0,
+        devices: 0
     });
     const syncError = ref(null);
 
@@ -29,7 +30,7 @@ export function useSync() {
     const POLL_INTERVAL = 15000;
     const STALL_TIMEOUT = 10 * 60 * 1000; // 10 minutes without changes
     let lastEntityCountChange = null;
-    let previousCounts = { users: 0, groups: 0, applications: 0, policies: 0 };
+    let previousCounts = { users: 0, groups: 0, applications: 0, policies: 0, devices: 0 };
 
     /**
      * Parse a UTC timestamp string from the server
@@ -122,6 +123,7 @@ export function useSync() {
                     data.entity_counts.groups !== previousCounts.groups ||
                     data.entity_counts.applications !== previousCounts.applications ||
                     data.entity_counts.policies !== previousCounts.policies;
+                    data.entity_counts.devices !== previousCounts.devices;
 
                 // If counts changed, update the timestamp
                 if (hasChanged) {

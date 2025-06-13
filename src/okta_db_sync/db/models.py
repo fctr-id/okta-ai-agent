@@ -128,6 +128,10 @@ class User(BaseModel):
     title = Column(String, nullable=True)
     organization = Column(String, nullable=True, index=True)
     
+    #JSON column for custom attributes from env variables
+    custom_attributes = Column(JSON, nullable=True, default={})
+    
+    
     #groups = relationship('Group', secondary=user_groups, back_populates='users', passive_deletes=True)
     #authenticators = relationship('Authenticator', secondary=user_authenticators, back_populates='users', passive_deletes=True)
     # Direct application assignments
@@ -135,6 +139,7 @@ class User(BaseModel):
     # Group memberships
     groups = relationship('Group',secondary=user_group_memberships,back_populates='users',passive_deletes=True)
     factors = relationship('UserFactor', back_populates='user', cascade='all, delete-orphan')
+    devices = relationship('UserDevice', foreign_keys='UserDevice.user_okta_id', back_populates='user', cascade='all, delete-orphan')
     
     __table_args__ = (
         Index('idx_user_tenant_email', 'tenant_id', 'email'),
@@ -300,6 +305,9 @@ class UserFactor(BaseModel):
     provider = Column(String, index=True)
     status = Column(String, index=True)
     
+    authenticator_name = Column(String, nullable=True, index=True)
+
+    
     # New timestamp fields
     created_at = Column(DateTime(timezone=True), nullable=True)
     last_updated_at = Column(DateTime(timezone=True), nullable=True)
@@ -359,7 +367,8 @@ class SyncHistory(Base):
     groups_count = Column(Integer, default=0)
     apps_count = Column(Integer, default=0)
     policies_count = Column(Integer, default=0)
-    records_processed = Column(Integer, default=0)  # Add this field for tracking records
+    devices_count = Column(Integer, default=0)
+    records_processed = Column(Integer, default=0)  
     
     # Progress tracking
     progress_percentage = Column(Integer, default=0)
@@ -378,7 +387,61 @@ class SyncHistory(Base):
     @property
     def SUCCESS(self):
         return SyncStatus.COMPLETED 
+
+class Device(BaseModel):
+    __tablename__ = 'devices'
     
+    # Basic device info from API response
+    status = Column(String, index=True)  # ACTIVE, etc.
+    
+    # Profile fields (all from API response)
+    display_name = Column(String, index=True)
+    platform = Column(String, index=True)  # ANDROID, iOS, WINDOWS, etc.
+    manufacturer = Column(String, index=True)
+    model = Column(String)
+    os_version = Column(String)
+    registered = Column(Boolean, default=False)
+    secure_hardware_present = Column(Boolean, default=False)
+    disk_encryption_type = Column(String)  # USER, NONE, etc.
+    
+    # Additional device attributes
+    serial_number = Column(String, index=True)  # Device serial number
+    udid = Column(String, index=True)  # Unique device identifier
+    
+    # Relationships
+    user_devices = relationship('UserDevice', back_populates='device', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        Index('idx_device_tenant_name', 'tenant_id', 'display_name'),
+        Index('idx_device_platform', 'tenant_id', 'platform'),
+        Index('idx_device_manufacturer', 'tenant_id', 'manufacturer'),
+        Index('idx_device_serial', 'tenant_id', 'serial_number'),
+        Index('idx_device_udid', 'tenant_id', 'udid'),
+        {'extend_existing': True}
+    )
+
+class UserDevice(SyncBase):
+    __tablename__ = 'user_devices'
+    
+    user_okta_id = Column(String, ForeignKey('users.okta_id', ondelete='CASCADE'), index=True)
+    device_okta_id = Column(String, ForeignKey('devices.okta_id', ondelete='CASCADE'), index=True)
+    management_status = Column(String)  # NOT_MANAGED, MANAGED, etc.
+    user_device_created_at = Column(DateTime(timezone=True))  # Per-user creation date
+    screen_lock_type = Column(String)  # BIOMETRIC, PIN, PASSWORD, etc.
+    
+    # Relationships
+    user = relationship('User', foreign_keys=[user_okta_id])
+    device = relationship('Device', foreign_keys=[device_okta_id])
+    
+    __table_args__ = (
+        Index('idx_user_device_user', 'tenant_id', 'user_okta_id'),
+        Index('idx_user_device_device', 'tenant_id', 'device_okta_id'),
+        Index('idx_user_device_mgmt_status', 'tenant_id', 'management_status'),
+        Index('idx_user_device_screen_lock', 'tenant_id', 'screen_lock_type'),
+        UniqueConstraint('tenant_id', 'user_okta_id', 'device_okta_id', 
+                        name='uix_user_device_tenant_user_device'),
+        {'extend_existing': True}
+    )    
     
 # Authentication Models
 class UserRole(str, enum.Enum):

@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from urllib.parse import urlparse
 from pathlib import Path
 import os, math
@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     NUM_OF_THREADS: int = int(os.getenv("NUM_OF_THREADS", "4"))
+    
+    # Add these new settings for dynamic user attributes
+    OKTA_USER_CUSTOM_ATTRIBUTES: str = os.getenv("OKTA_USER_CUSTOM_ATTRIBUTES", "")
+    #OKTA_USER_INDEXED_ATTRIBUTES: str = os.getenv("OKTA_USER_INDEXED_ATTRIBUTES", "")
+    
+    # device syncing
+    SYNC_OKTA_DEVICES: bool = os.getenv("SYNC_OKTA_DEVICES", "false").lower() == "true"
     
     # JWT Settings
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "CHANGE-THIS-KEY-IN-PRODUCTION-ENVIRONMENTS")
@@ -72,6 +79,30 @@ class Settings(BaseSettings):
     def MAX_CONCURRENT_USERS(self) -> int:
         """Calculate the maximum number of concurrent users based on rate limit (rounded down)"""
         return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT / 3))    
+
+    # Helper properties to parse the comma-separated strings
+    @property
+    def okta_user_custom_attributes_list(self) -> List[str]:
+        """Parse OKTA_USER_CUSTOM_ATTRIBUTES into a list, filtering out empty strings"""
+        if not self.OKTA_USER_CUSTOM_ATTRIBUTES:
+            return []
+        return [attr.strip() for attr in self.OKTA_USER_CUSTOM_ATTRIBUTES.split(',') if attr.strip()]
+
+    #@property  
+    #def okta_user_indexed_attributes_list(self) -> List[str]:
+    #    """
+    #    Parse OKTA_USER_INDEXED_ATTRIBUTES into a list.
+    #    If not set, returns all custom attributes (index everything).
+    #    If set, returns only the specified attributes to index.
+    #    """
+    #    if not self.OKTA_USER_INDEXED_ATTRIBUTES:
+    #        # If indexed attributes not specified, index all custom attributes
+    #        return self.okta_user_custom_attributes_list
+    #    
+    #    indexed_attrs = [attr.strip() for attr in self.OKTA_USER_INDEXED_ATTRIBUTES.split(',') if attr.strip()]
+    #    
+    #    # Only return attributes that are also in the custom attributes list
+    #    return [attr for attr in indexed_attrs if attr in self.okta_user_custom_attributes_list]
 
     class Config:
         env_file = ".env"

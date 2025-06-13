@@ -57,6 +57,7 @@ sql_agent = Agent(
         Keep JOIN conditions focused only on the ID relationships
         Do NOT use parameter placeholders (?) in queries
         Avoid tenant_id and is_deleted in JOIN conditions when possible
+       
         OPTIMIZATION PATTERNS:
         Instead of this complex pattern (that may fail):
         SELECT u.email, u.login FROM users u LEFT JOIN user_factors uf ON uf.user_okta_id = u.okta_id AND uf.factor_type = 'signed_nonce' AND uf.tenant_id = u.tenant_id AND uf.is_deleted = FALSE WHERE u.is_deleted = FALSE AND uf.id IS NULL
@@ -106,13 +107,44 @@ sql_agent = Agent(
         - A user can be assigned to only one manager
         - A manager can have multiple direct reporting users
         - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
+        
+       ### Custom Attributes (JSON Storage) ###
+        - Custom attributes are stored in the `custom_attributes` JSON column
+        - Use JSON_EXTRACT(custom_attributes, '$.attribute_name') to access values
+        - Use JSON functions for filtering and querying custom attributes
+        
+        ### JSON Query Examples ###
+        
+        Example: "Show users where custom_attrib_1 equals '4'"
+        SQL: SELECT email, login, first_name, last_name, 
+                    JSON_EXTRACT(custom_attributes, '$.custom_attrib_1') as custom_attrib_1
+             FROM users 
+             WHERE JSON_EXTRACT(custom_attributes, '$.custom_attrib_1') = '4' 
+             AND is_deleted = FALSE
+        
+        Example: "Find users with testAttrib containing 'hello'"
+        SQL: SELECT email, login, first_name, last_name,
+                    JSON_EXTRACT(custom_attributes, '$.testAttrib') as testAttrib
+             FROM users 
+             WHERE JSON_EXTRACT(custom_attributes, '$.testAttrib') LIKE '%hello%' 
+             AND is_deleted = FALSE
+             
+        Example: "List all users with any custom attributes"
+        SQL: SELECT email, login, first_name, last_name, custom_attributes
+             FROM users 
+             WHERE custom_attributes IS NOT NULL 
+             AND custom_attributes != '{}' 
+             AND is_deleted = FALSE
+                
 
         ##Key Columns to use in the queries##
         - Always use the following columns when answering queries unless more ore less are asked
         - For user related query Users: email, login, first_name, last_name, status
         - groups: name, description
         - applications: label, name, status
-        - factors: factor_type, provider, status
+        - factors: factor_type, provider, status, authenticator_name, device_name
+        - devices: display_name, platform, manufacturer, model, status
+        - user_devices: management_status, screen_lock_type
             
             ### Timestamp Handling ###
                 - All database timestamps are stored in UTC
@@ -190,7 +222,24 @@ sql_agent = Agent(
 @sql_agent.system_prompt
 async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
     """Access the complete okta database schema to answer user questions"""
-    return """
+    
+    # Get custom attributes dynamically
+    try:
+        from src.config.settings import settings
+        custom_attrs = settings.okta_user_custom_attributes_list
+    except (ImportError, AttributeError):
+        custom_attrs = []
+    
+    # Build custom attributes schema section
+    custom_attrs_schema = ""
+    if custom_attrs:
+        custom_attrs_schema = "\n            - custom_attributes (JSON)  Contains all custom Okta attributes"
+        custom_attrs_schema += "\n            Available custom attributes (access via JSON_EXTRACT):"
+        for attr in custom_attrs:
+            custom_attrs_schema += f"\n              * {attr} - use JSON_EXTRACT(custom_attributes, '$.{attr}')"
+    
+    # Build the schema string
+    schema = """
             ### DB Schema
             TABLE: users
             FIELDS:
@@ -216,7 +265,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
-            - is_deleted (Boolean, INDEX)
+            - is_deleted (Boolean, INDEX)""" + custom_attrs_schema + """
 
             INDEXES:
             - idx_user_tenant_email (tenant_id, email)
@@ -237,6 +286,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - direct_applications: many-to-many -> applications (via user_application_assignments)
             - groups: many-to-many -> groups (via user_group_memberships)
             - factors: one-to-many -> user_factors
+            - devices: many-to-many -> devices (via user_devices)
 
             TABLE: groups
             FIELDS:
@@ -324,6 +374,69 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - uix_tenant_okta_id (tenant_id, okta_id)
             RELATIONSHIPS:
             - applications: one-to-many -> applications
+            
+            TABLE: devices
+            FIELDS:
+            - id (Integer, PrimaryKey)
+            - tenant_id (String, INDEX)
+            - okta_id (String, INDEX)
+            - status (String, INDEX)  # ACTIVE, INACTIVE, etc.
+            - display_name (String, INDEX)  # Device display name
+            - platform (String, INDEX)  # ANDROID, iOS, WINDOWS, etc.
+            - manufacturer (String, INDEX)  # samsung, AZW, Apple, etc.
+            - model (String)  # Device model
+            - os_version (String)  # Operating system version
+            - serial_number (String, INDEX)  # Device serial number
+            - udid (String, INDEX)  # Unique device identifier
+            - registered (Boolean)  # Device registration status
+            - secure_hardware_present (Boolean)  # TPM/secure hardware availability
+            - disk_encryption_type (String)  # USER, NONE, etc.
+            - created_at (DateTime)      # From Okta 'created' field
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
+            - updated_at (DateTime)      # Local record update time
+            - last_synced_at (DateTime, INDEX)
+            - is_deleted (Boolean, INDEX)
+            
+            INDEXES:
+            - idx_device_tenant_name (tenant_id, display_name)
+            - idx_device_platform (tenant_id, platform)
+            - idx_device_manufacturer (tenant_id, manufacturer)
+            - idx_device_serial (tenant_id, serial_number)
+            - idx_device_udid (tenant_id, udid)
+            
+            UNIQUE:
+            - uix_tenant_okta_id (tenant_id, okta_id)
+            
+            RELATIONSHIPS:
+            - users: many-to-many -> users (via user_devices)
+            
+            TABLE: user_devices
+            FIELDS:
+            - id (Integer, PrimaryKey)
+            - tenant_id (String, INDEX)
+            - user_okta_id (String, ForeignKey -> users.okta_id)
+            - device_okta_id (String, ForeignKey -> devices.okta_id)
+            - management_status (String)  # NOT_MANAGED, MANAGED, etc.
+            - screen_lock_type (String)  # BIOMETRIC, PIN, PASSWORD, etc.
+            - user_device_created_at (DateTime)  # When user was associated with device
+            - created_at (DateTime)
+            - last_updated_at (DateTime)
+            - updated_at (DateTime)
+            - last_synced_at (DateTime, INDEX)
+            - is_deleted (Boolean, INDEX)
+            
+            INDEXES:
+            - idx_user_device_user (tenant_id, user_okta_id)
+            - idx_user_device_device (tenant_id, device_okta_id)
+            - idx_user_device_mgmt_status (tenant_id, management_status)
+            - idx_user_device_screen_lock (tenant_id, screen_lock_type)
+            
+            UNIQUE:
+            - uix_user_device_tenant_user_device (tenant_id, user_okta_id, device_okta_id)
+            
+            RELATIONSHIPS:
+            - user: many-to-one -> users
+            - device: many-to-one -> devices           
 
             TABLE: user_factors
             FIELDS:
@@ -334,15 +447,18 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce(fastpass), password, webauthn(FIDO2), security_question, token, push(okta verify), totp
             - provider (String, INDEX)
             - status (String, INDEX)
+            - authenticator_name (String, INDEX)  # Human-readable authenticator name like "Google Authenticator", "Okta Verify"
             - email (String, NULL)
             - phone_number (String, NULL)
             - device_type (String, NULL)
             - device_name (String, NULL)
             - platform (String, NULL)
             - created_at (DateTime)
+            - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
+            
             INDEXES:
             - idx_factor_tenant_user (tenant_id, user_okta_id)
             - idx_factor_okta_id (okta_id)
@@ -350,8 +466,11 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - idx_factor_provider_status (provider, status)
             - idx_factor_tenant_user_type (tenant_id, user_okta_id, factor_type)
             - idx_tenant_factor_type (tenant_id, factor_type)
+            - idx_factor_auth_name (tenant_id, authenticator_name)
+            
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
+            
             RELATIONSHIPS:
             - user: many-to-one -> users
 
@@ -417,7 +536,9 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - updated_at (DateTime)
             INDEXES:
             - idx_sync_tenant_entity (tenant_id, entity_type)
-            """     
+            """  
+    return schema         
+               
 
 #@sql_agent.system_prompt
 #async def add_tenant_context(ctx: RunContext[SQLDependencies]) -> str:

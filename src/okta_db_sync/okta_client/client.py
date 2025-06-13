@@ -202,6 +202,7 @@ class OktaClientWrapper:
     POLICY_PAGE_SIZE: Final[int] = 200
     AUTH_PAGE_SIZE: Final[int] = 100
     FACTOR_PAGE_SIZE: Final[int] = 50
+    DEVICE_PAGE_SIZE: Final[int] = 200
   
     # Rate limit delay between requests
     RATE_LIMIT_DELAY: Final[float] = 0.1
@@ -624,6 +625,9 @@ class OktaClientWrapper:
     async def _process_single_user(self, user) -> Dict:
         """Process single user with relationships concurrently"""
         try:
+            # Import settings here to avoid circular imports
+            from src.config.settings import settings
+            
             # Extract user ID from either object or dict
             user_okta_id = user['id'] if isinstance(user, dict) else getattr(user, 'id')
             user_dict = user if isinstance(user, dict) else user.as_dict() if hasattr(user, 'as_dict') else {}
@@ -639,6 +643,13 @@ class OktaClientWrapper:
             
             # Get profile data safely
             profile = user_dict.get('profile', {})
+            
+            custom_attributes = {}
+            for attr_name in settings.okta_user_custom_attributes_list:
+                value = profile.get(attr_name)
+                # Only store meaningful values (not None, empty string, or whitespace-only)
+                if value is not None and str(value).strip():
+                    custom_attributes[attr_name] = value
             
             transformed_user = {
                 'okta_id': user_okta_id,
@@ -658,7 +669,8 @@ class OktaClientWrapper:
                 'user_type': profile.get('userType'),
                 'country_code': profile.get('countryCode'),
                 'title': profile.get('title'),
-                'organization': profile.get('organization'),            
+                'organization': profile.get('organization'),
+                'custom_attributes': custom_attributes,  # Add custom attributes
                 'factors': factors,
                 'app_links': app_links,
                 'group_memberships': group_memberships
@@ -666,7 +678,8 @@ class OktaClientWrapper:
             
             logger.debug(
                 f"User {user_okta_id} processed with {len(app_links)} app links, "
-                f"{len(group_memberships)} groups, and {len(factors)} factors"
+                f"{len(group_memberships)} groups, {len(factors)} factors, "
+                f"and {len(custom_attributes)} custom attributes"
             )
             return transformed_user
             
@@ -1367,3 +1380,166 @@ class OktaClientWrapper:
         except Exception as e:
             logger.error(f"Error getting apps for group {group_okta_id}: {str(e)}")
             return []
+        
+    #### DEVICES SYNC ####
+
+    
+    async def list_devices(
+        self, 
+        since: Optional[datetime] = None,
+        processor_func: Optional[Callable] = None
+    ) -> Union[List[Dict], int]:
+        """
+        List devices with user relationships using direct API calls with expand=userSummary.
+        
+        Args:
+            since: Optional timestamp for incremental sync
+            processor_func: Function to process batches immediately
+            
+        Returns:
+            If processor_func is provided: Count of processed records
+            Otherwise: List of device dictionaries with user relationships
+        """
+        try:
+            from src.utils.pagination_limits import make_async_request
+            
+            # Build the API URL with query parameters
+            query_params = [
+                f"limit={self.DEVICE_PAGE_SIZE}",
+                "expand=userSummary"
+            ]
+            
+            # Add filter for incremental sync if needed
+            if since:
+                since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                filter_param = f'filter=lastUpdated gt "{since_str}"'
+                query_params.append(filter_param)
+            
+            # Construct full URL with query parameters
+            api_url = f"/api/v1/devices?{'&'.join(query_params)}"
+            
+            logger.debug(f"Fetching devices from: {api_url}")
+            
+            # Make the API request using your existing utility
+            async with self.api_semaphore:
+                response = await make_async_request(
+                    client=self.client,
+                    method="GET",
+                    url=api_url,
+                    return_object=False
+                )
+                await asyncio.sleep(self.RATE_LIMIT_DELAY)
+            
+            # Handle error responses
+            if isinstance(response, dict) and response.get("status") == "error":
+                logger.error(f"Error fetching devices: {response.get('error')}")
+                return [] if not processor_func else 0
+            
+            # Response should be a list of devices
+            if not response or not isinstance(response, list):
+                logger.info("No device data found")
+                return [] if not processor_func else 0
+            
+            # Transform the devices
+            try:
+                transformed_devices = self._transform_device_with_embedded_users(response)
+                if not transformed_devices:
+                    logger.info("No valid devices found after transformation")
+                    return [] if not processor_func else 0
+                
+                if processor_func:
+                    # Stream processing - process devices immediately
+                    await processor_func(transformed_devices)
+                    logger.info(f"Processed {len(transformed_devices)} devices")
+                    return len(transformed_devices)
+                else:
+                    # Return all devices
+                    logger.info(f"Retrieved {len(transformed_devices)} devices")
+                    return transformed_devices
+                
+            except Exception as e:
+                logger.error(f"Error transforming devices: {str(e)}")
+                return [] if not processor_func else 0
+                
+        except Exception as e:
+            logger.error(f"Error listing devices: {str(e)}")
+            raise
+    
+    def _transform_device_with_embedded_users(self, devices) -> List[Dict]:
+        """Transform devices with embedded user relationships from expand=userSummary"""
+        transformed_devices = []
+        
+        # Handle both single device and list of devices
+        device_list = devices if isinstance(devices, list) else [devices]
+        
+        for device in device_list:
+            try:
+                # Handle both dictionary and object formats
+                device_dict = device if isinstance(device, dict) else device.as_dict() if hasattr(device, 'as_dict') else {}
+                
+                # Extract ID
+                okta_id = device_dict.get('id')
+                if not okta_id:
+                    logger.error(f"Missing required okta_id for device")
+                    continue
+    
+                # Extract profile data safely
+                profile = device_dict.get('profile', {})
+                
+                # Transform base device data
+                device_data = {
+                    'okta_id': okta_id,
+                    'status': device_dict.get('status'),
+                    'display_name': profile.get('displayName'),
+                    'platform': profile.get('platform'),
+                    'manufacturer': profile.get('manufacturer'),
+                    'model': profile.get('model'),
+                    'os_version': profile.get('osVersion'),
+                    'serial_number': profile.get('serialNumber'),
+                    'udid': profile.get('udid'),
+                    'registered': profile.get('registered', False),
+                    'secure_hardware_present': profile.get('secureHardwarePresent', False),
+                    'disk_encryption_type': profile.get('diskEncryptionType'),
+                    'created_at': parse_timestamp(device_dict.get('created')),
+                    'last_updated_at': parse_timestamp(device_dict.get('lastUpdated'))
+                }
+                
+                # Extract embedded user relationships - FIXED LOGIC
+                embedded_data = device_dict.get('_embedded', {})
+                embedded_users = embedded_data.get('users', [])
+                
+                if embedded_users:
+                    user_devices = []
+                    for user_relationship in embedded_users:
+                        # Get the nested user object
+                        user_info = user_relationship.get('user', {})
+                        user_id = user_info.get('id')  # This is the okta_id
+                        
+                        if user_id:
+                            user_device_data = {
+                                'device_okta_id': okta_id,
+                                'user_okta_id': user_id,  # This should match users.okta_id
+                                'management_status': user_relationship.get('managementStatus'),
+                                'screen_lock_type': user_relationship.get('screenLockType'),  # Note: camelCase in API
+                                'user_device_created_at': parse_timestamp(user_relationship.get('created'))
+                            }
+                            user_devices.append(user_device_data)
+                            
+                            # Debug logging
+                            logger.debug(f"Created user-device relationship: device={okta_id}, user={user_id}, mgmt={user_device_data['management_status']}")
+                    
+                    if user_devices:
+                        device_data['user_devices'] = user_devices
+                        logger.debug(f"Device {okta_id} has {len(user_devices)} user relationships")
+                else:
+                    logger.debug(f"Device {okta_id} has no embedded users")
+                
+                transformed_devices.append(device_data)
+                logger.debug(f"Transformed device: {device_data['display_name']} ({okta_id})")
+    
+            except Exception as e:
+                logger.error(f"Error transforming device: {str(e)}")
+                continue
+        
+        logger.info(f"Transformed {len(transformed_devices)} devices with embedded user relationships")
+        return transformed_devices 

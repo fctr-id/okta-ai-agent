@@ -4,7 +4,7 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.5.0-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.5.5-beta)</h2>
 
 Meet Tako, the first AI agent of its kind that offers dual capabilities - both powerful database queries and real-time API operations through natural language. Built specifically for administrators, IAM managers, IT GRC teams and auditors, Tako leverages enterprise AI models to translate plain English questions into accurate data insights from synced databases or direct Okta API interactions. Our vision is to evolve Tako into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
 
@@ -43,6 +43,7 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
 
 - [📋 Table of Contents](#-table-of-contents)
 - [⚠️ BREAKING CHANGES ALERT](#️-breaking-changes-alert)
+- [🆕 New in This Version (0.5.5-beta)](#-new-in-this-version-055-beta)
 - [✨ What's Special?](#-whats-special)
 - [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
@@ -87,11 +88,20 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
 &nbsp;
 
 ## ⚠️ BREAKING CHANGES ALERT
-> **IMPORTANT**: Version 0.5.0-beta contains breaking changes. If you are using previous versions or installed before 05/20/2025, you will need to completely redo your setup to ensure compatibility with the new realtime capabilities.
+> **IMPORTANT**: Version 0.5.5-beta contains breaking changes. If you are using previous versions or installed before 06/13/2025, you will need to completely redo your setup to ensure compatibility with the new realtime capabilities.
 > 
 > **Docker users:** Stop containers, delete SQLite files (`rm sqlite_db/*.db`), then restart.
 > 
 > **Repository Clone users:** Delete database files (`rm *.db sqlite_db/*.db`), update dependencies (`pip install -r requirements.txt`), then restart.
+
+## 🆕 New in This Version (0.5.5-beta)
+- **📋 Custom User Attributes** - You can define custom user attributes that will be synced and available for querying.
+- **📱 Devices Sync** - Full devices sync with user relationships, security context, and analytics (Optional - set to false by default)
+- **🔍 Enhanced Queries** - Query users by custom attributes and devices by platform, security status, etc.
+- **🔒 SSL Certificate Support** - Self-signed certificates and organizational CAs are now supported for the openai_compatible provider
+  
+**Note**: Device sync controlled by `SYNC_OKTA_DEVICES` environment variable in .env file.
+
 
 ## ✨ What's Special?
 
@@ -299,14 +309,15 @@ The following data model applies only when using Database Mode with a synced SQL
 
 | Entity | Core Fields |
 |--------|-------------|
-| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager`, `password_changed_at`, `user_type`, `country_code`, `title`, `organization` |
+| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager`, `password_changed_at`, `user_type`, `country_code`, `title`, `organization`, `custom_attributes` (as defined by user)|
 | Groups | `name`, `description` |
 | Applications | `name`, `label`, `status`, `sign_on_mode`, `metadata_url`, `sign_on_url`, `audience`, `destination`, `signing_kid`, `username_template`, `username_template_type`, `admin_note`, `attribute_statements`, `honor_force_authn`, `hide_ios`, `hide_web`, `policy_id`, `settings`, `features`, `visibility`, `credentials`, `licensing`, `embedded_url`, `accessibility`, `user_name_template`, `app_settings`, `app_embedded_url` |
 | UserFactors | `factor_type`, `provider`, `status`, `email`, `phone_number`, `device_type`, `device_name`, `platform` |
 | Policies | `name`, `description`, `status`, `type` |
+| Devices | `display_name`, `platform`, `manufacturer`, `model`, `status`, `os_version`, `serial_number`, `udid`, `registered`, `secure_hardware_present`, `disk_encryption_type` |
+| UserDevices | `management_status`, `screen_lock_type`, `user_device_created_at` (relationships between users and their devices) |
 
 > **Note**: You can view the data saved to your SQLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
-
 
 ## ⚠️ Good to Know
 

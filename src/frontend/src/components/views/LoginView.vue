@@ -2,7 +2,7 @@
   <AppLayout :showLogout="false" contentClass="auth-content">
     <div class="auth-box animate-entry">
       <h1 class="auth-title">Welcome </h1>
-      <div class="auth-subtitle">Sign in to AI agent for Okta</div>
+      <div class="auth-subtitle">Sign in to  Tako AI</div>
 
       <form @submit.prevent="handleLogin" class="auth-form">
         <transition name="fade-slide">

@@ -21,7 +21,7 @@ from src.okta_db_sync.okta_client.client import OktaClientWrapper
 from ..db.operations import DatabaseOperations
 from ..db.models import (
     User, Group, Authenticator, Application, Policy, Base, 
-    SyncHistory, SyncStatus, UserFactor, 
+    SyncHistory, SyncStatus, UserFactor, Device,
     user_application_assignments, group_application_assignments,
     user_group_memberships
 )
@@ -97,7 +97,30 @@ class SyncOrchestrator:
             sync_history.error_message = error_message
         await session.commit()
 
-
+    def _get_authenticator_name(self, factor_type: str, provider: str) -> str:
+        """
+        Map factor type and provider to authenticator name.
+        Based on your actual Okta authenticator data.
+        """
+        authenticator_mappings = {
+            # Okta Verify handles multiple factor types
+            ('signed_nonce', 'OKTA'): 'Okta FastPass',      # FastPass
+            ('push', 'OKTA'): 'Okta Verify',               # Push notifications  
+            ('token:software:totp', 'OKTA'): 'Okta Verify', # TOTP in Okta Verify
+            
+            # Google Authenticator
+            ('token:software:totp', 'GOOGLE'): 'Google Authenticator',
+            
+            # Other authenticators
+            ('sms', 'OKTA'): 'Phone',
+            ('email', 'OKTA'): 'Email',
+            ('password', 'OKTA'): 'Password',
+            ('security_key', 'OKTA'): 'Security Key or Biometric',
+            ('security_question', 'OKTA'): 'Security Question',
+        }
+        
+        mapping_key = (factor_type, provider)
+        return authenticator_mappings.get(mapping_key, f"Unknown ({factor_type}, {provider})")
 
     async def _process_user_relationships(
         self,
@@ -167,14 +190,18 @@ class SyncOrchestrator:
             factors = user_data.pop('factors', [])
             if factors:
                 for factor in factors:
+                    authenticator_name = self._get_authenticator_name(
+                        factor.get('factor_type'), 
+                        factor.get('provider')
+                    )                    
                     stmt = text("""
                         INSERT INTO user_factors
                         (tenant_id, user_okta_id, okta_id, factor_type, provider, status,
-                        email, phone_number, device_type, device_name, platform,
+                        authenticator_name, email, phone_number, device_type, device_name, platform,
                         created_at, last_updated_at, updated_at)
                         VALUES (
                             :tenant_id, :user_okta_id, :okta_id, :factor_type, :provider, :status,
-                            :email, :phone_number, :device_type, :device_name, :platform,
+                            :authenticator_name, :email, :phone_number, :device_type, :device_name, :platform,
                             :created_at, :last_updated_at, :updated_at
                         )
                         ON CONFLICT (tenant_id, user_okta_id, okta_id) 
@@ -182,6 +209,7 @@ class SyncOrchestrator:
                             factor_type = excluded.factor_type,
                             provider = excluded.provider,
                             status = excluded.status,
+                            authenticator_name = excluded.authenticator_name,
                             email = excluded.email,
                             phone_number = excluded.phone_number,
                             device_type = excluded.device_type,
@@ -199,6 +227,7 @@ class SyncOrchestrator:
                         'factor_type': factor['factor_type'],
                         'provider': factor['provider'],
                         'status': factor['status'],
+                        'authenticator_name': authenticator_name,
                         'email': factor.get('email'),
                         'phone_number': factor.get('phone_number'),
                         'device_type': factor.get('device_type'),
@@ -356,6 +385,20 @@ class SyncOrchestrator:
                     DELETE FROM applications 
                     WHERE tenant_id = :tenant_id
                 """), {'tenant_id': self.tenant_id})
+
+            elif model == Device: 
+                # Clean device-related tables first (user_devices relationships)
+                await session.execute(text("""
+                    DELETE FROM user_devices 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})
+                
+                # Then clean devices themselves
+                await session.execute(text("""
+                    DELETE FROM devices 
+                    WHERE tenant_id = :tenant_id
+                """), {'tenant_id': self.tenant_id})                
+                
                 
             await session.commit()
             logger.info(f"Cleaned {model.__name__} data for tenant {self.tenant_id}")
@@ -424,6 +467,8 @@ class SyncOrchestrator:
                                 sync_history.apps_count = total_records
                             elif model.__name__ == 'Policy':
                                 sync_history.policies_count = total_records
+                            elif model.__name__ == 'Device': 
+                                sync_history.devices_count = total_records
                                 
                             await session.commit()
                         
@@ -450,8 +495,9 @@ class SyncOrchestrator:
         1. Groups first (for initial sync)
         2. Applications second
         3. Authenticators third (no dependencies)
-        4. Users last (depends on groups and apps)
-        5. Policies (depends on apps)
+        4. Devices fourth (conditional sync, no dependencies) 
+        5. Users fifth (depends on groups and apps)
+        6. Policies last (depends on apps)
         
         Supports cancellation via cancellation_flag attribute.
         """
@@ -486,16 +532,30 @@ class SyncOrchestrator:
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return
-    
+                
                 # 4. Users last (depends on groups and apps)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     logger.info("Step 4: Syncing Users")
                     await self.sync_model_streaming(User, okta.list_users)
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
-                    return
+                    return                
+                
+                # 5. Devices fourth (conditional sync)
+                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
+                    # Check if device sync is enabled
+                    from src.config.settings import settings
+                    if settings.SYNC_OKTA_DEVICES:
+                        logger.info("Step 4: Syncing Devices")
+                        await self.sync_model_streaming(Device, okta.list_devices)
+                    else:
+                        logger.info("Step 4: Skipping Devices (SYNC_OKTA_DEVICES=false)")
+                else:
+                    logger.info("Sync cancelled - skipping remaining steps")
+                    return                
     
-                # 5. Policies (depends on apps)
+    
+                # 6. Policies (depends on apps)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     logger.info("Step 5: Syncing Policies")
                     await self.sync_model_streaming(Policy, okta.list_policies)

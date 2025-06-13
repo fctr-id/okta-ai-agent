@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
             conn.execute(CreateTable(AuthUser.__table__))
         logger.info("Auth users table created successfully")
     else:
-        logger.info("Auth users table already exists")
+        logger.debug("Auth users table already exists. Do not have to create a new one")
     
     yield
     

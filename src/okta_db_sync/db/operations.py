@@ -10,11 +10,11 @@ Key features:
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, and_, not_, update, func, text
+from sqlalchemy import select, and_, not_, or_, update, func, text
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
-from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus
+from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice
 from src.core.helpers.argon2_hash import hash_password, verify_password, check_password_needs_rehash, calculate_lockout_time
 from src.config.settings import settings
 from src.utils.logging import logger
@@ -81,7 +81,7 @@ class DatabaseOperations:
                 await session.rollback()
                 logger.error(f"Database session error: {str(e)}")
                 raise
-
+    
     async def bulk_upsert(
         self,
         session: AsyncSession,
@@ -109,14 +109,22 @@ class DatabaseOperations:
             - Updates existing records
             - Creates new records
             - Sets sync timestamps
+            - Handles custom_attributes JSON column for User model
         """
         try:
             total_factors = 0
+            total_user_devices = 0
+            
             for record in records:
-                # Extract factors if present
+                # Extract factors if present (User model)
                 factors = record.pop('factors', []) if model == User else None
                 if model == User:
                     total_factors += len(factors) if factors else 0
+                
+                # Extract user_devices if present (Device model) 
+                user_devices = record.pop('user_devices', []) if model == Device else None
+                if model == Device:
+                    total_user_devices += len(user_devices) if user_devices else 0
                 
                 # Process main record
                 stmt = select(model).where(
@@ -131,27 +139,41 @@ class DatabaseOperations:
                 if existing:
                     for key, value in record.items():
                         if hasattr(existing, key):
-                            setattr(existing, key, value)
+                            # Handle JSON column properly
+                            if key == 'custom_attributes' and isinstance(value, dict):
+                                setattr(existing, key, value)
+                            else:
+                                setattr(existing, key, value)
                     existing.last_synced_at = datetime.utcnow()
                 else:
                     record['tenant_id'] = tenant_id
                     record['last_synced_at'] = datetime.utcnow()
+                    # Ensure custom_attributes is properly set for new records
+                    if model == User and 'custom_attributes' not in record:
+                        record['custom_attributes'] = {}
                     existing = model(**record)
                     session.add(existing)
                 
                 # Process factors if present
                 if factors:
                     await self._process_user_factors(session, existing, factors, tenant_id)
+                    
+                # Process user-device relationships if present (Device model)
+                if user_devices:
+                    await self._process_device_user_relationships(session, existing, user_devices, tenant_id)                    
     
+            # Logging
             if model == User:
                 logger.debug(f"Processed {len(records)} users with {total_factors} factors")
+            elif model == Device:
+                logger.debug(f"Processed {len(records)} devices with {total_user_devices} user relationships")
             else:
                 logger.info(f"Processed {len(records)} {model.__name__} records")
             return True
         except Exception as e:
             logger.error(f"Bulk upsert error for {model.__name__}: {str(e)}")
             raise
-
+    
     async def mark_deleted(
         self,
         session: AsyncSession,
@@ -347,7 +369,121 @@ class DatabaseOperations:
             
         except Exception as e:
             logger.error(f"Error processing group relationships: {str(e)}")
-            raise               
+            raise     
+        
+    async def _process_device_user_relationships(
+        self,
+        session: AsyncSession,
+        device: Device,
+        user_devices: List[Dict[str, Any]],
+        tenant_id: str
+    ) -> None:
+        """
+        Process user-device relationships for a device.
+        
+        Args:
+            session: Active database session
+            device: Device model instance
+            user_devices: List of user-device relationship dictionaries
+            tenant_id: Tenant identifier
+            
+        Raises:
+            Exception: On database errors
+            
+        Notes:
+            - Creates/updates user-device relationships
+            - Validates that users exist before creating relationships
+            - Marks removed relationships as deleted
+            - Maintains relationship sync timestamps
+        """        
+        try:
+            logger.debug(f"Processing {len(user_devices)} user relationships for device {device.okta_id}")
+            relationship_keys = []
+            
+            for user_device_data in user_devices:
+                user_okta_id = user_device_data['user_okta_id']
+                
+                # Validate that user exists before creating relationship
+                user_exists_stmt = select(User).where(
+                    and_(
+                        User.okta_id == user_okta_id,
+                        User.tenant_id == tenant_id,
+                        User.is_deleted == False
+                    )
+                )
+                user_result = await session.execute(user_exists_stmt)
+                if not user_result.scalar_one_or_none():
+                    logger.warning(f"Skipping device-user relationship: user {user_okta_id} not found for device {device.okta_id}")
+                    continue
+                
+                # Add context
+                user_device_data['tenant_id'] = tenant_id
+                user_device_data['device_okta_id'] = device.okta_id
+                
+                # Find existing relationship
+                stmt = select(UserDevice).where(
+                    and_(
+                        UserDevice.user_okta_id == user_okta_id,
+                        UserDevice.device_okta_id == device.okta_id,
+                        UserDevice.tenant_id == tenant_id
+                    )
+                )
+                result = await session.execute(stmt)
+                existing_relationship = result.scalar_one_or_none()
+    
+                if existing_relationship:
+                    # Update existing relationship
+                    for key, value in user_device_data.items():
+                        if hasattr(existing_relationship, key):
+                            setattr(existing_relationship, key, value)
+                    existing_relationship.last_synced_at = datetime.utcnow()
+                else:
+                    # Create new relationship
+                    new_relationship = UserDevice(**user_device_data)
+                    session.add(new_relationship)
+                
+                relationship_keys.append((user_okta_id, device.okta_id))
+    
+            # Mark deleted relationships (soft delete)
+            if relationship_keys:
+                # Build the condition for relationships that should remain active
+                active_conditions = [
+                    and_(
+                        UserDevice.user_okta_id == user_id,
+                        UserDevice.device_okta_id == device_id
+                    )
+                    for user_id, device_id in relationship_keys
+                ]
+                
+                # Find relationships to mark as deleted
+                stmt = select(UserDevice).where(
+                    and_(
+                        UserDevice.device_okta_id == device.okta_id,
+                        UserDevice.tenant_id == tenant_id,
+                        not_(or_(*active_conditions))
+                    )
+                )
+            else:
+                # No active relationships - mark all as deleted
+                stmt = select(UserDevice).where(
+                    and_(
+                        UserDevice.device_okta_id == device.okta_id,
+                        UserDevice.tenant_id == tenant_id
+                    )
+                )
+            
+            result = await session.execute(stmt)
+            deleted_relationships = result.scalars().all()
+            
+            for relationship in deleted_relationships:
+                relationship.is_deleted = True
+                relationship.last_synced_at = datetime.utcnow()
+    
+            await session.commit()
+    
+        except Exception as e:
+            logger.error(f"Error processing user relationships for device {device.okta_id}: {str(e)}")
+            raise                  
         
     #Authentication methods:
 
