@@ -439,3 +439,166 @@ async def make_async_request(client, method: str, url: str, headers: Dict = None
         logger.debug(f"Exception traceback: {tb}")
         
         return {"status": "error", "error": f"Error making SDK request: {str(e)}"}    
+    
+async def paginate_with_request_executor(
+    client,
+    initial_url: str,
+    method: str = "GET",
+    headers: Optional[Dict] = None,
+    body: Optional[Dict] = None,
+    entity_name: str = "records",
+    flow_id: Optional[str] = None,
+    preserve_links: bool = False
+) -> Union[List[Dict], Dict]:
+    """
+    Handle pagination using Okta SDK request executor.
+    """
+    import json
+    from urllib.parse import urlparse
+    
+    log_prefix = f"[FLOW:{flow_id}] " if flow_id else ""
+    
+    # Security check for full URLs
+    if initial_url.startswith(('http://', 'https://')):
+        from src.utils.security_config import is_okta_url_allowed
+        if not is_okta_url_allowed(initial_url):
+            error_msg = f"Security violation: URL {initial_url} is not an authorized Okta URL"
+            logger.error(f"{log_prefix}{error_msg}")
+            return {"status": "error", "error": error_msg}
+        
+        # Extract path for SDK request executor
+        parsed_url = urlparse(initial_url)
+        current_url = parsed_url.path
+        if parsed_url.query:
+            current_url += f"?{parsed_url.query}"
+    else:
+        current_url = initial_url
+    
+    all_items = []
+    page_count = 0
+    
+    logger.info(f"{log_prefix}Starting pagination for {entity_name} using request executor")
+    
+    try:
+        # Make initial request
+        async with _RATE_LIMIT_SEMAPHORE:
+            request, error = await client.get_request_executor().create_request(
+                method=method,
+                url=current_url,
+                body=body or {},
+                headers=headers or {},
+                oauth=False
+            )
+            
+            if error:
+                logger.error(f"{log_prefix}Error creating initial request: {error}")
+                return {"status": "error", "error": f"Error creating request: {error}"}
+            
+            response, error = await client.get_request_executor().execute(request, None)
+            
+            if error:
+                logger.error(f"{log_prefix}Error executing initial request: {error}")
+                return {"status": "error", "error": f"Error executing request: {error}"}
+        
+        # Process all pages - handle both response types
+        while True:
+            page_count += 1
+            logger.debug(f"{log_prefix}Processing page {page_count}")
+            
+            # Handle different response types
+            if isinstance(response, list):
+                # Response is already a list of items
+                logger.debug(f"{log_prefix}Response is a list with {len(response)} items")
+                items = response
+                has_next = False  # List responses typically don't have pagination
+            elif hasattr(response, 'get_body'):
+                # Response is an OktaAPIResponse object
+                response_body = response.get_body()
+                
+                if not response_body:
+                    logger.debug(f"{log_prefix}Empty response body for page {page_count}")
+                    break
+                
+                # Parse JSON response
+                try:
+                    if isinstance(response_body, str):
+                        data = json.loads(response_body)
+                    else:
+                        data = response_body
+                except json.JSONDecodeError as e:
+                    logger.error(f"{log_prefix}Error parsing JSON response: {e}")
+                    break
+                
+                # Extract items from response
+                if isinstance(data, list):
+                    items = data
+                elif isinstance(data, dict):
+                    items = data.get('records', data.get('results', data.get('items', [])))
+                    if not items and data and '_embedded' not in data:
+                        items = [data]
+                else:
+                    items = []
+                
+                # Check if there are more pages
+                has_next = hasattr(response, "has_next") and response.has_next()
+            else:
+                # Unknown response type
+                logger.error(f"{log_prefix}Unknown response type: {type(response)}")
+                break
+            
+            if not items:
+                logger.debug(f"{log_prefix}No items found in page {page_count}")
+                break
+            
+            # Process items
+            processed_items = []
+            for item in items:
+                # Convert to dict if needed
+                if hasattr(item, "as_dict"):
+                    item_dict = item.as_dict()
+                else:
+                    item_dict = item
+                
+                # Remove _links unless preserved
+                if not preserve_links and isinstance(item_dict, dict) and "_links" in item_dict:
+                    del item_dict["_links"]
+                
+                processed_items.append(item_dict)
+            
+            all_items.extend(processed_items)
+            logger.debug(f"{log_prefix}Page {page_count}: retrieved {len(processed_items)} {entity_name}")
+            
+            # Check for next page
+            if has_next:
+                logger.debug(f"{log_prefix}More pages available, fetching next page")
+                
+                # Small delay to avoid rate limits
+                await asyncio.sleep(0.2)
+                
+                async with _RATE_LIMIT_SEMAPHORE:
+                    try:
+                        # Get next page
+                        response, error = await response.next()
+                        
+                        if error:
+                            logger.error(f"{log_prefix}Error getting next page: {error}")
+                            break
+                        
+                    except StopAsyncIteration:
+                        logger.debug(f"{log_prefix}Reached end of pagination")
+                        break
+                    except Exception as e:
+                        logger.error(f"{log_prefix}Error during pagination: {str(e)}")
+                        break
+            else:
+                logger.debug(f"{log_prefix}No more pages available")
+                break
+        
+        logger.info(f"{log_prefix}Completed pagination: {len(all_items)} {entity_name} in {page_count} pages")
+        return all_items
+        
+    except Exception as e:
+        logger.error(f"{log_prefix}Error in request executor pagination: {str(e)}")
+        import traceback
+        logger.error(f"{log_prefix}Traceback: {traceback.format_exc()}")
+        return {"status": "error", "error": str(e)}

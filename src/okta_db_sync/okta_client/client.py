@@ -1389,77 +1389,42 @@ class OktaClientWrapper:
         since: Optional[datetime] = None,
         processor_func: Optional[Callable] = None
     ) -> Union[List[Dict], int]:
-        """
-        List devices with user relationships using direct API calls with expand=userSummary.
-        
-        Args:
-            since: Optional timestamp for incremental sync
-            processor_func: Function to process batches immediately
-            
-        Returns:
-            If processor_func is provided: Count of processed records
-            Otherwise: List of device dictionaries with user relationships
-        """
+        """List devices with user relationships using request executor pagination."""
         try:
-            from src.utils.pagination_limits import make_async_request
+            from src.utils.pagination_limits import paginate_with_request_executor
             
-            # Build the API URL with query parameters
+            # Build URL
+            base_url = "/api/v1/devices"
             query_params = [
                 f"limit={self.DEVICE_PAGE_SIZE}",
                 "expand=userSummary"
             ]
             
-            # Add filter for incremental sync if needed
             if since:
                 since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                filter_param = f'filter=lastUpdated gt "{since_str}"'
-                query_params.append(filter_param)
+                query_params.append(f'filter=lastUpdated gt "{since_str}"')
             
-            # Construct full URL with query parameters
-            api_url = f"/api/v1/devices?{'&'.join(query_params)}"
+            api_url = f"{base_url}?{'&'.join(query_params)}"
             
-            logger.debug(f"Fetching devices from: {api_url}")
-            
-            # Make the API request using your existing utility
-            async with self.api_semaphore:
-                response = await make_async_request(
-                    client=self.client,
-                    method="GET",
-                    url=api_url,
-                    return_object=False
-                )
-                await asyncio.sleep(self.RATE_LIMIT_DELAY)
+            # Use shared pagination utility with normalize_okta_response
+            devices_data = await paginate_with_request_executor(
+                client=self.client,
+                initial_url=api_url,
+                entity_name="devices",
+                preserve_links=True
+            )
             
             # Handle error responses
-            if isinstance(response, dict) and response.get("status") == "error":
-                logger.error(f"Error fetching devices: {response.get('error')}")
-                return [] if not processor_func else 0
+            if isinstance(devices_data, dict) and devices_data.get('status') == 'error':
+                raise Exception(devices_data.get('error'))
             
-            # Response should be a list of devices
-            if not response or not isinstance(response, list):
-                logger.info("No device data found")
-                return [] if not processor_func else 0
+            # Transform and process
+            transformed_devices = self._transform_device_with_embedded_users(devices_data)
             
-            # Transform the devices
-            try:
-                transformed_devices = self._transform_device_with_embedded_users(response)
-                if not transformed_devices:
-                    logger.info("No valid devices found after transformation")
-                    return [] if not processor_func else 0
-                
-                if processor_func:
-                    # Stream processing - process devices immediately
-                    await processor_func(transformed_devices)
-                    logger.info(f"Processed {len(transformed_devices)} devices")
-                    return len(transformed_devices)
-                else:
-                    # Return all devices
-                    logger.info(f"Retrieved {len(transformed_devices)} devices")
-                    return transformed_devices
-                
-            except Exception as e:
-                logger.error(f"Error transforming devices: {str(e)}")
-                return [] if not processor_func else 0
+            if processor_func:
+                return await processor_func(transformed_devices)
+            else:
+                return transformed_devices
                 
         except Exception as e:
             logger.error(f"Error listing devices: {str(e)}")
