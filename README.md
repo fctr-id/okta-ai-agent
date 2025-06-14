@@ -215,7 +215,7 @@ If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT
 
 **If you see this error frequently:**
 - Reduce your `OKTA_CONCURRENT_LIMIT` by 10-20 % and re-try
-- Wait for sync to complete, then try a lower value
+- Cancel the sync, then try a lower value
 - Contact support@fctr.io if issues persist
 
 ### 🆘 Need Help?
