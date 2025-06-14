@@ -189,20 +189,20 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 For the best sync times, please set the API rate limit to 100% as shown above. 
 In case you cannot set it to 100%, refer the table below to help you set the optimal `OKTA_CONCURRENT_LIMIT` setting in the `.env` file 
 
-| Tenant Type | API Rate Limit % | OKTA_CONCURRENT_LIMIT | Potential Higher Limit to Test |
-|-------------|------------------|----------------------|-------------------------------|
+| Tenant Type | API Rate Limit % | Recommended Setting | Potential Higher limit (needs testing) |
+|-------------|------------------|---------------------|------------------------|
 | Integrator | 50% | 22 | 30 |
 | Integrator | 75% | 34 | 40 |
 | Integrator | 100% | 45 | 50 |
 | One App | 50% | 52 | 135 |
 | One App | 75% | 79 | 203 |
 | One App | 100% | 105 | 270 |
-| Enterprise | 50% | 112 | 135 |
-| Enterprise | 75% | 169 | 203 |
-| Enterprise | 100% | 225 | 270 |
-| Workforce Identity | 50% | 112 | 135 |
-| Workforce Identity | 75% | 169 | 203 |
-| Workforce Identity | 100% | 225 | 270 |
+| Enterprise | 50% | 112 | 300 |
+| Enterprise | 75% | 169 | 450 |
+| Enterprise | 100% | 225 | 600 |
+| Workforce Identity | 50% | 112 | 300 |
+| Workforce Identity | 75% | 169 | 450 |
+| Workforce Identity | 100% | 225 | 600 |
 
 If you are experiencing too many API rate limits and need assistance optimizing your deployment, please contact support@fctr.io.
 
