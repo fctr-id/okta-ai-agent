@@ -50,12 +50,12 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
   - [Docker Compose](#docker-compose)
     - [Linux/macOS Instructions](#linuxmacos-instructions)
     - [Windows Instructions](#windows-instructions)
+  - [🚨 Optimal API settings for maximum sync speed 🚨](#-optimal-api-settings-for-maximum-sync-speed-)
   - [⚠️ Important: Monitor for Errors](#️-important-monitor-for-errors)
   - [🆘 Need Help?](#-need-help)
   - [Launching the Application](#launching-the-application)
   - [Tailing docker logs](#tailing-docker-logs)
   - [Access the Web Interface](#access-the-web-interface)
-- [🆕 What's New in v0.5.0](#-whats-new-in-v050)
   - [Dual Operation Modes](#dual-operation-modes)
   - [When to Use Each Mode](#when-to-use-each-mode)
   - [Realtime Agent Capabilities](#realtime-agent-capabilities)
@@ -103,6 +103,7 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
   
 **Note**: Device sync controlled by `SYNC_OKTA_DEVICES` environment variable in .env file.
 
+📋 **[View complete change log →](VERSION.md)**
 
 ## ✨ What's Special?
 
@@ -182,7 +183,7 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 # notepad .env (or use your favorite editor)
 ```
 
-###🚨 Optimal API settings for maximum sync speed 🚨
+### 🚨 Optimal API settings for maximum sync speed 🚨
 
 <p>
 <img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
@@ -236,8 +237,6 @@ docker compose logs -f
 ### Access the Web Interface
 - 🌐 Open your browser and go to: https://localhost:8001 to start using Tako 🌐
 
-
-## 🆕 What's New in v0.5.0
 
 ### Dual Operation Modes
 
