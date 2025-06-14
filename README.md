@@ -50,7 +50,6 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
   - [Docker Compose](#docker-compose)
     - [Linux/macOS Instructions](#linuxmacos-instructions)
     - [Windows Instructions](#windows-instructions)
-    - [� Optimal API Settings for Maximum Sync Performance](#-optimal-api-settings-for-maximum-sync-performance)
   - [⚠️ Important: Monitor for Errors](#️-important-monitor-for-errors)
   - [🆘 Need Help?](#-need-help)
   - [Launching the Application](#launching-the-application)
@@ -183,7 +182,7 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 # notepad .env (or use your favorite editor)
 ```
 
-#### � Optimal API Settings for Maximum Sync Performance
+###🚨 Optimal API settings for maximum sync speed 🚨
 
 <p>
 <img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
