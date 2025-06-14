@@ -50,7 +50,9 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
   - [Docker Compose](#docker-compose)
     - [Linux/macOS Instructions](#linuxmacos-instructions)
     - [Windows Instructions](#windows-instructions)
-    - [🚨 Optimal API settings for sync 🚨](#-optimal-api-settings-for-sync-)
+    - [� Optimal API Settings for Maximum Sync Performance](#-optimal-api-settings-for-maximum-sync-performance)
+  - [⚠️ Important: Monitor for Errors](#️-important-monitor-for-errors)
+  - [🆘 Need Help?](#-need-help)
   - [Launching the Application](#launching-the-application)
   - [Tailing docker logs](#tailing-docker-logs)
   - [Access the Web Interface](#access-the-web-interface)
@@ -79,7 +81,7 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
   - [Phase 3: Real-time Operations](#phase-3-real-time-operations)
   - [Phase 4: Autonomous Operations](#phase-4-autonomous-operations)
   - [Phase 5: Full Automation](#phase-5-full-automation)
-- [🆘 Need Help?](#-need-help)
+- [🆘 Need Help?](#-need-help-1)
 - [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
 - [👥 Contributors](#-contributors)
 - [💌 Thank You](#-thank-you)
@@ -181,30 +183,43 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 # notepad .env (or use your favorite editor)
 ```
 
-#### 🚨 Optimal API settings for sync 🚨
+#### � Optimal API Settings for Maximum Sync Performance
+
 <p>
 <img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
 </p>
 
-For the best sync times, please set the API rate limit to 100% as shown above. 
-In case you cannot set it to 100%, refer the table below to help you set the optimal `OKTA_CONCURRENT_LIMIT` setting in the `.env` file 
+**For fastest sync times, set your API rate limit to 100% as shown above.**
 
-| Tenant Type | API Rate Limit % | Recommended Setting | Potential Higher limit (needs testing) |
-|-------------|------------------|---------------------|------------------------|
+If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT` in your `.env` file:
+
+| Tenant Type | API Rate Limit % | Recommended Setting | Tested Maximun (CAUTION ⚠️) |
+|-------------|------------------|---------------------|-----------------|
 | Integrator | 50% | 22 | 30 |
 | Integrator | 75% | 34 | 40 |
 | Integrator | 100% | 45 | 50 |
-| One App | 50% | 52 | 135 |
-| One App | 75% | 79 | 203 |
-| One App | 100% | 105 | 270 |
-| Enterprise | 50% | 112 | 300 |
-| Enterprise | 75% | 169 | 450 |
-| Enterprise | 100% | 225 | 600 |
-| Workforce Identity | 50% | 112 | 300 |
-| Workforce Identity | 75% | 169 | 450 |
-| Workforce Identity | 100% | 225 | 600 |
+| One App | 50% | 135 | 200 |
+| One App | 75% | 203 | 300 |
+| One App | 100% | 270 | 400 |
+| Enterprise | 50% | 135 | 200 |
+| Enterprise | 75% | 203 | 300 |
+| Enterprise | 100% | 270 | 400 |
+| Workforce Identity | 50% | 135 | 270 |
+| Workforce Identity | 75% | 203 | 405 |
+| Workforce Identity | 100% | 270 | 540 |
 
-If you are experiencing too many API rate limits and need assistance optimizing your deployment, please contact support@fctr.io.
+### ⚠️ Important: Monitor for Errors
+
+**Check your sync logs for this warning:**
+```WARNING - Concurrent limit rate exceeded```
+
+**If you see this error frequently:**
+- Reduce your `OKTA_CONCURRENT_LIMIT` by 10-20 % and re-try
+- Wait for sync to complete, then try a lower value
+- Contact support@fctr.io if issues persist
+
+### 🆘 Need Help?
+If you experience frequent API rate limit errors, contact **support@fctr.io**
 
 ### Launching the Application
 
