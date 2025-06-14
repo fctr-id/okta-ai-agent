@@ -15,14 +15,14 @@ Custom User Attributes & Device Management:
 
 ## Current Latest: v0.5.0-beta (2025-05-20)
 Realtime Agents!
-_ new user interface for realtime queries
-_ Command line srcipt to use similar to MCP servers wihout context limitations
-Added Anthropic as another AI provider
-Custom headers if using LLM proxy or other security proxies
-Pydantic_ai update to 0.1.10
-Much better optimization API-DB sync process
-Clean logging without rate limit errors
-Many more bug fixes and imporvements.
+- New user interface for realtime queries
+- Command line srcipt to use similar to MCP servers wihout context limitations
+- Added Anthropic as another AI provider
+- Custom headers if using LLM proxy or other security proxies
+- Pydantic_ai update to 0.1.10
+- Much better optimization API-DB sync process
+- Clean logging without rate limit errors
+- Many more bug fixes and imporvements.
 
 
 ## Current Latest: v0.3.5-beta (2025-03-26)
