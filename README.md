@@ -182,7 +182,7 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 # notepad .env (or use your favorite editor)
 ```
 
-###🚨 Optimal API settings for maximum sync speed 🚨
+### 🚨 Optimal API settings for maximum sync speed 🚨
 
 <p>
 <img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
