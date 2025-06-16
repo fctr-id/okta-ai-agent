@@ -78,7 +78,22 @@ class Settings(BaseSettings):
     @property
     def MAX_CONCURRENT_USERS(self) -> int:
         """Calculate the maximum number of concurrent users based on rate limit (rounded down)"""
-        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT / 3))    
+        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT / 3))
+    
+    @property
+    def MAX_CONCURRENT_APPS(self) -> int:
+        """Calculate the maximum number of concurrent apps based on apps API rate limit"""
+        # Apps API has much lower rate limits than user APIs
+        # Use a conservative conversion factor of 0.2 (1/5th of user limit)
+        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT * 0.2))        
+    
+    @property
+    def MAX_CONCURRENT_GROUPS(self) -> int:
+        """Calculate the maximum number of concurrent groups"""
+        # Groups API has similar limits to users (500-600/min for premium tiers)
+        # Groups don't make additional API calls per group (unlike users)
+        # So we can use a higher percentage of the concurrent limit
+        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT * 0.8))    
 
     # Helper properties to parse the comma-separated strings
     @property
