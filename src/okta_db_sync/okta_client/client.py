@@ -16,6 +16,8 @@ Usage:
 """
 
 import asyncio
+import os
+from urllib.parse import urlparse
 import time, logging, re
 from okta.client import Client as OktaClient
 from datetime import datetime
@@ -24,6 +26,7 @@ from src.config.settings import settings
 from src.utils.logging import logger    
 from okta.models import User, Group, Policy, Application
 from datetime import timezone
+from src.utils.pagination_limits import _paginate_direct_api
 
 
 T = TypeVar('T')
@@ -202,7 +205,7 @@ class OktaClientWrapper:
     POLICY_PAGE_SIZE: Final[int] = 200
     AUTH_PAGE_SIZE: Final[int] = 100
     FACTOR_PAGE_SIZE: Final[int] = 50
-    DEVICE_PAGE_SIZE: Final[int] = 200
+    DEVICE_PAGE_SIZE: Final[int] = 1
   
     # Rate limit delay between requests
     RATE_LIMIT_DELAY: Final[float] = 0.1
@@ -1382,50 +1385,45 @@ class OktaClientWrapper:
             return []
         
     #### DEVICES SYNC ####
-
     
     async def list_devices(
         self, 
         since: Optional[datetime] = None,
         processor_func: Optional[Callable] = None
     ) -> Union[List[Dict], int]:
-        """List devices with user relationships using request executor pagination."""
+        """List devices using direct API calls with reusable pagination."""
         try:
-            from src.utils.pagination_limits import paginate_with_request_executor
+            logger.info("Starting device sync with direct API calls")
             
-            # Build URL
-            base_url = "/api/v1/devices"
-            query_params = [
-                f"limit={self.DEVICE_PAGE_SIZE}",
-                "expand=userSummary"
-            ]
+            # Build query parameters
+            query_params = {
+                "limit": self.DEVICE_PAGE_SIZE,
+                "expand": "userSummary"
+            }
             
             if since:
                 since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                query_params.append(f'filter=lastUpdated gt "{since_str}"')
+                query_params["search"] = f'lastUpdated gt "{since_str}"'
+                logger.debug(f"Using since filter: {since_str}")
             
-            api_url = f"{base_url}?{'&'.join(query_params)}"
-            
-            # Use shared pagination utility with normalize_okta_response
-            devices_data = await paginate_with_request_executor(
-                client=self.client,
-                initial_url=api_url,
+            # Use the imported pagination function directly
+            result = await _paginate_direct_api(
+                self, 
+                endpoint="/api/v1/devices",
+                query_params=query_params,
+                transform_func=self._transform_device_with_embedded_users,
+                processor_func=processor_func,
                 entity_name="devices",
-                preserve_links=True
+                flow_id=getattr(self, 'flow_id', None)
             )
             
-            # Handle error responses
-            if isinstance(devices_data, dict) and devices_data.get('status') == 'error':
-                raise Exception(devices_data.get('error'))
-            
-            # Transform and process
-            transformed_devices = self._transform_device_with_embedded_users(devices_data)
-            
             if processor_func:
-                return await processor_func(transformed_devices)
+                logger.info(f"Processed {result} device records")
             else:
-                return transformed_devices
+                logger.info(f"Retrieved {len(result)} device records")
                 
+            return result
+            
         except Exception as e:
             logger.error(f"Error listing devices: {str(e)}")
             raise
