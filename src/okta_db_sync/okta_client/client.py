@@ -205,7 +205,7 @@ class OktaClientWrapper:
     POLICY_PAGE_SIZE: Final[int] = 200
     AUTH_PAGE_SIZE: Final[int] = 100
     FACTOR_PAGE_SIZE: Final[int] = 50
-    DEVICE_PAGE_SIZE: Final[int] = 1
+    DEVICE_PAGE_SIZE: Final[int] = 200
   
     # Rate limit delay between requests
     RATE_LIMIT_DELAY: Final[float] = 0.1
