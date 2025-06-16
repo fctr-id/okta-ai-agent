@@ -574,7 +574,7 @@ class OktaClientWrapper:
                 processor_func=processor_func,
                 page_size=self.APP_PAGE_SIZE,
                 entity_name="applications",
-                batch_size=settings.OKTA_CONCURRENT_LIMIT,
+                batch_size=settings.MAX_CONCURRENT_APPS,
                 concurrent_transform=True
             )
                 
