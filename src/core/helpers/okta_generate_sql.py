@@ -42,6 +42,7 @@ class SQLQueryOutput(BaseModel):
 #    api_key=os.getenv('FW_TOKEN')
 #)
 
+
 sql_agent = Agent(
     model,
     #deps_type=SQLDependencies,
@@ -70,6 +71,18 @@ sql_agent = Agent(
 
         For finding users WITHOUT a specific factor, use:
         SELECT u.email, u.login, u.first_name, u.last_name FROM users u WHERE u.okta_id NOT IN ( SELECT user_okta_id FROM user_factors WHERE factor_type = 'signed_nonce' )
+        
+        ### OPERATOR SELECTION (MOST IMPORTANT) ###
+        **When user specifies exact values in a list, you MUST use IN/NOT IN:**
+        
+        CORRECT Examples:
+        - "department is one of Sales, Marketing" → `JSON_EXTRACT(custom_attributes, '$.department') IN ('Sales', 'Marketing')`
+        - "status not Engineering, IT" → `JSON_EXTRACT(custom_attributes, '$.job_family') NOT IN ('Engineering', 'IT')`
+        - "users with ACTIVE or SUSPENDED status" → `status IN ('ACTIVE', 'SUSPENDED')`
+        
+         WRONG Examples (DO NOT DO THIS):
+        - `JSON_EXTRACT(custom_attributes, '$.department') LIKE '%Sales%' OR JSON_EXTRACT(custom_attributes, '$.department') LIKE '%Marketing%'`
+        - `JSON_EXTRACT(custom_attributes, '$.job_family') NOT LIKE '%Engineering%' AND JSON_EXTRACT(custom_attributes, '$.job_family') NOT LIKE '%IT%'`
 
         IMPORTANT RULES TO FOLLOW:
         Avoid complex multi-condition JOIN statements
@@ -537,8 +550,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             INDEXES:
             - idx_sync_tenant_entity (tenant_id, entity_type)
             """  
-    return schema         
-               
+    return schema      
 
 #@sql_agent.system_prompt
 #async def add_tenant_context(ctx: RunContext[SQLDependencies]) -> str:
