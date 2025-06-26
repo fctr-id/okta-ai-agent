@@ -569,7 +569,7 @@ async def _paginate_direct_api(
                             logger.debug(f"{log_prefix}No more pages - {entity_name} pagination complete")
                         
                         # Safety check
-                        if page_count > 100:
+                        if page_count > 500:
                             logger.error(f"{log_prefix}Too many pages ({page_count}), stopping {entity_name} pagination")
                             break
                 
