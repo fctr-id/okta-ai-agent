@@ -4,6 +4,7 @@ from typing import Optional, List
 from urllib.parse import urlparse
 from pathlib import Path
 import os, math
+import logging
 
 # Get absolute paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -23,9 +24,13 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     NUM_OF_THREADS: int = int(os.getenv("NUM_OF_THREADS", "4"))
     
-    # Add these new settings for dynamic user attributes
+    # Custom user attributes
     OKTA_USER_CUSTOM_ATTRIBUTES: str = os.getenv("OKTA_USER_CUSTOM_ATTRIBUTES", "")
-    #OKTA_USER_INDEXED_ATTRIBUTES: str = os.getenv("OKTA_USER_INDEXED_ATTRIBUTES", "")
+    
+    # Deprovisioned user sync settings
+    SYNC_DEPROVISIONED_USERS: bool = os.getenv("SYNC_DEPROVISIONED_USERS", "true").lower() == "true"
+    DEPR_USER_CREATED_AFTER: str = os.getenv("DEPR_USER_CREATED_AFTER", "")
+    DEPR_USER_UPDATED_AFTER: str = os.getenv("DEPR_USER_UPDATED_AFTER", "")
     
     # device syncing
     SYNC_OKTA_DEVICES: bool = os.getenv("SYNC_OKTA_DEVICES", "false").lower() == "true"
@@ -68,6 +73,40 @@ class Settings(BaseSettings):
         log_level = os.getenv("LOG_LEVEL", "").upper()
         if log_level == "DEBUG":
             print(f"Database location: {db_path}")
+            
+        # Validate deprovisioned user sync settings
+        self._validate_deprovisioned_user_settings()
+
+    def _validate_deprovisioned_user_settings(self):
+        """Validate the deprovisioned user sync date settings"""
+        
+        # Validate date formats
+        for date_setting, date_value in [
+            ("DEPR_USER_CREATED_AFTER", self.DEPR_USER_CREATED_AFTER),
+            ("DEPR_USER_UPDATED_AFTER", self.DEPR_USER_UPDATED_AFTER)
+        ]:
+            if date_value:
+                try:
+                    # Try to parse the date to validate format
+                    datetime.strptime(date_value, "%Y-%m-%d")
+                    logging.info(f"Using {date_setting}: {date_value}")
+                except ValueError:
+                    logging.error(f"Invalid date format for {date_setting}: {date_value}. Use YYYY-MM-DD format.")
+                    raise ValueError(f"Invalid date format for {date_setting}. Use YYYY-MM-DD format (e.g., 2024-01-01)")
+        
+        # Log sync configuration
+        if self.SYNC_DEPROVISIONED_USERS:
+            if not self.DEPR_USER_CREATED_AFTER and not self.DEPR_USER_UPDATED_AFTER:
+                logging.info("Deprovisioned users: ALL will be included in sync")
+            else:
+                conditions = []
+                if self.DEPR_USER_CREATED_AFTER:
+                    conditions.append(f"created after {self.DEPR_USER_CREATED_AFTER}")
+                if self.DEPR_USER_UPDATED_AFTER:
+                    conditions.append(f"updated after {self.DEPR_USER_UPDATED_AFTER}")
+                logging.info(f"Deprovisioned users: Only those {' and '.join(conditions)} will be included in sync")
+        else:
+            logging.info("Deprovisioned users: EXCLUDED from sync (default Okta behavior)")
 
     @property
     def tenant_id(self) -> str:
@@ -103,21 +142,32 @@ class Settings(BaseSettings):
             return []
         return [attr.strip() for attr in self.OKTA_USER_CUSTOM_ATTRIBUTES.split(',') if attr.strip()]
 
-    #@property  
-    #def okta_user_indexed_attributes_list(self) -> List[str]:
-    #    """
-    #    Parse OKTA_USER_INDEXED_ATTRIBUTES into a list.
-    #    If not set, returns all custom attributes (index everything).
-    #    If set, returns only the specified attributes to index.
-    #    """
-    #    if not self.OKTA_USER_INDEXED_ATTRIBUTES:
-    #        # If indexed attributes not specified, index all custom attributes
-    #        return self.okta_user_custom_attributes_list
-    #    
-    #    indexed_attrs = [attr.strip() for attr in self.OKTA_USER_INDEXED_ATTRIBUTES.split(',') if attr.strip()]
-    #    
-    #    # Only return attributes that are also in the custom attributes list
-    #    return [attr for attr in indexed_attrs if attr in self.okta_user_custom_attributes_list]
+    # Helper properties for deprovisioned user date filters
+    @property
+    def depr_user_created_after_iso(self) -> str:
+        """Convert DEPR_USER_CREATED_AFTER to ISO format for Okta API"""
+        if self.DEPR_USER_CREATED_AFTER:
+            try:
+                # Validate the date format first
+                datetime.strptime(self.DEPR_USER_CREATED_AFTER, "%Y-%m-%d")
+                return f"{self.DEPR_USER_CREATED_AFTER}T00:00:00.000Z"
+            except ValueError:
+                logging.error(f"Invalid DEPR_USER_CREATED_AFTER format: {self.DEPR_USER_CREATED_AFTER}")
+                raise ValueError(f"DEPR_USER_CREATED_AFTER must be in YYYY-MM-DD format, got: {self.DEPR_USER_CREATED_AFTER}")
+        return ""
+    
+    @property
+    def depr_user_updated_after_iso(self) -> str:
+        """Convert DEPR_USER_UPDATED_AFTER to ISO format for Okta API"""
+        if self.DEPR_USER_UPDATED_AFTER:
+            try:
+                # Validate the date format first
+                datetime.strptime(self.DEPR_USER_UPDATED_AFTER, "%Y-%m-%d")
+                return f"{self.DEPR_USER_UPDATED_AFTER}T00:00:00.000Z"
+            except ValueError:
+                logging.error(f"Invalid DEPR_USER_UPDATED_AFTER format: {self.DEPR_USER_UPDATED_AFTER}")
+                raise ValueError(f"DEPR_USER_UPDATED_AFTER must be in YYYY-MM-DD format, got: {self.DEPR_USER_UPDATED_AFTER}")
+        return ""
 
     class Config:
         env_file = ".env"

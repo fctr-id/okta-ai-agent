@@ -590,26 +590,68 @@ class OktaClientWrapper:
         since: Optional[datetime] = None,
         processor_func: Optional[Callable] = None
     ) -> int:
-        """
-        List users with parallel processing and database streaming.
-        
-        Args:
-            since: Optional timestamp for incremental sync
-            processor_func: Function to process batches to the database
-                
-        Returns:
-            Count of processed records
-        """
         try:
-            # Set up query parameters
             query_params = {"limit": self.USER_PAGE_SIZE}
             
-            # Add filter for incremental sync if needed
-            if since:
-                since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-                query_params["filter"] = f"lastUpdated gt \"{since_str}\""
+            # Check if we need to ADD deprovisioned users
+            if settings.SYNC_DEPROVISIONED_USERS:
+                # Build conditions for deprovisioned users
+                deprovisioned_conditions = ['status eq "DEPROVISIONED"']
+                
+                # Add date filters only if specified by user
+                if settings.depr_user_created_after_iso:
+                    deprovisioned_conditions.append(f'created gt "{settings.depr_user_created_after_iso}"')
+                
+                if settings.depr_user_updated_after_iso:
+                    deprovisioned_conditions.append(f'lastUpdated gt "{settings.depr_user_updated_after_iso}"')
+                
+                # Add incremental sync to deprovisioned users as well
+                if since:
+                    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    deprovisioned_conditions.append(f'lastUpdated gt "{since_str}"')
+                
+                # Build the deprovisioned user filter
+                deprovisioned_filter = " and ".join(deprovisioned_conditions)
+                
+                # Use epoch date to capture all default users (instead of status ne "DEPROVISIONED")
+                #epoch_date = "1970-01-01T00:00:00.000Z"
+                #default_conditions = [f'created gt "{epoch_date}"']
+                default_conditions = [
+                    'status eq "STAGED"',
+                    'status eq "PROVISIONED"', 
+                    'status eq "ACTIVE"',
+                    'status eq "RECOVERY"',
+                    'status eq "PASSWORD_EXPIRED"',
+                    'status eq "LOCKED_OUT"',
+                    'status eq "SUSPENDED"'
+                ]
+                
+                # Add incremental sync to default users if needed
+                if since:
+                    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    # For incremental sync, we need to AND the status conditions with the date filter
+                    status_filter = " or ".join(default_conditions)
+                    default_filter = f"({status_filter}) and lastUpdated gt \"{since_str}\""
+                else:
+                    # For full sync, just OR all the status conditions
+                    default_filter = " or ".join(default_conditions)
+                
+                # Combine: (default users) OR (deprovisioned users with conditions)
+                query_params["search"] = f'({default_filter}) or ({deprovisioned_filter})'
+                
+                logger.info(f"Using combined search: default users + deprovisioned users")
+                logger.info(f"Deprovisioned user filter: {deprovisioned_filter}")
+                logger.debug(f"Final search expression: {query_params['search']}")
+                
+            else:
+                # Use default Okta behavior with optional incremental sync
+                if since:
+                    since_str = since.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+                    query_params["filter"] = f"lastUpdated gt \"{since_str}\""
+                    logger.info(f"Using default behavior with incremental sync: lastUpdated gt \"{since_str}\"")
+                else:
+                    logger.info("Using default Okta behavior: syncing active users only")
             
-            # Use common pagination function with parallel processing
             return await self._paginate(
                 api_method=self.client.list_users,
                 query_params=query_params,
@@ -635,17 +677,27 @@ class OktaClientWrapper:
             user_okta_id = user['id'] if isinstance(user, dict) else getattr(user, 'id')
             user_dict = user if isinstance(user, dict) else user.as_dict() if hasattr(user, 'as_dict') else {}
             
-            # Fetch relationships with small delays between calls
-            app_links = await self.get_user_app_links(user_okta_id)
-            await asyncio.sleep(0.1)  # Small delay after first API call
-            
-            group_memberships = await self.get_user_groups(user_okta_id)
-            await asyncio.sleep(0.1)  # Small delay after second API call
-            
-            factors = await self.list_user_factors([user_okta_id])
-            
             # Get profile data safely
             profile = user_dict.get('profile', {})
+            user_status = user_dict.get('status')
+            
+            # Initialize empty relationship data
+            app_links = []
+            group_memberships = []
+            factors = []
+            
+            # Only fetch relationships for non-deprovisioned users
+            if user_status != 'DEPROVISIONED':
+                # Fetch relationships with small delays between calls
+                app_links = await self.get_user_app_links(user_okta_id)
+                await asyncio.sleep(0.1)  # Small delay after first API call
+                
+                group_memberships = await self.get_user_groups(user_okta_id)
+                await asyncio.sleep(0.1)  # Small delay after second API call
+                
+                factors = await self.list_user_factors([user_okta_id])
+            else:
+                logger.debug(f"User {user_okta_id} is DEPROVISIONED - skipping relationship fetching")
             
             custom_attributes = {}
             for attr_name in settings.okta_user_custom_attributes_list:
@@ -660,7 +712,7 @@ class OktaClientWrapper:
                 'first_name': profile.get('firstName'),
                 'last_name': profile.get('lastName'),
                 'login': profile.get('login'),
-                'status': user_dict.get('status'),
+                'status': user_status,
                 'mobile_phone': profile.get('mobilePhone'),
                 'primary_phone': profile.get('primaryPhone'),
                 'employee_number': profile.get('employeeNumber'),
@@ -679,11 +731,14 @@ class OktaClientWrapper:
                 'group_memberships': group_memberships
             }
             
-            logger.debug(
-                f"User {user_okta_id} processed with {len(app_links)} app links, "
-                f"{len(group_memberships)} groups, {len(factors)} factors, "
-                f"and {len(custom_attributes)} custom attributes"
-            )
+            if user_status == 'DEPROVISIONED':
+                logger.debug(f"User {user_okta_id} (DEPROVISIONED) processed with basic data only")
+            else:
+                logger.debug(
+                    f"User {user_okta_id} processed with {len(app_links)} app links, "
+                    f"{len(group_memberships)} groups, {len(factors)} factors, "
+                    f"and {len(custom_attributes)} custom attributes"
+                )
             return transformed_user
             
         except Exception as e:
@@ -959,8 +1014,14 @@ class OktaClientWrapper:
                     factors, error = normalize_okta_response(api_response)
                     
                     if error:
-                        logger.error(f"API error for user {user_id}: {error}")
-                        continue
+                        # Handle 404s gracefully - these are expected for deprovisioned/deleted users
+                        error_str = str(error)
+                        if "404" in error_str or "E0000007" in error_str or "Not found" in error_str:
+                            logger.debug(f"User {user_id} not found for factors (likely deprovisioned/deleted) - skipping")
+                            continue
+                        else:
+                            logger.error(f"Factors API error for user {user_id}: {error}")
+                            continue
     
                     transformed_factors = []
                     for factor in factors:
@@ -971,7 +1032,11 @@ class OktaClientWrapper:
                     all_factors.extend(transformed_factors)
                     
                 except Exception as e:
-                    logger.error(f"Error fetching factors for user {user_id}: {str(e)}")
+                    error_str = str(e)
+                    if "404" in error_str or "E0000007" in error_str or "Not found" in error_str:
+                        logger.debug(f"User {user_id} not accessible for factors - skipping")
+                    else:
+                        logger.error(f"Error fetching factors for user {user_id}: {str(e)}")
                     continue
     
             return all_factors
