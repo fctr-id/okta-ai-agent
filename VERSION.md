@@ -1,5 +1,10 @@
 # Version History
 
+## Current Latest: v0.6.0-beta (2025-06-26)
+ - Added support to sync deprovisioned users
+ - Fixed device pagination issue
+ - Minor sys prompt updates for consistent queries.
+
 ## Current Latest: v0.5.5-beta (2025-06-12)
 Custom User Attributes & Device Management:
 - Added comprehensive custom user attributes support with JSON storage and querying
