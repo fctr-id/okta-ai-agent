@@ -123,6 +123,7 @@ class User(BaseModel):
     department = Column(String, index=True)
     manager = Column(String) 
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
+    status_changed_at = Column(DateTime(timezone=True), nullable=True, index=True)  
     user_type = Column(String, nullable=True)
     country_code = Column(String, nullable=True, index=True)
     title = Column(String, nullable=True)
@@ -151,6 +152,7 @@ class User(BaseModel):
         Index('idx_user_manager', 'tenant_id', 'manager'),
         Index('idx_user_name_search', 'tenant_id', 'first_name', 'last_name'),
         Index('idx_user_status_filter', 'tenant_id', 'status', 'is_deleted'),
+        Index('idx_user_status_changed', 'tenant_id', 'status_changed_at'),
         {'extend_existing': True}
     )
 
