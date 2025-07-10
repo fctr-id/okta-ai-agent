@@ -721,6 +721,7 @@ class OktaClientWrapper:
                 'created_at': parse_timestamp(user_dict.get('created')),
                 'last_updated_at': parse_timestamp(user_dict.get('lastUpdated')),
                 'password_changed_at': parse_timestamp(user_dict.get('passwordChanged')),
+                'status_changed_at': parse_timestamp(user_dict.get('statusChanged')),
                 'user_type': profile.get('userType'),
                 'country_code': profile.get('countryCode'),
                 'title': profile.get('title'),
