@@ -1,19 +1,22 @@
 from dataclasses import dataclass
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic_ai import Agent, RunContext
-from src.core.model_picker import ModelConfig, ModelType 
+from src.core.model_picker import ModelConfig, ModelType
 from dotenv import load_dotenv
 import asyncio
-import os, json, re
+import os
+import json
+import re
 
 load_dotenv()
 
-model = ModelConfig.get_model(ModelType.CODING) 
+model = ModelConfig.get_model(ModelType.CODING)
 
 @dataclass
 class SQLDependencies:
     tenant_id: str
     include_deleted: bool = False
+
 
 class SQLQueryOutput(BaseModel):
     model_config = ConfigDict(json_schema_extra={
@@ -22,7 +25,7 @@ class SQLQueryOutput(BaseModel):
             "explanation": "This query fetches all active users from the database"
         }
     })
-    
+
     sql: str = Field(
         description='SQL query to execute to fetch the details requested in the user question',
         min_length=1
@@ -43,10 +46,10 @@ class SQLQueryOutput(BaseModel):
 #)
 
 
+# Replace the existing system_prompt content with this updated version:
+
 sql_agent = Agent(
     model,
-    #deps_type=SQLDependencies,
-    #result_type=SQLQueryOutput,
     system_prompt="""
         You are a SQL expert. Generate optimized SQLite queries for an Okta database with tables with the following schema to answer to the user query:
         The query has to be a valid query for the SQLLite database and MUST only use the schema provided below.
@@ -58,7 +61,7 @@ sql_agent = Agent(
         Keep JOIN conditions focused only on the ID relationships
         Do NOT use parameter placeholders (?) in queries
         Avoid tenant_id and is_deleted in JOIN conditions when possible
-       
+
         OPTIMIZATION PATTERNS:
         Instead of this complex pattern (that may fail):
         SELECT u.email, u.login FROM users u LEFT JOIN user_factors uf ON uf.user_okta_id = u.okta_id AND uf.factor_type = 'signed_nonce' AND uf.tenant_id = u.tenant_id AND uf.is_deleted = FALSE WHERE u.is_deleted = FALSE AND uf.id IS NULL
@@ -71,15 +74,15 @@ sql_agent = Agent(
 
         For finding users WITHOUT a specific factor, use:
         SELECT u.email, u.login, u.first_name, u.last_name FROM users u WHERE u.okta_id NOT IN ( SELECT user_okta_id FROM user_factors WHERE factor_type = 'signed_nonce' )
-        
+
         ### OPERATOR SELECTION (MOST IMPORTANT) ###
         **When user specifies exact values in a list, you MUST use IN/NOT IN:**
-        
+
         CORRECT Examples:
         - "department is one of Sales, Marketing" → `JSON_EXTRACT(custom_attributes, '$.department') IN ('Sales', 'Marketing')`
         - "status not Engineering, IT" → `JSON_EXTRACT(custom_attributes, '$.job_family') NOT IN ('Engineering', 'IT')`
         - "users with ACTIVE or SUSPENDED status" → `status IN ('ACTIVE', 'SUSPENDED')`
-        
+
          WRONG Examples (DO NOT DO THIS):
         - `JSON_EXTRACT(custom_attributes, '$.department') LIKE '%Sales%' OR JSON_EXTRACT(custom_attributes, '$.department') LIKE '%Marketing%'`
         - `JSON_EXTRACT(custom_attributes, '$.job_family') NOT LIKE '%Engineering%' AND JSON_EXTRACT(custom_attributes, '$.job_family') NOT LIKE '%IT%'`
@@ -108,149 +111,201 @@ sql_agent = Agent(
 
         ### Input Validation ###:
         - Make sure that the question asked by the user is relevant to the schema provided below and can be answered using the schema
-        - if the question is too generic or not relevant to the schema, the SQL node should be empty and the explanation should state that the question is not relevant to the schema 
+        - if the question is too generic or not relevant to the schema, the SQL node should be empty and the explanation should state that the question is not relevant to the schema
         -If the query sayss something like save results to a file, or download to file or similar, in your explaination say "SAVE_FILE"
 
         ### Key concepts ###:
         - Use application.label for user-friendly app names. Even if the user states application or app name, use application label to query.
         - When using LIKE make sure you use wild cards even when using variables in the query
-        - Alyways use LIKE for application labels because the users may not provide the exact name 
+        - Alyways use LIKE for application labels because the users may not provide the exact name
         - Always list ACTIVE apps unless specifically asked for inactive ones
         - Always search for the group by name and use LIKE for the group name as well
         - A user can be assigned to only one manager
         - A manager can have multiple direct reporting users
         - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
-        
-       ### Custom Attributes (JSON Storage) ###
-        - Custom attributes are stored in the `custom_attributes` JSON column
-        - Use JSON_EXTRACT(custom_attributes, '$.attribute_name') to access values
-        - Use JSON functions for filtering and querying custom attributes
-        
-        ### JSON Query Examples ###
-        
-        Example: "Show users where custom_attrib_1 equals '4'"
-        SQL: SELECT email, login, first_name, last_name, 
-                    JSON_EXTRACT(custom_attributes, '$.custom_attrib_1') as custom_attrib_1
-             FROM users 
-             WHERE JSON_EXTRACT(custom_attributes, '$.custom_attrib_1') = '4' 
-             AND is_deleted = FALSE
-        
-        Example: "Find users with testAttrib containing 'hello'"
-        SQL: SELECT email, login, first_name, last_name,
-                    JSON_EXTRACT(custom_attributes, '$.testAttrib') as testAttrib
-             FROM users 
-             WHERE JSON_EXTRACT(custom_attributes, '$.testAttrib') LIKE '%hello%' 
-             AND is_deleted = FALSE
-             
-        Example: "List all users with any custom attributes"
-        SQL: SELECT email, login, first_name, last_name, custom_attributes
-             FROM users 
-             WHERE custom_attributes IS NOT NULL 
-             AND custom_attributes != '{}' 
-             AND is_deleted = FALSE
-                
+
+        ### Custom Attributes Display Strategy ###
+        Custom attributes are stored in the `custom_attributes` JSON column. When user queries involve listing users or querying custom attributes:
+
+        **ALWAYS expand custom attributes as individual columns for better display:**
+
+        1. **For general user queries (like "list users", "show users", etc.):**
+           - Always include individual columns for ALL available custom attributes
+           - Use JSON_EXTRACT(custom_attributes, '$.attribute_name') as attribute_name
+           - This makes data display much cleaner and allows proper column headers
+
+        2. **For queries filtering by custom attributes:**
+           - Include the filtering custom attribute as an individual column
+           - Include other common custom attributes as individual columns
+
+        **Custom Attribute Column Expansion Pattern:**
+
+        Instead of:
+        ```sql
+        SELECT email, login, first_name, last_name, custom_attributes FROM users
+        ```
+
+        Use:
+        ```sql
+        SELECT email, login, first_name, last_name, status,
+               JSON_EXTRACT(custom_attributes, '$.attribute1') as attribute1,
+               JSON_EXTRACT(custom_attributes, '$.attribute2') as attribute2,
+               JSON_EXTRACT(custom_attributes, '$.attribute3') as attribute3
+        FROM users WHERE is_deleted = FALSE
+        ```
+
+        **When to expand custom attributes:**
+        - ANY user listing query → expand ALL available custom attributes
+        - Custom attribute filtering → expand the filtered attribute plus others
+        - User detail queries → expand ALL available custom attributes
+
+        **JSON Query Examples with Expansion:**
+
+        Example: "Show users where department equals 'Engineering'"
+        ```sql
+        SELECT email, login, first_name, last_name, status,
+               JSON_EXTRACT(custom_attributes, '$.department') as department,
+               JSON_EXTRACT(custom_attributes, '$.job_title') as job_title
+        FROM users
+        WHERE JSON_EXTRACT(custom_attributes, '$.department') = 'Engineering'
+        AND is_deleted = FALSE
+        ```
+
+        Example: "List all users"
+        ```sql
+        SELECT email, login, first_name, last_name, status,
+               JSON_EXTRACT(custom_attributes, '$.department') as department,
+               JSON_EXTRACT(custom_attributes, '$.job_title') as job_title,
+               JSON_EXTRACT(custom_attributes, '$.manager_email') as manager_email
+        FROM users
+        WHERE is_deleted = FALSE
+        ```
 
         ##Key Columns to use in the queries##
         - Always use the following columns when answering queries unless more ore less are asked
         - For user related query Users: email, login, first_name, last_name, status
+        - include individual custom attribute columns for user queries only when the query mentions them
         - groups: name, description
         - applications: label, name, status
         - factors: factor_type, provider, status, authenticator_name, device_name
         - devices: display_name, platform, manufacturer, model, status
         - user_devices: management_status, screen_lock_type
-            
-            ### Timestamp Handling ###
-                - All database timestamps are stored in UTC
-                - Use SQLite's built-in datetime functions for timezone conversion:
-                - strftime('%Y-%m-%d %H:%M:%S', column) for basic formatting
-                - datetime(column, 'localtime') for local time conversion
-                - You MUST convert the timestamps to local time before displaying them in the output
-                
-                Example timestamp queries:
-                1. Basic timestamp display:
-                ```sql
-                SELECT 
-                    strftime('%Y-%m-%d %I:%M:%S %p', datetime(sync_end_time, 'localtime')) as local_sync_time,
-                    records_processed
-                FROM sync_history
-                ```
 
-                2. Timestamp filtering:
-                ```sql
-                SELECT *
-                FROM users
-                WHERE date(created_at, 'localtime') = date('now', 'localtime')
-                ```
+        ### Timestamp Handling ###
+            - All database timestamps (with type DateTime ) are stored in the databse  UTC
+            - Use SQLite's built-in datetime functions for timezone conversion:
+            - strftime('%Y-%m-%d %H:%M:%S', column) for basic formatting
+            - datetime(column, 'localtime') for local time conversion
+            - You MUST convert the timestamps to local time before displaying them in the output
+            - When creating aliases for converted timestamps, use the same column names as in the database schema, do NOT create new column names
 
-                - Always use these functions when displaying timestamps in queries
-                - Format: YYYY-MM-DD HH:MM:SS AM/PM
-            
-            ### user and manager relationship logic ###:
-            If asked about a user's manager then you find that user and then find the manager column
-             - Take the value from the manager column and search the users table for that value against email or login using LIKE
-            if asked about a manager's direct reportees, you will have to find the manager  login id and match that ID against the user's manager column
-            
-            Example: 
-            User Query: Manager for emma.jones
-            SQL: SELECT m.first_name, m.last_name, m.email, m.login FROM users u LEFT JOIN users m ON LOWER(m.login) LIKE LOWER('%' || u.manager || '%')WHERE (LOWER(u.email) LIKE LOWER('%emma.jones%') OR LOWER(u.login) LIKE LOWER('%emma.jones%'))AND u.is_deleted = FALSE;
 
-            
-            Example:
-            User Query: List the direct reports of noah.williams
-            SQL:  SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, u.manager, u.department, u.status FROM users u WHERE LOWER(u.manager) LIKE LOWER('%noah.williams%') AND u.is_deleted = FALSE
-            
-            
-            ### User-Application-Group Assignment Logic ###:
-            - Assignments are mutually exclusive, i.e. a user cannot be directly assigned to an app if he is a member of a group assigned to the app
-            - Group assignments take precedence
-            - Direct assignments only apply if no group assignment exists
-            - This ensures clear, unambiguous access management
-            
-            flowchart TD
-                A[Start] --> B{User in Group?}
-                B -- Yes --> C{Group assigned to App?}
-                C -- Yes --> D[Use Group Assignment]
-                C -- No --> E[Check Direct Assignment]
-                B -- No --> E
-                E --> F{Direct Assignment Exists?}
-                F -- Yes --> G[Use Direct Assignment]
-                F -- No --> H[No Access]            
-                        
-            Example Queries for application memberships for users:
-            Query: list all users assigned to FCTR ID Login app and show if it's a direct or assignment by a group
-            Output: SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, a.label, a.name, 'Group Assignment' AS assignment_type, g.name AS group_name FROM group_application_assignments gaa INNER JOIN groups g ON g.okta_id = gaa.group_okta_id INNER JOIN applications a ON a.okta_id = gaa.application_okta_id INNER JOIN user_group_memberships ugm ON ugm.group_okta_id = g.okta_id INNER JOIN users u ON u.okta_id = ugm.user_okta_id WHERE a.label LIKE '%fctr id - demo%' AND u.status = 'ACTIVE' UNION SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, a.label, a.name, 'Direct Assignment' AS assignment_type, NULL AS group_name FROM user_application_assignments uaa INNER JOIN users u ON u.okta_id = uaa.user_okta_id INNER JOIN applications a ON a.okta_id = uaa.application_okta_id WHERE a.label LIKE '%fctr id - demo%' AND u.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM group_application_assignments gaa INNER JOIN user_group_memberships ugm ON ugm.group_okta_id = gaa.group_okta_id WHERE ugm.user_okta_id = u.okta_id AND gaa.application_okta_id = uaa.application_okta_id)
-            
-            ### Output preferences ###
-            - The SQL query MUST output the data in a JSON format that is erasy to convert to csv if needed by the programming language.
-            - ALways list users and groups of all statuses unless specifically asked for a particular status
-            - Always output the user email & login fields in addition to the requested fields
-            - Always output the application label and application name in addition to the requested fields
-            - Always output the group name in addition to the requested fields
-            
-            
-            ##### You MUST call the okta_database_schema tool to access the full database schema when needed. #####
-            """
+            Example timestamp queries:
+            1. Basic timestamp display:
+            ```sql
+            SELECT
+                strftime('%Y-%m-%d %I:%M:%S %p', datetime(sync_end_time, 'localtime')) as local_sync_time,
+                records_processed
+            FROM sync_history
+            ```
+
+            2. Timestamp filtering:
+            ```sql
+            SELECT *
+            FROM users
+            WHERE date(created_at, 'localtime') = date('now', 'localtime')
+            ```
+
+            - Always use these functions when displaying timestamps in queries
+            - Format: YYYY-MM-DD HH:MM:SS AM/PM
+
+        ### user and manager relationship logic ###:
+        If asked about a user's manager then you find that user and then find the manager column
+         - Take the value from the manager column and search the users table for that value against email or login using LIKE
+        if asked about a manager's direct reportees, you will have to find the manager  login id and match that ID against the user's manager column
+
+        Example:
+        User Query: Manager for emma.jones
+        SQL: SELECT m.first_name, m.last_name, m.email, m.login FROM users u LEFT JOIN users m ON LOWER(m.login) LIKE LOWER('%' || u.manager || '%')WHERE (LOWER(u.email) LIKE LOWER('%emma.jones%') OR LOWER(u.login) LIKE LOWER('%emma.jones%'))AND u.is_deleted = FALSE;
+
+
+        Example:
+        User Query: List the direct reports of noah.williams
+        SQL:  SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, u.manager, u.department, u.status FROM users u WHERE LOWER(u.manager) LIKE LOWER('%noah.williams%') AND u.is_deleted = FALSE
+
+
+        ### User-Application-Group Assignment Logic ###:
+        - Assignments are mutually exclusive, i.e. a user cannot be directly assigned to an app if he is a member of a group assigned to the app
+        - Group assignments take precedence
+        - Direct assignments only apply if no group assignment exists
+        - This ensures clear, unambiguous access management
+
+        flowchart TD
+            A[Start] --> B{User in Group?}
+            B -- Yes --> C{Group assigned to App?}
+            C -- Yes --> D[Use Group Assignment]
+            C -- No --> E[Check Direct Assignment]
+            B -- No --> E
+            E --> F{Direct Assignment Exists?}
+            F -- Yes --> G[Use Direct Assignment]
+            F -- No --> H[No Access]
+
+        Example Queries for application memberships for users:
+        Query: list all users assigned to FCTR ID Login app and show if it's a direct or assignment by a group
+        Output: SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, a.label, a.name, 'Group Assignment' AS assignment_type, g.name AS group_name FROM group_application_assignments gaa INNER JOIN groups g ON g.okta_id = gaa.group_okta_id INNER JOIN applications a ON a.okta_id = gaa.application_okta_id INNER JOIN user_group_memberships ugm ON ugm.group_okta_id = g.okta_id INNER JOIN users u ON u.okta_id = ugm.user_okta_id WHERE a.label LIKE '%fctr id - demo%' AND u.status = 'ACTIVE' UNION SELECT u.id, u.okta_id, u.email, u.login, u.first_name, u.last_name, a.label, a.name, 'Direct Assignment' AS assignment_type, NULL AS group_name FROM user_application_assignments uaa INNER JOIN users u ON u.okta_id = uaa.user_okta_id INNER JOIN applications a ON a.okta_id = uaa.application_okta_id WHERE a.label LIKE '%fctr id - demo%' AND u.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM group_application_assignments gaa INNER JOIN user_group_memberships ugm ON ugm.group_okta_id = gaa.group_okta_id WHERE ugm.user_okta_id = u.okta_id AND gaa.application_okta_id = uaa.application_okta_id)
+
+        ### Output preferences ###
+        - The SQL query MUST output the data in a JSON format that is erasy to convert to csv if needed by the programming language.
+        - ALways list users and groups of all statuses unless specifically asked for a particular status
+        - Always output the user email & login fields in addition to the requested fields
+        - Always output the application label and application name in addition to the requested fields
+        - Always output the group name in addition to the requested fields
+
+
+        ##### You MUST call the okta_database_schema tool to access the full database schema when needed. #####
+        """
 )
 
 @sql_agent.system_prompt
 async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
     """Access the complete okta database schema to answer user questions"""
-    
+
     # Get custom attributes dynamically
     try:
         from src.config.settings import settings
         custom_attrs = settings.okta_user_custom_attributes_list
     except (ImportError, AttributeError):
         custom_attrs = []
-    
-    # Build custom attributes schema section
+
+    # Build custom attributes schema section with expansion guidance
     custom_attrs_schema = ""
     if custom_attrs:
         custom_attrs_schema = "\n            - custom_attributes (JSON)  Contains all custom Okta attributes"
-        custom_attrs_schema += "\n            Available custom attributes (access via JSON_EXTRACT):"
+        custom_attrs_schema += "\n            \n            CUSTOM ATTRIBUTES - ALWAYS EXPAND AS INDIVIDUAL COLUMNS:"
+        custom_attrs_schema += "\n            Available custom attributes (MUST be included as separate columns in user queries):"
+
+        # Create individual column examples for each custom attribute
         for attr in custom_attrs:
-            custom_attrs_schema += f"\n              * {attr} - use JSON_EXTRACT(custom_attributes, '$.{attr}')"
-    
+            clean_name = attr.lower().replace(' ', '_')
+            custom_attrs_schema += f"\n              * {attr} → JSON_EXTRACT(custom_attributes, '$.{attr}') as {clean_name}"
+
+        custom_attrs_schema += f"\n            \n            EXAMPLE - Instead of just selecting custom_attributes:"
+        custom_attrs_schema += f"\n            SELECT email, login, first_name, last_name, custom_attributes FROM users"
+        custom_attrs_schema += f"\n            \n            ALWAYS DO THIS (expand all custom attributes):"
+        custom_attrs_schema += f"\n            SELECT email, login, first_name, last_name, status,"
+
+        # Add all custom attributes to the example
+        for i, attr in enumerate(custom_attrs):
+            clean_name = attr.lower().replace(' ', '_')
+            comma = "," if i < len(custom_attrs) - 1 else ""
+            custom_attrs_schema += f"\n                   JSON_EXTRACT(custom_attributes, '$.{attr}') as {clean_name}{comma}"
+
+        custom_attrs_schema += f"\n            FROM users WHERE is_deleted = FALSE"
+        custom_attrs_schema += f"\n            \n            This creates proper column headers and clean data display!"
+    else:
+        custom_attrs_schema = "\n            - custom_attributes (JSON)  No custom attributes configured"
+
+
     # Build the schema string
     schema = """
             ### DB Schema
@@ -271,12 +326,13 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - manager (String)
             - user_type (String)
             - country_code (String, INDEX)
-            - title (String) 
+            - title (String)
             - organization (String, INDEX)
-            - password_changed_at (DateTime)            
+            - password_changed_at (DateTime)
             - created_at (DateTime)      # From Okta 'created' field
             - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)      # Local record update time
+            - status_changed_at (DateTime, INDEX)
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)""" + custom_attrs_schema + """
 
@@ -287,10 +343,10 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - idx_user_employee_number (tenant_id, employee_number)
             - idx_user_department (tenant_id, department)
             - idx_user_country_code (tenant_id, country_code)
-            - idx_user_organization (tenant_id, organization) 
+            - idx_user_organization (tenant_id, organization)
             - idx_user_manager (tenant_id, manager)
             - idx_user_name_search (tenant_id, first_name, last_name)
-            - idx_user_status_filter (tenant_id, status, is_deleted)           
+            - idx_user_status_filter (tenant_id, status, is_deleted)
 
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
@@ -373,7 +429,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - name (String, INDEX)
             - description (String, NULL)
             - status (String, INDEX)
-            - type (String, INDEX) 
+            - type (String, INDEX)
             - created_at (DateTime)      # From Okta 'created' field
             - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)      # Local record update time
@@ -387,7 +443,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - uix_tenant_okta_id (tenant_id, okta_id)
             RELATIONSHIPS:
             - applications: one-to-many -> applications
-            
+
             TABLE: devices
             FIELDS:
             - id (Integer, PrimaryKey)
@@ -409,20 +465,20 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - updated_at (DateTime)      # Local record update time
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
-            
+
             INDEXES:
             - idx_device_tenant_name (tenant_id, display_name)
             - idx_device_platform (tenant_id, platform)
             - idx_device_manufacturer (tenant_id, manufacturer)
             - idx_device_serial (tenant_id, serial_number)
             - idx_device_udid (tenant_id, udid)
-            
+
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
-            
+
             RELATIONSHIPS:
             - users: many-to-many -> users (via user_devices)
-            
+
             TABLE: user_devices
             FIELDS:
             - id (Integer, PrimaryKey)
@@ -437,19 +493,19 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - updated_at (DateTime)
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
-            
+
             INDEXES:
             - idx_user_device_user (tenant_id, user_okta_id)
             - idx_user_device_device (tenant_id, device_okta_id)
             - idx_user_device_mgmt_status (tenant_id, management_status)
             - idx_user_device_screen_lock (tenant_id, screen_lock_type)
-            
+
             UNIQUE:
             - uix_user_device_tenant_user_device (tenant_id, user_okta_id, device_okta_id)
-            
+
             RELATIONSHIPS:
             - user: many-to-one -> users
-            - device: many-to-one -> devices           
+            - device: many-to-one -> devices
 
             TABLE: user_factors
             FIELDS:
@@ -471,7 +527,7 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - updated_at (DateTime)
             - last_synced_at (DateTime, INDEX)
             - is_deleted (Boolean, INDEX)
-            
+
             INDEXES:
             - idx_factor_tenant_user (tenant_id, user_okta_id)
             - idx_factor_okta_id (okta_id)
@@ -480,10 +536,10 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - idx_factor_tenant_user_type (tenant_id, user_okta_id, factor_type)
             - idx_tenant_factor_type (tenant_id, factor_type)
             - idx_factor_auth_name (tenant_id, authenticator_name)
-            
+
             UNIQUE:
             - uix_tenant_okta_id (tenant_id, okta_id)
-            
+
             RELATIONSHIPS:
             - user: many-to-one -> users
 
@@ -549,8 +605,8 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             - updated_at (DateTime)
             INDEXES:
             - idx_sync_tenant_entity (tenant_id, entity_type)
-            """  
-    return schema      
+            """
+    return schema
 
 #@sql_agent.system_prompt
 #async def add_tenant_context(ctx: RunContext[SQLDependencies]) -> str:
@@ -574,7 +630,7 @@ def extract_json_from_text(text: str) -> dict:
                         continue
         except re.error:
             pass
-        
+
         # Try to find the first valid JSON object using bracket counting
         try:
             start_idx = text.find('{')
@@ -593,37 +649,38 @@ def extract_json_from_text(text: str) -> dict:
                                 pass
         except Exception:
             pass
-            
+
         # If we get here, we couldn't find valid JSON
         raise ValueError(f"No valid JSON found in response: {text[:100]}...")
 
 async def main():
     print("\nWelcome to Okta Query Assistant!")
     print("Type 'exit' to quit\n")
-    
+
     while True:
         question = input("\nWhat would you like to know about your Okta data? > ")
         if question.lower() == 'exit':
             break
-            
+
         try:
             response = await sql_agent.run(question)
             print("\nAgent Response:" + (response.output))
             result = extract_json_from_text(str(response.output))
-            
+
             print("\nGenerated SQL:")
             print("-" * 40)
             print(result["sql"])
             print("\nExplanation:")
             print(result["explanation"])
-            
+
         except ValueError as ve:
             print(f"\nError parsing response: {str(ve)}")
             print("Raw response:", str(response.output))
         except Exception as e:
             print(f"\nError: {str(e)}")
-        
+
         print("-" * 80)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
