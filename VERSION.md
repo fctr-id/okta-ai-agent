@@ -1,6 +1,11 @@
 # Version History
 
-## Current Latest: v0.5.5-beta (2025-06-12)
+## Current latest: v0.6.1-beta (07-13-2025)
+
+- Support for new user attribute statusChanged
+- Huge performance imporvements for SQL (removed JSON_EXTRACT)
+
+## v0.5.5-beta (2025-06-12)
 Custom User Attributes & Device Management:
 - Added comprehensive custom user attributes support with JSON storage and querying
 - Implemented full Okta device synchronization with user-device relationships
@@ -13,7 +18,7 @@ Custom User Attributes & Device Management:
 - Update pydantic AI framework to the latest version
 - Bug fixes and minor performance improvements
 
-## Current Latest: v0.5.0-beta (2025-05-20)
+## v0.5.0-beta (2025-05-20)
 Realtime Agents!
 - New user interface for realtime queries
 - Command line srcipt to use similar to MCP servers wihout context limitations
@@ -25,13 +30,13 @@ Realtime Agents!
 - Many more bug fixes and imporvements.
 
 
-## Current Latest: v0.3.5-beta (2025-03-26)
+## v0.3.5-beta (2025-03-26)
 - Added new user attributes -  country_code, userType, Title, organization, password_changed_at
 - Added multiple new indexex to speed up queries
 - Tweaks both to reasoning and coding agents to get better outputs from the LLMs
 - Multiple bugfixes and improvements
 
-## Current Latest: v0.3.0-beta (2025-03-23)
+## v0.3.0-beta (2025-03-23)
 - Resolved multiple critical bugs in the data synchronization pipeline
 - Significantly enhanced Okta-to-DB synchronization performance and efficiency
 - Implemented user interface refinements for improved usability
