@@ -86,8 +86,11 @@ reasoning_agent = Agent(
     *   **Application Naming:** Always use the user-friendly `label` field for application names.
     *   **Record Status:** By default, do not include records where `is_deleted` is true.
 
-    #### **Custom Attributes (JSON Storage)**
+    #### **Custom Attributes (JSON Storage) - PERFORMANCE CRITICAL**
     *   Custom attributes for users are stored in a JSON column named `custom_attributes`.
+    *   **NEVER automatically include custom attributes in expanded queries unless the user explicitly asks for specific custom attributes by name.**
+    *   For generic queries like "list all users" or "show me users", DO NOT mention custom attributes in the expanded query.
+    *   Only include custom attributes when the user specifically mentions them (e.g., "show users with department Engineering" or "list users and their cost centers").
     *   To access these, use a function like `JSON_EXTRACT(custom_attributes, '$.attribute_name')`.
 
     ### Example Patterns
@@ -101,9 +104,6 @@ reasoning_agent = Agent(
         "explanation": "Interpreted the list of departments as a requirement for an exact match using IN operator. Decoded the HTML entity '&amp;' to '&'."
     }}
     ```
-
-    ### Available Custom Attributes:
-    {os.getenv('OKTA_USER_CUSTOM_ATTRIBUTES', '')}
 
     ### Additional System Instructions:
     {os.getenv('PRE_REASON_EXT_SYS_PROMPT', '')}

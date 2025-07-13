@@ -272,15 +272,58 @@ class AIService:
 
             # Process results
             results = query_results.get("results", [])
+
+            # Smart Expansion: Backend processing for custom attributes
+            # If 'custom_attributes' column exists, parse its JSON content
+            # and merge it into the main result row.
+            if results and 'custom_attributes' in results[0]:
+                logger.info(f"Processing {len(results)} results with custom_attributes column")
+                transformed_results = []
+                users_with_attrs = 0
+                for i, row in enumerate(results):
+                    new_row = dict(row)
+                    custom_attrs_json = new_row.pop('custom_attributes', None)
+                    
+                    if custom_attrs_json and isinstance(custom_attrs_json, str) and custom_attrs_json != '{}':
+                        try:
+                            custom_attrs = json.loads(custom_attrs_json)
+                            if isinstance(custom_attrs, dict) and custom_attrs:
+                                new_row.update(custom_attrs)
+                                users_with_attrs += 1
+                        except (json.JSONDecodeError, TypeError):
+                            # If JSON is invalid or not a string, skip custom attributes for this row
+                            pass
+                    
+                    transformed_results.append(new_row)
+                results = transformed_results
+                
+                # Find a row with custom attributes to show proper column structure
+                sample_keys = list(results[0].keys()) if results else []
+                if users_with_attrs > 0:
+                    # Find first row that has custom attributes to show complete column structure
+                    for row in results:
+                        # Check if this row has any custom attribute columns
+                        base_columns = {'email', 'login', 'first_name', 'last_name', 'status', 'created_at', 'id', 'profile_url'}
+                        row_keys = set(row.keys())
+                        if row_keys - base_columns:  # Has custom attributes
+                            sample_keys = list(row.keys())
+                            break
+                
+                logger.info(f"Custom attributes transformation completed. {users_with_attrs} users had custom attributes.")
+            else:
+                logger.info(f"No custom_attributes column found in results. Available columns: {list(results[0].keys()) if results else 'No results'}")
+
             total_records = len(results)
             
             headers = []
             if results and len(results) > 0:
+                # Use sample_keys if we processed custom attributes, otherwise use first row keys
+                keys_to_use = sample_keys if 'sample_keys' in locals() else list(results[0].keys())
                 headers = [{
                     "text": key.replace('_', ' ').title(),
                     "value": key,
                     "align": 'start'
-                } for key in results[0].keys()]
+                } for key in keys_to_use]
 
             # Send metadata
             yield json.dumps({

@@ -101,7 +101,7 @@ sql_agent = Agent(
         - Make sure to print only the fields the user requested in the query
         - Do not print the timestamps from the database unless specifically requested by the user
         - Make sure you are not adding any additional entities to be queried not requested by the user in the query
-        - Understand the intent of the user query and print the necessary columns in addition to the ones requested so the data is complete and the user can understand the output.
+        - Print the columns the user requested. For users, always include email, login, first_name, last_name, and status unless asked otherwise. Do not add other columns unless they are essential to the user's question, and NEVER expand custom attributes unless explicitly asked.
         - When searching anything user related search against email and login fields
         - When searching for applications search against the application label field NOT the name field
         {
@@ -124,67 +124,43 @@ sql_agent = Agent(
         - A manager can have multiple direct reporting users
         - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
 
-        ### Custom Attributes Display Strategy ###
-        Custom attributes are stored in the `custom_attributes` JSON column. When user queries involve listing users or querying custom attributes:
+        ### Custom Attributes Display Strategy (PERFORMANCE CRITICAL) ###
+        Custom attributes are stored in a single `custom_attributes` JSON column. To ensure fast queries, follow these rules precisely:
 
-        **ALWAYS expand custom attributes as individual columns for better display:**
+        1.  **NEVER expand custom attributes with `JSON_EXTRACT` in the `SELECT` clause unless the user asks for a specific attribute by name.** For any generic query (e.g., "list all users", "show me the users"), you MUST select the `custom_attributes` column as a single, un-parsed JSON blob. This is the only acceptable behavior for generic queries.
+            -   **Example: "list all active users"**
+                ```sql
+                SELECT email, login, first_name, last_name, status, custom_attributes FROM users WHERE status = 'ACTIVE' AND is_deleted = FALSE
+                ```
 
-        1. **For general user queries (like "list users", "show users", etc.):**
-           - Always include individual columns for ALL available custom attributes
-           - Use JSON_EXTRACT(custom_attributes, '$.attribute_name') as attribute_name
-           - This makes data display much cleaner and allows proper column headers
+        2.  **ONLY expand attributes the user explicitly asks for.** If a user asks to filter by or see a specific custom attribute, use `JSON_EXTRACT` for ONLY that attribute.
+            -   **Example: "Show users in the 'Engineering' department"**
+                ```sql
+                SELECT email, login, status, JSON_EXTRACT(custom_attributes, '$.department') as department
+                FROM users
+                WHERE JSON_EXTRACT(custom_attributes, '$.department') = 'Engineering' AND is_deleted = FALSE
+                ```
 
-        2. **For queries filtering by custom attributes:**
-           - Include the filtering custom attribute as an individual column
-           - Include other common custom attributes as individual columns
+        3.  **Expand ALL attributes ONLY for a SINGLE, specific user.** This is the only case where full expansion is acceptable.
+            -   **Example: "show all details for user 'test@user.com'"**
+                ```sql
+                SELECT email, login, first_name, last_name, status,
+                       JSON_EXTRACT(custom_attributes, '$.department') as department,
+                       JSON_EXTRACT(custom_attributes, '$.costCenter') as costCenter
+                FROM users
+                WHERE login = 'test@user.com' AND is_deleted = FALSE
+                ```
 
-        **Custom Attribute Column Expansion Pattern:**
-
-        Instead of:
-        ```sql
-        SELECT email, login, first_name, last_name, custom_attributes FROM users
-        ```
-
-        Use:
-        ```sql
-        SELECT email, login, first_name, last_name, status,
-               JSON_EXTRACT(custom_attributes, '$.attribute1') as attribute1,
-               JSON_EXTRACT(custom_attributes, '$.attribute2') as attribute2,
-               JSON_EXTRACT(custom_attributes, '$.attribute3') as attribute3
-        FROM users WHERE is_deleted = FALSE
-        ```
-
-        **When to expand custom attributes:**
-        - ANY user listing query → expand ALL available custom attributes
-        - Custom attribute filtering → expand the filtered attribute plus others
-        - User detail queries → expand ALL available custom attributes
-
-        **JSON Query Examples with Expansion:**
-
-        Example: "Show users where department equals 'Engineering'"
-        ```sql
-        SELECT email, login, first_name, last_name, status,
-               JSON_EXTRACT(custom_attributes, '$.department') as department,
-               JSON_EXTRACT(custom_attributes, '$.job_title') as job_title
-        FROM users
-        WHERE JSON_EXTRACT(custom_attributes, '$.department') = 'Engineering'
-        AND is_deleted = FALSE
-        ```
-
-        Example: "List all users"
-        ```sql
-        SELECT email, login, first_name, last_name, status,
-               JSON_EXTRACT(custom_attributes, '$.department') as department,
-               JSON_EXTRACT(custom_attributes, '$.job_title') as job_title,
-               JSON_EXTRACT(custom_attributes, '$.manager_email') as manager_email
-        FROM users
-        WHERE is_deleted = FALSE
-        ```
+        ### Default Sorting Rules ###
+        To provide a consistent and user-friendly experience, apply default sorting to queries:
+        - For queries listing **users**, `ORDER BY last_name ASC, first_name ASC`.
+        - For queries listing **groups**, `ORDER BY name ASC`.
+        - For queries listing **applications**, `ORDER BY label ASC`.
+        - Only override these defaults if the user explicitly asks for a different sort order.
 
         ##Key Columns to use in the queries##
         - Always use the following columns when answering queries unless more ore less are asked
         - For user related query Users: email, login, first_name, last_name, status
-        - include individual custom attribute columns for user queries only when the query mentions them
         - groups: name, description
         - applications: label, name, status
         - factors: factor_type, provider, status, authenticator_name, device_name
@@ -277,31 +253,12 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
     except (ImportError, AttributeError):
         custom_attrs = []
 
-    # Build custom attributes schema section with expansion guidance
+    # Build custom attributes schema section
     custom_attrs_schema = ""
     if custom_attrs:
-        custom_attrs_schema = "\n            - custom_attributes (JSON)  Contains all custom Okta attributes"
-        custom_attrs_schema += "\n            \n            CUSTOM ATTRIBUTES - ALWAYS EXPAND AS INDIVIDUAL COLUMNS:"
-        custom_attrs_schema += "\n            Available custom attributes (MUST be included as separate columns in user queries):"
-
-        # Create individual column examples for each custom attribute
-        for attr in custom_attrs:
-            clean_name = attr.lower().replace(' ', '_')
-            custom_attrs_schema += f"\n              * {attr} → JSON_EXTRACT(custom_attributes, '$.{attr}') as {clean_name}"
-
-        custom_attrs_schema += f"\n            \n            EXAMPLE - Instead of just selecting custom_attributes:"
-        custom_attrs_schema += f"\n            SELECT email, login, first_name, last_name, custom_attributes FROM users"
-        custom_attrs_schema += f"\n            \n            ALWAYS DO THIS (expand all custom attributes):"
-        custom_attrs_schema += f"\n            SELECT email, login, first_name, last_name, status,"
-
-        # Add all custom attributes to the example
-        for i, attr in enumerate(custom_attrs):
-            clean_name = attr.lower().replace(' ', '_')
-            comma = "," if i < len(custom_attrs) - 1 else ""
-            custom_attrs_schema += f"\n                   JSON_EXTRACT(custom_attributes, '$.{attr}') as {clean_name}{comma}"
-
-        custom_attrs_schema += f"\n            FROM users WHERE is_deleted = FALSE"
-        custom_attrs_schema += f"\n            \n            This creates proper column headers and clean data display!"
+        # Simply list the available attributes. The main prompt handles the usage strategy.
+        custom_attrs_schema = "\n            - custom_attributes (JSON) Contains custom attributes."
+        custom_attrs_schema += "\n              Available attributes are: " + ", ".join(custom_attrs)
     else:
         custom_attrs_schema = "\n            - custom_attributes (JSON)  No custom attributes configured"
 
