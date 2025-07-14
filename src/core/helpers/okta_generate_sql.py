@@ -75,17 +75,31 @@ sql_agent = Agent(
         For finding users WITHOUT a specific factor, use:
         SELECT u.email, u.login, u.first_name, u.last_name FROM users u WHERE u.okta_id NOT IN ( SELECT user_okta_id FROM user_factors WHERE factor_type = 'signed_nonce' )
 
+        ### FIELD RESOLUTION (CRITICAL) ###
+        **Before generating SQL for any user field, you MUST check the schema to determine if it's a standard database column or custom attribute.**
+        
+        **Standard User Columns (use directly):**
+        - department, user_type, title, organization, manager, employee_number, country_code
+        - email, login, first_name, last_name, status, mobile_phone, primary_phone
+        
+        **Critical Field Name Mappings:**
+        - userType/usertype/USERTYPE → user_type (column) - NEVER use JSON_EXTRACT for this!
+        - employeeNumber → employee_number (column)
+        - countryCode → country_code (column)
+        - department/DEPARTMENT → department (column) - NEVER use JSON_EXTRACT for this!
+        
+        **Examples of CORRECT field resolution:**
+        - "usertype = EMPLOYEE" → `user_type = 'EMPLOYEE'` (standard column)
+        - "department = Engineering" → `department = 'Engineering'` (standard column)
+        - "costCenter = CC123" → `JSON_EXTRACT(custom_attributes, '$.costCenter') = 'CC123'` (custom attribute)
+        
         ### OPERATOR SELECTION (MOST IMPORTANT) ###
         **When user specifies exact values in a list, you MUST use IN/NOT IN:**
 
         CORRECT Examples:
-        - "department is one of Sales, Marketing" → `JSON_EXTRACT(custom_attributes, '$.department') IN ('Sales', 'Marketing')`
-        - "status not Engineering, IT" → `JSON_EXTRACT(custom_attributes, '$.job_family') NOT IN ('Engineering', 'IT')`
         - "users with ACTIVE or SUSPENDED status" → `status IN ('ACTIVE', 'SUSPENDED')`
-
-         WRONG Examples (DO NOT DO THIS):
-        - `JSON_EXTRACT(custom_attributes, '$.department') LIKE '%Sales%' OR JSON_EXTRACT(custom_attributes, '$.department') LIKE '%Marketing%'`
-        - `JSON_EXTRACT(custom_attributes, '$.job_family') NOT LIKE '%Engineering%' AND JSON_EXTRACT(custom_attributes, '$.job_family') NOT LIKE '%IT%'`
+        - "department is one of Sales, Marketing" → `department IN ('Sales', 'Marketing')` (standard column)
+        - "costCenter is CC123 or CC456" → `JSON_EXTRACT(custom_attributes, '$.costCenter') IN ('CC123', 'CC456')` (custom attribute)
 
         IMPORTANT RULES TO FOLLOW:
         Avoid complex multi-condition JOIN statements
@@ -124,32 +138,24 @@ sql_agent = Agent(
         - A manager can have multiple direct reporting users
         - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
 
-        ### Custom Attributes Display Strategy (PERFORMANCE CRITICAL) ###
-        Custom attributes are stored in a single `custom_attributes` JSON column. To ensure fast queries, follow these rules precisely:
+        ### Custom Attributes Strategy (PERFORMANCE CRITICAL) ###
+        **Always check the schema first to determine if a field is a standard column or custom attribute.**
+        
+        Custom attributes are stored in a JSON column. Follow these rules:
 
-        1.  **NEVER expand custom attributes with `JSON_EXTRACT` in the `SELECT` clause unless the user asks for a specific attribute by name.** For any generic query (e.g., "list all users", "show me the users"), you MUST select the `custom_attributes` column as a single, un-parsed JSON blob. This is the only acceptable behavior for generic queries.
-            -   **Example: "list all active users"**
-                ```sql
-                SELECT email, login, first_name, last_name, status, custom_attributes FROM users WHERE status = 'ACTIVE' AND is_deleted = FALSE
-                ```
+        1.  **For generic queries** (e.g., "list all users"), select `custom_attributes` as a JSON blob:
+            ```sql
+            SELECT email, login, first_name, last_name, status, custom_attributes FROM users WHERE status = 'ACTIVE'
+            ```
 
-        2.  **ONLY expand attributes the user explicitly asks for.** If a user asks to filter by or see a specific custom attribute, use `JSON_EXTRACT` for ONLY that attribute.
-            -   **Example: "Show users in the 'Engineering' department"**
-                ```sql
-                SELECT email, login, status, JSON_EXTRACT(custom_attributes, '$.department') as department
-                FROM users
-                WHERE JSON_EXTRACT(custom_attributes, '$.department') = 'Engineering' AND is_deleted = FALSE
-                ```
+        2.  **For specific field queries**, check the schema:
+            - **Standard columns**: Use direct column access (e.g., `department = 'Engineering'`)
+            - **Custom attributes**: Use JSON_EXTRACT (e.g., `JSON_EXTRACT(custom_attributes, '$.costCenter') = 'CC123'`)
 
-        3.  **Expand ALL attributes ONLY for a SINGLE, specific user.** This is the only case where full expansion is acceptable.
-            -   **Example: "show all details for user 'test@user.com'"**
-                ```sql
-                SELECT email, login, first_name, last_name, status,
-                       JSON_EXTRACT(custom_attributes, '$.department') as department,
-                       JSON_EXTRACT(custom_attributes, '$.costCenter') as costCenter
-                FROM users
-                WHERE login = 'test@user.com' AND is_deleted = FALSE
-                ```
+        3.  **Examples with correct field resolution**:
+            - "Show users with userType EMPLOYEE" → `WHERE user_type = 'EMPLOYEE'` (usertype maps to user_type column)
+            - "Show users in Engineering department" → `WHERE department = 'Engineering'` (department is standard column)
+            - "Show users with costCenter CC123" → `WHERE JSON_EXTRACT(custom_attributes, '$.costCenter') = 'CC123'` (costCenter is custom)
 
         ### Default Sorting Rules ###
         To provide a consistent and user-friendly experience, apply default sorting to queries:
@@ -238,6 +244,8 @@ sql_agent = Agent(
         - Always output the group name in addition to the requested fields
 
 
+        ##### CRITICAL: Always reference the schema below to determine if a field is a standard column or custom attribute #####
+        ##### NEVER use JSON_EXTRACT for standard columns like user_type, department, title, organization, manager! #####
         ##### You MUST call the okta_database_schema tool to access the full database schema when needed. #####
         """
 )

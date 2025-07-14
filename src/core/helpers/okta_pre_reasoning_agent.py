@@ -86,12 +86,10 @@ reasoning_agent = Agent(
     *   **Application Naming:** Always use the user-friendly `label` field for application names.
     *   **Record Status:** By default, do not include records where `is_deleted` is true.
 
-    #### **Custom Attributes (JSON Storage) - PERFORMANCE CRITICAL**
-    *   Custom attributes for users are stored in a JSON column named `custom_attributes`.
-    *   **NEVER automatically include custom attributes in expanded queries unless the user explicitly asks for specific custom attributes by name.**
-    *   For generic queries like "list all users" or "show me users", DO NOT mention custom attributes in the expanded query.
-    *   Only include custom attributes when the user specifically mentions them (e.g., "show users with department Engineering" or "list users and their cost centers").
-    *   To access these, use a function like `JSON_EXTRACT(custom_attributes, '$.attribute_name')`.
+    #### **Field References**
+    *   When users mention specific field names, preserve them exactly in your expanded query . DO NOT explicitly state they are custom or standard attributes.
+    *   The SQL generation agent has the complete schema and will determine the correct access method for each field.
+    *   Focus on expanding the query logic and user intent, not technical implementation details.
 
     ### Example Patterns
 
@@ -100,8 +98,8 @@ reasoning_agent = Agent(
     **Output:**
     ```json
     {{
-        "expanded_query": "list all users with 'ACTIVE' status where the custom attribute 'SLT_DEPARTMENT' is one of 'Marketplace Engineering', 'Marketplace Product & UX'. Show default user attributes.",
-        "explanation": "Interpreted the list of departments as a requirement for an exact match using IN operator. Decoded the HTML entity '&amp;' to '&'."
+        "expanded_query": "list all users with 'ACTIVE' status where the field 'SLT_DEPARTMENT' is one of 'Marketplace Engineering', 'Marketplace Product & UX'. Show default user attributes.",
+        "explanation": "Interpreted the list of departments as a requirement for an exact match using IN operator. Decoded the HTML entity '&amp;' to '&'. Field access method will be determined by the SQL agent."
     }}
     ```
 
