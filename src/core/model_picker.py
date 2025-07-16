@@ -9,6 +9,8 @@ from openai import AsyncAzureOpenAI
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.gemini import GeminiModelSettings
+from pydantic_ai.models.bedrock import BedrockConverseModel
+from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai import Agent
 import os, json
 import httpx
@@ -148,6 +150,7 @@ class AIProvider(str, Enum):
     AZURE_OPENAI = "azure_openai"
     OPENAI_COMPATIBLE = "openai_compatible"
     ANTHROPIC = "anthropic"
+    BEDROCK = "bedrock"
 
 class ModelType(str, Enum):
     REASONING = "reasoning"
@@ -264,6 +267,38 @@ class ModelConfig:
                 ModelType.CODING: AnthropicModel(
                     model_name=os.getenv('ANTHROPIC_CODING_MODEL', 'claude-3-5-sonnet-latest'),
                     provider=anthropic_provider
+                )
+            }
+            
+        elif provider == AIProvider.BEDROCK:
+            
+            # Create Bedrock provider with AWS credentials
+            region_name = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
+            aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+            aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+            
+            # Create provider with credentials if provided, otherwise use default AWS credential chain
+            if aws_access_key_id and aws_secret_access_key:
+                bedrock_provider = BedrockProvider(
+                    region_name=region_name,
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key
+                )
+            else:
+                # Use default AWS credential chain (IAM roles, profiles, etc.)
+                bedrock_provider = BedrockProvider(region_name=region_name)
+            
+            reasoning_model_name = os.getenv('BEDROCK_REASONING_MODEL', 'anthropic.claude-3-sonnet-20240229-v1:0')
+            coding_model_name = os.getenv('BEDROCK_CODING_MODEL', 'anthropic.claude-3-sonnet-20240229-v1:0')
+            
+            return {
+                ModelType.REASONING: BedrockConverseModel(
+                    model_name=reasoning_model_name,
+                    provider=bedrock_provider
+                ),
+                ModelType.CODING: BedrockConverseModel(
+                    model_name=coding_model_name,
+                    provider=bedrock_provider
                 )
             } 
 

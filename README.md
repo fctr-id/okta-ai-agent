@@ -115,6 +115,7 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
      -  OpenAI (GPT-4, o4-mini)
      -  Azure OpenAI (GPT-4)
      -  Anthropic (Claude 3.7 Sonnet)
+     -  AWS Bedrock (Claude, Nova, Llama models)
      -  Ollama (Local, Self-hosted, use 32B+ models)
      -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
 * 🖥️ **Web Interface** - Modern UI for easier interaction with Tako and your Okta data
