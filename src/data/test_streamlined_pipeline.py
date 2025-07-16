@@ -29,54 +29,39 @@ class StrictValidator:
     
     @staticmethod
     def validate_llm1_response(response: Dict, available_entities: List[str], entity_summary: Dict) -> Dict:
-        """Validate LLM1 response against available entities and operations"""
-        entities = response.get('entities', [])
-        operations = response.get('operations', [])
-        methods = response.get('methods', [])
+        """Validate LLM1 response in ExecutionPlan format against available entities"""
+        plan = response.get('plan', {})
+        steps = plan.get('steps', [])
         
-        # 1. Validate entities exist
+        if not steps:
+            raise ValidationError("LLM1 RESPONSE INVALID - No steps provided in plan")
+        
+        # Extract entities from tool_names in steps
+        tool_names = [step.get('tool_name', '') for step in steps]
+        
+        # 1. Validate all tool_names are valid entities
         invalid_entities = []
-        for entity in entities:
-            if entity not in available_entities:
-                invalid_entities.append(entity)
+        for tool_name in tool_names:
+            if tool_name not in available_entities:
+                invalid_entities.append(tool_name)
         
         if invalid_entities:
             raise ValidationError(f"LLM1 HALLUCINATION DETECTED - Invalid entities: {invalid_entities}. Must use only: {available_entities}")
         
-        # 2. Validate operations belong to their entities
-        invalid_operations = []
-        for entity in entities:
-            if entity in entity_summary:
-                valid_ops = entity_summary[entity].get('operations', [])
-                # Check if any requested operations match this entity's operations
-                entity_has_valid_op = False
-                for operation in operations:
-                    if operation in valid_ops:
-                        entity_has_valid_op = True
-                        break
-                
-                if not entity_has_valid_op:
-                    invalid_operations.append(f"Entity '{entity}' has no valid operations from {operations}. Valid ops: {valid_ops}")
-        
-        if invalid_operations:
-            raise ValidationError(f"LLM1 OPERATION MISMATCH - {'; '.join(invalid_operations)}")
-        
-        # 3. Validate methods are standard HTTP methods
-        valid_methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
-        invalid_methods = [m for m in methods if m.upper() not in valid_methods]
-        if invalid_methods:
-            raise ValidationError(f"LLM1 INVALID METHODS - {invalid_methods}. Must use: {valid_methods}")
+        # 2. Validate each step has required fields
+        for i, step in enumerate(steps):
+            required_fields = ['tool_name', 'query_context', 'critical', 'reason']
+            missing_fields = [field for field in required_fields if field not in step]
+            if missing_fields:
+                raise ValidationError(f"LLM1 STEP {i+1} INVALID - Missing fields: {missing_fields}")
         
         print(f"✅ LLM1 VALIDATION PASSED - No hallucination detected")
         return response
 
-class PreciseStrategyPlan(BaseModel):
-    """LLM1 response matching the existing system prompt format"""
-    entities: List[str]
-    operations: List[str] 
-    methods: List[str]
-    strategy: str
-    reasoning: str
+class ExecutionPlanResponse(BaseModel):
+    """LLM1 response matching the existing ExecutionPlan format"""
+    plan: Dict[str, Any]  # Contains steps, reasoning, partial_success_acceptable
+    confidence: int
 
 class CodeResponse(BaseModel):
     python_code: str
@@ -91,11 +76,40 @@ class PreciseEndpointFilter:
         self.endpoints = condensed_reference['endpoints']
         self.entity_summary = condensed_reference['entity_summary']
     
-    def filter_endpoints(self, llm1_plan: PreciseStrategyPlan) -> Dict[str, Any]:
-        """Ultra-precise filtering using entity + operation + method matching"""
-        entities = [e.lower() for e in llm1_plan.entities]
-        operations = [op.lower() for op in llm1_plan.operations]
-        methods = [m.upper() for m in llm1_plan.methods]
+    def filter_endpoints(self, llm1_plan: ExecutionPlanResponse) -> Dict[str, Any]:
+        """Ultra-precise filtering using steps from ExecutionPlan"""
+        steps = llm1_plan.plan.get('steps', [])
+        
+        # Extract entities and operations from steps with improved parsing
+        entities = list(set([step.get('tool_name', '').lower() for step in steps]))
+        operations = []
+        
+        print(f"🔍 EXTRACTING OPERATIONS FROM QUERY CONTEXT:")
+        for i, step in enumerate(steps, 1):
+            query_context = step.get('query_context', '').lower()
+            extracted_ops = []
+            
+            # More comprehensive operation extraction
+            if 'list_members' in query_context:
+                extracted_ops.append('list_members')
+            elif 'list_user_assignments' in query_context:
+                extracted_ops.append('list_user_assignments')
+            elif 'list_enrollments' in query_context or 'list_factors' in query_context:
+                extracted_ops.append('list_factors')
+            elif 'list_by_user' in query_context:
+                extracted_ops.append('list_by_user')
+            elif 'list groups' in query_context or 'list' in query_context:
+                extracted_ops.append('list')
+            elif 'get' in query_context:
+                extracted_ops.append('get')
+            elif 'create' in query_context:
+                extracted_ops.append('create')
+            
+            print(f"   Step {i}: '{query_context}' → {extracted_ops}")
+            operations.extend(extracted_ops)
+        
+        operations = list(set(operations))
+        methods = ['GET']  # Default to GET for most operations
         
         print(f"🎯 PRECISE FILTERING")
         print(f"   Entities: {entities}")
@@ -106,11 +120,14 @@ class PreciseEndpointFilter:
         entity_results = {}
         
         for entity in entities:
+            if not entity:  # Skip empty entities
+                continue
+                
             entity_endpoints = self._get_entity_operation_matches(entity, operations, methods)
             
             if entity_endpoints:
                 # Limit per entity (max 3 per entity to prevent explosion)
-                max_per_entity = min(3, max(1, 8 // len(entities)))
+                max_per_entity = min(3, max(1, 8 // len([e for e in entities if e])))
                 selected = entity_endpoints[:max_per_entity]
                 
                 filtered_endpoints.extend(selected)
@@ -282,18 +299,39 @@ IMPORTANT: Role assignments (user roles, admin roles) are NOT available in SQL -
                 f"{insertion_point}\n{complete_section}"
             )
         
-        # Create LLM1 agent
-        llm1_agent = Agent(
+        # Create LLM1 agent without strict validation first
+        llm1_agent_raw = Agent(
             model='openai:gpt-4o-mini',
-            result_type=PreciseStrategyPlan,
             system_prompt=updated_system_prompt
+            # No result_type for raw response
         )
         
         print(f"📝 Query: {query}")
         print(f"🔄 Running LLM1 planning...")
         
-        result = await llm1_agent.run(query)
-        llm1_output = result.output
+        # Get raw response first
+        raw_result = await llm1_agent_raw.run(query)
+        raw_output = raw_result.output
+        print(f"🔍 Raw LLM1 output: {raw_output}")
+        
+        # Parse the raw output manually
+        if isinstance(raw_output, str):
+            import json as json_module
+            try:
+                llm1_output_dict = json_module.loads(raw_output)
+            except Exception as e:
+                print(f"❌ Failed to parse LLM1 JSON output: {e}")
+                return None
+        else:
+            llm1_output_dict = raw_output
+        
+        # Create validated response object
+        try:
+            llm1_output = ExecutionPlanResponse(**llm1_output_dict)
+        except Exception as e:
+            print(f"❌ Failed to validate LLM1 response: {e}")
+            print(f"Response was: {llm1_output_dict}")
+            return None
         
         # Validate LLM1 response
         print("\n🔍 VALIDATING LLM1 RESPONSE...")
@@ -308,11 +346,17 @@ IMPORTANT: Role assignments (user roles, admin roles) are NOT available in SQL -
             return None
         
         print(f"\n📋 LLM1 PLAN:")
-        print(f"🎯 Entities: {llm1_output.entities}")
-        print(f"⚙️  Operations: {llm1_output.operations}")
-        print(f"🔧 Methods: {llm1_output.methods}")
-        print(f"📋 Strategy: {llm1_output.strategy}")
-        print(f"🧠 Reasoning: {llm1_output.reasoning}")
+        steps = llm1_output.plan.get('steps', [])
+        entities = list(set([step.get('tool_name', '') for step in steps]))
+        print(f"🎯 Entities: {entities}")
+        print(f"📋 Steps: {len(steps)} steps planned")
+        print(f"🧠 Reasoning: {llm1_output.plan.get('reasoning', '')}")
+        print(f"🎯 Confidence: {llm1_output.confidence}%")
+        
+        # Show individual steps
+        for i, step in enumerate(steps, 1):
+            print(f"   Step {i}: {step.get('tool_name', '')} - {step.get('query_context', '')}")
+            print(f"           Critical: {step.get('critical', False)}, Reason: {step.get('reason', '')}")
         
         # Phase 2: Endpoint Filtering
         print("\n🔍 PHASE 2: ENDPOINT FILTERING")
@@ -326,75 +370,36 @@ IMPORTANT: Role assignments (user roles, admin roles) are NOT available in SQL -
         print(f"📉 Filtered endpoints: {filter_results['filtered_endpoint_count']}")
         print(f"🎯 Reduction: {filter_results['reduction_percentage']}%")
         
-        # Phase 3: LLM2 Code Generation
-        print("\n💻 PHASE 3: LLM2 CODE GENERATION")
-        print("=" * 50)
+        # Extract entities for summary
+        steps = llm1_output.plan.get('steps', [])
+        entities = list(set([step.get('tool_name', '') for step in steps]))
         
-        filtered_endpoints = filter_results['filtered_endpoints']
-        
-        # Load LLM2 system prompt
-        with open('llm2_system_prompt.txt', 'r', encoding='utf-8') as f:
-            base_llm2_prompt = f.read()
-        
-        llm2_system_prompt = f"""{base_llm2_prompt}
-
-STRATEGIC PLAN:
-{json.dumps(llm1_output.model_dump(), indent=2)}
-
-PRECISELY FILTERED ENDPOINTS ({len(filtered_endpoints)} total):
-{json.dumps(filtered_endpoints, indent=2)}
-
-USER QUERY: "{query}"
-
-Generate Python code that accomplishes this request using the provided endpoints."""
-        
-        # Create LLM2 agent
-        llm2_agent = Agent(
-            model='openai:gpt-4o-mini',
-            result_type=CodeResponse,
-            system_prompt=llm2_system_prompt
-        )
-        
-        print(f"📝 Query: {query}")
-        print(f"📊 Endpoints: {len(filtered_endpoints)}")
-        print(f"🔄 Running LLM2...")
-        
-        result = await llm2_agent.run(f"Generate code for: {query}")
-        llm2_output = result.output
-        
-        # Save ONLY the final generated code (no intermediate files)
-        code_filename = f"final_generated_code_{timestamp}.py"
-        with open(code_filename, 'w') as f:
-            f.write(f"# Generated Code for: {query}\n")
-            f.write(f"# Generated at: {datetime.now()}\n") 
-            f.write(f"# Entities: {llm1_output.entities}\n")
-            f.write(f"# Operations: {llm1_output.operations}\n")
-            f.write(f"# Methods: {llm1_output.methods}\n")
-            f.write(f"# Endpoints Used: {len(filtered_endpoints)}\n\n")
-            f.write(llm2_output.python_code)
-        
-        print(f"\n📋 LLM2 RESULTS:")
-        print(f"📦 Requirements: {llm2_output.requirements}")
-        print(f"💡 Explanation: {llm2_output.explanation[:200]}...")
-        print(f"💾 Code saved to: {code_filename}")
-        
-        # Final Summary
-        print("\n🎉 STREAMLINED PIPELINE COMPLETED!")
+        # Final Summary - Focus on LLM1 and filtering
+        print("\n🎉 LLM1 PHASE COMPLETED!")
         print("=" * 70)
-        print(f"📊 Final Results:")
-        print(f"   • Entities: {llm1_output.entities}")
-        print(f"   • Operations: {llm1_output.operations}")
+        print(f"📊 Phase 1 Results:")
+        print(f"   • Entities: {entities}")
+        print(f"   • Steps: {len(steps)}")
+        print(f"   • Confidence: {llm1_output.confidence}%")
+        print(f"📊 Phase 2 Results:")
         print(f"   • Endpoints: {filter_results['original_endpoint_count']} → {filter_results['filtered_endpoint_count']}")
         print(f"   • Reduction: {filter_results['reduction_percentage']}%")
-        print(f"   • Code Generated: ✅")
-        print(f"   • Files Created: 1 (code only)")
+        print(f"   • Entity Results: {filter_results['entity_results']}")
+        
+        print(f"\n🔍 FILTERING DEBUG:")
+        print(f"   Issue: Only {filter_results['filtered_endpoint_count']} endpoints found for {len(entities)} entities")
+        print(f"   Need to improve operation extraction from query_context")
         
         return {
             'success': True,
             'llm1_plan': llm1_output.model_dump(),
             'filtering_results': filter_results,
-            'code_generated': True,
-            'files_created': 1
+            'entities': entities,
+            'debug_info': {
+                'endpoints_found': filter_results['filtered_endpoint_count'],
+                'entities_requested': len(entities),
+                'entity_results': filter_results['entity_results']
+            }
         }
         
     except Exception as e:
