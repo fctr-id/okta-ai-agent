@@ -44,6 +44,15 @@ ENDPOINT USAGE - MANDATORY COMPLIANCE:
 5. CHAIN API calls logically using ONLY the provided endpoints
 6. DO NOT use generic endpoint patterns like /api/v1/users - use exact provided patterns
 
+🚨 PARAMETER COMPLIANCE - CRITICAL:
+1. **ONLY USE DOCUMENTED PARAMETERS**: Use ONLY parameters listed in 'parameters.required' and 'parameters.optional'
+2. **NEVER INVENT PARAMETERS**: Do NOT use parameters not in the API specification
+3. **SYSTEM LOG SPECIFIC**: For system_log endpoints, ONLY use: 'since', 'until', 'filter', 'q', 'limit', 'sortOrder'
+4. **NO 'published' PARAMETER**: NEVER use 'published' in filter expressions - use 'since'/'until' for time filtering
+5. **TIME FORMAT**: Use ISO 8601 with Z suffix for time parameters (e.g., "2025-07-09T00:00:00.000Z")
+6. **FILTER SYNTAX**: Follow SCIM filter syntax with correct operators: eq, ne, gt, lt, sw, co, ew
+7. **QUOTE STRINGS**: Properly quote string values in filter expressions
+
 FORBIDDEN PATTERNS (DO NOT USE):
 - Generic endpoints like /api/v1/users, /api/v1/groups, /api/v1/apps
 - Endpoints not explicitly listed in the provided filtered endpoints

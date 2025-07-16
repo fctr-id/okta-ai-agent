@@ -136,7 +136,7 @@ sql_agent = Agent(
         - Always search for the group by name and use LIKE for the group name as well
         - A user can be assigned to only one manager
         - A manager can have multiple direct reporting users
-        - Do NOT print the id and okta_id fields in the output unless specifically requested by the user
+        - ALWAYS include okta_id fields (user_okta_id, group_okta_id, application_okta_id) when the query might require follow-up API calls
 
         ### Custom Attributes Strategy (PERFORMANCE CRITICAL) ###
         **Always check the schema first to determine if a field is a standard column or custom attribute.**
