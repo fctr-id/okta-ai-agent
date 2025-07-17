@@ -35,6 +35,8 @@ CODE QUALITY REQUIREMENTS:
 6. Use descriptive variable names and add inline comments
 7. Handle authentication properly with provided credentials
 8. Include proper imports and dependencies
+9. **MANDATORY RATE LIMIT PROTECTION**: ALWAYS include limit=100 parameter in ALL API calls to prevent rate limiting
+10. **PAGINATION AWARENESS**: Be aware that limit=100 may require pagination for complete data, but prioritize rate limit compliance
 
 ENDPOINT USAGE - MANDATORY COMPLIANCE:
 1. READ THE ENDPOINT DESCRIPTIONS carefully to understand what each endpoint does
@@ -52,6 +54,7 @@ ENDPOINT USAGE - MANDATORY COMPLIANCE:
 5. **TIME FORMAT**: Use ISO 8601 with Z suffix for time parameters (e.g., "2025-07-09T00:00:00.000Z")
 6. **FILTER SYNTAX**: Follow SCIM filter syntax with correct operators: eq, ne, gt, lt, sw, co, ew
 7. **QUOTE STRINGS**: Properly quote string values in filter expressions
+8. **MANDATORY LIMIT**: ALWAYS set limit=100 for ALL API calls to prevent rate limiting and excessive data fetching
 
 FORBIDDEN PATTERNS (DO NOT USE):
 - Generic endpoints like /api/v1/users, /api/v1/groups, /api/v1/apps
@@ -64,6 +67,17 @@ ERROR HANDLING:
 - Handle HTTP errors gracefully with meaningful error messages
 - Check for None/empty responses before processing
 - Provide fallback behavior when appropriate
+- Handle 429 (Too Many Requests) errors with appropriate retry logic
+
+RATE LIMITING COMPLIANCE - MANDATORY:
+🚨 CRITICAL: ALL API calls MUST include limit=100 parameter to prevent rate limiting issues
+- System logs have 120 calls/minute limit (2 calls/second)
+- User/group/app endpoints have various limits
+- ALWAYS add limit=100 to query parameters for ALL API calls
+- Example: GET /api/v1/users?limit=100
+- Example: GET /api/v1/logs?limit=100&since=2025-07-17T00:00:00.000Z
+- Do NOT make unlimited API calls - respect the limit=100 constraint
+- If more data is needed, acknowledge that pagination would be required but keep limit=100
 
 CODE STRUCTURE:
 - Import required libraries at the top

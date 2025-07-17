@@ -138,6 +138,60 @@ sql_agent = Agent(
         - A manager can have multiple direct reporting users
         - ALWAYS include okta_id fields (user_okta_id, group_okta_id, application_okta_id) when the query might require follow-up API calls
 
+        ### API CONTEXT INTEGRATION (NEW CAPABILITY) ###
+        **CRITICAL: API data is provided as CONTEXT TEXT, not as a database column or table**
+        
+        You may receive queries with API data context. When you see sample API data provided:
+        1. **Analyze the API data structure** shown in the context text to identify where user/group/application IDs are located
+        2. **Manually extract the specific IDs** from the context text 
+        3. **Create hardcoded WHERE clauses** using the extracted IDs
+        4. **Focus on what additional data** the user wants from the database schema
+        
+        **IMPORTANT: API data is NOT a database column - it's context information only**
+        
+        **API Data Patterns & ID Extraction:**
+        **Look for these patterns in the provided API context text:**
+        
+        - **System logs**: Look for `"actor": {"id": "00uropbgtlUuob0uH697"}` patterns
+        - **User lists**: Look for `"id": "00u..."` patterns 
+        - **Group lists**: Look for `"id": "00g..."` patterns
+        - **Application lists**: Look for `"id": "0oa..."` patterns
+        - **Role assignments**: Look for `"assignee": {"id": "..."}` patterns
+        - **Group memberships**: Look for user and group ID patterns
+        - **App assignments**: Look for user and app ID patterns
+        
+        **CORRECT ID Extraction Examples:**
+        
+        **Example 1 - Users from login events context:**
+        If you see API context showing:
+        ```
+        {"actor": {"id": "00uropbgtlUuob0uH697"}, ...}
+        {"actor": {"id": "00us049g5koN4Vvb7697"}, ...}
+        ```
+        Generate SQL like:
+        ```sql
+        WHERE u.okta_id IN ('00uropbgtlUuob0uH697', '00us049g5koN4Vvb7697')
+        ```
+        
+        **Example 2 - Groups from context:**
+        If you see API context showing:
+        ```
+        {"id": "00gsso123admin456", "name": "sso-super-admins"}
+        ```
+        Generate SQL like:
+        ```sql
+        WHERE g.okta_id IN ('00gsso123admin456')
+        ```
+        
+        **API Context Guidelines:**
+        - **NEVER use json_each() or json_extract() with 'api_data' column** - there is no such column
+        - Always examine the provided API context text carefully
+        - **Manually extract the actual ID values** from the context text
+        - Create hardcoded WHERE clauses using IN (...) with literal string values
+        - Match the table alias with the resource type (u. for users, g. for groups, a. for applications)
+        - Include appropriate okta_id fields for potential follow-up API calls
+        - **Key principle**: Extract specific ID values from context text and hardcode them in SQL
+
         ### Custom Attributes Strategy (PERFORMANCE CRITICAL) ###
         **Always check the schema first to determine if a field is a standard column or custom attribute.**
         

@@ -17,6 +17,12 @@ Pipeline: LLM1 → SQL → Multiple Sequential LLM2 calls (one per API step) →
 
 BREAKTHROUGH: This solves the dependency problem between API calls by executing them sequentially
 with accumulated context, rather than trying to orchestrate everything in one big LLM2 call.
+
+EXECUTIONMANAGER ENHANCEMENTS:
+- Now uses enhanced step execution with context passing
+- Improved error handling and dependency resolution  
+- Better data flow between SQL and API steps
+- Context-aware step execution from RealWorldHybridExecutor
 """
 
 import asyncio
@@ -44,10 +50,11 @@ async def execute_multi_step_llm2_pipeline():
     
     executor = RealWorldHybridExecutor()
     
-    # The specific query we'll use for testing
-    query = "Find users in group sso-super-admins, get their applications, roles and their last 7 days login activity"
+    # TESTING API → SQL DIRECTION (flipped query)
+    # Original SQL → API: "Find users in group sso-super-admins, get their applications, roles and their last 7 days login activity"
+    query = "Find users who logged in the last 7 days and fetch their group memberships, then get their applications"
     
-    print(f"📝 Test Query: {query}")
+    print(f"📝 Test Query (API → SQL): {query}")
     print("-" * 50)
     
     try:
@@ -66,6 +73,26 @@ async def execute_multi_step_llm2_pipeline():
         sql_result = result.get('sql_execution', {})
         filter_result = result.get('endpoint_filtering', {})
         
+        # DEBUG: Check full result structure for plan details
+        print(f"🔍 DEBUG Full result keys: {list(result.keys())}")
+        if 'llm1_planning' in result:
+            print(f"🔍 DEBUG LLM1 planning keys: {list(result['llm1_planning'].keys())}")
+        if 'execution_summary' in result:
+            print(f"🔍 DEBUG Execution summary keys: {list(result['execution_summary'].keys())}")
+        if 'execution_result' in result:
+            print(f"🔍 DEBUG Execution result keys: {list(result['execution_result'].keys())}")
+            # Check if the full LLM1 plan is in execution_result
+            exec_result = result['execution_result']
+            if 'llm1_result' in exec_result:
+                print(f"   LLM1 result keys: {list(exec_result['llm1_result'].keys())}")
+                if 'llm1_plan' in exec_result['llm1_result']:
+                    print(f"   LLM1 plan keys: {list(exec_result['llm1_result']['llm1_plan'].keys())}")
+                    if 'plan' in exec_result['llm1_result']['llm1_plan']:
+                        plan = exec_result['llm1_result']['llm1_plan']['plan']
+                        print(f"   Plan keys: {list(plan.keys())}")
+                        if 'steps' in plan:
+                            print(f"   Found {len(plan['steps'])} steps in execution_result!")
+        
         print(f"✅ Phase 1 Results:")
         print(f"   📋 Entities: {llm1_result.get('entities', [])}")
         print(f"   📊 Steps: {llm1_result.get('steps_count', 0)}")
@@ -79,8 +106,45 @@ async def execute_multi_step_llm2_pipeline():
         entities = llm1_result.get('entities', [])
         print(f"🔍 Found entities: {entities}")
         
-        # Create steps based on the entities and their typical order  
-        steps = []
+        # DEBUG: Check what's available in LLM1 result
+        print(f"🔍 DEBUG LLM1 result keys: {list(llm1_result.keys())}")
+        if 'plan' in llm1_result:
+            plan = llm1_result['plan']
+            print(f"🔍 DEBUG Plan keys: {list(plan.keys()) if isinstance(plan, dict) else type(plan)}")
+            if isinstance(plan, dict) and 'steps' in plan:
+                print(f"🔍 DEBUG Plan steps: {len(plan['steps'])} steps")
+                for i, step in enumerate(plan['steps']):
+                    print(f"   Step {i+1}: {step}")
+        
+        # Try to get actual LLM1 planned steps - now available in llm1_planning
+        planned_steps = []
+        
+        # Try the new planned_steps field first
+        if 'planned_steps' in llm1_result:
+            planned_steps = llm1_result['planned_steps']
+            print(f"🔍 DEBUG Found {len(planned_steps)} planned steps in llm1_planning")
+        
+        # Fallback to execution_result (though this doesn't have the plan)
+        elif ('execution_result' in result and 
+            'llm1_result' in result['execution_result'] and
+            'llm1_plan' in result['execution_result']['llm1_result'] and
+            'plan' in result['execution_result']['llm1_result']['llm1_plan']):
+            plan = result['execution_result']['llm1_result']['llm1_plan']['plan']
+            planned_steps = plan.get('steps', [])
+            print(f"🔍 DEBUG Found {len(planned_steps)} planned steps in execution_result")
+            
+        # Final fallback to direct plan access  
+        elif 'plan' in llm1_result and isinstance(llm1_result['plan'], dict):
+            planned_steps = llm1_result['plan'].get('steps', [])
+            print(f"🔍 DEBUG Found {len(planned_steps)} planned steps in LLM1 result")
+        
+        if planned_steps:
+            print(f"✅ Using {len(planned_steps)} steps from LLM1 plan")
+            steps = planned_steps
+        else:
+            print(f"⚠️ No LLM1 planned steps found, falling back to entity-based step creation")
+            # Create steps based on the entities and their typical order  
+            steps = []
         if 'users' in entities:
             steps.append({
                 'tool_name': 'users',
@@ -121,8 +185,21 @@ async def execute_multi_step_llm2_pipeline():
         api_results = []
         accumulated_data = sql_result.get('data_sample', [])  # Start with SQL data
         
-        # Find API steps and execute them one by one
+        # Find ALL steps (API and SQL) and execute them in order
+        all_steps = [step for step in steps]
         api_steps = [step for step in steps if step.get('tool_name') not in ['users', 'groups', 'applications']]
+        sql_steps = [step for step in steps if step.get('tool_name') in ['users', 'groups', 'applications']]
+        
+        # Check if we have API → SQL workflow (API steps before SQL steps)
+        has_api_first_workflow = False
+        if api_steps and sql_steps:
+            # Check if any API step comes before any SQL step
+            api_indices = [i for i, step in enumerate(all_steps) if step.get('tool_name') not in ['users', 'groups', 'applications']]
+            sql_indices = [i for i, step in enumerate(all_steps) if step.get('tool_name') in ['users', 'groups', 'applications']]
+            
+            if api_indices and sql_indices and min(api_indices) < max(sql_indices):
+                has_api_first_workflow = True
+                print(f"🔄 DETECTED API → SQL WORKFLOW: Will execute API steps first, then SQL with API context")
         
         if not api_steps:
             print("ℹ️ No API steps found, only SQL execution completed")
@@ -133,6 +210,8 @@ async def execute_multi_step_llm2_pipeline():
             }
         
         print(f"🔍 Found {len(api_steps)} API steps to execute")
+        if has_api_first_workflow:
+            print(f"🔄 API → SQL Workflow: Will enhance SQL with API results")
         
         for step_num, api_step in enumerate(api_steps, 1):
             print(f"\n📋 API STEP {step_num}/{len(api_steps)}: {api_step.get('tool_name')}")
@@ -182,7 +261,27 @@ async def execute_multi_step_llm2_pipeline():
                 )
                 
                 if execution_result and execution_result.get('success'):
+                    print(f"   🔍 DEBUG: Execution result keys: {list(execution_result.keys())}")
                     step_data = execution_result.get('api_data_collected', [])
+                    
+                    # ENHANCED: Always store raw API execution output for LLM processing
+                    raw_output = execution_result.get('output') or execution_result.get('stdout', '')
+                    if raw_output:
+                        # Store the raw API output for the LLM to process later
+                        raw_api_output = {
+                            'step_name': api_step.get('tool_name'),
+                            'raw_output': raw_output,
+                            'execution_context': api_step.get('query_context', ''),
+                            'step_number': step_num
+                        }
+                        
+                        # Always add raw output regardless of step_data content
+                        if not step_data:  # If no structured data, initialize as list
+                            step_data = []
+                        step_data.append(raw_api_output)
+                        
+                        print(f"   📝 Stored raw API output ({len(raw_output)} chars) for LLM processing")
+                    
                     print(f"   ✅ Step {step_num} executed successfully: {len(step_data)} records")
                     
                     # Add this step's results to accumulated data for next step
@@ -214,6 +313,72 @@ async def execute_multi_step_llm2_pipeline():
                     'success': False,
                     'error': f"Code generation failed: {step_llm2_result.get('error', 'Unknown')}"
                 })
+        
+        # Phase 2.5: Execute SQL steps with API context (if API → SQL workflow)
+        if has_api_first_workflow and sql_steps and accumulated_data:
+            print(f"\n🤖 PHASE 2.5: SQL WITH API CONTEXT")
+            print("=" * 45)
+            
+            print(f"🔍 Found {len(sql_steps)} SQL steps to execute with API context")
+            print(f"📊 API Data Available: {len(accumulated_data)} records")
+            
+            for sql_step_num, sql_step in enumerate(sql_steps, 1):
+                print(f"\n📋 SQL STEP {sql_step_num}/{len(sql_steps)}: {sql_step.get('tool_name')}")
+                print("-" * 40)
+                
+                # Build enhanced query with raw API context for LLM processing
+                raw_api_outputs = []
+                api_context_summary = ""
+                
+                for record in accumulated_data:
+                    if isinstance(record, dict) and 'raw_output' in record:
+                        raw_api_outputs.append(record)
+                        step_info = f"Step {record.get('step_number')} ({record.get('step_name')})"
+                        output_preview = record['raw_output'][:200] + "..." if len(record['raw_output']) > 200 else record['raw_output']
+                        api_context_summary += f"\n{step_info}: {output_preview}\n"
+                
+                api_context_query = f"""
+                {query}
+                
+                API EXECUTION RESULTS TO PROCESS:
+                {api_context_summary}
+                
+                INSTRUCTIONS:
+                1. Analyze the API execution results above to extract relevant data (user IDs, group IDs, app IDs, etc.)
+                2. Generate SQL queries that use this extracted data with DISTINCT for deduplication
+                3. The API results may contain duplicate entries - ensure each unique ID is processed only once
+                4. Structure your SQL to efficiently join with existing database tables
+                
+                Total API result steps: {len(raw_api_outputs)}
+                """
+                
+                print(f"🔄 Executing SQL with API context ({len(accumulated_data)} records)...")
+                
+                # Create enhanced LLM1 plan for SQL with raw API context
+                enhanced_llm1_plan = {
+                    "requires_sql": True,
+                    "sql_needed": True,
+                    "explanation": f"SQL execution with API context - {len(raw_api_outputs)} API result steps",
+                    "api_context": True,
+                    "raw_api_data": raw_api_outputs  # Pass raw data for LLM to process
+                }
+                
+                # Execute SQL with API context using enhanced SQL agent
+                sql_with_api_result = await executor._execute_sql_queries(
+                    enhanced_llm1_plan, 
+                    api_context_query, 
+                    f"api_sql_step_{sql_step_num}"
+                )
+                
+                if sql_with_api_result and sql_with_api_result.get('success'):
+                    sql_api_data = sql_with_api_result.get('data', [])
+                    print(f"   ✅ SQL with API context: {len(sql_api_data)} records returned")
+                    if sql_api_data:
+                        print(f"   📄 Sample result: {sql_api_data[0]}")
+                        # Add SQL results to accumulated data
+                        accumulated_data.extend(sql_api_data)
+                else:
+                    print(f"   ❌ SQL with API context failed: {sql_with_api_result.get('error', 'Unknown error')}")
         
         # Phase 3: Results Summary
         print(f"\n🎯 PHASE 3: MULTI-STEP PIPELINE SUMMARY")
@@ -265,5 +430,6 @@ async def execute_multi_step_llm2_pipeline():
         traceback.print_exc()
         return {'success': False, 'error': str(e)}
 
+# Main execution - Core working pipeline (SQL → API)
 if __name__ == "__main__":
     asyncio.run(execute_multi_step_llm2_pipeline())

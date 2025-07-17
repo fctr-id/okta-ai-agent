@@ -4615,7 +4615,7 @@
       "name": "List all System Log events",
       "entity": "system_log",
       "operation": "list_events",
-      "description": "Lists all System Log events\n\nSee [System Log query](https://developer.okta.com/docs/reference/system-log-query/) for further details and examples, and [System Log filters and search](https://help.okta.com/okta_help.htm?type=oie&id=csh-syslog-filters) for common use cases.\n\nBy default, 100 System Log events are returned. If there are more events, see the [header link](https://developer.okta.com/docs/api/#link-header) for the `next` link,\nor increase the number of returned objects using the `limit` parameter.\n\n>**Note:** The value of the `clientSecret` property in the System Log is secured by a hashing function, and isn't the value used during authentication.",
+      "description": "Make sure you pass the relevant event codes depending on what the user is asking. If there are possbile muiltipple event codes, pass all them in the filter",
       "folder_path": "System Log",
       "parameters": {
         "required": [],
