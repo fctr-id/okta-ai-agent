@@ -1308,73 +1308,157 @@ Generate practical, executable code that solves the user's query: {query}"""
         print(f"🤖 Using LLM3 Results Processor with pandas enhancement")
         
         try:
-            # Import the enhanced results processor
-            from .enhanced_results_processor import enhanced_results_processor
+            # Use LLM3 processor similar to streamlined executor
+            llm3_processor = None
+            try:
+                from src.core.realtime.agents.results_processor_agent import results_processor as llm3_processor
+            except ImportError:
+                llm3_processor = None
             
-            # Prepare comprehensive results for processing
-            processing_context = {
-                'original_query': original_query,
-                'llm1_planning': combined_results.get('llm1_planning', {}),
-                'sql_execution': combined_results.get('sql_execution', {}),
-                'endpoint_filtering': combined_results.get('endpoint_filtering', {}),
-                'llm2_code_generation': combined_results.get('llm2_code_generation', {}),
-                'execution_result': execution_result if execution_result else {'success': False, 'message': 'Code not executed'},
-                'execution_summary': combined_results.get('execution_summary', {}),
-                'timestamp': combined_results.get('timestamp'),
-                'correlation_id': combined_results.get('correlation_id')
-            }
             
-            # Create metadata for the processor
-            metadata = {
-                'flow_id': combined_results.get('correlation_id', 'unknown'),
-                'processing_timestamp': datetime.now().isoformat(),
-                'pandas_enhanced': True
-            }
-            
-            print(f"🔄 Running LLM3 enhanced results processor...")
-            
-            # Process results with pandas enhancement
-            enhanced_response = await enhanced_results_processor.process_results_with_pandas(
-                query=original_query,
-                results=processing_context,
-                original_plan=combined_results.get('llm1_planning', {}),
-                metadata=metadata
-            )
-            
-            print(f"✅ LLM3 results processing completed")
-            print(f"📊 Display Type: {enhanced_response.display_type}")
-            print(f"📝 Content Length: {len(str(enhanced_response.content))} characters")
-            print(f"🔍 Data Insights: {len(enhanced_response.data_insights or {})} insights")
-            print(f"📈 Visualizations: {len(enhanced_response.visualization_suggestions or [])} suggestions")
-            
-            # Return comprehensive results
-            return {
-                'success': True,
-                'raw_results': combined_results,
-                'execution_result': execution_result,
-                'processed_summary': {
-                    'display_type': enhanced_response.display_type,
-                    'content': enhanced_response.content,
-                    'metadata': enhanced_response.metadata,
-                    'data_insights': enhanced_response.data_insights,
-                    'visualization_suggestions': enhanced_response.visualization_suggestions,
-                    'processing_code': enhanced_response.processing_code
-                },
-                'processing_method': 'llm3_pandas_enhanced',
-                'correlation_id': combined_results.get('correlation_id'),
-                'enhancement_features': {
-                    'pandas_analytics': True,
-                    'data_quality_scoring': True,
-                    'statistical_insights': True,
-                    'visualization_recommendations': True,
-                    'pattern_detection': True
+            if llm3_processor:
+                # Create step_results_for_processing format (like ExecutionManager)
+                step_results_for_processing = {}
+                
+                # Extract data from combined results
+                sql_data = combined_results.get('sql_execution', {}).get('data', [])
+                api_data = []
+                
+                if execution_result and execution_result.get('success'):
+                    # Try to extract API data from execution result
+                    stdout = execution_result.get('stdout', '')
+                    if stdout:
+                        api_data = [{'raw_output': stdout, 'execution_context': 'API call results'}]
+                
+                # Build step results
+                if sql_data:
+                    step_results_for_processing["1"] = sql_data
+                if api_data:
+                    step_results_for_processing["2"] = api_data
+                
+                print(f"🔄 Running LLM3 enhanced results processor...")
+                
+                # Use the LLM3 processor with proper format
+                llm3_input = {
+                    "original_query": original_query,
+                    "execution_results": {
+                        "step_results_for_processing": step_results_for_processing,
+                        "data_summary": {
+                            "total_steps": len(step_results_for_processing),
+                            "step_keys": list(step_results_for_processing.keys()),
+                            "has_data": any(isinstance(v, list) and len(v) > 0 for v in step_results_for_processing.values())
+                        }
+                    },
+                    "metadata": {
+                        "correlation_id": combined_results.get('correlation_id'),
+                        "processing_timestamp": datetime.now().isoformat(),
+                        "processor": "llm3_dedicated"
+                    }
                 }
-            }
+                
+                prompt = f"""
+Process these hybrid execution results and provide a clear answer to the user's query.
+
+ORIGINAL QUERY: {original_query}
+
+EXECUTION RESULTS:
+{json.dumps(llm3_input, default=str, indent=2)}
+
+Remember to respond with valid JSON only in the format specified in your system prompt.
+"""
+                
+                # Call LLM3 processor - try different method names
+                try:
+                    if hasattr(llm3_processor, 'run'):
+                        result = await llm3_processor.run(prompt)
+                    elif hasattr(llm3_processor, 'process_results'):
+                        # Use the process_results method if available
+                        result = await llm3_processor.process_results(
+                            query=original_query,
+                            results=step_results_for_processing,
+                            original_plan={'plan': {'steps': []}},
+                            is_sample=False,
+                            metadata=llm3_input["metadata"]
+                        )
+                    else:
+                        raise AttributeError(f"LLM3 processor methods: {[m for m in dir(llm3_processor) if not m.startswith('_')]}")
+                        
+                    # Debug: Print the result structure
+                    print(f"🔍 LLM3 result type: {type(result)}")
+                    if hasattr(result, '__dict__'):
+                        print(f"🔍 LLM3 result attributes: {list(result.__dict__.keys())}")
+                    
+                except Exception as llm3_call_error:
+                    print(f"⚠️ LLM3 call failed: {llm3_call_error}")
+                    raise llm3_call_error
+                
+                # Parse the LLM3 response
+                try:
+                    if hasattr(result, 'display_type') and hasattr(result, 'content'):
+                        # Result is a ProcessingResponse object with direct attributes
+                        response_json = {
+                            'display_type': result.display_type,
+                            'content': result.content,
+                            'metadata': getattr(result, 'metadata', {}),
+                            'processing_code': getattr(result, 'processing_code', None)
+                        }
+                        print(f"✅ LLM3 returned ProcessingResponse object")
+                    elif hasattr(result, 'data') and isinstance(result.data, dict):
+                        # Result.data is already a structured dict
+                        response_json = result.data
+                        print(f"✅ LLM3 returned structured data: {type(result.data)}")
+                    elif hasattr(result, 'data') and hasattr(result.data, 'display_type'):
+                        # Result.data is a structured object with attributes
+                        response_json = {
+                            'display_type': getattr(result.data, 'display_type', 'markdown'),
+                            'content': getattr(result.data, 'content', ''),
+                            'metadata': getattr(result.data, 'metadata', {})
+                        }
+                        print(f"✅ LLM3 returned structured object: {type(result.data)}")
+                    elif hasattr(result, 'output'):
+                        # Try to extract JSON from output string
+                        from src.core.helpers.okta_generate_sql import extract_json_from_text
+                        response_json = extract_json_from_text(str(result.output))
+                        print(f"✅ LLM3 output parsed as JSON")
+                    else:
+                        # Try to extract JSON from string representation
+                        from src.core.helpers.okta_generate_sql import extract_json_from_text
+                        response_json = extract_json_from_text(str(result))
+                        print(f"✅ LLM3 string parsed as JSON")
+                    
+                    print(f"✅ LLM3 results processing completed")
+                    print(f"📊 Display Type: {response_json.get('display_type', 'unknown')}")
+                    print(f"📝 Content Length: {len(str(response_json.get('content', '')))} characters")
+                    
+                    # Return comprehensive results with LLM3 processing
+                    return {
+                        'success': True,
+                        'raw_results': combined_results,
+                        'execution_result': execution_result,
+                        'processed_summary': response_json,
+                        'processing_method': 'llm3_pandas_enhanced',
+                        'correlation_id': combined_results.get('correlation_id'),
+                        'enhancement_features': {
+                            'pandas_analytics': True,
+                            'data_quality_scoring': True,
+                            'statistical_insights': True,
+                            'visualization_recommendations': True,
+                            'pattern_detection': True
+                        }
+                    }
+                    
+                except Exception as parse_error:
+                    print(f"⚠️ LLM3 response parsing failed: {parse_error}")
+                    print(f"🔄 Falling back to basic processing...")
+            else:
+                print(f"⚠️ LLM3 processor not available, falling back to basic processing...")
+            
+            # Fallback to basic processing without pandas enhancement
+            return await self._process_final_results_fallback(combined_results, original_query, execution_result)
             
         except Exception as e:
             print(f"❌ LLM3 results processing failed: {e}")
             print(f"🔄 Falling back to basic processing...")
-            
             # Fallback to basic processing without pandas enhancement
             return await self._process_final_results_fallback(combined_results, original_query, execution_result)
     
