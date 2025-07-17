@@ -43,6 +43,10 @@ except ImportError as e:
     print(f"❌ Failed to import SQL agent: {e}")
     sql_agent = None
 
+# Constants for sampling and results processing (inspired by ExecutionManager)
+MAX_CHARS_FOR_FULL_RESULTS = 60000
+MAX_SAMPLES_PER_STEP = 5
+
 class ExecutionPlanResponse(BaseModel):
     """LLM1 response matching the existing ExecutionPlan format"""
     plan: Dict[str, Any]  # Contains steps, reasoning, partial_success_acceptable
@@ -553,7 +557,8 @@ class RealWorldHybridExecutor:
                 enhanced_final_result = await self._process_final_results_with_llm3(
                     combined_results=final_result,
                     original_query=query,
-                    execution_result=execution_result
+                    execution_result=execution_result,
+                    step_context=step_results.get('execution_context', {})  # Pass step context
                 )
                 
                 print(f"✅ LLM3 processing completed successfully")
@@ -744,24 +749,30 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
             'correlation_id': correlation_id
         }
     
-    async def _execute_sql_queries(self, llm1_plan: Dict, query: str, correlation_id: str) -> Dict[str, Any]:
-        """Execute SQL queries based on LLM1 plan using REAL SQL agent"""
+    async def _execute_sql_queries(self, llm1_plan: Dict, query: str, correlation_id: str, api_context: List = None) -> Dict[str, Any]:
+        """Execute SQL queries with optional API context data"""
         
         if not sql_agent:
             print("❌ SQL agent not available")
             return {'success': False, 'error': 'SQL agent not available', 'data': []}
         
-        print(f"💾 Executing SQL queries based on LLM1 plan...")
+        print(f"💾 Executing SQL queries...")
+        print(f"   🔍 DEBUG: Starting SQL execution")
         
         try:
             # Use the real SQL agent with proper tenant_id
-            sql_dependencies = SQLDependencies(tenant_id="default")  # Use default tenant_id
+            sql_dependencies = SQLDependencies(tenant_id="default")
             
-            print(f"🔍 Running SQL agent with query: {query}")
-            sql_result = await sql_agent.run(query, deps=sql_dependencies)
+            # Build context query if API context is provided
+            context_query = query
+            if api_context:
+                context_query = f"{query}\n\nCONTEXT FROM PREVIOUS STEPS:\n"
+                for api_item in api_context:
+                    if 'sample_data' in api_item:
+                        context_query += f"Step {api_item.get('step_name', 'unknown')}: {json.dumps(api_item['sample_data'][:3], indent=2)}\n"
             
-            print(f"📊 SQL agent result type: {type(sql_result)}")
-            print(f"📊 SQL agent raw output: {sql_result.output}")
+            print(f"� Running SQL agent with query: {context_query[:200]}...")
+            sql_result = await sql_agent.run(context_query, deps=sql_dependencies)
             
             # Extract JSON from the SQL agent response
             try:
@@ -770,9 +781,8 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 explanation = sql_response_json.get('explanation', '')
                 
                 print(f"✅ Generated SQL: {sql_query[:100]}{'...' if len(sql_query) > 100 else ''}")
-                print(f"📝 Explanation: {explanation}")
                 
-                # Now execute the SQL query against the database
+                # Execute the SQL query against the database
                 if sql_query and sql_query.strip():
                     db_data = await self._execute_raw_sql_query(sql_query, correlation_id)
                     
@@ -785,12 +795,7 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                     }
                 else:
                     print("⚠️ SQL agent returned empty query")
-                    return {
-                        'success': False, 
-                        'error': 'Empty SQL query generated',
-                        'explanation': explanation,
-                        'data': []
-                    }
+                    return {'success': False, 'error': 'Empty SQL query generated', 'explanation': explanation, 'data': []}
                     
             except Exception as e:
                 print(f"❌ Failed to parse SQL agent response: {e}")
@@ -798,164 +803,8 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 
         except Exception as e:
             print(f"❌ SQL execution failed: {e}")
-            import traceback
-            traceback.print_exc()
             return {'success': False, 'error': str(e), 'data': []}
 
-    async def _execute_sql_queries_with_api_context(self, llm1_plan: Dict, query: str, correlation_id: str, api_data_collected: List) -> Dict[str, Any]:
-        """Execute SQL queries with API context data for API→SQL workflows"""
-        
-        if not sql_agent:
-            print("❌ SQL agent not available")
-            return {'success': False, 'error': 'SQL agent not available', 'data': []}
-
-        try:
-            # Use the real SQL agent with proper tenant_id and API context
-            sql_dependencies = SQLDependencies(
-                tenant_id="trial-8499881",  # TODO: make this configurable
-                include_deleted=False
-            )
-            
-            # Add API context information to the query
-            context_query = f"""
-{query}
-
-**IMPORTANT: API DATA CONTEXT AVAILABLE**
-
-The following API data has been collected from previous steps:
-"""
-            
-            for api_item in api_data_collected:
-                # Extract all user IDs from the API response for complete processing
-                raw_output = api_item['raw_output']
-                
-                # FIXED: Limit API data sent to SQL agent to avoid overwhelming context
-                extracted_data = "Complete API data for extraction (truncated for display)"
-                
-                # Always try to extract key identifiers first
-                import re
-                user_id_pattern = r'"(?:actor\.)?id":\s*"([^"]+)"'
-                user_ids = re.findall(user_id_pattern, raw_output)
-                
-                if user_ids:
-                    unique_user_ids = list(set(user_ids))
-                    # Only include user IDs and minimal context for SQL agent
-                    extracted_data = f"Extracted User IDs: {unique_user_ids}\n\n"
-                    
-                    # Add only first 500 chars of raw data as context sample
-                    sample_data = raw_output[:500] + "..." if len(raw_output) > 500 else raw_output
-                    extracted_data += f"Sample API Response: {sample_data}"
-                    
-                    print(f"   📊 Extracted {len(unique_user_ids)} unique user IDs for SQL context")
-                else:
-                    # If no user IDs found, send limited sample
-                    extracted_data = raw_output[:800] + "..." if len(raw_output) > 800 else raw_output
-                    print(f"   ⚠️ No user IDs extracted, sending {len(extracted_data)} chars sample")
-                
-                context_query += f"""
-Step {api_item['step_number']} - {api_item['step_name']}:
-Context: {api_item['execution_context']}
-Data: {extracted_data}
-
-"""
-            
-            context_query += """
-**CRITICAL SQL INSTRUCTIONS:**
-1. The API data above is CONTEXT INFORMATION, not a database table or column
-2. You must manually extract the relevant IDs from the API context data shown above
-3. Create a hardcoded WHERE clause like: WHERE u.okta_id IN ('id1', 'id2', 'id3')
-4. DO NOT use json_each() or reference 'api_data' as a database column
-5. Look for patterns like "actor.id" or "id" fields in the API context and extract the actual values
-6. Generate a complete SQL query that works against the existing database schema
-"""
-            
-            print(f"🔍 Running SQL agent with API context: {len(context_query)} chars")
-            sql_result = await sql_agent.run(context_query, deps=sql_dependencies)
-            
-            print(f"📊 SQL agent result type: {type(sql_result)}")
-            print(f"📊 SQL agent raw output: {sql_result.output}")
-
-            # Extract JSON from the SQL agent response
-            parsed_result = extract_json_from_text(sql_result.output)
-
-            if parsed_result and isinstance(parsed_result, dict):
-                sql_query = parsed_result.get('sql', '').strip()
-                explanation = parsed_result.get('explanation', 'No explanation provided')
-
-                if sql_query:
-                    print(f"✅ Generated SQL: {sql_query[:100]}...")
-                    print(f"📝 Explanation: {explanation}")
-
-                    # Execute the SQL query - the SQL agent already has API context
-                    print(f"🔍 SQL query generated with API context - executing against database")
-                    
-                    db_results = await self._execute_raw_sql_query(sql_query, correlation_id)
-                    
-                    return {
-                        'success': True,
-                        'data': db_results,
-                        'records_count': len(db_results),
-                        'sql_query': sql_query,
-                        'explanation': explanation,
-                        'processing_method': 'sql_with_api_context'
-                    }
-                else:
-                    print("⚠️ SQL agent returned empty query")
-                    return {
-                        'success': False,
-                        'error': 'Empty SQL query generated',
-                        'data': []
-                    }
-            else:
-                print(f"❌ Failed to parse SQL agent response: Invalid JSON structure")
-                return {
-                    'success': False,
-                    'error': 'Failed to parse SQL agent response',
-                    'data': []
-                }
-
-        except Exception as e:
-            print(f"❌ Failed to execute SQL query with API context: {e}")
-            return {'success': False, 'error': str(e), 'data': []}
-
-    def _process_api_data_for_sql(self, api_data_collected: List, sql_query: str) -> List[Dict]:
-        """
-        Instead of hardcoding parsing logic, let the SQL agent handle raw API data.
-        This is a placeholder that returns raw API data for the SQL agent to process.
-        """
-        
-        print(f"🔍 Processing API data for SQL extraction...")
-        print(f"   📋 Processing {len(api_data_collected)} API items")
-        print(f"   🤖 Letting SQL agent parse the raw API output directly")
-        
-        try:
-            # Return raw API data with minimal structure for SQL agent to analyze
-            processed_data = []
-            
-            for api_item in api_data_collected:
-                raw_output = api_item['raw_output']
-                step_name = api_item['step_name']
-                
-                print(f"   � Step {step_name}: {len(raw_output)} chars of raw data")
-                
-                # Just pass the raw data to SQL agent - let LLM figure out parsing
-                processed_data.append({
-                    'step_name': step_name,
-                    'step_number': api_item['step_number'],
-                    'raw_api_output': raw_output,
-                    'execution_context': api_item.get('execution_context', ''),
-                    'note': 'Raw API data for SQL agent to analyze and extract relevant IDs'
-                })
-            
-            print(f"✅ Prepared {len(processed_data)} raw API data items for SQL processing")
-            return processed_data
-            
-        except Exception as e:
-            print(f"❌ Failed to prepare API data: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-    
     async def _execute_raw_sql_query(self, sql_query: str, correlation_id: str) -> List[Dict]:
         """Execute raw SQL query against the database and return results"""
         
@@ -1287,7 +1136,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             }
         }
     
-    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, execution_result: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, execution_result: Dict[str, Any] = None, step_context: Dict[str, Any] = None) -> Dict[str, Any]:
         """
         Process final results using LLM3 Results Processor Agent with pandas enhancement.
         
@@ -1308,277 +1157,99 @@ Generate practical, executable code that solves the user's query: {query}"""
         print(f"🤖 Using LLM3 Results Processor with pandas enhancement")
         
         try:
-            # Use LLM3 processor similar to streamlined executor
+            # Try to import LLM3 processor
             llm3_processor = None
             try:
                 from src.core.realtime.agents.results_processor_agent import results_processor as llm3_processor
             except ImportError:
-                llm3_processor = None
-            
+                pass
             
             if llm3_processor:
-                # Create step_results_for_processing format (like ExecutionManager)
+                # Build step_results_for_processing with variable names (ExecutionManager pattern)
                 step_results_for_processing = {}
                 
-                # Extract data from combined results
-                sql_data = combined_results.get('sql_execution', {}).get('data', [])
-                api_data = []
+                # Extract data from step context using the new variable system
+                if step_context and step_context.get('data_variables'):
+                    for var_name, var_data in step_context['data_variables'].items():
+                        step_results_for_processing[var_name] = var_data
                 
-                if execution_result and execution_result.get('success'):
-                    # Try to extract API data from execution result
-                    stdout = execution_result.get('stdout', '')
-                    if stdout:
-                        api_data = [{'raw_output': stdout, 'execution_context': 'API call results'}]
-                
-                # Build step results
-                if sql_data:
-                    step_results_for_processing["1"] = sql_data
-                if api_data:
-                    step_results_for_processing["2"] = api_data
-                
-                print(f"🔄 Running LLM3 enhanced results processor...")
+                # Fallback to old format if no variables stored
+                if not step_results_for_processing:
+                    sql_data = combined_results.get('sql_execution', {}).get('data', [])
+                    if sql_data:
+                        step_results_for_processing["step_1_sql"] = sql_data
+                    
+                    if execution_result and execution_result.get('success'):
+                        stdout = execution_result.get('stdout', '')
+                        if stdout:
+                            step_results_for_processing["step_2_api"] = [{'raw_output': stdout}]
                 
                 # Use the LLM3 processor with proper format
-                llm3_input = {
-                    "original_query": original_query,
-                    "execution_results": {
-                        "step_results_for_processing": step_results_for_processing,
-                        "data_summary": {
-                            "total_steps": len(step_results_for_processing),
-                            "step_keys": list(step_results_for_processing.keys()),
-                            "has_data": any(isinstance(v, list) and len(v) > 0 for v in step_results_for_processing.values())
-                        }
-                    },
-                    "metadata": {
-                        "correlation_id": combined_results.get('correlation_id'),
-                        "processing_timestamp": datetime.now().isoformat(),
-                        "processor": "llm3_dedicated"
+                prompt = f"Process these results for query: {original_query}\n\nResults: {json.dumps(step_results_for_processing, default=str)[:1000]}..."
+                
+                # Call LLM3 processor with correct method
+                result = await llm3_processor.process_results(
+                    query=original_query,
+                    results=step_results_for_processing,
+                    original_plan=None,
+                    is_sample=False,
+                    metadata={'flow_id': 'hybrid_executor'}
+                )
+                
+                # Parse response from ResultsProcessorAgent
+                if hasattr(result, 'display_type') and hasattr(result, 'content'):
+                    response_json = {
+                        'display_type': result.display_type,
+                        'content': result.content,
+                        'metadata': getattr(result, 'metadata', {})
                     }
+                elif hasattr(result, 'output'):
+                    # Extract from agent output
+                    response_json = {
+                        'display_type': 'markdown',
+                        'content': str(result.output),
+                        'metadata': {}
+                    }
+                else:
+                    # Fallback: treat as string
+                    response_json = {
+                        'display_type': 'markdown',
+                        'content': str(result),
+                        'metadata': {}
+                    }
+                
+                return {
+                    'success': True,
+                    'raw_results': combined_results,
+                    'processed_summary': response_json,
+                    'processing_method': 'llm3_enhanced'
                 }
                 
-                prompt = f"""
-Process these hybrid execution results and provide a clear answer to the user's query.
-
-ORIGINAL QUERY: {original_query}
-
-EXECUTION RESULTS:
-{json.dumps(llm3_input, default=str, indent=2)}
-
-Remember to respond with valid JSON only in the format specified in your system prompt.
-"""
-                
-                # Call LLM3 processor - try different method names
-                try:
-                    if hasattr(llm3_processor, 'run'):
-                        result = await llm3_processor.run(prompt)
-                    elif hasattr(llm3_processor, 'process_results'):
-                        # Use the process_results method if available
-                        result = await llm3_processor.process_results(
-                            query=original_query,
-                            results=step_results_for_processing,
-                            original_plan={'plan': {'steps': []}},
-                            is_sample=False,
-                            metadata=llm3_input["metadata"]
-                        )
-                    else:
-                        raise AttributeError(f"LLM3 processor methods: {[m for m in dir(llm3_processor) if not m.startswith('_')]}")
-                        
-                    # Debug: Print the result structure
-                    print(f"🔍 LLM3 result type: {type(result)}")
-                    if hasattr(result, '__dict__'):
-                        print(f"🔍 LLM3 result attributes: {list(result.__dict__.keys())}")
-                    
-                except Exception as llm3_call_error:
-                    print(f"⚠️ LLM3 call failed: {llm3_call_error}")
-                    raise llm3_call_error
-                
-                # Parse the LLM3 response
-                try:
-                    if hasattr(result, 'display_type') and hasattr(result, 'content'):
-                        # Result is a ProcessingResponse object with direct attributes
-                        response_json = {
-                            'display_type': result.display_type,
-                            'content': result.content,
-                            'metadata': getattr(result, 'metadata', {}),
-                            'processing_code': getattr(result, 'processing_code', None)
-                        }
-                        print(f"✅ LLM3 returned ProcessingResponse object")
-                    elif hasattr(result, 'data') and isinstance(result.data, dict):
-                        # Result.data is already a structured dict
-                        response_json = result.data
-                        print(f"✅ LLM3 returned structured data: {type(result.data)}")
-                    elif hasattr(result, 'data') and hasattr(result.data, 'display_type'):
-                        # Result.data is a structured object with attributes
-                        response_json = {
-                            'display_type': getattr(result.data, 'display_type', 'markdown'),
-                            'content': getattr(result.data, 'content', ''),
-                            'metadata': getattr(result.data, 'metadata', {})
-                        }
-                        print(f"✅ LLM3 returned structured object: {type(result.data)}")
-                    elif hasattr(result, 'output'):
-                        # Try to extract JSON from output string
-                        from src.core.helpers.okta_generate_sql import extract_json_from_text
-                        response_json = extract_json_from_text(str(result.output))
-                        print(f"✅ LLM3 output parsed as JSON")
-                    else:
-                        # Try to extract JSON from string representation
-                        from src.core.helpers.okta_generate_sql import extract_json_from_text
-                        response_json = extract_json_from_text(str(result))
-                        print(f"✅ LLM3 string parsed as JSON")
-                    
-                    print(f"✅ LLM3 results processing completed")
-                    print(f"📊 Display Type: {response_json.get('display_type', 'unknown')}")
-                    print(f"📝 Content Length: {len(str(response_json.get('content', '')))} characters")
-                    
-                    # Return comprehensive results with LLM3 processing
-                    return {
-                        'success': True,
-                        'raw_results': combined_results,
-                        'execution_result': execution_result,
-                        'processed_summary': response_json,
-                        'processing_method': 'llm3_pandas_enhanced',
-                        'correlation_id': combined_results.get('correlation_id'),
-                        'enhancement_features': {
-                            'pandas_analytics': True,
-                            'data_quality_scoring': True,
-                            'statistical_insights': True,
-                            'visualization_recommendations': True,
-                            'pattern_detection': True
-                        }
-                    }
-                    
-                except Exception as parse_error:
-                    print(f"⚠️ LLM3 response parsing failed: {parse_error}")
-                    print(f"🔄 Falling back to basic processing...")
             else:
-                print(f"⚠️ LLM3 processor not available, falling back to basic processing...")
-            
-            # Fallback to basic processing without pandas enhancement
-            return await self._process_final_results_fallback(combined_results, original_query, execution_result)
+                print(f"⚠️ LLM3 processor not available - using basic results")
+                return {
+                    'success': True,
+                    'raw_results': combined_results,
+                    'processed_summary': f"Query: {original_query}\n\nResults: {len(combined_results)} phases completed",
+                    'processing_method': 'basic_fallback'
+                }
             
         except Exception as e:
-            print(f"❌ LLM3 results processing failed: {e}")
-            print(f"🔄 Falling back to basic processing...")
-            # Fallback to basic processing without pandas enhancement
-            return await self._process_final_results_fallback(combined_results, original_query, execution_result)
-    
-    async def _process_final_results_fallback(self, combined_results: Dict[str, Any], original_query: str, execution_result: Dict[str, Any] = None) -> Dict[str, Any]:
-        """
-        Fallback results processing using LLM2 when LLM3 is not available.
-        
-        This maintains backward compatibility while providing basic results processing.
-        """
-        
-        print(f"📋 FALLBACK: Basic Results Processing (LLM2)")
-        print("=" * 40)
-        
-        try:
-            # Load LLM3 system prompt as fallback
-            llm3_prompt_path = os.path.join(os.path.dirname(__file__), "llm3_system_prompt.txt")
-            try:
-                with open(llm3_prompt_path, 'r', encoding='utf-8') as f:
-                    results_system_prompt = f.read()
-                print(f"✅ Using LLM3 system prompt with LLM2 model")
-            except FileNotFoundError:
-                print(f"⚠️ LLM3 prompt not found, using basic fallback")
-                results_system_prompt = """You are a Results Processor. Create a clear summary of the AI agent execution results.
-                
-                Respond with JSON format: {"display_type": "markdown"|"table", "content": "...", "metadata": {...}}
-                
-                Provide:
-                1. Direct answer to the user's query
-                2. Key findings with specific data
-                3. Execution summary with confidence levels
-                4. Recommendations and next steps"""
-            
-            # Use LLM2 model as fallback processor
-            from pydantic_ai import Agent
-            from src.core.model_picker import ModelConfig, ModelType
-            
-            coding_model = self.coding_model if self.coding_model else ModelConfig.get_model(ModelType.CODING)
-            
-            fallback_agent = Agent(
-                model=coding_model,
-                system_prompt=results_system_prompt
-            )
-            
-            # Build processing context
-            processing_context = {
-                'original_query': original_query,
-                'execution_phases': {
-                    'llm1_planning': combined_results.get('llm1_planning', {}),
-                    'sql_execution': combined_results.get('sql_execution', {}),
-                    'endpoint_filtering': combined_results.get('endpoint_filtering', {}),
-                    'llm2_code_generation': combined_results.get('llm2_code_generation', {}),
-                    'code_execution': execution_result if execution_result else {'success': False, 'message': 'Code not executed'}
-                },
-                'summary_metrics': {
-                    'total_sql_records': combined_results.get('sql_execution', {}).get('records_count', 0),
-                    'total_api_endpoints': combined_results.get('endpoint_filtering', {}).get('filtered_count', 0),
-                    'code_generated': combined_results.get('llm2_code_generation', {}).get('success', False),
-                    'code_executed': execution_result.get('success', False) if execution_result else False,
-                    'entities_involved': combined_results.get('llm1_planning', {}).get('entities', [])
-                }
-            }
-            
-            # Create processing prompt
-            processing_prompt = f"""Process these Okta AI agent execution results for the user query: "{original_query}"
-
-EXECUTION RESULTS:
-{json.dumps(processing_context, indent=2)[:6000]}...
-
-Create a comprehensive, user-friendly response that directly answers the user's question with confidence levels and actionable insights."""
-            
-            print(f"🔄 Running fallback results processor...")
-            results_response = await fallback_agent.run(processing_prompt)
-            
-            processed_output = str(results_response.output)
-            
-            print(f"✅ Fallback processing completed")
-            print(f"📝 Summary length: {len(processed_output)} characters")
-            
-            return {
-                'success': True,
-                'raw_results': combined_results,
-                'execution_result': execution_result,
-                'processed_summary': processed_output,
-                'processing_method': 'llm2_fallback_with_llm3_prompt',
-                'correlation_id': combined_results.get('correlation_id'),
-                'enhancement_features': {
-                    'pandas_analytics': False,
-                    'data_quality_scoring': False,
-                    'statistical_insights': False,
-                    'visualization_recommendations': False,
-                    'pattern_detection': False
-                }
-            }
-            
-        except Exception as e:
-            print(f"❌ Fallback processing failed: {e}")
-            
-            # Return basic results if all processing fails
+            print(f"❌ LLM3 processing failed: {e}")
             return {
                 'success': False,
                 'raw_results': combined_results,
-                'execution_result': execution_result,
-                'processed_summary': f"Results processing failed: {str(e)}. Raw results available in 'raw_results' field.",
-                'processing_method': 'raw_results_only',
-                'error': str(e),
-                'correlation_id': combined_results.get('correlation_id')
+                'processed_summary': f"Results processing failed: {str(e)}",
+                'error': str(e)
             }
     
     async def _execute_generated_code(self, python_code: str, correlation_id: str) -> Dict[str, Any]:
         """Execute the generated Python code and capture results"""
         
         print(f"🚀 EXECUTING GENERATED CODE")
-        print(f"==================================================")
         
         try:
             # Save the code to a temporary file
-            import tempfile
-            import subprocess
-            import sys
-            
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(python_code)
                 temp_file = f.name
@@ -1597,10 +1268,7 @@ Create a comprehensive, user-friendly response that directly answers the user's 
             
             if result.returncode == 0:
                 print(f"✅ Code executed successfully!")
-                print(f"📊 EXECUTION RESULTS:")
-                print(f"{'='*60}")
                 print(result.stdout)
-                print(f"{'='*60}")
                 
                 return {
                     'success': True,
@@ -1611,7 +1279,6 @@ Create a comprehensive, user-friendly response that directly answers the user's 
                 }
             else:
                 print(f"❌ Code execution failed with return code {result.returncode}")
-                print(f"📝 Error output:")
                 print(result.stderr)
                 
                 return {
@@ -1701,6 +1368,10 @@ Create a comprehensive, user-friendly response that directly answers the user's 
                     step, step_context, query, correlation_id, llm1_plan
                 )
                 
+                # Ensure step_result is a dictionary
+                if not isinstance(step_result, dict):
+                    step_result = {'success': False, 'error': str(step_result), 'data': []}
+                
                 # Update step context with results
                 step_context['completed_steps'][str(i)] = step_result
                 step_context['step_results'][f'step_{i}'] = step_result.get('data', [])
@@ -1764,11 +1435,114 @@ Create a comprehensive, user-friendly response that directly answers the user's 
             'enhanced': True
         }
 
+    def _extract_sample_for_context(self, data: Any, variable_name: str, max_samples: int = MAX_SAMPLES_PER_STEP) -> Dict[str, Any]:
+        """
+        Extract a sample from data for context passing between steps.
+        Based on ExecutionManager's intelligent sampling approach.
+        
+        Args:
+            data: The full dataset to sample from
+            variable_name: Name of the variable storing the full data
+            max_samples: Maximum number of sample items to include
+            
+        Returns:
+            Dict with sample data and metadata for LLM context
+        """
+        if not data:
+            return {
+                'variable_name': variable_name,
+                'sample_data': [],
+                'total_records': 0,
+                'context_message': f"Variable {variable_name} contains no data"
+            }
+        
+        # Handle lists - take first N items
+        if isinstance(data, list):
+            total_count = len(data)
+            sample_data = data[:max_samples] if total_count > max_samples else data
+            
+            return {
+                'variable_name': variable_name,
+                'sample_data': sample_data,
+                'total_records': total_count,
+                'data_fields': list(sample_data[0].keys()) if sample_data and isinstance(sample_data[0], dict) else [],
+                'context_message': f"Sample from {variable_name} (contains {total_count} total records)"
+            }
+        
+        # Handle single records - wrap in list for consistency
+        elif isinstance(data, dict):
+            return {
+                'variable_name': variable_name,
+                'sample_data': [data],
+                'total_records': 1,
+                'data_fields': list(data.keys()),
+                'context_message': f"Single record from {variable_name}"
+            }
+        
+        # Handle other types
+        else:
+            return {
+                'variable_name': variable_name,
+                'sample_data': [str(data)],
+                'total_records': 1,
+                'data_fields': [],
+                'context_message': f"Data from {variable_name} ({type(data).__name__})"
+            }
+    
+    def _build_enhanced_context_for_llm(self, step_context: Dict, current_step_name: str) -> str:
+        """
+        Build enhanced context message for LLM with samples and variable names.
+        This allows LLMs to understand data structure while knowing which variables contain full datasets.
+        
+        Args:
+            step_context: Current step execution context
+            current_step_name: Name of the current step being executed
+            
+        Returns:
+            Formatted context string for LLM prompt
+        """
+        if not step_context.get('accumulated_data'):
+            return ""
+        
+        context_parts = ["\n🔗 CONTEXT FROM PREVIOUS STEPS:"]
+        
+        for item in step_context['accumulated_data']:
+            # Ensure item is a dictionary, skip if it's not
+            if not isinstance(item, dict):
+                print(f"   ⚠️ Skipping non-dict item in accumulated_data: {type(item)} - {str(item)[:50]}...")
+                continue
+                
+            variable_name = item.get('variable_name', 'unknown_variable')
+            sample_data = item.get('sample_data', [])
+            total_records = item.get('total_records', 0)
+            step_name = item.get('step_name', 'unknown_step')
+            data_fields = item.get('data_fields', [])
+            
+            context_parts.append(f"\n📊 Step {step_name}:")
+            context_parts.append(f"   • Variable: {variable_name}")
+            context_parts.append(f"   • Total Records: {total_records}")
+            context_parts.append(f"   • Fields: {data_fields}")
+            
+            if sample_data and total_records > 0:
+                # Show sample structure for LLM understanding
+                if len(sample_data) <= 3:
+                    context_parts.append(f"   • Sample Data:\n{json.dumps(sample_data, indent=6)}")
+                else:
+                    context_parts.append(f"   • Sample (first 3 records):\n{json.dumps(sample_data[:3], indent=6)}")
+            
+            # Key instruction for LLMs
+            context_parts.append(f"   ⚠️  IMPORTANT: Use variable '{variable_name}' in your code to process ALL {total_records} records")
+        
+        context_parts.append(f"\n🎯 Current Step: {current_step_name}")
+        context_parts.append("📝 INSTRUCTIONS: The samples above show data structure. Generate code that processes the FULL datasets stored in the named variables.")
+        
+        return "\n".join(context_parts)
+
     async def _execute_single_step_enhanced(self, step: Dict, step_context: Dict, query: str, 
                                           correlation_id: str, llm1_plan: Dict = None) -> Dict:
         """
-        Execute a single step with enhanced context tracking
-        ExecutionManager Pattern Implementation
+        Execute a single step with enhanced context tracking and sample-based data passing.
+        Implements ExecutionManager patterns for variable management and context passing.
         """
         step_name = step.get('tool_name', f"Step_{len(step_context['completed_steps']) + 1}")
         step_type = self._determine_step_type_simple(step)
@@ -1777,34 +1551,80 @@ Create a comprehensive, user-friendly response that directly answers the user's 
         
         try:
             if step_type == 'sql':
-                # Check if we have API data to enhance the SQL query
-                if step_context['accumulated_data']:
-                    print(f"   🔗 Using API data from {len(step_context['accumulated_data'])} previous steps")
-                    enhanced_query = f"{query}\n\nAPI CONTEXT DATA:\n"
-                    for api_item in step_context['accumulated_data']:
-                        enhanced_query += f"Step {api_item['step_number']} ({api_item['step_name']}): {api_item['raw_output'][:500]}...\n"
+                print(f"   🔍 DEBUG: About to execute SQL step")
+                
+                try:
+                    # Build enhanced context with samples and variable names
+                    enhanced_context = self._build_enhanced_context_for_llm(step_context, step_name)
+                    enhanced_query = f"{query}{enhanced_context}" if enhanced_context else query
                     
-                    result = await self._execute_sql_queries_with_api_context(
-                        {'tool_name': step_name}, enhanced_query, correlation_id, step_context['accumulated_data']
-                    )
-                else:
-                    result = await self._execute_sql_queries({'tool_name': step_name}, query, correlation_id)
-                
-                # Store SQL result in context
-                if result.get('success'):
-                    step_context['sql_results'] = step_context.get('sql_results', [])
-                    step_context['sql_results'].append({
-                        'step_name': step_name,
-                        'data': result.get('data', []),
-                        'records_count': result.get('records_count', 0)
-                    })
-                
-                return {
-                    'success': result.get('success', False),
-                    'step_type': 'sql',
-                    'result': result,
-                    'data': result.get('data', [])
-                }
+                    # Check if we have API data samples to enhance the SQL query
+                    if step_context['accumulated_data']:
+                        print(f"   🔗 Using sample context from {len(step_context['accumulated_data'])} previous steps")
+                        result = await self._execute_sql_queries(
+                            llm1_plan, enhanced_query, correlation_id, step_context['accumulated_data']
+                        )
+                    else:
+                        result = await self._execute_sql_queries(llm1_plan, enhanced_query, correlation_id)
+                    
+                    # Debug: Log result details
+                    print(f"   🔍 SQL result type: {type(result)}")
+                    print(f"   🔍 SQL result preview: {str(result)[:100]}...")
+                    
+                    # Ensure result is a dictionary
+                    if not isinstance(result, dict):
+                        print(f"   ⚠️ Converting non-dict result to error dict")
+                        result = {'success': False, 'error': str(result), 'data': []}
+                    
+                    # Store SQL result with VARIABLE NAME and SAMPLE for next steps
+                    if isinstance(result, dict) and result.get('success'):
+                        sql_data = result.get('data', [])
+                        print(f"   🔍 SQL data type: {type(sql_data)}, length: {len(sql_data) if hasattr(sql_data, '__len__') else 'N/A'}")
+                        
+                        variable_name = f"sql_data_step_{len(step_context['completed_steps']) + 1}"
+                        
+                        # Store full dataset with named variable
+                        step_context['data_variables'] = step_context.get('data_variables', {})
+                        step_context['data_variables'][variable_name] = sql_data
+                        
+                        # Store metadata for future reference
+                        step_context['sql_results'] = step_context.get('sql_results', [])
+                        step_context['sql_results'].append({
+                            'step_name': step_name,
+                            'variable_name': variable_name,  # Key enhancement: variable name
+                            'data': sql_data,  # Full data stored
+                            'sample_data': sql_data[:5],  # Sample for context
+                            'total_records': len(sql_data)
+                        })
+                        
+                        # Add structured sample context for next steps
+                        if sql_data:
+                            sample_context = self._extract_sample_for_context(sql_data, variable_name)
+                            sample_context.update({
+                                'step_name': step_name,
+                                'step_number': len(step_context['completed_steps']) + 1,
+                                'step_type': 'sql'
+                            })
+                            step_context['accumulated_data'].append(sample_context)
+                    
+                    return {
+                        'success': result.get('success', False),
+                        'step_type': 'sql',
+                        'result': result,
+                        'data': result.get('data', [])
+                    }
+                    
+                except Exception as sql_error:
+                    print(f"   ❌ SQL step execution error: {sql_error}")
+                    print(f"   🔍 Error type: {type(sql_error)}")
+                    import traceback
+                    traceback.print_exc()
+                    return {
+                        'success': False,
+                        'step_type': 'sql',
+                        'error': str(sql_error),
+                        'data': []
+                    }
                 
             else:  # API step
                 # Execute endpoint filtering with the full LLM1 plan
@@ -1842,20 +1662,48 @@ Create a comprehensive, user-friendly response that directly answers the user's 
                         )
                         
                         if api_execution_result.get('success'):
-                            # Store the API data for future steps
-                            api_data_item = {
+                            # Store the API data with variable name and sample
+                            api_raw_output = api_execution_result.get('stdout', '')
+                            variable_name = f"api_data_step_{len(step_context['completed_steps']) + 1}"
+                            
+                            # Store full API output with named variable
+                            step_context['data_variables'] = step_context.get('data_variables', {})
+                            step_context['data_variables'][variable_name] = api_raw_output
+                            
+                            # Try to extract structured data from API output for sampling
+                            try:
+                                import re
+                                # Look for JSON arrays in the output
+                                json_match = re.search(r'\[[\s\S]*\]', api_raw_output)
+                                if json_match:
+                                    api_data_list = json.loads(json_match.group(0))
+                                    sample_context = self._extract_sample_for_context(api_data_list, variable_name)
+                                else:
+                                    # Fallback: treat as single data item
+                                    sample_context = self._extract_sample_for_context(api_raw_output, variable_name)
+                            except:
+                                # Fallback: treat as raw string
+                                sample_context = self._extract_sample_for_context(api_raw_output, variable_name)
+                            
+                            # Add API step metadata
+                            sample_context.update({
                                 'step_name': step_name,
-                                'raw_output': api_execution_result.get('stdout', ''),
-                                'execution_context': step.get('query_context', ''),
-                                'step_number': len(step_context['completed_steps']) + 1
-                            }
-                            step_context['accumulated_data'].append(api_data_item)
-                            print(f"   ✅ API Step executed: stored {len(api_execution_result.get('stdout', ''))} chars of data")
+                                'step_number': len(step_context['completed_steps']) + 1,
+                                'step_type': 'api',
+                                'execution_context': step.get('query_context', '')
+                            })
+                            
+                            step_context['accumulated_data'].append(sample_context)
+                            print(f"   ✅ API Step executed: stored variable {variable_name} with {len(api_raw_output)} chars")
                             
                             return {
                                 'success': True,
-                                'api_data': api_data_item,
-                                'filter_result': filter_result
+                                'step_type': 'api',
+                                'api_data': {
+                                    'variable_name': variable_name,
+                                    'raw_output': api_raw_output,
+                                    'sample_context': sample_context
+                                }
                             }
                         else:
                             return {'success': False, 'error': 'API execution failed'}
