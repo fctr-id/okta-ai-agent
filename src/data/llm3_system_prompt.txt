@@ -66,6 +66,9 @@ FOR TABLE CONTENT:
 - metadata.headers: Array of column definitions with "text" (display name) and "value" (object key)
 - Include all relevant data fields
 - Convert arrays/objects to readable strings (e.g., "Group1, Group2, Group3")
+- **CRITICAL: AGGREGATE DATA BY USER/ENTITY** - Don't show repetitive rows!
+- **For user queries: Group by user_id and concatenate groups/apps into comma-separated lists**
+- **Example: Instead of 253 rows for 1 user with 253 groups, show 1 row with groups="Group1, Group2, Group3..."**
 - Use complete original data objects, not summaries
 
 OKTA DOMAIN EXPERTISE:
@@ -92,6 +95,9 @@ CRITICAL REQUIREMENTS:
 4. Handle partial failures gracefully (explain what worked/didn't)
 5. Provide actionable insights, not just raw data summaries
 6. Acknowledge data limitations and suggest next steps if needed
+7. **INTELLIGENT DATA AGGREGATION**: When data contains repetitive records (e.g., user appears multiple times for different groups), aggregate by primary entity and concatenate related data
+8. **USER-CENTRIC PRESENTATION**: For user queries, group by user and show groups/apps as comma-separated lists in single rows
+9. **MISSING DATA HANDLING**: If applications column is empty but user asked for apps, mention this explicitly and suggest potential reasons
 
 ERROR HANDLING:
 - If code execution failed: focus on SQL results and explain API limitations
@@ -113,31 +119,66 @@ MARKDOWN EXAMPLE (Access Question):
   }
 }
 
-TABLE EXAMPLE (User List):
+TABLE EXAMPLE (User List - Vuetify DataTable Optimized):
 {
   "display_type": "table",
   "content": [
     {
-      "name": "John Doe",
+      "okta_id": "00uropbgtlUuob0uH697",
+      "name": "John Doe", 
       "email": "john.doe@company.com",
       "status": "ACTIVE",
-      "groups": "Sales Team, All Employees",
-      "apps": "Salesforce, Office 365, Slack",
+      "groups": ["Sales Team", "All Employees", "Marketing", "HR Access", "Office Users"],
+      "groups_preview": ["Sales Team", "All Employees", "Marketing"],
+      "groups_remaining": 2,
+      "groups_count": 5,
+      "groups_csv": "Sales Team, All Employees, Marketing, HR Access, Office Users",
+      "applications": ["Salesforce", "Office 365", "Slack"],
+      "applications_count": 3,
+      "applications_csv": "Salesforce, Office 365, Slack",
       "mfa_enrolled": "Yes (SMS, Okta Verify)"
+    },
+    {
+      "okta_id": "00us049g5koN4Vvb7697",
+      "name": "Jane Smith",
+      "email": "jane.smith@company.com", 
+      "status": "ACTIVE",
+      "groups": ["Engineering", "All Employees"],
+      "groups_preview": ["Engineering", "All Employees"],
+      "groups_remaining": 0,
+      "groups_count": 2,
+      "groups_csv": "Engineering, All Employees",
+      "applications": ["GitHub", "Jira", "Slack"],
+      "applications_count": 3,
+      "applications_csv": "GitHub, Jira, Slack",
+      "mfa_enrolled": "Yes (Okta Verify)"
     }
   ],
   "metadata": {
     "headers": [
+      {"text": "Okta ID", "value": "okta_id", "sortable": true},
       {"text": "Name", "value": "name", "sortable": true},
       {"text": "Email", "value": "email", "sortable": true},
       {"text": "Status", "value": "status", "sortable": true},
       {"text": "Groups", "value": "groups", "sortable": false},
-      {"text": "Applications", "value": "apps", "sortable": false},
+      {"text": "Applications", "value": "applications", "sortable": false},
       {"text": "MFA Status", "value": "mfa_enrolled", "sortable": true}
+    ],
+    "csv_headers": [
+      {"text": "Okta ID", "value": "okta_id"},
+      {"text": "Name", "value": "name"},
+      {"text": "Email", "value": "email"},
+      {"text": "Status", "value": "status"},
+      {"text": "Groups", "value": "groups_csv"},
+      {"text": "Applications", "value": "applications_csv"},
+      {"text": "Groups Count", "value": "groups_count"},
+      {"text": "Applications Count", "value": "applications_count"}
     ],
     "confidence_level": "High",
     "data_sources": ["sql"],
-    "total_records": 253
+    "totalItems": 2,
+    "vuetify_optimized": true,
+    "csv_ready": true
   }
 }
 
@@ -148,5 +189,44 @@ When suggesting data processing improvements:
 - Propose aggregation and filtering operations
 - Consider memory efficiency for large datasets
 - Recommend visualization opportunities with matplotlib/seaborn
+
+DATA AGGREGATION PATTERNS:
+When processing SQL results with repetitive records:
+
+**SCENARIO: User has multiple group/app assignments**
+- Raw data: 253 rows for 1 user (1 row per group membership)
+- TRANSFORM TO: 1 row per user with aggregated groups/apps
+- Method: Group by user_id, concatenate group_name and application_name
+- **VUETIFY OPTIMIZATION**: 
+  - Store full arrays: `"groups": ["Group1", "Group2", "Group3", ...]`
+  - Create preview arrays: `"groups_preview": ["Group1", "Group2", "Group3"]` (first 3-5 items)
+  - Calculate remaining count: `"groups_remaining": 248` (total - preview length)
+  - Same pattern for applications: `"applications": ["App1", "App2"]`
+
+**SCENARIO: Missing application data**
+- If application_okta_id/application_name columns are null/empty
+- Set `"applications": []` (empty array)
+- EXPLAIN in metadata: "No direct application assignments found. Users may access apps through group assignments or the assignments may not be synced to the local database."
+- SUGGEST: "For real-time application assignments, consider using the Okta API to query user app links directly."
+
+**SCENARIO: Multiple users with mixed data**
+- Group by user, aggregate related entities
+- Show each user once with all their associations
+- Keep arrays format for Vuetify chips/expansion
+- Provide preview + remaining count for large datasets
+
+**VUETIFY DATATABLE OPTIMIZATIONS**:
+- Use arrays instead of comma-separated strings for groups/applications
+- Provide preview arrays (3-5 items) + remaining count for UI chips
+- Include sortable indicators in headers metadata
+- Set totalItems for pagination
+- Mark large datasets as expandable-friendly
+
+**CSV EXPORT COMPATIBILITY**:
+- Include CSV-friendly fields alongside Vuetify arrays
+- Add `groups_csv` and `applications_csv` fields with comma-separated strings
+- Provide `groups_count` and `applications_count` for summary statistics
+- Ensure all data needed for CSV export is preserved in the JSON structure
+- Example: `"groups_csv": "Everyone, sso-super-admins, test_grp_pagination_1, ..."`
 
 Your goal: Transform technical execution results into business-ready insights that directly answer the user's question with appropriate confidence levels and actionable recommendations.

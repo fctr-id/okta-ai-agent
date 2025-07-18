@@ -562,6 +562,12 @@ class RealWorldHybridExecutor:
                 )
                 
                 print(f"✅ LLM3 processing completed successfully")
+                
+                # Export results to CSV file
+                csv_file = await self._export_results_to_csv(enhanced_final_result, query, correlation_id, step_results)
+                if csv_file:
+                    enhanced_final_result['csv_export_path'] = csv_file
+                
                 final_result = enhanced_final_result
                 
             except Exception as llm3_error:
@@ -585,6 +591,11 @@ class RealWorldHybridExecutor:
                 print(f"   📊 Pandas Analytics: ✅ Enabled")
                 print(f"   📈 Data Insights: ✅ Generated")
                 print(f"   📉 Visualizations: ✅ Suggested")
+            
+            # Export results to CSV
+            csv_path = await self._export_results_to_csv(final_result, query, correlation_id, step_results)
+            if csv_path:
+                print(f"📤 Results exported to CSV: {csv_path}")
             
             return final_result
             
@@ -769,9 +780,22 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 context_query = f"{query}\n\nCONTEXT FROM PREVIOUS STEPS:\n"
                 for api_item in api_context:
                     if 'sample_data' in api_item:
-                        context_query += f"Step {api_item.get('step_name', 'unknown')}: {json.dumps(api_item['sample_data'][:3], indent=2)}\n"
+                        # Extract user IDs from API events for SQL agent
+                        sample_data = api_item['sample_data'][:MAX_SAMPLES_PER_STEP]  # Use proper sampling
+                        
+                        # For system log or any other data, use standard format and let LLM decide what to extract
+                        context_query += f"📊 Step {api_item.get('step_name', 'unknown')}:\n"
+                        context_query += f"   • Variable: {api_item.get('variable_name', 'unknown_variable')}\n"
+                        context_query += f"   • Total Records: {api_item.get('total_records', len(sample_data))}\n"
+                        context_query += f"   • Fields: {api_item.get('data_fields', [])}\n"
+                        context_query += f"   • Sample Data:\n{json.dumps(sample_data, indent=6)}\n"
+                        context_query += f"   ⚠️  IMPORTANT: Use variable '{api_item.get('variable_name', 'unknown_variable')}' in your code to process ALL {api_item.get('total_records', len(sample_data))} records\n\n"
             
-            print(f"� Running SQL agent with query: {context_query[:200]}...")
+            print(f"🔍 DEBUG: Starting SQL execution")
+            print(f"💬 FULL QUERY TEXT PASSED TO SQL AGENT:")
+            print("=" * 80)
+            print(context_query)
+            print("=" * 80)
             sql_result = await sql_agent.run(context_query, deps=sql_dependencies)
             
             # Extract JSON from the SQL agent response
@@ -780,7 +804,10 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 sql_query = sql_response_json.get('sql', '')
                 explanation = sql_response_json.get('explanation', '')
                 
-                print(f"✅ Generated SQL: {sql_query[:100]}{'...' if len(sql_query) > 100 else ''}")
+                print(f"🔍 DEBUG: Generated FULL SQL Query:")
+                print(f"   {sql_query}")
+                print(f"📝 SQL Explanation: {explanation}")
+                print(f"🔍 DEBUG: SQL Query Length: {len(sql_query)} characters")
                 
                 # Execute the SQL query against the database
                 if sql_query and sql_query.strip():
@@ -1187,6 +1214,19 @@ Generate practical, executable code that solves the user's query: {query}"""
                 # Use the LLM3 processor with proper format
                 prompt = f"Process these results for query: {original_query}\n\nResults: {json.dumps(step_results_for_processing, default=str)[:1000]}..."
                 
+                print(f"🔍 DEBUG: LLM3 Input Data Structure:")
+                for var_name, var_data in step_results_for_processing.items():
+                    if isinstance(var_data, list) and len(var_data) > 0:
+                        print(f"   📊 {var_name}: {len(var_data)} records")
+                        print(f"      Sample keys: {list(var_data[0].keys()) if isinstance(var_data[0], dict) else 'Not dict'}")
+                        if isinstance(var_data[0], dict):
+                            sample_record = var_data[0]
+                            print(f"      Sample values:")
+                            for key, value in list(sample_record.items())[:5]:
+                                print(f"        {key}: {value}")
+                    else:
+                        print(f"   📊 {var_name}: {type(var_data)} - {str(var_data)[:100]}...")
+                
                 # Call LLM3 processor with correct method
                 result = await llm3_processor.process_results(
                     query=original_query,
@@ -1217,6 +1257,21 @@ Generate practical, executable code that solves the user's query: {query}"""
                         'content': str(result),
                         'metadata': {}
                     }
+                
+                print(f"🔍 DEBUG: LLM3 Raw Response:")
+                print(f"   Display Type: {response_json.get('display_type')}")
+                print(f"   Content Type: {type(response_json.get('content'))}")
+                if isinstance(response_json.get('content'), list) and len(response_json['content']) > 0:
+                    print(f"   Content Length: {len(response_json['content'])} items")
+                    print(f"   First Item Keys: {list(response_json['content'][0].keys()) if isinstance(response_json['content'][0], dict) else 'Not dict'}")
+                    if isinstance(response_json['content'][0], dict):
+                        first_item = response_json['content'][0]
+                        print(f"   First Item Sample:")
+                        for key, value in list(first_item.items())[:8]:
+                            print(f"     {key}: {str(value)[:100]}{'...' if len(str(value)) > 100 else ''}")
+                else:
+                    print(f"   Content Preview: {str(response_json.get('content'))[:200]}...")
+                print(f"   Metadata: {response_json.get('metadata', {})}")
                 
                 return {
                     'success': True,
@@ -1386,16 +1441,13 @@ Generate practical, executable code that solves the user's query: {query}"""
                     'data_count': len(step_result.get('data', []))
                 }
                 
-                # Update legacy results and accumulated data
+                # Update legacy results (don't add to accumulated_data here - that's handled in _execute_single_step_enhanced)
                 if step_result.get('step_type') == 'sql':
                     sql_result = step_result.get('result', sql_result)
-                    if step_result.get('data'):
-                        step_context['accumulated_data'].extend(step_result['data'])
                 elif step_result.get('step_type') == 'api':
                     filter_result = step_result.get('result', filter_result)
                     if step_result.get('api_data'):
                         api_data_collected.extend(step_result['api_data'])
-                        step_context['accumulated_data'].extend(step_result['api_data'])
                 
                 print(f"   ✅ Step {i} completed in {step_time:.2f}s")
                 
@@ -1554,9 +1606,13 @@ Generate practical, executable code that solves the user's query: {query}"""
                 print(f"   🔍 DEBUG: About to execute SQL step")
                 
                 try:
+                    # Use the step's query_context instead of the original user query
+                    step_query = step.get('query_context', query)
+                    print(f"   🔍 DEBUG: Using step query_context: {step_query}")
+                    
                     # Build enhanced context with samples and variable names
                     enhanced_context = self._build_enhanced_context_for_llm(step_context, step_name)
-                    enhanced_query = f"{query}{enhanced_context}" if enhanced_context else query
+                    enhanced_query = f"{step_query}{enhanced_context}" if enhanced_context else step_query
                     
                     # Check if we have API data samples to enhance the SQL query
                     if step_context['accumulated_data']:
@@ -1699,11 +1755,9 @@ Generate practical, executable code that solves the user's query: {query}"""
                             return {
                                 'success': True,
                                 'step_type': 'api',
-                                'api_data': {
-                                    'variable_name': variable_name,
-                                    'raw_output': api_raw_output,
-                                    'sample_context': sample_context
-                                }
+                                'api_data': api_raw_output,  # Return raw output for legacy compatibility
+                                'variable_name': variable_name,
+                                'sample_context': sample_context  # Structured context for next steps
                             }
                         else:
                             return {'success': False, 'error': 'API execution failed'}
@@ -1736,6 +1790,196 @@ Generate practical, executable code that solves the user's query: {query}"""
             return 'sql'
         else:
             return 'api'
+    
+    async def _export_results_to_csv(self, results: Dict[str, Any], query: str, correlation_id: str, step_results: Dict[str, Any] = None) -> str:
+        """
+        Export final results to CSV file in the results folder.
+        
+        Args:
+            results: The processed results from LLM3
+            query: Original user query
+            correlation_id: Unique identifier for this execution
+            
+        Returns:
+            Path to the exported CSV file
+        """
+        import csv
+        import os
+        from datetime import datetime
+        import re
+        
+        try:
+            # Create results directory if it doesn't exist - UNDER src/data
+            results_dir = os.path.join(os.path.dirname(__file__), 'results')
+            os.makedirs(results_dir, exist_ok=True)
+            
+            # Generate filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_query = re.sub(r'[^\w\s-]', '', query.replace(' ', '_'))[:30]
+            filename = f"okta_hybrid_results_{safe_query}_{timestamp}.csv"
+            filepath = os.path.join(results_dir, filename)
+            
+            # Extract data for CSV export - PRIORITIZE SQL DATA FROM STEP_RESULTS
+            rows_to_export = []
+            sql_data = []
+            
+            print(f"🔍 DEBUG: Looking for SQL data in step_results and raw_results...")
+            
+            # Method 1: Check step_results parameter first (most reliable)
+            if step_results and 'sql_result' in step_results:
+                sql_result = step_results['sql_result']
+                if isinstance(sql_result, dict) and 'data' in sql_result:
+                    sql_data = sql_result['data']
+                    print(f"   Method 1 - step_results parameter: Found {len(sql_data)} records")
+            
+            # Method 2: Try sql_execution from raw_results (fallback)
+            if not sql_data:
+                raw_results = results.get('raw_results', {})
+                print(f"   Raw results keys: {list(raw_results.keys()) if raw_results else 'None'}")
+                
+                sql_execution = raw_results.get('sql_execution', {})
+                if sql_execution:
+                    sql_data = sql_execution.get('data', [])
+                    print(f"   Method 2 - sql_execution: Found {len(sql_data)} records")
+            
+            # Method 3: Try execution_result from raw_results
+            if not sql_data and raw_results:
+                execution_result = raw_results.get('execution_result', {})
+                if execution_result and isinstance(execution_result, dict):
+                    sql_data = execution_result.get('data', [])
+                    print(f"   Method 3 - execution_result: Found {len(sql_data)} records")
+            
+            # Method 4: Try step results from the step context
+            if not sql_data and raw_results:
+                step_res_list = raw_results.get('step_results', [])
+                if step_res_list:
+                    for step in step_res_list:
+                        if step.get('step_type') == 'sql' and step.get('data'):
+                            sql_data = step.get('data', [])
+                            print(f"   Method 4 - step_results: Found {len(sql_data)} records")
+                            break
+            
+            # Method 5: Look in execution_summary (last resort)
+            if not sql_data and raw_results:
+                exec_summary = raw_results.get('execution_summary', {})
+                if exec_summary:
+                    sql_data = exec_summary.get('sql_data', [])
+                    print(f"   Method 5 - execution_summary: Found {len(sql_data)} records")
+                    
+            print(f"🔍 Final SQL data found: {len(sql_data)} records")
+            
+            # Check for LLM3 processed results first (new aggregated format)
+            processed_summary = results.get('processed_summary', {})
+            if isinstance(processed_summary, dict) and processed_summary.get('display_type') == 'table':
+                llm3_content = processed_summary.get('content', [])
+                if llm3_content and isinstance(llm3_content, list) and len(llm3_content) > 0:
+                    print(f"📄 Exporting {len(llm3_content)} LLM3 aggregated records to CSV...")
+                    
+                    # Use CSV headers from metadata if available, or intelligently select fields
+                    csv_headers = []
+                    metadata = processed_summary.get('metadata', {})
+                    if metadata.get('csv_headers'):
+                        csv_headers = [h['value'] for h in metadata['csv_headers']]
+                    else:
+                        # Fallback: intelligently select all relevant fields from first record
+                        first_record = llm3_content[0]
+                        priority_fields = ['okta_id', 'name', 'first_name', 'last_name', 'email', 'status']
+                        for field in priority_fields:
+                            if field in first_record:
+                                csv_headers.append(field)
+                        
+                        # Add CSV-friendly fields if available, otherwise use regular fields
+                        for key in first_record.keys():
+                            if key.endswith('_csv') or key.endswith('_count'):
+                                csv_headers.append(key)
+                            elif key in ['groups', 'applications'] and key not in csv_headers:
+                                csv_headers.append(key)  # Include groups/applications even if not CSV format
+                    
+                    # Add metadata columns
+                    csv_headers.extend(['query', 'correlation_id', 'timestamp', 'processing_method'])
+                    
+                    # Write CSV with LLM3 aggregated data
+                    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=csv_headers)
+                        writer.writeheader()
+                        
+                        for row in llm3_content:
+                            # Add metadata to each row
+                            export_row = {}
+                            for header in csv_headers:
+                                if header in ['query', 'correlation_id', 'timestamp', 'processing_method']:
+                                    continue  # Handle metadata separately
+                                export_row[header] = row.get(header, '')
+                            
+                            # Add metadata
+                            export_row.update({
+                                'query': query,
+                                'correlation_id': correlation_id,
+                                'timestamp': datetime.now().isoformat(),
+                                'processing_method': results.get('processing_method', 'llm3_aggregated')
+                            })
+                            writer.writerow(export_row)
+                            
+                    print(f"✅ Exported {len(llm3_content)} LLM3 aggregated records to: {filepath}")
+                    return filepath
+            
+            # Fallback to SQL data if LLM3 processed format not available
+            if sql_data and isinstance(sql_data, list) and len(sql_data) > 0:
+                # Use SQL data as primary export - THIS IS THE REAL DATA!
+                print(f"📄 Exporting {len(sql_data)} SQL records to CSV...")
+                
+                # Get column headers from first record
+                if isinstance(sql_data[0], dict):
+                    headers = list(sql_data[0].keys())
+                    
+                    # Add metadata columns
+                    headers.extend(['query', 'correlation_id', 'timestamp', 'processing_method'])
+                    
+                    # Write CSV with ACTUAL SQL DATA
+                    with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                        writer = csv.DictWriter(csvfile, fieldnames=headers)
+                        writer.writeheader()
+                        
+                        for row in sql_data:
+                            # Add metadata to each row
+                            export_row = row.copy()
+                            export_row.update({
+                                'query': query,
+                                'correlation_id': correlation_id,
+                                'timestamp': datetime.now().isoformat(),
+                                'processing_method': results.get('processing_method', 'unknown')
+                            })
+                            writer.writerow(export_row)
+                            
+                    print(f"✅ Exported {len(sql_data)} SQL records to: {filepath}")
+                    return filepath
+            
+            # Fallback: Export processed summary as text-based CSV
+            processed_summary = results.get('processed_summary', {})
+            content = processed_summary.get('content', '') if isinstance(processed_summary, dict) else str(processed_summary)
+            
+            # Create a simple CSV with summary data
+            headers = ['timestamp', 'query', 'correlation_id', 'processing_method', 'content_type', 'content']
+            
+            with open(filepath, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=headers)
+                writer.writeheader()
+                
+                writer.writerow({
+                    'timestamp': datetime.now().isoformat(),
+                    'query': query,
+                    'correlation_id': correlation_id,
+                    'processing_method': results.get('processing_method', 'unknown'),
+                    'content_type': processed_summary.get('display_type', 'text') if isinstance(processed_summary, dict) else 'text',
+                    'content': content[:1000] + '...' if len(content) > 1000 else content
+                })
+            
+            print(f"✅ Exported summary to: {filepath}")
+            return filepath
+            
+        except Exception as e:
+            print(f"❌ CSV export failed: {e}")
+            return None
 
 # Test function
 async def test_real_execution():
