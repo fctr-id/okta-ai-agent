@@ -67,3 +67,4 @@ src/data/final_generated_code_*.py
 docs/Untitled-3.txt
 src/data/results/*
 .github/copilot-instructions.md
+docs/pydantic-ai-migration-spec.md
