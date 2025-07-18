@@ -130,63 +130,26 @@ class PreciseEndpointFilter:
         self.entity_summary = condensed_reference['entity_summary']
     
     def filter_endpoints(self, llm1_plan: ExecutionPlanResponse) -> Dict[str, Any]:
-        """Ultra-precise filtering using steps from ExecutionPlan - ONLY for API steps"""
+        """Filter endpoints based on LLM1's explicit entity+operation specifications"""
         steps = llm1_plan.plan.get('steps', [])
         
-        # Extract entities and operations ONLY from API steps (not SQL steps)
+        # Extract entities and operations DIRECTLY from LLM1's explicit specifications
         api_entities = []
         operations = []
         
-        print(f"🔍 EXTRACTING OPERATIONS FROM QUERY CONTEXT:")
+        print(f"🔍 EXTRACTING ENTITIES AND OPERATIONS FROM LLM1 PLAN:")
         for i, step in enumerate(steps, 1):
-            query_context = step.get('query_context', '').lower()
             tool_name = step.get('tool_name', '').lower()
+            operation = step.get('operation', '')
+            query_context = step.get('query_context', '')
             
-            # Skip SQL steps - only process API steps
-            if query_context.startswith('sql:'):
-                print(f"   Step {i}: '{query_context}' → [] (SQL step - skipped)")
-                continue
-                
-            # This is an API step - extract operations DYNAMICALLY
-            extracted_ops = []
-            
-            # DYNAMIC operation extraction - get all operations from entity_summary
-            entity_name = tool_name.lower()
-            if entity_name in self.entity_summary:
-                available_operations = self.entity_summary[entity_name].get('operations', [])
-                
-                # Match operations mentioned in query_context against available operations
-                for operation in available_operations:
-                    if operation.lower() in query_context.lower():
-                        extracted_ops.append(operation)
-                
-                # If no specific operation found, check for common patterns
-                if not extracted_ops:
-                    for operation in available_operations:
-                        # Check for semantic matches
-                        if any(pattern in query_context.lower() for pattern in [
-                            'list', 'get', 'fetch', 'retrieve', 'find'
-                        ]) and operation.startswith('list'):
-                            extracted_ops.append(operation)
-                            break
-                        elif 'create' in query_context.lower() and operation == 'create':
-                            extracted_ops.append(operation)
-                            break
-                        elif any(pattern in query_context.lower() for pattern in [
-                            'update', 'modify', 'change'
-                        ]) and operation in ['update', 'replace']:
-                            extracted_ops.append(operation)
-                            break
-                        elif 'delete' in query_context.lower() and operation == 'delete':
-                            extracted_ops.append(operation)
-                            break
-            
-            print(f"   Step {i}: '{query_context}' → {extracted_ops}")
-            
-            # Only add to entities and operations if this is an API step with operations
-            if extracted_ops:
+            # Check if this is an API step (has operation specified)
+            if operation and tool_name in self.entity_summary:
                 api_entities.append(tool_name)
-                operations.extend(extracted_ops)
+                operations.append(operation.lower())
+                print(f"   Step {i}: entity='{tool_name}', operation='{operation}'")
+            else:
+                print(f"   Step {i}: SQL step '{tool_name}' (no operation filtering needed)")
         
         # Remove duplicates
         entities = list(set(api_entities))
@@ -198,18 +161,26 @@ class PreciseEndpointFilter:
         print(f"   Operations: {operations}")
         print(f"   Methods: {methods}")
         
+        if not entities:
+            print("   ℹ️ No API entities found - all steps are SQL")
+            return {
+                'success': True,
+                'filtered_endpoints': [],
+                'entity_results': {},
+                'total_endpoints': 0,
+                'llm1_plan': llm1_plan.model_dump()
+            }
+        
+        # Filter endpoints for each entity
         filtered_endpoints = []
         entity_results = {}
         
         for entity in entities:
-            if not entity:  # Skip empty entities
-                continue
-                
             entity_endpoints = self._get_entity_operation_matches(entity, operations, methods)
             
             if entity_endpoints:
                 # Limit per entity (max 3 per entity to prevent explosion)
-                max_per_entity = min(3, max(1, 8 // len([e for e in entities if e])))
+                max_per_entity = min(3, max(1, 8 // len(entities)))
                 selected = entity_endpoints[:max_per_entity]
                 
                 filtered_endpoints.extend(selected)
