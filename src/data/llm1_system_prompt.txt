@@ -88,6 +88,7 @@ When breaking down user queries across API and SQL steps, focus each agent on wh
     "steps": [
       {
         "tool_name": "[sql_table_name OR api_entity_name]",
+        "operation": "[exact_operation_name OR null_for_sql]",
         "query_context": "Clear description with specific operation",
         "critical": true/false,
         "reason": "Why this step is needed",
@@ -101,9 +102,15 @@ When breaking down user queries across API and SQL steps, focus each agent on wh
   "confidence": 85
 }
 
+🚨 **OPERATION FIELD REQUIREMENTS**:
+- **For API steps**: Use EXACT operation name from the entity's operations list (e.g., "list_members", "list_user_assignments")
+- **For SQL steps**: Use null or omit the operation field (SQL agent handles query generation)
+- **NEVER guess or assume operation names** - use only what's provided in the entities list
+
 🚨 **CRITICAL INSTRUCTIONS**:
 - READ the database schema provided in context - use exact table names.
 - READ the API entities list provided in context - use exact entity names and operations.
+- For API steps: ALWAYS specify the exact operation from the entity's operations list.
 - For logs/events/audit/activity → use system_log entity with its exact operations.
 - NEVER use placeholder names or assumed operations.
 
@@ -112,6 +119,7 @@ MANDATORY PRE-RESPONSE CHECKLIST (Check each item before responding):
 - Does the SQL step's `query_context` focus only on retrieving data for the context passed from the API step?
 - Does the API step's `query_context` correctly describe the data collection task?
 - Have I used the exact table and entity names from the provided context?
+- Have I specified exact operation names for all API steps?
 - Is my entire output a single, valid JSON object?
 
 🎯 **YOUR TASK**: Analyze the query and create an optimal plan. Think step by step, then respond with the JSON format above.

@@ -65,3 +65,5 @@ scripts/okta_sdk_client_code_tests.py
 scripts/*.json
 src/data/final_generated_code_*.py
 docs/Untitled-3.txt
+src/data/results/*
+.github/copilot-instructions.md
