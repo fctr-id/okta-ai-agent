@@ -37,11 +37,13 @@ from src.core.model_picker import ModelConfig, ModelType
 
 # Import real components
 try:
-    from src.core.helpers.okta_generate_sql import sql_agent, SQLDependencies, extract_json_from_text
-    print("SQL agent imported successfully")
+    from sql_agent import sql_agent, SQLDependencies, is_safe_sql, extract_json_from_text
+    print("SQL agent imported successfully (local copy)")
 except ImportError as e:
-    print(f"❌ Failed to import SQL agent: {e}")
+    print(f"❌ Failed to import local SQL agent: {e}")
     sql_agent = None
+    is_safe_sql = None
+    extract_json_from_text = None
 
 # Constants for sampling and results processing (inspired by ExecutionManager)
 MAX_CHARS_FOR_FULL_RESULTS = 60000
@@ -520,8 +522,8 @@ class RealWorldHybridExecutor:
             if execution_result:
                 final_result['execution_result'] = execution_result
             
-            # Phase 7: Enhanced Results Processing with LLM3 (NEW!)
-            print(f"\n🧠 PHASE 7: LLM3 RESULTS PROCESSING")
+            # Phase 7: Enhanced Results Processing with Results Formatter Agent (NEW!)
+            print(f"\n🧠 PHASE 7: RESULTS FORMATTER AGENT PROCESSING")
             print("=" * 50)
             
             try:
@@ -532,7 +534,7 @@ class RealWorldHybridExecutor:
                     step_context=step_results.get('execution_context', {})  # Pass step context
                 )
                 
-                print(f"✅ LLM3 processing completed successfully")
+                print(f"✅ Results Formatter Agent processing completed successfully")
                 
                 # Export results to CSV file
                 csv_file = await self._export_results_to_csv(enhanced_final_result, query, correlation_id, step_results)
@@ -541,10 +543,10 @@ class RealWorldHybridExecutor:
                 
                 final_result = enhanced_final_result
                 
-            except Exception as llm3_error:
-                print(f"⚠️ LLM3 processing failed: {llm3_error}")
+            except Exception as formatter_error:
+                print(f"⚠️ Results Formatter Agent processing failed: {formatter_error}")
                 print(f"🔄 Continuing with basic results...")
-                # Keep the original final_result if LLM3 fails
+                # Keep the original final_result if Results Formatter Agent fails
             
             print(f"\n✅ HYBRID EXECUTION COMPLETED!")
             print(f"   📊 LLM1 Steps: {len(llm1_plan.get('plan', {}).get('steps', []))}")
@@ -554,7 +556,7 @@ class RealWorldHybridExecutor:
             print(f"   📝 Code Length: {len(llm2_result.get('code', ''))} characters")
             print(f"   🚀 Code Executed: {execution_result.get('success', False) if execution_result else False}")
             
-            # Enhanced execution summary with LLM3 info
+            # Enhanced execution summary with Results Formatter Agent info
             processing_method = final_result.get('processing_method', 'basic_combination')
             enhancement_features = final_result.get('enhancement_features', {})
             print(f"   📋 Results Processing: {processing_method}")
@@ -769,16 +771,22 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
             print("=" * 80)
             sql_result = await sql_agent.run(context_query, deps=sql_dependencies)
             
-            # Extract JSON from the SQL agent response
+            # Extract data from the SQL agent response (PydanticAI structured output)
             try:
-                sql_response_json = extract_json_from_text(str(sql_result.output))
-                sql_query = sql_response_json.get('sql', '')
-                explanation = sql_response_json.get('explanation', '')
+                # sql_result.data contains the SQLQueryOutput object
+                sql_output = sql_result.data
+                sql_query = sql_output.sql if sql_output else ''
+                explanation = sql_output.explanation if sql_output else ''
                 
                 print(f"🔍 DEBUG: Generated FULL SQL Query:")
                 print(f"   {sql_query}")
                 print(f"📝 SQL Explanation: {explanation}")
                 print(f"🔍 DEBUG: SQL Query Length: {len(sql_query)} characters")
+                
+                # Simple safety check
+                if is_safe_sql and not is_safe_sql(sql_query):
+                    print("⚠️ SQL query failed safety check - blocking execution")
+                    return {'success': False, 'error': 'Unsafe SQL query generated', 'explanation': explanation, 'data': []}
                 
                 # Execute the SQL query against the database
                 if sql_query and sql_query.strip():
@@ -1134,25 +1142,76 @@ Generate practical, executable code that solves the user's query: {query}"""
             }
         }
     
-    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, execution_result: Dict[str, Any] = None, step_context: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, execution_result: Dict[str, Any] = None, step_context: Dict[str, Any] = None, use_structured: bool = True) -> Dict[str, Any]:
         """
-        Process final results using LLM3 Results Processor Agent with pandas enhancement.
+        Process final results using Results Formatter Agent with pandas enhancement.
         
-        This method uses the dedicated LLM3 system prompt and enhanced pandas processing
+        This method uses the dedicated Results Formatter Agent system prompt and enhanced pandas processing
         to create comprehensive, user-friendly summaries with data insights.
         
         Args:
             combined_results: The raw combined results from all phases
             original_query: The user's original query
             execution_result: Optional code execution results
+            step_context: Context from step execution
+            use_structured: Whether to use structured PydanticAI Results Formatter Agent (Phase 1)
             
         Returns:
             Dict containing both raw results and enhanced processed summary
         """
         
-        print(f"📋 PHASE 7: ENHANCED RESULTS PROCESSING (LLM3)")
+        print(f"📋 PHASE 7: ENHANCED RESULTS PROCESSING (Results Formatter Agent)")
         print("=" * 50)
-        print(f"🤖 Using LLM3 Results Processor with pandas enhancement")
+        
+        # Phase 1: Try structured Results Formatter Agent first if enabled
+        if use_structured:
+            print(f"🤖 Using Results Formatter Agent with PydanticAI (Modern)")
+            try:
+                from src.data.results_formatter_agent import process_results_structured
+                
+                # Build step_results_for_processing with variable names
+                step_results_for_processing = {}
+                
+                # Extract data from step context using the new variable system
+                if step_context and step_context.get('data_variables'):
+                    for var_name, var_data in step_context['data_variables'].items():
+                        step_results_for_processing[var_name] = var_data
+                
+                # Fallback to old format if no variables stored
+                if not step_results_for_processing:
+                    sql_data = combined_results.get('sql_execution', {}).get('data', [])
+                    if sql_data:
+                        step_results_for_processing["step_1_sql"] = sql_data
+                    
+                    if execution_result and execution_result.get('success'):
+                        stdout = execution_result.get('stdout', '')
+                        if stdout:
+                            step_results_for_processing["step_2_api"] = [{'raw_output': stdout}]
+                
+                # Use structured Results Formatter Agent processor
+                structured_response = await process_results_structured(
+                    query=original_query,
+                    results=step_results_for_processing,
+                    original_plan=None,
+                    is_sample=False,
+                    metadata={'flow_id': 'hybrid_executor_structured'}
+                )
+                
+                print(f"✅ [Structured Results Formatter Agent] Successfully processed with {structured_response.get('display_type')} format")
+                
+                return {
+                    'success': True,
+                    'raw_results': combined_results,
+                    'processed_summary': structured_response,
+                    'processing_method': 'results_formatter_structured_pydantic'
+                }
+                
+            except Exception as e:
+                print(f"⚠️ [Structured Results Formatter Agent] Failed: {e}")
+                print(f"🔄 Falling back to original Results Formatter Agent implementation...")
+        
+        # Original LLM3 implementation (fallback)
+        print(f"🤖 Using Original LLM3 Results Processor with pandas enhancement")
         
         try:
             # Try to import LLM3 processor
