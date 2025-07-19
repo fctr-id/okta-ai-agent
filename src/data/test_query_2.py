@@ -21,12 +21,12 @@ async def test_query_2():
     """Test SQL→API workflow with group-based user query"""
     
     # The query that should trigger SQL first, then API
-    query = "Find users of group sso-super-admins. DO NOT use SQL database."
+    query = "Find users in the group sso-super-admins and fetch their apps, groups and roles"
     
     print("🧪 END-TO-END TEST: QUERY 2 (SQL→API)")
     print("="*70)
     print(f"🎯 QUERY 2: {query}")
-    print("Expected workflow: SQL (group members) → API (user details + roles)")
+    print("Expected workflow: SQL (group members) → API (app assignments + roles)")
     print("="*70)
     
     return await execute_test_query(query, "QUERY 2 (SQL→API)", "SQL→API")

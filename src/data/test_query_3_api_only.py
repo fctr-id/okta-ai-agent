@@ -2,7 +2,7 @@
 """
 Test Query 3: API-ONLY Forced Execution
 Tests the same query as Query 2 but with explicit SQL restriction
-Query: "Find users of group sso-super-admins and fetch their apps, groups and assigned roles. DO NOT use SQL database."
+Query: "Find users in the group sso-super-admins and fetch their apps, groups and roles and DO NOT use the local SQL DB"
 Expected: Pure API workflow with multiple API calls
 """
 
@@ -22,7 +22,7 @@ def test_api_only_query():
     print("=" * 70)
     
     # Modified query with explicit SQL restriction
-    query = "Find users of group sso-super-admins and fetch their apps, groups and assigned roles. DO NOT use SQL database."
+    query = "Find users in the group sso-super-admins and fetch their apps, groups and roles and DO NOT use the local SQL DB"
     
     print(f"🎯 QUERY 3: {query}")
     print("Expected workflow: API-ONLY (SQL forbidden)")

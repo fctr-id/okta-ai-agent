@@ -57,7 +57,7 @@ async def test_query_2():
     # Query 2: Should trigger SQL→API workflow
     # SQL: Get users in specific group (available in SQL)
     # API: Get detailed group memberships, apps and roles for those users (not in SQL)
-    query = "Find all users in group sso-super-admins and fetch their groups, apps and their roles"
+    query = "Find users in the group sso-super-admins and fetch their apps, groups and roles"
     
     print(f"\n🎯 QUERY 2 (SQL→API): {query}")
     print(f"Expected workflow: SQL (users in group) → API (groups + apps + roles)")

@@ -773,8 +773,8 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
             
             # Extract data from the SQL agent response (PydanticAI structured output)
             try:
-                # sql_result.data contains the SQLQueryOutput object
-                sql_output = sql_result.data
+                # Use result.output for modern PydanticAI
+                sql_output = sql_result.output
                 sql_query = sql_output.sql if sql_output else ''
                 explanation = sql_output.explanation if sql_output else ''
                 
@@ -1210,123 +1210,17 @@ Generate practical, executable code that solves the user's query: {query}"""
                 print(f"⚠️ [Structured Results Formatter Agent] Failed: {e}")
                 print(f"🔄 Falling back to original Results Formatter Agent implementation...")
         
-        # Original LLM3 implementation (fallback)
-        print(f"🤖 Using Original LLM3 Results Processor with pandas enhancement")
+        # Original LLM3 implementation (fallback) - DISABLED due to compatibility issues
+        print(f"🤖 Skipping Original LLM3 Results Processor (deprecated interface)")
         
-        try:
-            # Try to import LLM3 processor
-            llm3_processor = None
-            try:
-                from src.core.realtime.agents.results_processor_agent import results_processor as llm3_processor
-            except ImportError:
-                pass
-            
-            if llm3_processor:
-                # Build step_results_for_processing with variable names (ExecutionManager pattern)
-                step_results_for_processing = {}
-                
-                # Extract data from step context using the new variable system
-                if step_context and step_context.get('data_variables'):
-                    for var_name, var_data in step_context['data_variables'].items():
-                        step_results_for_processing[var_name] = var_data
-                
-                # Fallback to old format if no variables stored
-                if not step_results_for_processing:
-                    sql_data = combined_results.get('sql_execution', {}).get('data', [])
-                    if sql_data:
-                        step_results_for_processing["step_1_sql"] = sql_data
-                    
-                    if execution_result and execution_result.get('success'):
-                        stdout = execution_result.get('stdout', '')
-                        if stdout:
-                            step_results_for_processing["step_2_api"] = [{'raw_output': stdout}]
-                
-                # Use the LLM3 processor with proper format
-                prompt = f"Process these results for query: {original_query}\n\nResults: {json.dumps(step_results_for_processing, default=str)[:1000]}..."
-                
-                print(f"🔍 DEBUG: LLM3 Input Data Structure:")
-                for var_name, var_data in step_results_for_processing.items():
-                    if isinstance(var_data, list) and len(var_data) > 0:
-                        print(f"   📊 {var_name}: {len(var_data)} records")
-                        print(f"      Sample keys: {list(var_data[0].keys()) if isinstance(var_data[0], dict) else 'Not dict'}")
-                        if isinstance(var_data[0], dict):
-                            sample_record = var_data[0]
-                            print(f"      Sample values:")
-                            for key, value in list(sample_record.items())[:5]:
-                                print(f"        {key}: {value}")
-                    else:
-                        print(f"   📊 {var_name}: {type(var_data)} - {str(var_data)[:100]}...")
-                
-                # Call LLM3 processor with correct method
-                result = await llm3_processor.process_results(
-                    query=original_query,
-                    results=step_results_for_processing,
-                    original_plan=None,
-                    is_sample=False,
-                    metadata={'flow_id': 'hybrid_executor'}
-                )
-                
-                # Parse response from ResultsProcessorAgent
-                if hasattr(result, 'display_type') and hasattr(result, 'content'):
-                    response_json = {
-                        'display_type': result.display_type,
-                        'content': result.content,
-                        'metadata': getattr(result, 'metadata', {})
-                    }
-                elif hasattr(result, 'output'):
-                    # Extract from agent output
-                    response_json = {
-                        'display_type': 'markdown',
-                        'content': str(result.output),
-                        'metadata': {}
-                    }
-                else:
-                    # Fallback: treat as string
-                    response_json = {
-                        'display_type': 'markdown',
-                        'content': str(result),
-                        'metadata': {}
-                    }
-                
-                print(f"🔍 DEBUG: LLM3 Raw Response:")
-                print(f"   Display Type: {response_json.get('display_type')}")
-                print(f"   Content Type: {type(response_json.get('content'))}")
-                if isinstance(response_json.get('content'), list) and len(response_json['content']) > 0:
-                    print(f"   Content Length: {len(response_json['content'])} items")
-                    print(f"   First Item Keys: {list(response_json['content'][0].keys()) if isinstance(response_json['content'][0], dict) else 'Not dict'}")
-                    if isinstance(response_json['content'][0], dict):
-                        first_item = response_json['content'][0]
-                        print(f"   First Item Sample:")
-                        for key, value in list(first_item.items())[:8]:
-                            print(f"     {key}: {str(value)[:100]}{'...' if len(str(value)) > 100 else ''}")
-                else:
-                    print(f"   Content Preview: {str(response_json.get('content'))[:200]}...")
-                print(f"   Metadata: {response_json.get('metadata', {})}")
-                
-                return {
-                    'success': True,
-                    'raw_results': combined_results,
-                    'processed_summary': response_json,
-                    'processing_method': 'llm3_enhanced'
-                }
-                
-            else:
-                print(f"⚠️ LLM3 processor not available - using basic results")
-                return {
-                    'success': True,
-                    'raw_results': combined_results,
-                    'processed_summary': f"Query: {original_query}\n\nResults: {len(combined_results)} phases completed",
-                    'processing_method': 'basic_fallback'
-                }
-            
-        except Exception as e:
-            print(f"❌ LLM3 processing failed: {e}")
-            return {
-                'success': False,
-                'raw_results': combined_results,
-                'processed_summary': f"Results processing failed: {str(e)}",
-                'error': str(e)
-            }
+        # Use basic fallback instead since the structured formatter already processed results
+        print(f"🔄 Using basic results combination...")
+        return {
+            'success': True,
+            'raw_results': combined_results,
+            'processed_summary': f"Query: {original_query}\n\nResults: {len(combined_results)} phases completed",
+            'processing_method': 'basic_fallback'
+        }
     
     async def _execute_generated_code(self, python_code: str, correlation_id: str) -> Dict[str, Any]:
         """Execute the generated Python code and capture results"""

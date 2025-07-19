@@ -1,41 +1,39 @@
 from dataclasses import dataclass
-from pydantic import BaseModel, Field, ConfigDict, validator
-from pydantic_ai import Agent, RunContext, ModelRetry
-from pydantic_ai.exceptions import UnexpectedModelBehavior, UsageLimitExceeded
-from pydantic import ValidationError
-import sys
-import os
+from pydantic import BaseModel, Field, ConfigDict
+from pydantic_ai import Agent, RunContext
+from dotenv import load_dotenv
 import asyncio
+import os
 import json
 import re
-from typing import Optional, Dict, Any, List, Union
-import logging
-from datetime import datetime
 
-# Configure logging for data directory context
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Load environment variables
-from dotenv import load_dotenv
 load_dotenv()
 
-# Use a simple model configuration to avoid import issues
-def get_simple_model():
-    """Simple model configuration without complex imports"""
-    model_name = os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
-    return model_name
-
-model = get_simple_model()
+# Use the model picker approach from the working version
+try:
+    from src.core.model_picker import ModelConfig, ModelType
+    model = ModelConfig.get_model(ModelType.REASONING)
+except ImportError:
+    # Fallback to simple model configuration
+    def get_simple_model():
+        """Simple model configuration without complex imports"""
+        model_name = os.getenv('LLM_MODEL', 'gpt-3.5-turbo')
+        return model_name
+    model = get_simple_model()
 
 @dataclass
 class SQLDependencies:
-    """Simple dependency injection for SQL agent"""
     tenant_id: str
     include_deleted: bool = False
 
 class SQLQueryOutput(BaseModel):
-    """Simple SQL query output - no validation here, we'll check safety separately"""
+    model_config = ConfigDict(json_schema_extra={
+        "example": {
+            "sql": "SELECT * FROM users ",
+            "explanation": "This query fetches all active users from the database"
+        }
+    })
+
     sql: str = Field(
         description='SQL query to execute to fetch the details requested in the user question',
         min_length=1
@@ -44,49 +42,44 @@ class SQLQueryOutput(BaseModel):
         description='Natural language explanation for the SQL query provided',
         min_length=1
     )
-    complexity: str = Field(
-        default="medium",
-        description='Query complexity: simple, medium, complex'
-    )
 
-# Simple global configuration
-def get_global_llm_config():
-    """Get global LLM configuration from environment variables"""
-    return {
-        'temperature': float(os.getenv('LLM_TEMPERATURE', '0.1')),
-        'max_tokens': int(os.getenv('LLM_MAX_TOKENS', '2000')),
-        'retries': int(os.getenv('LLM_RETRIES', '2')),
-        'enable_token_reporting': os.getenv('LLM_ENABLE_TOKEN_REPORTING', 'true').lower() == 'true'
-    }
+    def json_response(self) -> str:
+        """Returns a properly formatted JSON string"""
+        return self.model_dump_json(indent=2)
 
-# Get configuration
-config = get_global_llm_config()
+# Replace the existing system_prompt content with this updated version:
 
-# Professional SQL Agent with enhanced features
 sql_agent = Agent(
     model,
-    result_type=SQLQueryOutput,
+    output_type=SQLQueryOutput,
     deps_type=SQLDependencies,
-    retries=config['retries'],
     system_prompt="""
-You are an expert SQLite engineer. Your primary task is to convert user requests into a single, optimized, and valid SQLite query based on the provided database schema.
+You are an expert-level SQLite engineer. Your primary task is to convert user requests into a single, optimized, and valid SQLite query based on the provided database schema. You must follow all rules and patterns outlined below without deviation.
 
-### OUTPUT FORMAT
-Your final output MUST be a single, raw JSON object with these keys:
+### 1. CORE DIRECTIVE: OUTPUT FORMAT
+Your final output MUST be a single, raw JSON object and nothing else. It must contain two keys: `sql` and `explanation`. Do not add any extra characters, newlines, or text outside of this JSON structure.
 
 {
 "sql": "<A SINGLE, VALID SQLITE QUERY STRING>",
-"explanation": "<A CONCISE EXPLANATION OF THE QUERY>",
-"complexity": "<simple|medium|complex>"
+"explanation": "<A CONCISE EXPLANATION OF THE QUERY. If the user asks to save or download, begin the explanation with 'SAVE_FILE'.>"
 }
 
-### RULES
-1. **Single Query Only:** Generate only one SQL query
-2. **No Placeholders:** All values must be hardcoded literals, never use `?`
-3. **Schema is Truth:** Use only the table and column names from the provided schema
-4. **Default Status Filter:** Filter for `status = 'ACTIVE'` unless user specifies otherwise
-5. **Default Columns:** Always include key fields (email, login, name, etc.)
-6. **Default Sorting:** Use logical sorting (last_name, first_name for users, name for groups)
+### 2. GOLDEN RULES (APPLY TO ALL QUERIES)
+1.  **Single Query Only:** You MUST generate only one SQL query.
+2.  **No Placeholders:** All values must be hardcoded literals. NEVER use `?`.
+3.  **Schema is Truth:** The database schema provided below is the ONLY source of truth for table and column names. NEVER reference columns not explicitly listed in the schema.
+4.  **No Assumed Columns:** Do NOT assume tables have `is_deleted`, `active`, or other columns unless explicitly listed in the schema. Only use columns that are documented.
+5.  **Default Status Filter:** Unless the user specifies a different status (e.g., "inactive," "suspended"), you MUST filter for `status = 'ACTIVE'` for users, applications, and any other relevant entities.
+6.  **Default Columns:**
+    *   **Users:** ALWAYS include `email`, `login`, `first_name`, `last_name`, `status`. Also include `okta_id` if the query involves relationships (groups, apps, etc.).
+    *   **Groups:** ALWAYS include `name`, `description`, `okta_id`.
+    *   **Applications:** ALWAYS include `label`, `name`, `status`, `okta_id`.
+    *   Never select timestamp columns unless explicitly requested.
+7.  **Default Sorting:**
+    *   For **users**, `ORDER BY last_name ASC, first_name ASC`.
+    *   For **groups**, `ORDER BY name ASC`.
+    *   For **applications**, `ORDER BY label ASC`.
+    *   Only override these defaults if the user requests a different sort order.
 
 ### 3. QUERY GENERATION PROCESS (Follow these steps)
 
@@ -481,27 +474,6 @@ async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
             """
     return schema
 
-# Simple safety check function (called after getting response)
-def is_safe_sql(sql: str) -> bool:
-    """Simple safety check - done outside LLM to avoid retries"""
-    if not sql or not sql.strip():
-        return False
-    
-    sql_upper = sql.upper().strip()
-    
-    # Block dangerous operations
-    dangerous_keywords = ['DROP', 'DELETE', 'TRUNCATE', 'ALTER', 'CREATE', 'INSERT', 'UPDATE']
-    for keyword in dangerous_keywords:
-        if f' {keyword} ' in f' {sql_upper} ' or sql_upper.startswith(f'{keyword} '):
-            return False
-    
-    # Must be SELECT
-    return sql_upper.startswith('SELECT')
-
-#@sql_agent.system_prompt
-#async def add_tenant_context(ctx: RunContext[SQLDependencies]) -> str:
-#    return f"Using tenant_id: {ctx.deps.tenant_id}"
-
 def extract_json_from_text(text: str) -> dict:
     """Extract JSON from text response"""
     try:
@@ -543,187 +515,58 @@ def extract_json_from_text(text: str) -> dict:
         # If we get here, we couldn't find valid JSON
         raise ValueError(f"No valid JSON found in response: {text[:100]}...")
 
-async def professional_sql_query(question: str, tenant_id: str = "default", 
-                                include_deleted: bool = False) -> tuple[SQLQueryOutput, dict]:
-    """
-    Simple professional SQL query generation with basic token tracking
+def is_safe_sql(sql_query: str) -> bool:
+    """Simple SQL safety check - no validation retries here, just basic safety"""
     
-    Returns:
-        tuple: (SQLQueryOutput, usage_info)
-    """
-    config = get_global_llm_config()
+    if not sql_query or not isinstance(sql_query, str):
+        return False
+        
+    sql_lower = sql_query.lower().strip()
     
-    try:
-        # Create simple dependencies
-        deps = SQLDependencies(tenant_id=tenant_id, include_deleted=include_deleted)
+    # Must have SELECT
+    if not sql_lower.startswith('select'):
+        return False
         
-        # Execute query
-        logger.info(f"🔍 Processing SQL query: {question[:50]}...")
-        
-        response = await sql_agent.run(question, deps=deps)
-        
-        # Get usage information
-        usage = response.usage()
-        usage_info = {
-            'input_tokens': getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0)) if usage else 0,
-            'output_tokens': getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0)) if usage else 0,
-            'total_tokens': getattr(usage, 'total_tokens', 0) if usage else 0,
-            'model_name': getattr(usage, 'model', 'unknown') if usage else 'unknown'
-        }
-        
-        # Simple token reporting
-        if config.get('enable_token_reporting', True) and usage:
-            input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-            output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
-            total_tokens = getattr(usage, 'total_tokens', input_tokens + output_tokens)
-            logger.info(f"💰 Token Usage - Input: {input_tokens}, Output: {output_tokens}, Total: {total_tokens}")
+    # Block dangerous operations
+    dangerous_keywords = [
+        'drop', 'delete', 'insert', 'update', 'create', 'alter', 
+        'truncate', 'replace', 'exec', 'execute', 'call', 'procedure'
+    ]
+    
+    for keyword in dangerous_keywords:
+        if f' {keyword} ' in f' {sql_lower} ':
+            return False
             
-            # Basic cost estimation
-            estimated_cost = (input_tokens * 0.00001) + (output_tokens * 0.00003)
-            logger.info(f"💵 Estimated cost: ${estimated_cost:.6f}")
-        
-        # Get the result and do simple safety check
-        result = response.data
-        if result and is_safe_sql(result.sql):
-            logger.info(f"✅ Safe SQL query generated: {result.complexity} complexity")
-        else:
-            logger.warning("⚠️ Generated SQL failed safety check - but continuing")
-            
-        return result, usage_info
-        
-    except ModelRetry as e:
-        logger.error(f"🔄 SQL generation retry failed: {e}")
-        raise
-    except UnexpectedModelBehavior as e:
-        logger.error(f"🤖 Model behavior issue: {e}")
-        raise
-    except UsageLimitExceeded as e:
-        logger.error(f"💸 Usage limits exceeded: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"❌ SQL generation error: {e}")
-        raise
+    return True
 
 async def main():
-    """Phase 4 Enhanced main function with comprehensive professional features"""
-    print("\n🚀 Phase 4 Professional Okta SQL Query Assistant")
-    print("✨ Enhanced Features:")
-    print("   📊 Advanced token tracking & cost analysis")
-    print("   🔒 Comprehensive security validation")
-    print("   ⚡ Performance optimization hints")
-    print("   🎯 Confidence scoring & quality metrics")
-    print("   🔄 Graduated retry strategies")
-    print("   📈 Efficiency analytics")
-    print("\nType 'exit' to quit, 'config' to show settings\n")
-
-    # Initialize user context for enhanced dependency injection
-    user_context = {
-        'session_start': datetime.now().isoformat(),
-        'session_id': f"sql_session_{hash('main_user')}",
-        'preferences': {
-            'security_level': 'standard',
-            'performance_mode': 'balanced',
-            'detailed_logging': True
-        }
-    }
-
-    while True:
-        user_input = input("\nWhat would you like to know about your Okta data? > ").strip()
-        
-        if user_input.lower() == 'exit':
-            print("👋 Goodbye! Session analytics will be logged.")
-            break
-            
-        if user_input.lower() == 'config':
-            config = get_global_llm_config()
-            print("\n📋 Current Phase 4 Configuration:")
-            for key, value in config.items():
-                print(f"   {key}: {value}")
-            continue
-            
-        if not user_input:
-            continue
-
-        try:
-            # Phase 4: Enhanced query execution with comprehensive features
-            result, usage_info = await professional_sql_query(
-                question=user_input,
-                security_level=user_context['preferences']['security_level'],
-                user_context=user_context
-            )
-            
-            print("\n" + "="*80)
-            print("📊 PHASE 4 ENHANCED QUERY RESULTS")
-            print("="*80)
-            
-            # Core results
-            print(f"🔍 SQL Query:")
-            print(f"   {result.sql}")
-            print(f"\n📝 Explanation:")
-            print(f"   {result.explanation}")
-            
-            # Phase 4 enhancements
-            print(f"\n📈 Quality Metrics:")
-            print(f"   Complexity: {result.complexity}")
-            print(f"   Confidence Score: {result.confidence_score:.2f}/1.0")
-            print(f"   Estimated Rows: {result.estimated_rows}")
-            print(f"   Security Risk: {result.security_analysis.get('risk_level', 'unknown')}")
-            
-            if result.optimization_hints:
-                print(f"\n⚡ Performance Optimization Hints:")
-                for i, hint in enumerate(result.optimization_hints, 1):
-                    print(f"   {i}. {hint}")
-            
-            # Enhanced token analytics
-            print(f"\n💰 Token & Cost Analytics:")
-            print(f"   📥 Input Tokens: {usage_info['input_tokens']}")
-            print(f"   📤 Output Tokens: {usage_info['output_tokens']}")
-            print(f"   📊 Total Tokens: {usage_info['total_tokens']}")
-            
-            if usage_info.get('cost_breakdown'):
-                cost = usage_info['cost_breakdown']
-                print(f"   � Total Cost: ${cost['total_cost']:.6f}")
-                print(f"   🏷️ Model: {cost['model_type']}")
-                
-            if usage_info.get('efficiency_metrics'):
-                metrics = usage_info['efficiency_metrics']
-                print(f"   ⚡ Efficiency: {metrics['tokens_per_dollar']:.0f} tokens/$")
-                print(f"   📊 Cost per Query: ${metrics['cost_per_query']:.6f}")
-
-        except ModelRetry as mre:
-            print(f"\n🔄 Query retry exhausted after {get_global_llm_config()['retries']} attempts:")
-            print(f"   {str(mre)}")
-        except UnexpectedModelBehavior as umb:
-            print(f"\n🤖 Model behavior issue detected:")
-            print(f"   {str(umb)}")
-        except UsageLimitExceeded as ule:
-            print(f"\n💸 Usage limits exceeded:")
-            print(f"   {str(ule)}")
-        except ValidationError as ve:
-            print(f"\n📋 Data validation error:")
-            print(f"   {str(ve)}")
-        except Exception as e:
-            print(f"\n❌ Unexpected error:")
-            print(f"   {str(e)}")
-
-async def main():
-    """Simple test function"""
-    print("\n🚀 Okta SQL Query Assistant")
+    print("\nWelcome to Okta Query Assistant!")
     print("Type 'exit' to quit\n")
 
     while True:
-        question = input("\nWhat would you like to know? > ")
+        question = input("\nWhat would you like to know about your Okta data? > ")
         if question.lower() == 'exit':
             break
 
         try:
-            result, usage_info = await professional_sql_query(question)
-            print(f"\nSQL: {result.sql}")
-            print(f"Explanation: {result.explanation}")
-            print(f"Tokens: {usage_info['total_tokens']}")
+            response = await sql_agent.run(question)
+            print("\nAgent Response:" + (response.output))
+            result = extract_json_from_text(str(response.output))
+
+            print("\nGenerated SQL:")
+            print("-" * 40)
+            print(result["sql"])
+            print("\nExplanation:")
+            print(result["explanation"])
+
+        except ValueError as ve:
+            print(f"\nError parsing response: {str(ve)}")
+            print("Raw response:", str(response.output))
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"\nError: {str(e)}")
+
+        print("-" * 80)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
-	
