@@ -7,8 +7,16 @@ import asyncio
 import os
 import json
 import re
+import sys
+
+# Add src path for importing utils
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
 
 load_dotenv()
+
+# Setup centralized logging with file output
+logger = get_logger("okta_ai_agent.sql_agent", log_dir=get_default_log_dir())
 
 # Use the model picker approach from the working version
 try:
@@ -26,6 +34,7 @@ except ImportError:
 class SQLDependencies:
     tenant_id: str
     include_deleted: bool = False
+    flow_id: str = ""  # Correlation ID for flow tracking
 
 class SQLQueryOutput(BaseModel):
     model_config = ConfigDict(json_schema_extra={
@@ -539,17 +548,28 @@ async def main():
         if question.lower() == 'exit':
             break
 
+        # Generate correlation ID for this query
+        flow_id = generate_correlation_id()
+        set_correlation_id(flow_id)
+
         try:
+            logger.info(f"[{flow_id}] SQL Agent: Starting query generation")
+            logger.debug(f"[{flow_id}] Input query: {question}")
+            
             # Use structured output directly (no manual JSON parsing needed)
-            deps = SQLDependencies(tenant_id="default", include_deleted=False)
+            deps = SQLDependencies(tenant_id="default", include_deleted=False, flow_id=flow_id)
             result = await sql_agent.run(question, deps=deps)
+            
+            logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
+            logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
             
             # Simple token usage reporting (keeping it minimal)
             if hasattr(result, 'usage') and result.usage():
                 usage = result.usage()
                 input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
                 output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
-                print(f"💰 Token Usage: {input_tokens} in, {output_tokens} out")
+                logger.info(f"[{flow_id}] SQL generation completed - {input_tokens} in, {output_tokens} out tokens")
+                print(f"Token Usage: {input_tokens} in, {output_tokens} out")
 
             print("\nGenerated SQL:")
             print("-" * 40)
@@ -558,12 +578,16 @@ async def main():
             print(result.output.explanation)
 
         except ModelRetry as e:
-            print(f"\n🔄 Retry needed: {e}")
+            logger.error(f"[{flow_id}] SQL generation retry needed: {e}")
+            print(f"\nRetry needed: {e}")
         except UnexpectedModelBehavior as e:
-            print(f"\n⚠️ Unexpected behavior: {e}")
+            logger.error(f"[{flow_id}] SQL generation unexpected behavior: {e}")
+            print(f"\nUnexpected behavior: {e}")
         except UsageLimitExceeded as e:
-            print(f"\n💰 Usage limit exceeded: {e}")
+            logger.error(f"[{flow_id}] SQL generation usage limit exceeded: {e}")
+            print(f"\nUsage limit exceeded: {e}")
         except Exception as e:
+            logger.error(f"[{flow_id}] SQL generation failed: {e}")
             print(f"\nError: {str(e)}")
 
         print("-" * 80)

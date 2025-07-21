@@ -23,10 +23,10 @@ from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLim
 
 # Add src path for importing utils
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from utils.logging import get_logger, generate_correlation_id, set_correlation_id
+from utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
 
-# Setup centralized logging
-logger = get_logger(__name__)
+# Setup centralized logging with file output
+logger = get_logger("okta_ai_agent.results_formatter", log_dir=get_default_log_dir())
 
 # Configuration
 config = {
@@ -49,7 +49,7 @@ def _load_complete_data_prompt() -> str:
         with open(prompt_file, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
-        logger.warning("⚠️ Complete data prompt file not found, using fallback")
+        logger.warning("Complete data prompt file not found, using fallback")
         return """You are a Results Formatter Agent that processes complete datasets.
 CRITICAL: AGGREGATE DATA BY USER/ENTITY - Don't show repetitive rows!
 For user queries: Group by user_id and concatenate groups/apps into comma-separated lists.
@@ -62,7 +62,7 @@ def _load_sample_data_prompt() -> str:
         with open(prompt_file, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
-        logger.warning("⚠️ Sample data prompt file not found, using fallback")
+        logger.warning("Sample data prompt file not found, using fallback")
         return """You are a Results Formatter Agent that processes sample data and generates processing code.
 Analyze samples and create efficient code for processing complete datasets."""
 
@@ -294,10 +294,10 @@ async def _parse_and_enhance_response(result, flow_id: str, total_records: int, 
         if config['enable_token_reporting'] and hasattr(result, 'usage'):
             usage = result.usage()
             if usage:
-                logger.info(f"[{flow_id}] 💰 Token Usage:")
-                logger.info(f"   📥 Input: {getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))} tokens")
-                logger.info(f"   📤 Output: {getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))} tokens") 
-                logger.info(f"   📊 Total: {getattr(usage, 'total_tokens', 0)} tokens")
+                logger.debug(f"[{flow_id}] Token Usage:")
+                logger.debug(f"   Input: {getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))} tokens")
+                logger.debug(f"   Output: {getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))} tokens") 
+                logger.debug(f"   Total: {getattr(usage, 'total_tokens', 0)} tokens")
                 
                 # Add to response
                 input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
@@ -310,11 +310,11 @@ async def _parse_and_enhance_response(result, flow_id: str, total_records: int, 
                     'estimated_cost': f"${((input_tokens * 0.00001) + (output_tokens * 0.00003)):.6f}"
                 }
         
-        logger.info(f"[{flow_id}] ✅ Successfully processed with flexible parsing")
+        logger.info(f"[{flow_id}] Successfully processed with flexible parsing")
         return response_json
         
     except Exception as e:
-        logger.error(f"[{flow_id}] ❌ Response parsing failed: {e}")
+        logger.error(f"[{flow_id}] Response parsing failed: {e}")
         # Create fallback response
         return {
             'display_type': 'markdown',
@@ -337,36 +337,36 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
     total_records = _count_total_records(results)
     flow_id = metadata.get("flow_id", "unknown") if metadata else "unknown"
     
-    logger.info(f"[{flow_id}] 🎯 Results Formatter Agent Starting")
-    logger.info(f"[{flow_id}] 📊 Processing {total_records} total records (is_sample: {is_sample})")
-    logger.debug(f"[{flow_id}] 📝 Query: {query}")
-    logger.debug(f"[{flow_id}] 📋 Original Plan: {original_plan}")
+    logger.info(f"[{flow_id}] Results Formatter Agent Starting")
+    logger.info(f"[{flow_id}] Processing {total_records} total records (is_sample: {is_sample})")
+    logger.debug(f"[{flow_id}] Query: {query}")
+    logger.debug(f"[{flow_id}] Original Plan: {original_plan}")
     
     # Log the input data structure for debugging
     if 'raw_results' in results:
         raw_results = results['raw_results']
         if 'sql_execution' in raw_results:
             sql_data = raw_results['sql_execution'].get('data', [])
-            logger.debug(f"[{flow_id}] 💾 SQL Data: {len(sql_data)} records")
+            logger.debug(f"[{flow_id}] SQL Data: {len(sql_data)} records")
             if sql_data:
                 sample_record = sql_data[0]
-                logger.debug(f"[{flow_id}] 📑 Sample SQL Record Keys: {list(sample_record.keys())}")
-                logger.debug(f"[{flow_id}] 📑 Sample SQL Record: {sample_record}")
+                logger.debug(f"[{flow_id}] Sample SQL Record Keys: {list(sample_record.keys())}")
+                logger.debug(f"[{flow_id}] Sample SQL Record: {sample_record}")
     
     try:
         # Determine processing approach based on dataset size (prioritize complete processing for medium datasets)
         if total_records <= 200:  # Process up to 200 records directly to ensure aggregation works
             # Small-to-medium dataset - process directly with aggregation
-            logger.info(f"[{flow_id}] 🔄 Processing complete dataset directly")
+            logger.info(f"[{flow_id}] Processing complete dataset directly")
             return await _process_complete_data(query, results, original_plan, flow_id, total_records)
         else:
             # Large dataset - use sampling for efficiency and to avoid token limits
-            logger.info(f"[{flow_id}] 🔄 Processing samples for large dataset ({total_records} records)")
+            logger.info(f"[{flow_id}] Processing samples for large dataset ({total_records} records)")
             sampled_results = _create_intelligent_samples(results, total_records)
             return await _process_sample_data(query, sampled_results, original_plan, flow_id, total_records)
             
     except Exception as e:
-        logger.error(f"[{flow_id}] ❌ Results Formatter Agent Error: {e}")
+        logger.error(f"[{flow_id}] Results Formatter Agent Error: {e}")
         return {
             'display_type': 'markdown', 
             'content': {'text': f'**Error**: {e}'},
@@ -385,7 +385,7 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
                                 flow_id: str, total_records: int) -> Dict[str, Any]:
     """Process complete dataset directly without sampling"""
     
-    logger.info(f"[{flow_id}] 🎨 Starting complete data processing")
+    logger.info(f"[{flow_id}] Starting complete data processing")
     
     # Create enhanced prompt for complete data processing
     dataset_size_context = ""
@@ -400,42 +400,42 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
     prompt = _create_complete_data_prompt(query, results, original_plan, dataset_size_context, total_records)
     
     # Log the prompt being sent to LLM
-    logger.debug(f"[{flow_id}] 📝 Prompt to LLM (length: {len(prompt)} chars):")
-    logger.debug(f"[{flow_id}] 📝 Prompt Content: {prompt[:1000]}..." if len(prompt) > 1000 else f"[{flow_id}] 📝 Prompt Content: {prompt}")
+    logger.debug(f"[{flow_id}] Prompt to LLM (length: {len(prompt)} chars):")
+    logger.debug(f"[{flow_id}] Prompt Content: {prompt[:1000]}..." if len(prompt) > 1000 else f"[{flow_id}] Prompt Content: {prompt}")
     
     try:
-        logger.info(f"[{flow_id}] 🤖 Sending prompt to PydanticAI complete data formatter...")
+        logger.info(f"[{flow_id}] Sending prompt to PydanticAI complete data formatter...")
         
         # Run formatter with flexible validation
         result = await complete_data_formatter.run(prompt)
         
         # Log the LLM response
-        logger.debug(f"[{flow_id}] 🤖 LLM Response Type: {type(result)}")
+        logger.debug(f"[{flow_id}] LLM Response Type: {type(result)}")
         if hasattr(result, 'data'):
-            logger.debug(f"[{flow_id}] 🤖 LLM Response Data: {str(result.data)[:500]}...")
+            logger.debug(f"[{flow_id}] LLM Response Data: {str(result.data)[:500]}...")
         elif hasattr(result, 'message'):
-            logger.debug(f"[{flow_id}] 🤖 LLM Response Message: {str(result.message)[:500]}...")
+            logger.debug(f"[{flow_id}] LLM Response Message: {str(result.message)[:500]}...")
         else:
-            logger.debug(f"[{flow_id}] 🤖 LLM Response: {str(result)[:500]}...")
+            logger.debug(f"[{flow_id}] LLM Response: {str(result)[:500]}...")
         
         formatted_result = await _parse_and_enhance_response(result, flow_id, total_records, is_complete=True)
         
         # Log the final formatted result
-        logger.info(f"[{flow_id}] ✅ Complete data processing finished")
-        logger.debug(f"[{flow_id}] 📊 Final Result Keys: {list(formatted_result.keys())}")
+        logger.info(f"[{flow_id}] Complete data processing finished")
+        logger.debug(f"[{flow_id}] Final Result Keys: {list(formatted_result.keys())}")
         if 'content' in formatted_result:
             content = formatted_result['content']
             if isinstance(content, list):
-                logger.info(f"[{flow_id}] 📊 Final Content: {len(content)} items")
+                logger.info(f"[{flow_id}] Final Content: {len(content)} items")
                 if content:
-                    logger.debug(f"[{flow_id}] 📊 Sample Content Item: {content[0]}")
+                    logger.debug(f"[{flow_id}] Sample Content Item: {content[0]}")
             else:
-                logger.debug(f"[{flow_id}] 📊 Final Content: {str(content)[:200]}...")
+                logger.debug(f"[{flow_id}] Final Content: {str(content)[:200]}...")
         
         return formatted_result
         
     except Exception as e:
-        logger.error(f"[{flow_id}] ❌ Complete data processing failed: {e}")
+        logger.error(f"[{flow_id}] Complete data processing failed: {e}")
         # Return fallback response instead of re-raising
         return {
             'display_type': 'markdown',
@@ -457,14 +457,14 @@ async def _process_sample_data(query: str, sampled_results: Dict[str, Any], orig
     
     try:
         if config['enable_token_reporting']:
-            logger.info(f"[{flow_id}] 🎨 Processing samples and generating code with specialized PydanticAI agent...")
+            logger.info(f"[{flow_id}] Processing samples and generating code with specialized PydanticAI agent...")
         
         # Run formatter with flexible validation
         result = await sample_data_formatter.run(prompt)
         return await _parse_and_enhance_response(result, flow_id, total_records, is_complete=False)
         
     except Exception as e:
-        logger.error(f"[{flow_id}] ❌ Sample data processing failed: {e}")
+        logger.error(f"[{flow_id}] Sample data processing failed: {e}")
         # Return fallback response instead of re-raising
         return {
             'display_type': 'markdown',

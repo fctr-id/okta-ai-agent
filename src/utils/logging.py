@@ -121,11 +121,13 @@ def get_logger(name: str, log_dir: Optional[Path] = None) -> logging.Logger:
     # Add file handler if log_dir is provided
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f"{name.split('.')[-1]}.log")
+        # Use unified okta_ai_agent.log for all agents
+        log_file = os.path.join(log_dir, "okta_ai_agent.log")
         file_handler = RotatingFileHandler(
             log_file, 
             maxBytes=10*1024*1024, 
-            backupCount=5
+            backupCount=5,
+            encoding='utf-8'  # Fix for Windows Unicode/emoji logging
         )
         file_handler.setLevel(DEFAULT_FILE_LEVEL)
         file_formatter = logging.Formatter(
