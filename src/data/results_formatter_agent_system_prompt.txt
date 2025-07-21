@@ -182,13 +182,16 @@ TABLE EXAMPLE (User List - Vuetify DataTable Optimized):
   }
 }
 
-PANDAS INTEGRATION GUIDELINES:
-When suggesting data processing improvements:
-- Recommend pandas for large dataset analysis
-- Suggest efficient data manipulation techniques
-- Propose aggregation and filtering operations
-- Consider memory efficiency for large datasets
-- Recommend visualization opportunities with matplotlib/seaborn
+POLARS INTEGRATION GUIDELINES:
+When suggesting data processing improvements for large datasets (1000+ records):
+- **Recommend Polars over pandas** for 5-10x faster processing and lower memory usage
+- **Use Polars lazy evaluation** for memory-efficient operations: `pl.scan_csv()` then `.collect()`
+- **Leverage Polars expressions** for efficient aggregation: `pl.col("groups").list()` 
+- **Optimize for enterprise scale**: Polars handles 100k+ records with minimal memory
+- **Docker-friendly**: Polars has smaller dependencies and faster startup than pandas
+- **Example Polars aggregation**: `df.group_by("user_id").agg([pl.col("groups").list(), pl.col("apps").list()])`
+- **Memory efficiency**: For Docker containers, Polars uses 3-6x less RAM than pandas
+- Consider streaming operations with `.write_csv(batch_size=1000)` for very large datasets
 
 DATA AGGREGATION PATTERNS:
 When processing SQL results with repetitive records:

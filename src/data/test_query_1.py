@@ -28,7 +28,7 @@ from src.data.real_world_hybrid_executor import RealWorldHybridExecutor
 async def test_query_1():
     """Test Query 1: Users logged in last 7 days with their apps and groups (API→SQL)"""
     
-    print("🧪 END-TO-END TEST: QUERY 1 (API→SQL)")
+    print("END-TO-END TEST: QUERY 1 (API->SQL)")
     print("=" * 70)
     
     # Initialize the executor
@@ -37,7 +37,7 @@ async def test_query_1():
     # Query 1: Should trigger API→SQL workflow
     # API: Get login events from last 7 days (not in SQL)
     # SQL: Get apps and groups for those users (available in SQL)
-    query = "Find users logged in the last 7 days and fetch me their apps and groups"
+    query = "Find users logged in the last 7 days and fetch me their applications and groups"
     
     print(f"\n🎯 QUERY 1 (API→SQL): {query}")
     print(f"Expected workflow: API (system_log: last 7 days) → SQL (user apps + groups)")
@@ -57,7 +57,7 @@ async def test_query_2():
     # Query 2: Should trigger SQL→API workflow
     # SQL: Get users in specific group (available in SQL)
     # API: Get detailed group memberships, apps and roles for those users (not in SQL)
-    query = "Find users in the group sso-super-admins and fetch their apps, groups and roles"
+    query = "Find users in the group sso-super-admins and fetch their applications, groups and roles"
     
     print(f"\n🎯 QUERY 2 (SQL→API): {query}")
     print(f"Expected workflow: SQL (users in group) → API (groups + apps + roles)")

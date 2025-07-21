@@ -4615,17 +4615,16 @@
       "name": "List all System Log events",
       "entity": "system_log",
       "operation": "list_events",
-      "description": "Make sure you pass the relevant event codes depending on what the user is asking. If there are possbile muiltipple event codes, pass all them in the filter",
+      "description": "Limit 1000 (not 100) MUST be passed Make sure you pass the relevant event codes depending on what the user is asking. If there are possbile muiltipple event codes, pass all them in the filter",
       "folder_path": "System Log",
       "parameters": {
-        "required": [],
+        "required": ["limit"],
         "optional": [
           "since",
           "until",
           "after",
           "filter",
           "q",
-          "limit",
           "sortOrder"
         ]
       }

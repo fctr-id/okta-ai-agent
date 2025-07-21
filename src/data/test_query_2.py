@@ -98,7 +98,7 @@ async def execute_test_query(query: str, test_name: str, expected_workflow: str)
         has_api_filtering = endpoint_results.get('success', False)
         
         if has_sql and has_api_filtering:
-            detected_workflow = "SQL → API"
+            detected_workflow = "SQL→API"
         elif has_sql and not has_api_filtering:
             detected_workflow = "SQL Only"
         elif not has_sql and has_api_filtering:

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
 from dotenv import load_dotenv
 import asyncio
 import os
@@ -12,7 +13,7 @@ load_dotenv()
 # Use the model picker approach from the working version
 try:
     from src.core.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.REASONING)
+    model = ModelConfig.get_model(ModelType.CODING)
 except ImportError:
     # Fallback to simple model configuration
     def get_simple_model():
@@ -53,96 +54,61 @@ sql_agent = Agent(
     model,
     output_type=SQLQueryOutput,
     deps_type=SQLDependencies,
-    system_prompt="""
-You are an expert-level SQLite engineer. Your primary task is to convert user requests into a single, optimized, and valid SQLite query based on the provided database schema. You must follow all rules and patterns outlined below without deviation.
+    retries=0,  # Keep simple - no retries to avoid validation issues
+    system_prompt="""You are an expert-level SQLite engineer. Your primary task is to convert user requests into a single, optimized, and valid SQLite query based on the provided database schema. You must follow all rules and patterns outlined below without deviation.
 
 ### 1. CORE DIRECTIVE: OUTPUT FORMAT
-Your final output MUST be a single, raw JSON object and nothing else. It must contain two keys: `sql` and `explanation`. Do not add any extra characters, newlines, or text outside of this JSON structure.
-
+Your final output MUST be a single, raw JSON object. It must contain two keys: `sql` and `explanation`. Do not add any extra characters, newlines, or text outside of this JSON structure.
 {
 "sql": "<A SINGLE, VALID SQLITE QUERY STRING>",
 "explanation": "<A CONCISE EXPLANATION OF THE QUERY. If the user asks to save or download, begin the explanation with 'SAVE_FILE'.>"
 }
 
 ### 2. GOLDEN RULES (APPLY TO ALL QUERIES)
-1.  **Single Query Only:** You MUST generate only one SQL query.
-2.  **No Placeholders:** All values must be hardcoded literals. NEVER use `?`.
-3.  **Schema is Truth:** The database schema provided below is the ONLY source of truth for table and column names. NEVER reference columns not explicitly listed in the schema.
-4.  **No Assumed Columns:** Do NOT assume tables have `is_deleted`, `active`, or other columns unless explicitly listed in the schema. Only use columns that are documented.
-5.  **Default Status Filter:** Unless the user specifies a different status (e.g., "inactive," "suspended"), you MUST filter for `status = 'ACTIVE'` for users, applications, and any other relevant entities.
-6.  **Default Columns:**
-    *   **Users:** ALWAYS include `email`, `login`, `first_name`, `last_name`, `status`. Also include `okta_id` if the query involves relationships (groups, apps, etc.).
-    *   **Groups:** ALWAYS include `name`, `description`, `okta_id`.
-    *   **Applications:** ALWAYS include `label`, `name`, `status`, `okta_id`.
-    *   Never select timestamp columns unless explicitly requested.
-7.  **Default Sorting:**
-    *   For **users**, `ORDER BY last_name ASC, first_name ASC`.
-    *   For **groups**, `ORDER BY name ASC`.
-    *   For **applications**, `ORDER BY label ASC`.
-    *   Only override these defaults if the user requests a different sort order.
+1.  **Single Query Only:** You MUST generate only one SQL query. Do not use placeholders (`?`).
+2.  **Schema is Truth:** The database schema provided is the ONLY source of truth. NEVER use columns not explicitly listed.
+3.  **Default Filters:** Unless specified otherwise, you MUST filter for `status = 'ACTIVE'` for users and applications.
+4.  **Default Columns & Sorting:**
+    *   **Users:** ALWAYS include `email`, `login`, `first_name`, `last_name`, `status`. Include `okta_id` for queries involving relationships. Sort by `last_name`, `first_name`.
+    *   **Groups:** ALWAYS include `name`, `description`, `okta_id`. Sort by `name`.
+    *   **Applications:** ALWAYS include `label`, `name`, `status`, `okta_id`. Sort by `label`.
+5.  **Operator Choice:** Use `LIKE '%value%'` for free-text searches (names, labels), `IN ('val1', 'val2')` for lists, and `=` for exact matches (IDs, emails, status).
+6.  **Custom Attributes:** For fields not in the standard schema, use `JSON_EXTRACT(custom_attributes, '$.fieldName')`.
+7.  **JOINs:** Join tables ONLY on their `okta_id` relationships (e.g., `ON u.okta_id = ugm.user_okta_id`).
 
-### 3. QUERY GENERATION PROCESS (Follow these steps)
+### 3. QUERY PATTERNS
 
-**Step 1: Input Validation**
-*   If the user's question is generic or cannot be answered by the schema, set the `sql` value to `""` and explain why in the `explanation`.
+**Pattern 1: User Groups & Applications (Most Important)**
+*   To get a complete view of a user's groups and all applications (both direct and group-based), you MUST use the following `UNION` pattern. This ensures all groups are listed, even if they have no associated apps.
 
-**Step 2: Field & Operator Resolution (CRITICAL)**
-*   **Check Schema First:** Before writing a `WHERE` clause, determine if the field is a standard column or a custom attribute.
-    *   **Standard Columns:** `department`, `user_type`, `title`, `manager`, etc. Use direct column access (e.g., `WHERE department = 'Engineering'`).
-    *   **Custom Attributes:** For any other field, use `JSON_EXTRACT(custom_attributes, '$.fieldName')`.
-*   **Operator Choice:**
-    *   Use `LIKE '%value%'` for free-text searches on names, labels, and descriptions (e.g., user name, app label, group name).
-    *   Use `IN ('val1', 'val2')` when the user provides a list of exact values.
-    *   Use `=` for exact matches on IDs, emails, logins, and status codes.
-*   **Field Name Mapping:**
-    *   `userType` -> `user_type` (column)
-    *   `employeeNumber` -> `employee_number` (column)
-    *   `department` -> `department` (column)
-    *   `application` or `app name` -> `application.label` (column for searching)
-
-**Step 3: JOIN & Performance Strategy**
-*   **Keep JOINs Simple:** Join tables ONLY on their `okta_id` relationships (e.g., `ON u.okta_id = uf.user_okta_id`).
-*   **Filter in `WHERE`:** Do NOT add filtering conditions like `status` or `factor_type` into the `ON` clause. Use the `WHERE` clause for all filtering.
-*   **Prefer `NOT IN` for Exclusions:** To find records that do NOT have an associated record in another table, use the `okta_id NOT IN (SELECT ...)` subquery pattern. Avoid `LEFT JOIN ... WHERE id IS NULL`.
-
-### 4. ADVANCED QUERY PATTERNS
-
-**Pattern 1: API Context Integration**
-*   **Context, Not a Column:** API data provided in the user prompt is context text, NOT a database column.
-*   **Action:** Manually extract the IDs (`00u...`, `00g...`, `0oa...`) from the provided text. Hardcode these IDs into your query using a `WHERE okta_id IN ('id1', 'id2', ...)` clause.
-*   **Example:** If context is `{"actor": {"id": "00uropbgtlUuob0uH697"}}`, your query should contain `WHERE u.okta_id = '00uropbgtlUuob0uH697'`.
-
-**Pattern 2: Manager & Report Hierarchy**
-*   **Find a User's Manager:** `SELECT m.* FROM users u JOIN users m ON u.manager = m.login WHERE u.email = 'user_email'`.
-*   **Find a Manager's Reports:** `SELECT u.* FROM users u WHERE u.manager = 'manager_login'`.
-
-**Pattern 3: Comprehensive Application Assignments (CRITICAL)**
-*   When asked for user applications, user apps, application assignments, or app assignments, you MUST check for **both direct and group-based** assignments using a `UNION`.
-*   Use the following template:
     ```sql
-    -- Group-based assignments
-    SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, a.label, a.okta_id AS application_okta_id, 'Group' AS assignment_type, g.name AS assignment_source
+    -- Get all groups and any group-based apps
+    SELECT u.email, u.first_name, u.last_name, g.name as group_name, a.label as application_label, 'Group' as assignment_type, g.name as assignment_source
     FROM users u
-    JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
-    JOIN groups g ON ugm.group_okta_id = g.okta_id
-    JOIN group_application_assignments gaa ON g.okta_id = gaa.group_okta_id
-    JOIN applications a ON gaa.application_okta_id = a.okta_id
-    WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE' AND a.status = 'ACTIVE'
+    LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
+    LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id
+    LEFT JOIN group_application_assignments gaa ON g.okta_id = gaa.group_okta_id
+    LEFT JOIN applications a ON gaa.application_okta_id = a.okta_id AND a.status = 'ACTIVE'
+    WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE'
     UNION
-    -- Direct assignments
-    SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, a.label, a.okta_id AS application_okta_id, 'Direct' AS assignment_type, 'Direct Assignment' AS assignment_source
+    -- Get all direct app assignments
+    SELECT u.email, u.first_name, u.last_name, NULL as group_name, a.label as application_label, 'Direct' as assignment_type, 'Direct Assignment' as assignment_source
     FROM users u
     JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id
     JOIN applications a ON uaa.application_okta_id = a.okta_id
     WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE' AND a.status = 'ACTIVE'
-    ORDER BY email, label
+    ORDER BY email, group_name, application_label
     ```
 
-**Pattern 4: Timestamp Handling**
-*   If a user asks for a timestamp field, you MUST format it for local time.
-*   **Format:** `strftime('%Y-%m-%d %H:%M:%S', datetime(column_name, 'localtime')) AS column_name`
-*   **Example:** `SELECT strftime('%Y-%m-%d %H:%M:%S', datetime(created_at, 'localtime')) AS created_at FROM users`
+**Pattern 2: API Context Integration**
+*   If the prompt contains context with IDs (e.g., from a previous API call), you MUST extract those IDs and hardcode them into your query using a `WHERE okta_id IN ('id1', 'id2', ...)` clause.
 
+**Pattern 3: Manager & Report Hierarchy**
+*   **Find a User's Manager:** `SELECT m.* FROM users u JOIN users m ON u.manager = m.login WHERE u.email = 'user_email'`.
+*   **Find a Manager's Reports:** `SELECT u.* FROM users u WHERE u.manager = 'manager_login'`.
+
+**Pattern 4: Timestamp Handling**
+*   If a user asks for a timestamp, format it for local time: `strftime('%Y-%m-%d %H:%M:%S', datetime(column_name, 'localtime')) AS column_name`.
 
 ##### DATABASE SCHEMA (Source of Truth) #####
 # CRITICAL: Always reference this schema to determine if a field is a standard column or a custom attribute.
@@ -523,19 +489,44 @@ def is_safe_sql(sql_query: str) -> bool:
         
     sql_lower = sql_query.lower().strip()
     
-    # Must have SELECT
-    if not sql_lower.startswith('select'):
+    # Remove comments completely for analysis
+    lines = sql_lower.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith('--'):
+            # Remove inline comments
+            if '--' in line:
+                line = line.split('--')[0].strip()
+            if line:
+                cleaned_lines.append(line)
+    
+    if not cleaned_lines:
         return False
         
-    # Block dangerous operations
-    dangerous_keywords = [
-        'drop', 'delete', 'insert', 'update', 'create', 'alter', 
-        'truncate', 'replace', 'exec', 'execute', 'call', 'procedure'
+    cleaned_sql = ' '.join(cleaned_lines)
+    
+    # Must be a SELECT statement (can start with WITH for CTEs)
+    if not (cleaned_sql.startswith('select') or cleaned_sql.startswith('with')):
+        return False
+    
+    # Block truly dangerous operations (but allow CTEs and complex queries)
+    dangerous_patterns = [
+        'drop table', 'drop database', 'drop schema', 'drop view',
+        'delete from', 'insert into', 'update set',
+        'truncate table', 'create table', 'alter table',
+        'exec ', 'execute ', 'call ', 'procedure ',
+        '; drop', '; delete', '; insert', '; update', '; create'
     ]
     
-    for keyword in dangerous_keywords:
-        if f' {keyword} ' in f' {sql_lower} ':
+    for pattern in dangerous_patterns:
+        if pattern in cleaned_sql:
             return False
+    
+    # Additional safety: ensure it's primarily a read operation
+    # Allow WITH clauses, subqueries, JOINs, UNIONs - all safe for read operations
+    if 'select' not in cleaned_sql:
+        return False
             
     return True
 
@@ -549,19 +540,29 @@ async def main():
             break
 
         try:
-            response = await sql_agent.run(question)
-            print("\nAgent Response:" + (response.output))
-            result = extract_json_from_text(str(response.output))
+            # Use structured output directly (no manual JSON parsing needed)
+            deps = SQLDependencies(tenant_id="default", include_deleted=False)
+            result = await sql_agent.run(question, deps=deps)
+            
+            # Simple token usage reporting (keeping it minimal)
+            if hasattr(result, 'usage') and result.usage():
+                usage = result.usage()
+                input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
+                output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+                print(f"💰 Token Usage: {input_tokens} in, {output_tokens} out")
 
             print("\nGenerated SQL:")
             print("-" * 40)
-            print(result["sql"])
+            print(result.output.sql)
             print("\nExplanation:")
-            print(result["explanation"])
+            print(result.output.explanation)
 
-        except ValueError as ve:
-            print(f"\nError parsing response: {str(ve)}")
-            print("Raw response:", str(response.output))
+        except ModelRetry as e:
+            print(f"\n🔄 Retry needed: {e}")
+        except UnexpectedModelBehavior as e:
+            print(f"\n⚠️ Unexpected behavior: {e}")
+        except UsageLimitExceeded as e:
+            print(f"\n💰 Usage limit exceeded: {e}")
         except Exception as e:
             print(f"\nError: {str(e)}")
 
