@@ -95,8 +95,16 @@ ENDPOINT USAGE - MANDATORY COMPLIANCE:
 4. **NO 'published' PARAMETER**: NEVER use 'published' in filter expressions - use 'since'/'until' for time filtering
 5. **TIME FORMAT**: Use ISO 8601 with Z suffix for time parameters (e.g., "2025-07-09T00:00:00.000Z")
 6. **FILTER SYNTAX**: Follow SCIM filter syntax with correct operators: eq, ne, gt, lt, sw, co, ew
-7. **QUOTE STRINGS**: Properly quote string values in filter expressions
-8. **MANDATORY LIMIT**: ALWAYS set limit=100 for ALL API calls to prevent rate limiting and excessive data fetching
+7. **QUOTE STRINGS**: Use double quotes (not single quotes) for string values in filter expressions
+8. **PARENTHESES REQUIRED**: For multiple OR conditions, wrap the entire expression in parentheses
+9. **MANDATORY LIMIT**: ALWAYS set limit=100 for ALL API calls to prevent rate limiting and excessive data fetching
+
+🚨 SCIM FILTER EXAMPLES - MANDATORY FORMAT:
+- Single condition: filter=eventType eq "user.authentication.auth"
+- Multiple OR conditions: filter=(eventType eq "user.authentication.auth" or eventType eq "user.session.start")
+- With time range: filter=(eventType eq "user.authentication.auth") and published gt "2025-07-14T00:00:00.000Z"
+- WRONG FORMAT: filter=eventType eq 'user.session.start' or eventType eq 'user.authentication.sso'
+- CORRECT FORMAT: filter=(eventType eq "user.session.start" or eventType eq "user.authentication.sso")
 
 FORBIDDEN PATTERNS (DO NOT USE):
 - Generic endpoints like /api/v1/users, /api/v1/groups, /api/v1/apps

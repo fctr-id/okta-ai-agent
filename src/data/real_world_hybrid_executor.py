@@ -3,9 +3,9 @@ Real-world Hybrid Executor for Okta AI Agent.
 Based on test_streamlined_pipeline.py logic - NO MOCKS!
 
 This executor:
-1. Uses LLM1 to generate execution plans (real ExecutionPlanResponse)
+1. Uses Planning Agent to generate execution plans (real ExecutionPlanResponse)
 2. Uses SQL agent for database queries (real SQL execution)
-3. Uses endpoint filtering for LLM2 (real API endpoints)
+3. Uses endpoint filtering for API calls (real API endpoints)
 4. Combines SQL data + API endpoints for final results
 """
 
@@ -35,22 +35,33 @@ from pydantic_ai import Agent
 # Import model picker for LLM configurations
 from src.core.model_picker import ModelConfig, ModelType
 
+# Import centralized logging with correlation ID support
+from src.utils.logging import get_logger, set_correlation_id, get_correlation_id, get_default_log_dir
+
 # Import real components
 try:
     from sql_agent import sql_agent, SQLDependencies, is_safe_sql, extract_json_from_text
     print("SQL agent imported successfully (local copy)")
 except ImportError as e:
-    print(f"❌ Failed to import local SQL agent: {e}")
+    print(f"[ERROR] Failed to import local SQL agent: {e}")
     sql_agent = None
     is_safe_sql = None
     extract_json_from_text = None
+
+try:
+    from planning_agent import planning_agent, PlanningDependencies
+    print("Planning agent imported successfully (local copy)")
+except ImportError as e:
+    print(f"[ERROR] Failed to import local Planning agent: {e}")
+    planning_agent = None
+    PlanningDependencies = None
 
 # Constants for sampling and results processing (inspired by ExecutionManager)
 MAX_CHARS_FOR_FULL_RESULTS = 60000
 MAX_SAMPLES_PER_STEP = 5
 
 class ExecutionPlanResponse(BaseModel):
-    """LLM1 response matching the existing ExecutionPlan format"""
+    """Planning Agent response matching the existing ExecutionPlan format"""
     plan: Dict[str, Any]  # Contains steps, reasoning, partial_success_acceptable
     confidence: int
 
@@ -68,13 +79,13 @@ class StrictValidator:
     """Strict validation to prevent LLM hallucination"""
     
     @staticmethod
-    def validate_llm1_response(response: Dict, available_entities: List[str], entity_summary: Dict) -> Dict:
-        """Validate LLM1 response in ExecutionPlan format against available entities"""
+    def validate_planning_agent_response(response: Dict, available_entities: List[str], entity_summary: Dict) -> Dict:
+        """Validate Planning Agent response in ExecutionPlan format against available entities"""
         plan = response.get('plan', {})
         steps = plan.get('steps', [])
         
         if not steps:
-            raise ValidationError("LLM1 RESPONSE INVALID - No steps provided in plan")
+            raise ValidationError("PLANNING AGENT RESPONSE INVALID - No steps provided in plan")
         
         # Extract entities from tool_names in steps
         tool_names = [step.get('tool_name', '') for step in steps]
@@ -103,16 +114,16 @@ class StrictValidator:
                 invalid_entities.append(tool_name)
         
         if invalid_entities:
-            raise ValidationError(f"LLM1 HALLUCINATION DETECTED - Invalid entities: {invalid_entities}. Must use API entities: {api_entities[:5]}... or SQL tables: {sql_tables[:5]}...")
+            raise ValidationError(f"PLANNING AGENT HALLUCINATION DETECTED - Invalid entities: {invalid_entities}. Must use API entities: {api_entities[:5]}... or SQL tables: {sql_tables[:5]}...")
         
         # 2. Validate each step has required fields
         for i, step in enumerate(steps):
-            required_fields = ['tool_name', 'query_context', 'critical', 'reason']
+            required_fields = ['tool_name', 'query_context', 'critical', 'reasoning']
             missing_fields = [field for field in required_fields if field not in step]
             if missing_fields:
-                raise ValidationError(f"LLM1 STEP {i+1} INVALID - Missing fields: {missing_fields}")
+                raise ValidationError(f"PLANNING AGENT STEP {i+1} INVALID - Missing fields: {missing_fields}")
         
-        print(f"✅ LLM1 VALIDATION PASSED - {len(api_steps)} API steps, {len(sql_steps)} SQL steps")
+        print(f"[SUCCESS] PLANNING AGENT VALIDATION PASSED - {len(api_steps)} API steps, {len(sql_steps)} SQL steps")
         
         # Check for hybrid optimization opportunities
         if len(sql_steps) == 0 and len(api_steps) > 2:
@@ -131,25 +142,27 @@ class PreciseEndpointFilter:
         self.endpoints = condensed_reference['endpoints']
         self.entity_summary = condensed_reference['entity_summary']
     
-    def filter_endpoints(self, llm1_plan: ExecutionPlanResponse) -> Dict[str, Any]:
-        """Filter endpoints based on LLM1's explicit entity+operation specifications"""
-        steps = llm1_plan.plan.get('steps', [])
+    def filter_endpoints(self, planning_plan: ExecutionPlanResponse) -> Dict[str, Any]:
+        """Filter endpoints based on Planning Agent's explicit entity+operation specifications"""
+        steps = planning_plan.plan.get('steps', [])
         
-        # Extract entities and operations DIRECTLY from LLM1's explicit specifications
+        # Extract entities and operations DIRECTLY from Planning Agent's explicit specifications
         api_entities = []
         operations = []
         
-        print(f"🔍 EXTRACTING ENTITIES AND OPERATIONS FROM LLM1 PLAN:")
+        print(f"[SEARCH] EXTRACTING ENTITIES AND OPERATIONS FROM PLANNING AGENT PLAN:")
         for i, step in enumerate(steps, 1):
             tool_name = step.get('tool_name', '').lower()
-            operation = step.get('operation', '')
             query_context = step.get('query_context', '')
             
-            # Check if this is an API step (has operation specified)
-            if operation and tool_name in self.entity_summary:
+            # Check if this is an API step by checking if tool_name exists in entity_summary
+            if tool_name in self.entity_summary:
                 api_entities.append(tool_name)
-                operations.append(operation.lower())
-                print(f"   Step {i}: entity='{tool_name}', operation='{operation}'")
+                # Get the default operation for this entity (usually first one)
+                entity_ops = self.entity_summary[tool_name].get('operations', ['list'])
+                default_op = entity_ops[0] if entity_ops else 'list'
+                operations.append(default_op.lower())
+                print(f"   Step {i}: API entity='{tool_name}', default_operation='{default_op}'")
             else:
                 print(f"   Step {i}: SQL step '{tool_name}' (no operation filtering needed)")
         
@@ -158,19 +171,22 @@ class PreciseEndpointFilter:
         operations = list(set(operations))
         methods = ['GET']  # Default to GET for most operations
         
-        print(f"🎯 PRECISE FILTERING (API STEPS ONLY)")
+        print(f"[TARGET] PRECISE FILTERING (API STEPS ONLY)")
         print(f"   Entities: {entities}")
         print(f"   Operations: {operations}")
         print(f"   Methods: {methods}")
         
         if not entities:
-            print("   ℹ️ No API entities found - all steps are SQL")
+            print("   [INFO] No API entities found - all steps are SQL")
             return {
                 'success': True,
+                'original_endpoint_count': len(self.endpoints),
+                'filtered_endpoint_count': 0,
+                'reduction_percentage': 100.0,
                 'filtered_endpoints': [],
                 'entity_results': {},
                 'total_endpoints': 0,
-                'llm1_plan': llm1_plan.model_dump()
+                'planning_plan': planning_plan.model_dump()
             }
         
         # Filter endpoints for each entity
@@ -191,12 +207,12 @@ class PreciseEndpointFilter:
                     'selected': len(selected),
                     'endpoints': [ep['name'] for ep in selected]
                 }
-                print(f"   ✅ {entity}: {len(selected)} endpoints selected (from {len(entity_endpoints)} matches)")
+                print(f"   [SUCCESS] {entity}: {len(selected)} endpoints selected (from {len(entity_endpoints)} matches)")
                 for ep in selected:
                     print(f"      • {ep['method']} {ep['url_pattern']} - {ep['name']}")
             else:
                 entity_results[entity] = {'found': 0, 'selected': 0, 'endpoints': []}
-                print(f"   ❌ {entity}: No matching endpoints")
+                print(f"   [ERROR] {entity}: No matching endpoints")
         
         # Final safety limit
         if len(filtered_endpoints) > 8:
@@ -211,7 +227,7 @@ class PreciseEndpointFilter:
             'reduction_percentage': reduction_pct,
             'entity_results': entity_results,
             'filtered_endpoints': filtered_endpoints,
-            'llm1_plan': llm1_plan.model_dump()
+            'planning_plan': planning_plan.model_dump()
         }
     
     def _get_entity_operation_matches(self, entity: str, operations: List[str], methods: List[str]) -> List[Dict]:
@@ -276,10 +292,13 @@ class PreciseEndpointFilter:
 class RealWorldHybridExecutor:
     """
     Real-world hybrid executor that implements the exact logic from test_streamlined_pipeline.py
-    NO MOCKS - only real LLM1, real SQL, real endpoint filtering
+    NO MOCKS - only real Planning Agent, real SQL, real endpoint filtering
     """
     
     def __init__(self):
+        # Initialize centralized logging
+        self.logger = get_logger("okta_ai_agent.hybrid_executor", log_dir=get_default_log_dir())
+        
         self.db_path = os.path.join(project_root, "sqlite_db", "okta_sync.db")
         self.api_data_path = os.path.join(project_root, "src", "data", "Okta_API_entitity_endpoint_reference.json")
         self.schema_path = os.path.join(project_root, "src", "data", "okta_schema.json")
@@ -296,12 +315,12 @@ class RealWorldHybridExecutor:
         # Initialize model configuration
         self._initialize_model_config()
         
-        print("🚀 RealWorldHybridExecutor initialized")
+        print("[LAUNCH] RealWorldHybridExecutor initialized")
         print(f"   📁 DB Path: {self.db_path}")
         print(f"   📁 API Data: {self.api_data_path}")
         print(f"   📁 Schema: {self.schema_path}")
-        print(f"   📊 Entities loaded: {len(self.api_data.get('entity_summary', {}))}")
-        print(f"   🗃️ Tables loaded: {len(self.db_schema.get('sql_tables', {}))}")
+        print(f"   [DATA] Entities loaded: {len(self.api_data.get('entity_summary', {}))}")
+        print(f"   [DB] Tables loaded: {len(self.db_schema.get('sql_tables', {}))}")
     
     def _initialize_model_config(self):
         """Initialize and log model configuration"""
@@ -309,17 +328,17 @@ class RealWorldHybridExecutor:
             ai_provider = os.getenv('AI_PROVIDER', 'openai').lower()
             models = ModelConfig.get_models()
             
-            print(f"🤖 Model Configuration:")
-            print(f"   🎯 AI Provider: {ai_provider}")
-            print(f"   🧠 LLM1 (Reasoning): {models[ModelType.REASONING]}")
-            print(f"   💻 LLM2 (Coding): {models[ModelType.CODING]}")
+            print(f"[BOT] Model Configuration:")
+            print(f"   [TARGET] AI Provider: {ai_provider}")
+            print(f"   [BRAIN] Planning Agent (Reasoning): {models[ModelType.REASONING]}")
+            print(f"   [CODE] LLM2 (Coding): {models[ModelType.CODING]}")
             
             # Store models for easy access
             self.reasoning_model = models[ModelType.REASONING]
             self.coding_model = models[ModelType.CODING]
             
         except Exception as e:
-            print(f"⚠️ Model configuration warning: {e}")
+            print(f"[WARNING] Model configuration warning: {e}")
             print(f"   Using fallback configuration")
             self.reasoning_model = None
             self.coding_model = None
@@ -333,15 +352,15 @@ class RealWorldHybridExecutor:
             endpoints_count = len(api_data.get('endpoints', []))
             entity_count = len(api_data.get('entity_summary', {}))
             
-            print(f"✅ Loaded API data: {endpoints_count} endpoints, {entity_count} entities")
+            print(f"[SUCCESS] Loaded API data: {endpoints_count} endpoints, {entity_count} entities")
             
             # Log entity summary for verification
             entities = list(api_data.get('entity_summary', {}).keys())
-            print(f"   🏷️ Available entities: {entities[:10]}{'...' if len(entities) > 10 else ''}")
+            print(f"   [TAG] Available entities: {entities[:10]}{'...' if len(entities) > 10 else ''}")
             
             return api_data
         except Exception as e:
-            print(f"❌ Failed to load API data: {e}")
+            print(f"[ERROR] Failed to load API data: {e}")
             return {'endpoints': [], 'entity_summary': {}}
     
     def _load_db_schema(self) -> Dict:
@@ -351,52 +370,52 @@ class RealWorldHybridExecutor:
                 schema_data = json.load(f)
             
             tables_count = len(schema_data.get('sql_tables', {}))
-            print(f"✅ Loaded DB schema: {tables_count} tables")
+            print(f"[SUCCESS] Loaded DB schema: {tables_count} tables")
             
             # Log table names for verification
             tables = list(schema_data.get('sql_tables', {}).keys())
-            print(f"   🗃️ Available tables: {tables}")
+            print(f"   [DB] Available tables: {tables}")
             
             return schema_data
         except Exception as e:
-            print(f"❌ Failed to load DB schema: {e}")
+            print(f"[ERROR] Failed to load DB schema: {e}")
             return {'sql_tables': {}}
     
     def verify_loaded_data(self):
         """Verify that all required data is loaded correctly"""
-        print("\n🔍 VERIFYING LOADED DATA")
+        print("\n[SEARCH] VERIFYING LOADED DATA")
         print("=" * 50)
         
         # Verify API data
         api_entities = list(self.api_data.get('entity_summary', {}).keys())
         api_endpoints = self.api_data.get('endpoints', [])
         
-        print(f"📊 API Data:")
-        print(f"   🏷️ Entities: {len(api_entities)}")
-        print(f"   🔗 Endpoints: {len(api_endpoints)}")
+        print(f"[DATA] API Data:")
+        print(f"   [TAG] Entities: {len(api_entities)}")
+        print(f"   [LINK] Endpoints: {len(api_endpoints)}")
         
         if api_entities:
-            print(f"   📋 Sample entities: {api_entities[:5]}")
+            print(f"   [LIST] Sample entities: {api_entities[:5]}")
             
             # Show sample entity details
             sample_entity = api_entities[0]
             entity_details = self.api_data['entity_summary'][sample_entity]
-            print(f"   🔍 Sample '{sample_entity}' operations: {entity_details.get('operations', [])[:3]}")
+            print(f"   [SEARCH] Sample '{sample_entity}' operations: {entity_details.get('operations', [])[:3]}")
         
         # Verify DB schema
         db_tables = list(self.db_schema.get('sql_tables', {}).keys())
         
-        print(f"🗃️ Database Schema:")
-        print(f"   📋 Tables: {len(db_tables)}")
+        print(f"[DB] Database Schema:")
+        print(f"   [LIST] Tables: {len(db_tables)}")
         
         if db_tables:
-            print(f"   🔍 Available tables: {db_tables}")
+            print(f"   [SEARCH] Available tables: {db_tables}")
             
             # Show sample table details
             sample_table = db_tables[0]
             table_details = self.db_schema['sql_tables'][sample_table]
             columns = table_details.get('columns', [])
-            print(f"   📊 Sample '{sample_table}' columns: {columns[:5]}{'...' if len(columns) > 5 else ''}")
+            print(f"   [DATA] Sample '{sample_table}' columns: {columns[:5]}{'...' if len(columns) > 5 else ''}")
         
         # Verify files exist
         api_exists = os.path.exists(self.api_data_path)
@@ -404,9 +423,9 @@ class RealWorldHybridExecutor:
         db_exists = os.path.exists(self.db_path)
         
         print(f"📁 File Status:")
-        print(f"   {'✅' if api_exists else '❌'} API Data: {self.api_data_path}")
-        print(f"   {'✅' if schema_exists else '❌'} Schema: {self.schema_path}")
-        print(f"   {'✅' if db_exists else '❌'} Database: {self.db_path}")
+        print(f"   {'[SUCCESS]' if api_exists else '[ERROR]'} API Data: {self.api_data_path}")
+        print(f"   {'[SUCCESS]' if schema_exists else '[ERROR]'} Schema: {self.schema_path}")
+        print(f"   {'[SUCCESS]' if db_exists else '[ERROR]'} Database: {self.db_path}")
         
         return {
             'api_entities_count': len(api_entities),
@@ -422,28 +441,42 @@ class RealWorldHybridExecutor:
     async def execute_query(self, query: str) -> Dict[str, Any]:
         """
         Main execution method that follows test_streamlined_pipeline logic:
-        1. LLM1 generates execution plan
+        1. Planning Agent generates execution plan
         2. SQL queries based on steps  
         3. Endpoint filtering for LLM2
         4. Return combined results
         """
         
-        print(f"\n🚀 EXECUTING REAL HYBRID QUERY")
+        print(f"\n[LAUNCH] EXECUTING REAL HYBRID QUERY")
         print(f"=" * 60)
-        print(f"📝 Query: {query}")
+        print(f"[NOTE] Query: {query}")
         
-        correlation_id = f"hybrid_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Use existing correlation ID if available, otherwise generate hybrid-specific one
+        existing_correlation_id = get_correlation_id()
+        if existing_correlation_id:
+            correlation_id = existing_correlation_id
+            print(f"[SYNC] Using existing correlation ID: {correlation_id}")
+        else:
+            correlation_id = f"hybrid_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            print(f"[NEW] Generated hybrid correlation ID: {correlation_id}")
+        
+        # CRITICAL: Always set the correlation ID to ensure ALL agents use the same ID
+        # This ensures Planning Agent, SQL Agent, AND Results Formatter Agent all use identical correlation IDs
+        set_correlation_id(correlation_id)
+        print(f"[LOCK] Correlation ID locked for all agents: {correlation_id}")
         
         try:
-            # Phase 1: LLM1 Planning (REAL)
-            print(f"\n🧠 PHASE 1: LLM1 PLANNING")
+            # Phase 1: Planning Agent (REAL)
+            print(f"\n[BRAIN] PHASE 1: PLANNING AGENT")
             print("=" * 50)
             
-            llm1_result = await self._execute_llm1_planning(query, correlation_id)
-            if not llm1_result or not llm1_result.get('success'):
-                return {'success': False, 'error': 'LLM1 planning failed', 'correlation_id': correlation_id}
+            planning_result = await self._execute_planning_agent(query, correlation_id)
+            if not planning_result or not planning_result.get('success'):
+                return {'success': False, 'error': 'Planning Agent failed', 'correlation_id': correlation_id}
             
-            llm1_plan = llm1_result['llm1_plan']
+            # Extract the execution plan for compatibility with existing code
+            execution_plan_response = planning_result['execution_plan']
+            llm1_plan = execution_plan_response.model_dump()  # Keep variable name for compatibility
             
             # Phase 2-N: Dynamic Execution Based on LLM1 Plan Order
             sql_result = {'success': True, 'data': [], 'explanation': 'No SQL steps executed yet'}
@@ -469,72 +502,76 @@ class RealWorldHybridExecutor:
             has_api_endpoints = len(filter_result.get('filtered_endpoints', [])) > 0
             
             # Debug information
-            print(f"\n🔍 LLM2 DECISION LOGIC:")
-            print(f"   📋 SQL result exists: {step_results.get('sql_result') is not None}")
-            print(f"   ✅ SQL success: {sql_result.get('success')}")
-            print(f"   📊 SQL data count: {len(sql_result.get('data', []))}")
-            print(f"   🎯 Has SQL data: {has_sql_data}")
-            print(f"   🔗 API endpoints: {has_api_endpoints}")
-            print(f"   📝 LLM2 condition (has_api_endpoints and not has_sql_data): {has_api_endpoints and not has_sql_data}")
+            print(f"\n[SEARCH] LLM2 DECISION LOGIC:")
+            print(f"   [LIST] SQL result exists: {step_results.get('sql_result') is not None}")
+            print(f"   [SUCCESS] SQL success: {sql_result.get('success')}")
+            print(f"   [DATA] SQL data count: {len(sql_result.get('data', []))}")
+            print(f"   [TARGET] Has SQL data: {has_sql_data}")
+            print(f"   [LINK] API endpoints: {has_api_endpoints}")
+            print(f"   [NOTE] LLM2 condition (has_api_endpoints and not has_sql_data): {has_api_endpoints and not has_sql_data}")
             
             # Only run LLM2 if we have API endpoints but no complete SQL data
             # Skip LLM2 if we already have complete results from SQL
             llm2_result = {'success': False, 'code': '', 'explanation': 'Skipped - using direct SQL results'}
             
             if has_api_endpoints and not has_sql_data:
-                print(f"\n🤖 PHASE 4: LLM2 CODE GENERATION")
+                print(f"\n[BOT] PHASE 4: LLM2 CODE GENERATION")
                 print("=" * 50)
-                print("🎯 Generating API code for endpoints without SQL data")
+                print("[TARGET] Generating API code for endpoints without SQL data")
                 
                 llm2_result = await self._execute_llm2_code_generation(
-                    llm1_result, sql_result, filter_result, query, correlation_id, api_data_collected
+                    planning_result, sql_result, filter_result, query, correlation_id, api_data_collected
                 )
             else:
-                print(f"\n⏭️ PHASE 4: SKIPPING LLM2 CODE GENERATION")
+                print(f"\n[SKIP] PHASE 4: SKIPPING LLM2 CODE GENERATION")
                 print("=" * 50)
                 if has_sql_data:
-                    print("✅ Complete SQL data available - proceeding directly to results processing")
+                    print("[SUCCESS] Complete SQL data available - proceeding directly to results processing")
                 else:
-                    print("ℹ️ No API endpoints to process")
+                    print("[INFO] No API endpoints to process")
             
             # Phase 5: Execute Generated Code (only if LLM2 generated code)
             execution_result = None
             if llm2_result.get('success') and llm2_result.get('code'):
-                print(f"\n🚀 PHASE 5: CODE EXECUTION")
+                print(f"\n[LAUNCH] PHASE 5: CODE EXECUTION")
                 print("=" * 50)
                 
                 execution_result = await self._execute_generated_code(
                     llm2_result['code'], correlation_id
                 )
             else:
-                print(f"\n⏭️ PHASE 5: SKIPPING CODE EXECUTION")
+                print(f"\n[SKIP] PHASE 5: SKIPPING CODE EXECUTION")
                 print("=" * 50)
-                print("ℹ️ No code generated by LLM2 - using step results directly")
+                print("[INFO] No code generated by LLM2 - using step results directly")
                 execution_result = {'success': True, 'stdout': 'No code execution needed', 'stderr': ''}
             
             # Phase 6: Results Combination
-            print(f"\n🎯 PHASE 6: RESULTS COMBINATION")
+            print(f"\n[TARGET] PHASE 6: RESULTS COMBINATION")
             print("=" * 50)
             
-            final_result = await self._combine_results(llm1_result, sql_result, filter_result, llm2_result, correlation_id)
+            final_result = await self._combine_results(planning_result, sql_result, filter_result, llm2_result, correlation_id)
             
             # Add execution results to final result
             if execution_result:
                 final_result['execution_result'] = execution_result
             
             # Phase 7: Enhanced Results Processing with Results Formatter Agent (NEW!)
-            print(f"\n🧠 PHASE 7: RESULTS FORMATTER AGENT PROCESSING")
+            print(f"\n[BRAIN] PHASE 7: RESULTS FORMATTER AGENT PROCESSING")
             print("=" * 50)
             
             try:
+                # CRITICAL: Ensure correlation ID is set before Results Formatter Agent execution
+                set_correlation_id(correlation_id)
+                
                 enhanced_final_result = await self._process_final_results_with_llm3(
                     combined_results=final_result,
                     original_query=query,
+                    correlation_id=correlation_id,
                     execution_result=execution_result,
                     step_context=step_results.get('execution_context', {})  # Pass step context
                 )
                 
-                print(f"✅ Results Formatter Agent processing completed successfully")
+                print(f"[SUCCESS] Results Formatter Agent processing completed successfully")
                 
                 # Export results to CSV file
                 csv_file = await self._export_results_to_csv(enhanced_final_result, query, correlation_id, step_results)
@@ -544,36 +581,36 @@ class RealWorldHybridExecutor:
                 final_result = enhanced_final_result
                 
             except Exception as formatter_error:
-                print(f"⚠️ Results Formatter Agent processing failed: {formatter_error}")
-                print(f"🔄 Continuing with basic results...")
+                print(f"[WARNING] Results Formatter Agent processing failed: {formatter_error}")
+                print(f"[REFRESH] Continuing with basic results...")
                 # Keep the original final_result if Results Formatter Agent fails
             
-            print(f"\n✅ HYBRID EXECUTION COMPLETED!")
-            print(f"   📊 LLM1 Steps: {len(llm1_plan.get('plan', {}).get('steps', []))}")
-            print(f"   💾 SQL Results: {len(sql_result.get('data', []))} records")
-            print(f"   🔍 Filtered Endpoints: {filter_result.get('filtered_endpoint_count', 0)}")
-            print(f"   🤖 LLM2 Code Generated: {llm2_result.get('success', False)}")
-            print(f"   📝 Code Length: {len(llm2_result.get('code', ''))} characters")
-            print(f"   🚀 Code Executed: {execution_result.get('success', False) if execution_result else False}")
+            print(f"\n[SUCCESS] HYBRID EXECUTION COMPLETED!")
+            print(f"   [DATA] Planning Steps: {len(llm1_plan.get('plan', {}).get('steps', []))}")
+            print(f"   [SAVE] SQL Results: {len(sql_result.get('data', []))} records")
+            print(f"   [SEARCH] Filtered Endpoints: {filter_result.get('filtered_endpoint_count', 0)}")
+            print(f"   [BOT] LLM2 Code Generated: {llm2_result.get('success', False)}")
+            print(f"   [NOTE] Code Length: {len(llm2_result.get('code', ''))} characters")
+            print(f"   [LAUNCH] Code Executed: {execution_result.get('success', False) if execution_result else False}")
             
             # Enhanced execution summary with Results Formatter Agent info
             processing_method = final_result.get('processing_method', 'basic_combination')
             enhancement_features = final_result.get('enhancement_features', {})
-            print(f"   📋 Results Processing: {processing_method}")
+            print(f"   [LIST] Results Processing: {processing_method}")
             if enhancement_features.get('pandas_analytics'):
-                print(f"   📊 Pandas Analytics: ✅ Enabled")
-                print(f"   📈 Data Insights: ✅ Generated")
-                print(f"   📉 Visualizations: ✅ Suggested")
+                print(f"   [DATA] Pandas Analytics: [SUCCESS] Enabled")
+                print(f"   [UP] Data Insights: [SUCCESS] Generated")
+                print(f"   [DOWN] Visualizations: [SUCCESS] Suggested")
             
             # Export results to CSV
             csv_path = await self._export_results_to_csv(final_result, query, correlation_id, step_results)
             if csv_path:
-                print(f"📤 Results exported to CSV: {csv_path}")
+                print(f"[EXPORT] Results exported to CSV: {csv_path}")
             
             return final_result
             
         except Exception as e:
-            print(f"❌ Hybrid execution failed: {e}")
+            print(f"[ERROR] Hybrid execution failed: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -583,37 +620,106 @@ class RealWorldHybridExecutor:
                 'phase': 'execution'
             }
     
-    async def _execute_llm1_planning(self, query: str, correlation_id: str) -> Dict[str, Any]:
-        """Execute LLM1 planning phase using REAL LLM with existing system prompt (following test_streamlined_pipeline pattern)
+    async def _execute_planning_agent(self, query: str, correlation_id: str) -> Dict[str, Any]:
+        """Execute Planning Agent using PydanticAI with structured output and validation"""
         
-        VALIDATION APPROACH:
-        - LLM1 can suggest both SQL operations (using table names) and API operations (using entity names)
-        - SQL steps: tool_name in ['users', 'groups', 'applications', etc.] → go to SQL agent
-        - API steps: tool_name in ['user', 'group', 'application', etc.] → go to endpoint filtering
-        - Only validate that tool_name is either a valid SQL table OR a valid API entity
-        """
+        if planning_agent is None:
+            return {'success': False, 'error': 'Planning agent not available'}
         
-        # Get available entities and build system prompt DYNAMICALLY (following test_streamlined_pipeline.py)
+        
+        # Build database schema context
+        db_schema_context = self._build_db_schema_context()
+        
+        # Build API entities context
         available_entities = list(self.api_data.get('entity_summary', {}).keys())
         entity_summary = self.api_data.get('entity_summary', {})
+        api_entities_context = self._build_api_entities_context(available_entities, entity_summary)
         
-        print(f"🔍 Building LLM1 system prompt with {len(available_entities)} entities")
+        print(f"[REFRESH] Running Planning Agent with PydanticAI...")
+        print(f"   [DATA] {len(available_entities)} API entities available")
+        print(f"   [DB] {len(self.db_schema.get('sql_tables', {}))} SQL tables available")
         
-        # Load existing system prompt (like test_streamlined_pipeline.py)
-        system_prompt_path = os.path.join(os.path.dirname(__file__), "llm1_system_prompt.txt")
-        with open(system_prompt_path, 'r', encoding='utf-8') as f:
-            base_system_prompt = f.read()
-        
-        # Build dynamic entity operations text (exactly like test_streamlined_pipeline.py)
-        entity_operations_text = []
-        for entity, details in entity_summary.items():
-            operations = details.get('operations', [])
-            methods = details.get('methods', [])
-            entity_operations_text.append(f"  • {entity}: operations=[{', '.join(operations)}], methods=[{', '.join(methods)}]")
-        
-        entities_with_operations = "\n".join(entity_operations_text)
-        
-        # Build SQL schema context dynamically from actual schema data
+        try:
+            # Create dependencies for Planning Agent
+            planning_deps = PlanningDependencies(
+                available_entities=available_entities,
+                entity_summary=self.api_data.get('entity_summary', {}),
+                sql_tables=self.db_schema.get('tables', {}),
+                flow_id=correlation_id
+            )
+            
+            # CRITICAL: Ensure correlation ID is set before Planning Agent execution
+            set_correlation_id(correlation_id)
+            
+            # Log Planning Agent execution start
+            self.logger.info(f"[{correlation_id}] Planning Agent: Starting execution plan generation")
+            self.logger.debug(f"[{correlation_id}] Planning query: {query}")
+            
+            # Execute Planning Agent with structured output
+            planning_result = await planning_agent.run(
+                query, 
+                deps=planning_deps
+            )
+            
+            # Extract the structured output
+            planning_output = planning_result.output
+            
+            # Log Planning Agent completion
+            if hasattr(planning_result, 'usage') and planning_result.usage():
+                usage = planning_result.usage()
+                input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
+                output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+                self.logger.info(f"[{correlation_id}] Planning Agent completed - {input_tokens} in, {output_tokens} out tokens")
+            else:
+                self.logger.info(f"[{correlation_id}] Planning Agent completed successfully")
+            
+            print(f"[SUCCESS] Planning Agent completed successfully")
+            print(f"   [LIST] Plan confidence: {planning_output.plan.confidence}")
+            print(f"   [TARGET] Steps planned: {len(planning_output.plan.steps)}")
+            
+            # Convert to ExecutionPlanResponse format for compatibility
+            execution_plan_response = ExecutionPlanResponse(
+                plan={
+                    'steps': [step.model_dump() for step in planning_output.plan.steps],
+                    'reasoning': planning_output.plan.reasoning,
+                },
+                confidence=planning_output.plan.confidence
+            )
+            
+            # Validate the response
+            try:
+                validated_response = StrictValidator.validate_planning_agent_response(
+                    execution_plan_response.model_dump(), 
+                    available_entities, 
+                    entity_summary
+                )
+            except ValidationError as ve:
+                print(f"[ERROR] PLANNING AGENT VALIDATION FAILED: {ve}")
+                return {'success': False, 'error': f'Planning Agent validation failed: {ve}'}
+            
+            # Display plan details
+            print(f"� PLANNING AGENT PLAN:")
+            steps = execution_plan_response.plan.get('steps', [])
+            entities = list(set([step.get('tool_name', '') for step in steps]))
+            print(f"[TARGET] Entities: {entities}")
+            print(f"[LIST] Steps: {len(steps)} steps planned")
+            
+            # Return success with the execution plan
+            return {
+                'success': True,
+                'execution_plan': execution_plan_response,
+                'planning_output': planning_output,
+                'entities': entities,
+                'correlation_id': correlation_id
+            }
+            
+        except Exception as e:
+            print(f"[ERROR] Planning Agent execution failed: {e}")
+            print(f"Error details: {traceback.format_exc()}")
+            return {'success': False, 'error': f'Planning Agent error: {e}'}
+    
+    def _build_db_schema_context(self) -> str:
+        """Build database schema context for Planning Agent"""
         sql_tables = self.db_schema.get('sql_tables', {})
         sql_table_names = list(sql_tables.keys())
         
@@ -629,7 +735,7 @@ class RealWorldHybridExecutor:
                 table_desc += f", operations={fast_ops[:3]}{'...' if len(fast_ops) > 3 else ''}"
             sql_schema_details.append(table_desc)
         
-        sql_info = f"""
+        return f"""
 SQL DATABASE SCHEMA (actual schema data):
 Available Tables: {', '.join(sql_table_names)}
 
@@ -639,113 +745,33 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
 - If you see columns like 'user_okta_id', 'app_okta_id', 'factor_type' → that data is available in SQL
 - If you don't see role-related columns → that data requires API calls
 - Use table names as tool_name for SQL operations, API entity names for non-SQL operations"""
-        
-        # Update system prompt preserving HYBRID STRATEGY section
-        import re
-        entities_section = f"AVAILABLE ENTITIES AND OPERATIONS:\n{entities_with_operations}"
-        complete_section = f"{entities_section}\n{sql_info}"
-        
-        # Look for the specific AVAILABLE ENTITIES list (not HYBRID sections)
-        pattern = r'AVAILABLE ENTITIES:\nYou can use these exact entity names.*?(?=\n\nEXAMPLES|\nCRITICAL|\nCOMPLETE|$)'
-        
-        if re.search(pattern, base_system_prompt, flags=re.DOTALL):
-            updated_system_prompt = re.sub(pattern, complete_section, base_system_prompt, flags=re.DOTALL)
-            print(f"✅ Updated AVAILABLE ENTITIES section with dynamic content")
-        else:
-            # Fallback: append without replacing hybrid strategy
-            updated_system_prompt = base_system_prompt + f"\n\n{complete_section}"
-            print(f"⚠️ Appended dynamic content to preserve HYBRID STRATEGY")
-        
-        print(f"📝 System prompt built with:")
-        print(f"   🏷️ {len(available_entities)} entities")
-        print(f"   🗃️ {len(sql_tables)} SQL tables")
-        print(f"   📋 Sample entities: {available_entities[:5]}")
-        
-        # Create LLM1 agent (like test_streamlined_pipeline.py) using reasoning model
-        reasoning_model = self.reasoning_model if self.reasoning_model else ModelConfig.get_model(ModelType.REASONING)
-        llm1_agent_raw = Agent(
-            model=reasoning_model,
-            system_prompt=updated_system_prompt
-            # No result_type for raw response
-        )
-        
-        print(f"🔄 Running LLM1 planning...")
-        
-        # Get raw response (like test_streamlined_pipeline.py)
-        raw_result = await llm1_agent_raw.run(query)
-        raw_output = raw_result.output
-        print(f"🔍 Raw LLM1 output type: {type(raw_output)}")
-        
-        # Parse the raw output (like test_streamlined_pipeline.py)
-        if isinstance(raw_output, str):
-            try:
-                # Use extract_json_from_text to handle markdown code blocks
-                llm1_output_dict = extract_json_from_text(raw_output)
-            except Exception as e:
-                print(f"❌ Failed to parse LLM1 JSON output: {e}")
-                print(f"Raw output: {raw_output[:500]}...")
-                return {'success': False, 'error': f'LLM1 JSON parse error: {e}'}
-        else:
-            llm1_output_dict = raw_output
-        
-        # Create validated response object (like test_streamlined_pipeline.py)
-        try:
-            llm1_output = ExecutionPlanResponse(**llm1_output_dict)
-        except Exception as e:
-            print(f"❌ Failed to validate LLM1 response: {e}")
-            print(f"Response was: {llm1_output_dict}")
-            return {'success': False, 'error': f'LLM1 validation error: {e}'}
-        
-        # Validate LLM1 response using our updated validation logic
-        print("🔍 VALIDATING LLM1 RESPONSE...")
-        try:
-            # Call our static validation method correctly - it's in StrictValidator, not ValidationError
-            validated_response = StrictValidator.validate_llm1_response(
-                llm1_output.model_dump(), 
-                available_entities, 
-                entity_summary
-            )
-        except ValidationError as ve:
-            print(f"❌ LLM1 VALIDATION FAILED: {ve}")
-            return {'success': False, 'error': f'LLM1 validation failed: {ve}'}
-        except Exception as e:
-            print(f"❌ VALIDATION ERROR: {e}")
-            return {'success': False, 'error': f'Validation error: {e}'}
-        
-        # Display plan details
-        print(f"📋 LLM1 PLAN:")
-        steps = llm1_output.plan.get('steps', [])
-        entities = list(set([step.get('tool_name', '') for step in steps]))
-        print(f"🎯 Entities: {entities}")
-        print(f"📋 Steps: {len(steps)} steps planned")
-        print(f"🧠 Reasoning: {llm1_output.plan.get('reasoning', '')}")
-        print(f"🎯 Confidence: {llm1_output.confidence}%")
-        
-        # Show individual steps
-        for i, step in enumerate(steps, 1):
-            print(f"   Step {i}: {step.get('tool_name', '')} - {step.get('query_context', '')}")
-            print(f"           Critical: {step.get('critical', False)}, Reason: {step.get('reason', '')}")
-        
-        return {
-            'success': True,
-            'llm1_plan': llm1_output.model_dump(),
-            'entities': entities,
-            'correlation_id': correlation_id
-        }
     
-    async def _execute_sql_queries(self, llm1_plan: Dict, query: str, correlation_id: str, api_context: List = None) -> Dict[str, Any]:
+    def _build_api_entities_context(self, available_entities: List[str], entity_summary: Dict) -> str:
+        """Build API entities context for Planning Agent"""
+        entity_operations_text = []
+        for entity, details in entity_summary.items():
+            operations = details.get('operations', [])
+            methods = details.get('methods', [])
+            entity_operations_text.append(f"  • {entity}: operations=[{', '.join(operations)}], methods=[{', '.join(methods)}]")
+        
+        return f"AVAILABLE ENTITIES AND OPERATIONS:\n{chr(10).join(entity_operations_text)}"
+    
+    async def _execute_sql_queries(self, planning_plan: Dict, query: str, correlation_id: str, api_context: List = None) -> Dict[str, Any]:
         """Execute SQL queries with optional API context data"""
         
         if not sql_agent:
-            print("❌ SQL agent not available")
+            print("[ERROR] SQL agent not available")
             return {'success': False, 'error': 'SQL agent not available', 'data': []}
         
-        print(f"💾 Executing SQL queries...")
-        print(f"   🔍 DEBUG: Starting SQL execution")
+        print(f"[SAVE] Executing SQL queries...")
+        print(f"   [SEARCH] DEBUG: Starting SQL execution")
         
         try:
-            # Use the real SQL agent with proper tenant_id
-            sql_dependencies = SQLDependencies(tenant_id="default")
+            # Use the real SQL agent with proper tenant_id and correlation ID
+            sql_dependencies = SQLDependencies(tenant_id="default", flow_id=correlation_id)
+            
+            # CRITICAL: Ensure correlation ID is set before SQL Agent execution  
+            set_correlation_id(correlation_id)
             
             # Build context query if API context is provided
             context_query = query
@@ -757,19 +783,33 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                         sample_data = api_item['sample_data'][:MAX_SAMPLES_PER_STEP]  # Use proper sampling
                         
                         # For system log or any other data, use standard format and let LLM decide what to extract
-                        context_query += f"📊 Step {api_item.get('step_name', 'unknown')}:\n"
+                        context_query += f"[DATA] Step {api_item.get('step_name', 'unknown')}:\n"
                         context_query += f"   • Variable: {api_item.get('variable_name', 'unknown_variable')}\n"
                         context_query += f"   • Total Records: {api_item.get('total_records', len(sample_data))}\n"
                         context_query += f"   • Fields: {api_item.get('data_fields', [])}\n"
                         context_query += f"   • Sample Data:\n{json.dumps(sample_data, indent=6)}\n"
-                        context_query += f"   ⚠️  IMPORTANT: Use variable '{api_item.get('variable_name', 'unknown_variable')}' in your code to process ALL {api_item.get('total_records', len(sample_data))} records\n\n"
+                        context_query += f"   [WARNING]  IMPORTANT: Use variable '{api_item.get('variable_name', 'unknown_variable')}' in your code to process ALL {api_item.get('total_records', len(sample_data))} records\n\n"
             
-            print(f"🔍 DEBUG: Starting SQL execution")
-            print(f"💬 FULL QUERY TEXT PASSED TO SQL AGENT:")
+            print(f"[SEARCH] DEBUG: Starting SQL execution")
+            print(f"[CHAT] FULL QUERY TEXT PASSED TO SQL AGENT:")
             print("=" * 80)
             print(context_query)
             print("=" * 80)
+            
+            # Log SQL agent execution start
+            self.logger.info(f"[{correlation_id}] SQL Agent: Starting query generation")
+            self.logger.debug(f"[{correlation_id}] Input query length: {len(context_query)} characters")
+            
             sql_result = await sql_agent.run(context_query, deps=sql_dependencies)
+            
+            # Log SQL agent execution completion
+            if hasattr(sql_result, 'usage') and sql_result.usage():
+                usage = sql_result.usage()
+                input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
+                output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+                self.logger.info(f"[{correlation_id}] SQL Agent completed - {input_tokens} in, {output_tokens} out tokens")
+            else:
+                self.logger.info(f"[{correlation_id}] SQL Agent completed successfully")
             
             # Extract data from the SQL agent response (PydanticAI structured output)
             try:
@@ -778,14 +818,14 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 sql_query = sql_output.sql if sql_output else ''
                 explanation = sql_output.explanation if sql_output else ''
                 
-                print(f"🔍 DEBUG: Generated FULL SQL Query:")
+                print(f"[SEARCH] DEBUG: Generated FULL SQL Query:")
                 print(f"   {sql_query}")
-                print(f"📝 SQL Explanation: {explanation}")
-                print(f"🔍 DEBUG: SQL Query Length: {len(sql_query)} characters")
+                print(f"[NOTE] SQL Explanation: {explanation}")
+                print(f"[SEARCH] DEBUG: SQL Query Length: {len(sql_query)} characters")
                 
                 # Simple safety check
                 if is_safe_sql and not is_safe_sql(sql_query):
-                    print("⚠️ SQL query failed safety check - blocking execution")
+                    print("[WARNING] SQL query failed safety check - blocking execution")
                     return {'success': False, 'error': 'Unsafe SQL query generated', 'explanation': explanation, 'data': []}
                 
                 # Execute the SQL query against the database
@@ -800,21 +840,21 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                         'correlation_id': correlation_id
                     }
                 else:
-                    print("⚠️ SQL agent returned empty query")
+                    print("[WARNING] SQL agent returned empty query")
                     return {'success': False, 'error': 'Empty SQL query generated', 'explanation': explanation, 'data': []}
                     
             except Exception as e:
-                print(f"❌ Failed to parse SQL agent response: {e}")
+                print(f"[ERROR] Failed to parse SQL agent response: {e}")
                 return {'success': False, 'error': f'SQL parsing error: {e}', 'data': []}
                 
         except Exception as e:
-            print(f"❌ SQL execution failed: {e}")
+            print(f"[ERROR] SQL execution failed: {e}")
             return {'success': False, 'error': str(e), 'data': []}
 
     async def _execute_raw_sql_query(self, sql_query: str, correlation_id: str) -> List[Dict]:
         """Execute raw SQL query against the database and return results"""
         
-        print(f"🗃️ Executing SQL query against database...")
+        print(f"[DB] Executing SQL query against database...")
         
         try:
             import sqlite3
@@ -833,33 +873,33 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
             
             conn.close()
             
-            print(f"✅ SQL query executed successfully: {len(data)} records returned")
+            print(f"[SUCCESS] SQL query executed successfully: {len(data)} records returned")
             if data:
-                print(f"📊 Sample record keys: {list(data[0].keys())}")
+                print(f"[DATA] Sample record keys: {list(data[0].keys())}")
             
             return data
             
         except Exception as e:
-            print(f"❌ Database query failed: {e}")
+            print(f"[ERROR] Database query failed: {e}")
             return []
     
-    async def _execute_endpoint_filtering(self, llm1_plan: Dict, correlation_id: str) -> Dict[str, Any]:
+    async def _execute_endpoint_filtering(self, planning_plan: Dict, correlation_id: str) -> Dict[str, Any]:
         """Execute endpoint filtering based on LLM1 plan using REAL filtering logic"""
         
-        print(f"🔍 Filtering endpoints based on LLM1 plan...")
+        print(f"[SEARCH] Filtering endpoints based on LLM1 plan...")
         
         try:
             # Create ExecutionPlanResponse from the plan
-            llm1_output = ExecutionPlanResponse(**llm1_plan)
+            planning_output = ExecutionPlanResponse(**planning_plan)
             
             # Use the real endpoint filter
             filter_engine = PreciseEndpointFilter(self.api_data)
-            filter_results = filter_engine.filter_endpoints(llm1_output)
+            filter_results = filter_engine.filter_endpoints(planning_output)
             
-            print(f"📊 FILTERING RESULTS:")
-            print(f"📈 Original endpoints: {filter_results['original_endpoint_count']}")
-            print(f"📉 Filtered endpoints: {filter_results['filtered_endpoint_count']}")
-            print(f"🎯 Reduction: {filter_results['reduction_percentage']}%")
+            print(f"[DATA] FILTERING RESULTS:")
+            print(f"[UP] Original endpoints: {filter_results['original_endpoint_count']}")
+            print(f"[DOWN] Filtered endpoints: {filter_results['filtered_endpoint_count']}")
+            print(f"[TARGET] Reduction: {filter_results['reduction_percentage']}%")
             
             # Add explicit success indicator for downstream processing
             filter_results['success'] = True
@@ -867,7 +907,7 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
             return filter_results
             
         except Exception as e:
-            print(f"❌ Endpoint filtering failed: {e}")
+            print(f"[ERROR] Endpoint filtering failed: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -877,21 +917,21 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 'filtered_endpoints': []
             }
     
-    async def _execute_llm2_code_generation(self, llm1_result: Dict, sql_result: Dict, filter_result: Dict, query: str, correlation_id: str, api_data_collected: List = None) -> Dict[str, Any]:
+    async def _execute_llm2_code_generation(self, planning_result: Dict, sql_result: Dict, filter_result: Dict, query: str, correlation_id: str, api_data_collected: List = None) -> Dict[str, Any]:
         """Execute LLM2 code generation phase using SQL data + filtered endpoints"""
         
         # Prepare data for LLM2 first
         sql_data = sql_result.get('data', [])
         filtered_endpoints = filter_result.get('filtered_endpoints', [])
         
-        print(f"🤖 Generating Python code with SQL data + API endpoints...")
-        print(f"📊 LLM2 Context Summary:")
-        print(f"   💾 SQL Records: {len(sql_data)}")
-        print(f"   🔗 API Endpoints: {len(filtered_endpoints)}")
+        print(f"[BOT] Generating Python code with SQL data + API endpoints...")
+        print(f"[DATA] LLM2 Context Summary:")
+        print(f"   [SAVE] SQL Records: {len(sql_data)}")
+        print(f"   [LINK] API Endpoints: {len(filtered_endpoints)}")
         
         # Log endpoint details for verification
         for i, ep in enumerate(filtered_endpoints, 1):
-            print(f"   📋 Endpoint {i}: {ep.get('method', '')} {ep.get('url_pattern', '')}")
+            print(f"   [LIST] Endpoint {i}: {ep.get('method', '')} {ep.get('url_pattern', '')}")
             print(f"      • Name: {ep.get('name', '')}")
             print(f"      • Entity: {ep.get('entity', '')}, Operation: {ep.get('operation', '')}")
             req_params = ep.get('parameters', {}).get('required', [])
@@ -902,7 +942,7 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
         
         
         if not sql_data and not filtered_endpoints:
-            print("⚠️ No SQL data or API endpoints available for code generation")
+            print("[WARNING] No SQL data or API endpoints available for code generation")
             return {
                 'success': False, 
                 'error': 'No data available for code generation',
@@ -929,7 +969,7 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 }
                 for ep in filtered_endpoints
             ],
-            'entities_involved': llm1_result.get('entities', [])
+            'entities_involved': planning_result.get('entities', [])
         }
         
         # Load LLM2 system prompt from file
@@ -938,13 +978,13 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
             with open(llm2_prompt_path, 'r', encoding='utf-8') as f:
                 base_llm2_prompt = f.read()
         except FileNotFoundError:
-            print(f"⚠️ llm2_system_prompt.txt not found at {llm2_prompt_path}, using fallback prompt")
+            print(f"[WARNING] llm2_system_prompt.txt not found at {llm2_prompt_path}, using fallback prompt")
             base_llm2_prompt = "You are LLM2, a Python code generator for Okta operations. Generate working Python code that combines SQL data with API calls."
         
         # Create dynamic LLM2 system prompt with context
         # Extract Step 2 description for LLM2 context
-        llm1_plan = llm1_result.get('llm1_plan', {}).get('plan', {})
-        steps = llm1_plan.get('steps', [])
+        planning_plan = planning_result.get('execution_plan', {}).model_dump() if 'execution_plan' in planning_result else planning_result.get('planning_output', {}).execution_plan.model_dump() if 'planning_output' in planning_result else {}
+        steps = planning_plan.get('plan', {}).get('steps', []) if 'plan' in planning_plan else planning_plan.get('steps', [])
         step2_description = "No specific step found"
         
         # Find the API step (usually step 2 for role assignments)
@@ -959,7 +999,7 @@ DYNAMIC CONTEXT FOR THIS REQUEST:
 - LLM2 Task: {step2_description}
 - SQL Records Available: {len(sql_data)}
 - API Endpoints Available: {len(filtered_endpoints)}
-- Entities: {llm1_result.get('entities', [])}
+- Entities: {planning_result.get('entities', [])}
 
 AVAILABLE SQL DATA SAMPLE:
 {json.dumps(sql_data[:2], indent=2) if sql_data else 'No SQL data available'}
@@ -1016,7 +1056,11 @@ Generate practical, executable code that solves the user's query: {query}"""
                 result_type=LLM2CodeResponse  # Enforce JSON structure
             )
             
-            print(f"🔄 Running LLM2 code generation...")
+            print(f"[REFRESH] Running LLM2 code generation...")
+            
+            # Log LLM2 execution start with detailed context
+            self.logger.info(f"[{correlation_id}] LLM2 Code Generation: Starting code generation")
+            self.logger.debug(f"[{correlation_id}] LLM2 Context: SQL records={len(sql_data)}, API endpoints={len(filtered_endpoints)}")
             
             # Generate code
             llm2_raw_result = await llm2_agent.run(
@@ -1024,7 +1068,16 @@ Generate practical, executable code that solves the user's query: {query}"""
             )
             
             llm2_output = llm2_raw_result.output
-            print(f"🔍 LLM2 output type: {type(llm2_output)}")
+            print(f"[SEARCH] LLM2 output type: {type(llm2_output)}")
+            
+            # Log LLM2 token usage if available
+            if hasattr(llm2_raw_result, 'usage') and llm2_raw_result.usage():
+                usage = llm2_raw_result.usage()
+                input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
+                output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+                self.logger.info(f"[{correlation_id}] LLM2 Code Generation completed - {input_tokens} in, {output_tokens} out tokens")
+            else:
+                self.logger.info(f"[{correlation_id}] LLM2 Code Generation completed successfully")
             
             # Parse LLM2 response - should be LLM2CodeResponse object
             if isinstance(llm2_output, LLM2CodeResponse):
@@ -1032,7 +1085,7 @@ Generate practical, executable code that solves the user's query: {query}"""
                 python_code = llm2_output.python_code
                 explanation = llm2_output.explanation
                 requirements = llm2_output.requirements
-                print(f"✅ Successfully parsed LLM2 Pydantic response")
+                print(f"[SUCCESS] Successfully parsed LLM2 Pydantic response")
             elif isinstance(llm2_output, str):
                 try:
                     # Fallback: try to parse JSON manually
@@ -1040,9 +1093,9 @@ Generate practical, executable code that solves the user's query: {query}"""
                     python_code = llm2_response.get('python_code', '')
                     explanation = llm2_response.get('explanation', '')
                     requirements = llm2_response.get('requirements', [])
-                    print(f"✅ Successfully parsed LLM2 JSON response")
+                    print(f"[SUCCESS] Successfully parsed LLM2 JSON response")
                 except json.JSONDecodeError as e:
-                    print(f"❌ LLM2 returned invalid JSON: {e}")
+                    print(f"[ERROR] LLM2 returned invalid JSON: {e}")
                     print(f"Raw output: {llm2_output[:500]}...")
                     return {
                         'success': False,
@@ -1065,10 +1118,16 @@ Generate practical, executable code that solves the user's query: {query}"""
                 python_code = re.sub(r'\n```\s*$', '', python_code, flags=re.MULTILINE)
                 python_code = python_code.strip()
             
-            print(f"✅ LLM2 code generation completed")
-            print(f"📝 Code length: {len(python_code)} characters")
-            print(f"📋 Requirements: {requirements}")
-            print(f"🔍 Code preview: {python_code[:200]}{'...' if len(python_code) > 200 else ''}")
+            # Log the FULL generated code for debugging (user requested complete code visibility)
+            self.logger.info(f"[{correlation_id}] LLM2 Generated Code - Length: {len(python_code)} characters")
+            self.logger.debug(f"[{correlation_id}] LLM2 Complete Generated Code:\n{python_code}")
+            self.logger.debug(f"[{correlation_id}] LLM2 Explanation: {explanation}")
+            self.logger.debug(f"[{correlation_id}] LLM2 Requirements: {requirements}")
+            
+            print(f"[SUCCESS] LLM2 code generation completed")
+            print(f"[NOTE] Code length: {len(python_code)} characters")
+            print(f"[LIST] Requirements: {requirements}")
+            print(f"[SEARCH] Code preview: {python_code[:200]}{'...' if len(python_code) > 200 else ''}")
             
             return {
                 'success': True,
@@ -1083,7 +1142,9 @@ Generate practical, executable code that solves the user's query: {query}"""
             }
             
         except Exception as e:
-            print(f"❌ LLM2 code generation failed: {e}")
+            print(f"[ERROR] LLM2 code generation failed: {e}")
+            # Log the LLM2 error for debugging
+            self.logger.error(f"[{correlation_id}] LLM2 Code Generation failed: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -1094,28 +1155,29 @@ Generate practical, executable code that solves the user's query: {query}"""
                 'requirements': []
             }
     
-    async def _combine_results(self, llm1_result: Dict, sql_result: Dict, filter_result: Dict, llm2_result: Dict, correlation_id: str) -> Dict[str, Any]:
+    async def _combine_results(self, planning_result: Dict, sql_result: Dict, filter_result: Dict, llm2_result: Dict, correlation_id: str) -> Dict[str, Any]:
         """Combine all results into final response"""
         
-        print(f"🎯 Combining all results...")
+        print(f"[TARGET] Combining all results...")
         
         return {
             'success': True,
             'correlation_id': correlation_id,
             'timestamp': datetime.now().isoformat(),
-            'llm1_planning': {
-                'success': llm1_result.get('success'),
-                'entities': llm1_result.get('entities', []),
-                'steps_count': len(llm1_result.get('llm1_plan', {}).get('plan', {}).get('steps', [])),
-                'confidence': llm1_result.get('llm1_plan', {}).get('confidence'),
-                'reasoning': llm1_result.get('llm1_plan', {}).get('plan', {}).get('reasoning'),
-                'full_plan': llm1_result.get('llm1_plan', {}).get('plan', {}),  # Include full plan for multi-step pipeline
-                'planned_steps': llm1_result.get('llm1_plan', {}).get('plan', {}).get('steps', [])  # Direct access to steps
+            'planning_agent': {
+                'success': planning_result.get('success'),
+                'entities': planning_result.get('entities', []),
+                'steps_count': len(planning_result.get('execution_plan', {}).plan.get('steps', []) if 'execution_plan' in planning_result else []),
+                'confidence': planning_result.get('execution_plan', {}).confidence if 'execution_plan' in planning_result else None,
+                'reasoning': planning_result.get('planning_output', {}).plan.reasoning if 'planning_output' in planning_result else None,
+                'full_plan': planning_result.get('execution_plan', {}).plan if 'execution_plan' in planning_result else {},
+                'planned_steps': planning_result.get('execution_plan', {}).plan.get('steps', []) if 'execution_plan' in planning_result else []
             },
             'sql_execution': {
                 'success': sql_result.get('success'),
                 'records_count': len(sql_result.get('data', [])),
-                'data_sample': sql_result.get('data', [])[:3],  # First 3 records as sample
+                'data_sample': sql_result.get('data', [])[:3],  # First 3 records as sample for display
+                'data': sql_result.get('data', []),  # Complete dataset for Results Formatter Agent counting
                 'sql_query': sql_result.get('sql_query', ''),
                 'explanation': sql_result.get('explanation', '')
             },
@@ -1136,13 +1198,13 @@ Generate practical, executable code that solves the user's query: {query}"""
             'execution_summary': {
                 'total_sql_records': len(sql_result.get('data', [])),
                 'total_api_endpoints': filter_result.get('filtered_endpoint_count', 0),
-                'entities_involved': llm1_result.get('entities', []),
+                'entities_involved': planning_result.get('entities', []),
                 'sql_to_api_ready': len(sql_result.get('data', [])) > 0 and filter_result.get('filtered_endpoint_count', 0) > 0,
                 'next_phase': 'Ready for SQL→API mapping execution'
             }
         }
     
-    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, execution_result: Dict[str, Any] = None, step_context: Dict[str, Any] = None, use_structured: bool = True) -> Dict[str, Any]:
+    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, correlation_id: str, execution_result: Dict[str, Any] = None, step_context: Dict[str, Any] = None, use_structured: bool = True) -> Dict[str, Any]:
         """
         Process final results using Results Formatter Agent with pandas enhancement.
         
@@ -1160,12 +1222,12 @@ Generate practical, executable code that solves the user's query: {query}"""
             Dict containing both raw results and enhanced processed summary
         """
         
-        print(f"📋 PHASE 7: ENHANCED RESULTS PROCESSING (Results Formatter Agent)")
+        print(f"[LIST] PHASE 7: ENHANCED RESULTS PROCESSING (Results Formatter Agent)")
         print("=" * 50)
         
         # Phase 1: Try structured Results Formatter Agent first if enabled
         if use_structured:
-            print(f"🤖 Using Results Formatter Agent with PydanticAI (Modern)")
+            print(f"[BOT] Using Results Formatter Agent with PydanticAI (Modern)")
             try:
                 from src.data.results_formatter_agent import process_results_structured
                 
@@ -1179,42 +1241,63 @@ Generate practical, executable code that solves the user's query: {query}"""
                 
                 # Fallback to old format if no variables stored
                 if not step_results_for_processing:
-                    sql_data = combined_results.get('sql_execution', {}).get('data', [])
+                    # CRITICAL: For Results Formatter Agent, pass COMPLETE SQL data for proper counting
+                    # Use the full data from sql_execution, not just the sample
+                    sql_data = combined_results.get('sql_execution', {}).get('data', [])  # Use COMPLETE data
                     if sql_data:
                         step_results_for_processing["step_1_sql"] = sql_data
+                        print(f"[DATA] Passing {len(sql_data)} SQL records to Results Formatter Agent")
                     
                     if execution_result and execution_result.get('success'):
                         stdout = execution_result.get('stdout', '')
                         if stdout:
                             step_results_for_processing["step_2_api"] = [{'raw_output': stdout}]
+
+                # CRITICAL: Pass the complete raw_results to Results Formatter Agent for proper record counting
+                # This allows the agent to count total records correctly for mode selection (sample vs complete)
+                # The Results Formatter Agent needs ALL data for counting, then will create samples internally for LLM
+                complete_results_structure = {
+                    'raw_results': combined_results,  # Complete results for counting
+                    'step_results': step_results_for_processing  # Processed results for formatting
+                }
+                
+                print(f"[DEBUG] Results Formatter Agent Data Summary:")
+                print(f"   SQL Records: {len(combined_results.get('sql_execution', {}).get('data', []))}")
+                print(f"   API Endpoints: {combined_results.get('endpoint_filtering', {}).get('filtered_count', 0)}")
+                print(f"   Total for counting: {len(combined_results.get('sql_execution', {}).get('data', []))}")
                 
                 # Use structured Results Formatter Agent processor
                 structured_response = await process_results_structured(
                     query=original_query,
-                    results=step_results_for_processing,
+                    results=complete_results_structure,  # Pass complete structure for proper counting
                     original_plan=None,
                     is_sample=False,
-                    metadata={'flow_id': 'hybrid_executor_structured'}
+                    metadata={'flow_id': correlation_id}  # Use the SAME correlation ID as other agents
                 )
                 
-                print(f"✅ [Structured Results Formatter Agent] Successfully processed with {structured_response.get('display_type')} format")
+                print(f"[SUCCESS] Results Formatter Agent processed with {structured_response.get('display_type')} format")
                 
                 return {
                     'success': True,
                     'raw_results': combined_results,
                     'processed_summary': structured_response,
-                    'processing_method': 'results_formatter_structured_pydantic'
+                    'processing_method': 'results_formatter_structured_pydantic',
+                    'enhancement_features': {
+                        'pandas_analytics': True,
+                        'data_insights': True,
+                        'visualization_suggestions': True
+                    }
                 }
                 
             except Exception as e:
-                print(f"⚠️ [Structured Results Formatter Agent] Failed: {e}")
-                print(f"🔄 Falling back to original Results Formatter Agent implementation...")
+                print(f"[WARNING] [Structured Results Formatter Agent] Failed: {e}")
+                print(f"[REFRESH] Falling back to original Results Formatter Agent implementation...")
         
         # Original LLM3 implementation (fallback) - DISABLED due to compatibility issues
-        print(f"🤖 Skipping Original LLM3 Results Processor (deprecated interface)")
+        print(f"[BOT] Skipping Original LLM3 Results Processor (deprecated interface)")
         
         # Use basic fallback instead since the structured formatter already processed results
-        print(f"🔄 Using basic results combination...")
+        print(f"[REFRESH] Using basic results combination...")
         return {
             'success': True,
             'raw_results': combined_results,
@@ -1225,13 +1308,19 @@ Generate practical, executable code that solves the user's query: {query}"""
     async def _execute_generated_code(self, python_code: str, correlation_id: str) -> Dict[str, Any]:
         """Execute the generated Python code and capture results"""
         
-        print(f"🚀 EXECUTING GENERATED CODE")
+        print(f"[LAUNCH] EXECUTING GENERATED CODE")
+        
+        # Log code execution start (avoid logging full code due to size)
+        self.logger.info(f"[{correlation_id}] Code Execution: Starting execution of generated LLM2 code")
+        self.logger.debug(f"[{correlation_id}] Code length: {len(python_code)} characters")
         
         try:
             # Save the code to a temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(python_code)
                 temp_file = f.name
+            
+            self.logger.debug(f"[{correlation_id}] Code Execution: Saved code to temporary file: {temp_file}")
             
             # Execute the code and capture output
             result = subprocess.run(
@@ -1246,8 +1335,15 @@ Generate practical, executable code that solves the user's query: {query}"""
             os.unlink(temp_file)
             
             if result.returncode == 0:
-                print(f"✅ Code executed successfully!")
+                print(f"[SUCCESS] Code executed successfully!")
                 print(result.stdout)
+                
+                # Log successful execution results (truncate large outputs)
+                self.logger.info(f"[{correlation_id}] Code Execution: Completed successfully (return code: 0)")
+                stdout_preview = result.stdout[:500] + "..." if len(result.stdout) > 500 else result.stdout
+                self.logger.debug(f"[{correlation_id}] Code Execution stdout preview: {stdout_preview}")
+                if result.stderr:
+                    self.logger.debug(f"[{correlation_id}] Code Execution stderr: {result.stderr}")
                 
                 return {
                     'success': True,
@@ -1257,8 +1353,13 @@ Generate practical, executable code that solves the user's query: {query}"""
                     'execution_time': 'N/A'  # Could add timing if needed
                 }
             else:
-                print(f"❌ Code execution failed with return code {result.returncode}")
+                print(f"[ERROR] Code execution failed with return code {result.returncode}")
                 print(result.stderr)
+                
+                # Log failed execution
+                self.logger.error(f"[{correlation_id}] Code Execution: Failed with return code {result.returncode}")
+                self.logger.error(f"[{correlation_id}] Code Execution stderr: {result.stderr}")
+                self.logger.debug(f"[{correlation_id}] Code Execution stdout: {result.stdout}")
                 
                 return {
                     'success': False,
@@ -1270,6 +1371,7 @@ Generate practical, executable code that solves the user's query: {query}"""
                 
         except subprocess.TimeoutExpired:
             print(f"⏰ Code execution timed out after 60 seconds")
+            self.logger.error(f"[{correlation_id}] Code Execution: Timed out after 60 seconds")
             return {
                 'success': False,
                 'error': 'Execution timeout (60s)',
@@ -1277,7 +1379,8 @@ Generate practical, executable code that solves the user's query: {query}"""
                 'stderr': 'Timeout expired'
             }
         except Exception as e:
-            print(f"❌ Failed to execute code: {e}")
+            print(f"[ERROR] Failed to execute code: {e}")
+            self.logger.error(f"[{correlation_id}] Code Execution: Exception occurred - {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -1285,7 +1388,7 @@ Generate practical, executable code that solves the user's query: {query}"""
                 'stderr': str(e)
             }
     
-    async def _execute_steps_in_order(self, llm1_plan: Dict, query: str, correlation_id: str) -> Dict[str, Any]:
+    async def _execute_steps_in_order(self, planning_plan: Dict, query: str, correlation_id: str) -> Dict[str, Any]:
         """
         Execute steps in the order specified by LLM1 plan with ExecutionManager pattern enhancements.
         
@@ -1296,9 +1399,9 @@ Generate practical, executable code that solves the user's query: {query}"""
         - Structured execution flow with proper data flow tracking
         """
         
-        steps = llm1_plan.get('plan', {}).get('steps', [])
+        steps = planning_plan.get('plan', {}).get('steps', [])
         if not steps:
-            print("⚠️ No steps found in LLM1 plan")
+            print("[WARNING] No steps found in Planning plan")
             return {
                 'sql_result': {'success': True, 'data': [], 'explanation': 'No steps to execute'},
                 'filter_result': {'success': True, 'filtered_endpoints': [], 'filtered_endpoint_count': 0},
@@ -1317,7 +1420,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             'data_flow': {}
         }
 
-        print(f"🔄 ENHANCED EXECUTION: {len(steps)} steps with context passing")
+        print(f"[REFRESH] ENHANCED EXECUTION: {len(steps)} steps with context passing")
         for i, step in enumerate(steps, 1):
             tool_name = step.get('tool_name', '')
             query_context = step.get('query_context', '')
@@ -1336,7 +1439,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             query_context = step.get('query_context', '')
             critical = step.get('critical', False)
             
-            print(f"\n📋 STEP {i}/{len(steps)}: {tool_name}")
+            print(f"\n[LIST] STEP {i}/{len(steps)}: {tool_name}")
             print(f"   Context: {query_context}")
             print(f"   Critical: {critical}")
             print(f"   Available Data: {len(step_context['accumulated_data'])} items")
@@ -1344,7 +1447,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             try:
                 # ExecutionManager Enhancement: Context-aware step execution
                 step_result = await self._execute_single_step_enhanced(
-                    step, step_context, query, correlation_id, llm1_plan
+                    step, step_context, query, correlation_id, planning_plan
                 )
                 
                 # Ensure step_result is a dictionary
@@ -1373,7 +1476,7 @@ Generate practical, executable code that solves the user's query: {query}"""
                     if step_result.get('api_data'):
                         api_data_collected.extend(step_result['api_data'])
                 
-                print(f"   ✅ Step {i} completed in {step_time:.2f}s")
+                print(f"   [SUCCESS] Step {i} completed in {step_time:.2f}s")
                 
             except Exception as e:
                 step_time = time.time() - step_start_time
@@ -1386,22 +1489,22 @@ Generate practical, executable code that solves the user's query: {query}"""
                 }
                 step_context['errors'].append(error_info)
                 
-                print(f"   ❌ Step {i} failed in {step_time:.2f}s: {str(e)}")
+                print(f"   [ERROR] Step {i} failed in {step_time:.2f}s: {str(e)}")
                 
                 if critical:
                     print(f"   � Critical step failed, halting execution")
                     break
                 else:
-                    print(f"   ⚠️ Non-critical step failed, continuing")
+                    print(f"   [WARNING] Non-critical step failed, continuing")
                     continue
 
         # ExecutionManager Enhancement: Execution summary
         total_time = (datetime.now() - step_context['execution_start_time']).total_seconds()
-        print(f"\n📊 EXECUTION SUMMARY:")
-        print(f"   ⏱️ Total Time: {total_time:.2f}s")
-        print(f"   ✅ Completed: {len(step_context['completed_steps'])}/{len(steps)}")
-        print(f"   ❌ Errors: {len(step_context['errors'])}")
-        print(f"   📊 Total Data: {len(step_context['accumulated_data'])} items")
+        print(f"\n[DATA] EXECUTION SUMMARY:")
+        print(f"   [TIME] Total Time: {total_time:.2f}s")
+        print(f"   [SUCCESS] Completed: {len(step_context['completed_steps'])}/{len(steps)}")
+        print(f"   [ERROR] Errors: {len(step_context['errors'])}")
+        print(f"   [DATA] Total Data: {len(step_context['accumulated_data'])} items")
 
         return {
             'sql_result': sql_result,
@@ -1480,12 +1583,12 @@ Generate practical, executable code that solves the user's query: {query}"""
         if not step_context.get('accumulated_data'):
             return ""
         
-        context_parts = ["\n🔗 CONTEXT FROM PREVIOUS STEPS:"]
+        context_parts = ["\n[LINK] CONTEXT FROM PREVIOUS STEPS:"]
         
         for item in step_context['accumulated_data']:
             # Ensure item is a dictionary, skip if it's not
             if not isinstance(item, dict):
-                print(f"   ⚠️ Skipping non-dict item in accumulated_data: {type(item)} - {str(item)[:50]}...")
+                print(f"   [WARNING] Skipping non-dict item in accumulated_data: {type(item)} - {str(item)[:50]}...")
                 continue
                 
             variable_name = item.get('variable_name', 'unknown_variable')
@@ -1494,7 +1597,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             step_name = item.get('step_name', 'unknown_step')
             data_fields = item.get('data_fields', [])
             
-            context_parts.append(f"\n📊 Step {step_name}:")
+            context_parts.append(f"\n[DATA] Step {step_name}:")
             context_parts.append(f"   • Variable: {variable_name}")
             context_parts.append(f"   • Total Records: {total_records}")
             context_parts.append(f"   • Fields: {data_fields}")
@@ -1507,15 +1610,15 @@ Generate practical, executable code that solves the user's query: {query}"""
                     context_parts.append(f"   • Sample (first 3 records):\n{json.dumps(sample_data[:3], indent=6)}")
             
             # Key instruction for LLMs
-            context_parts.append(f"   ⚠️  IMPORTANT: Use variable '{variable_name}' in your code to process ALL {total_records} records")
+            context_parts.append(f"   [WARNING]  IMPORTANT: Use variable '{variable_name}' in your code to process ALL {total_records} records")
         
-        context_parts.append(f"\n🎯 Current Step: {current_step_name}")
-        context_parts.append("📝 INSTRUCTIONS: The samples above show data structure. Generate code that processes the FULL datasets stored in the named variables.")
+        context_parts.append(f"\n[TARGET] Current Step: {current_step_name}")
+        context_parts.append("[NOTE] INSTRUCTIONS: The samples above show data structure. Generate code that processes the FULL datasets stored in the named variables.")
         
         return "\n".join(context_parts)
 
     async def _execute_single_step_enhanced(self, step: Dict, step_context: Dict, query: str, 
-                                          correlation_id: str, llm1_plan: Dict = None) -> Dict:
+                                          correlation_id: str, planning_plan: Dict = None) -> Dict:
         """
         Execute a single step with enhanced context tracking and sample-based data passing.
         Implements ExecutionManager patterns for variable management and context passing.
@@ -1523,16 +1626,16 @@ Generate practical, executable code that solves the user's query: {query}"""
         step_name = step.get('tool_name', f"Step_{len(step_context['completed_steps']) + 1}")
         step_type = self._determine_step_type_simple(step)
         
-        print(f"   🎯 Executing {step_type.upper()} Step: {step_name}")
+        print(f"   [TARGET] Executing {step_type.upper()} Step: {step_name}")
         
         try:
             if step_type == 'sql':
-                print(f"   🔍 DEBUG: About to execute SQL step")
+                print(f"   [SEARCH] DEBUG: About to execute SQL step")
                 
                 try:
                     # Use the step's query_context instead of the original user query
                     step_query = step.get('query_context', query)
-                    print(f"   🔍 DEBUG: Using step query_context: {step_query}")
+                    print(f"   [SEARCH] DEBUG: Using step query_context: {step_query}")
                     
                     # Build enhanced context with samples and variable names
                     enhanced_context = self._build_enhanced_context_for_llm(step_context, step_name)
@@ -1540,26 +1643,26 @@ Generate practical, executable code that solves the user's query: {query}"""
                     
                     # Check if we have API data samples to enhance the SQL query
                     if step_context['accumulated_data']:
-                        print(f"   🔗 Using sample context from {len(step_context['accumulated_data'])} previous steps")
+                        print(f"   [LINK] Using sample context from {len(step_context['accumulated_data'])} previous steps")
                         result = await self._execute_sql_queries(
-                            llm1_plan, enhanced_query, correlation_id, step_context['accumulated_data']
+                            planning_plan, enhanced_query, correlation_id, step_context['accumulated_data']
                         )
                     else:
-                        result = await self._execute_sql_queries(llm1_plan, enhanced_query, correlation_id)
+                        result = await self._execute_sql_queries(planning_plan, enhanced_query, correlation_id)
                     
                     # Debug: Log result details
-                    print(f"   🔍 SQL result type: {type(result)}")
-                    print(f"   🔍 SQL result preview: {str(result)[:100]}...")
+                    print(f"   [SEARCH] SQL result type: {type(result)}")
+                    print(f"   [SEARCH] SQL result preview: {str(result)[:100]}...")
                     
                     # Ensure result is a dictionary
                     if not isinstance(result, dict):
-                        print(f"   ⚠️ Converting non-dict result to error dict")
+                        print(f"   [WARNING] Converting non-dict result to error dict")
                         result = {'success': False, 'error': str(result), 'data': []}
                     
                     # Store SQL result with VARIABLE NAME and SAMPLE for next steps
                     if isinstance(result, dict) and result.get('success'):
                         sql_data = result.get('data', [])
-                        print(f"   🔍 SQL data type: {type(sql_data)}, length: {len(sql_data) if hasattr(sql_data, '__len__') else 'N/A'}")
+                        print(f"   [SEARCH] SQL data type: {type(sql_data)}, length: {len(sql_data) if hasattr(sql_data, '__len__') else 'N/A'}")
                         
                         variable_name = f"sql_data_step_{len(step_context['completed_steps']) + 1}"
                         
@@ -1595,8 +1698,8 @@ Generate practical, executable code that solves the user's query: {query}"""
                     }
                     
                 except Exception as sql_error:
-                    print(f"   ❌ SQL step execution error: {sql_error}")
-                    print(f"   🔍 Error type: {type(sql_error)}")
+                    print(f"   [ERROR] SQL step execution error: {sql_error}")
+                    print(f"   [SEARCH] Error type: {type(sql_error)}")
                     import traceback
                     traceback.print_exc()
                     return {
@@ -1607,23 +1710,23 @@ Generate practical, executable code that solves the user's query: {query}"""
                     }
                 
             else:  # API step
-                # Execute endpoint filtering with the full LLM1 plan
-                if llm1_plan:
-                    filter_result = await self._execute_endpoint_filtering(llm1_plan, correlation_id)
+                # Execute endpoint filtering with the full Planning plan
+                if planning_plan:
+                    filter_result = await self._execute_endpoint_filtering(planning_plan, correlation_id)
                 else:
-                    print("⚠️ No LLM1 plan available for endpoint filtering")
-                    filter_result = {'success': False, 'error': 'No LLM1 plan available'}
+                    print("[WARNING] No Planning plan available for endpoint filtering")
+                    filter_result = {'success': False, 'error': 'No Planning plan available'}
                 
                 # Check if there are SQL steps after this that might need the API data
-                total_steps = len(llm1_plan.get('plan', {}).get('steps', [])) if llm1_plan else 1
+                total_steps = len(planning_plan.get('plan', {}).get('steps', [])) if planning_plan else 1
                 current_step = len(step_context['completed_steps']) + 1
                 has_dependent_steps = current_step < total_steps
                 
-                print(f"   🔍 Dependency check: Step {current_step}/{total_steps}, Has dependent steps: {has_dependent_steps}")
-                print(f"   🔍 Filter result success: {filter_result.get('success')}")
+                print(f"   [SEARCH] Dependency check: Step {current_step}/{total_steps}, Has dependent steps: {has_dependent_steps}")
+                print(f"   [SEARCH] Filter result success: {filter_result.get('success')}")
                 
                 if has_dependent_steps and filter_result.get('success'):
-                    print(f"   🚀 API→SQL workflow detected - executing API call for data collection")
+                    print(f"   [LAUNCH] API→SQL workflow detected - executing API call for data collection")
                     
                     # Generate and execute code for this API step
                     api_llm2_result = await self._execute_llm2_code_generation(
@@ -1674,7 +1777,7 @@ Generate practical, executable code that solves the user's query: {query}"""
                             })
                             
                             step_context['accumulated_data'].append(sample_context)
-                            print(f"   ✅ API Step executed: stored variable {variable_name} with {len(api_raw_output)} chars")
+                            print(f"   [SUCCESS] API Step executed: stored variable {variable_name} with {len(api_raw_output)} chars")
                             
                             return {
                                 'success': True,
@@ -1688,12 +1791,12 @@ Generate practical, executable code that solves the user's query: {query}"""
                     else:
                         return {'success': False, 'error': 'API code generation failed'}
                 else:
-                    print(f"   ✅ API Step completed: {filter_result.get('filtered_endpoint_count', 0)} endpoints")
+                    print(f"   [SUCCESS] API Step completed: {filter_result.get('filtered_endpoint_count', 0)} endpoints")
                     return filter_result
                     
         except Exception as e:
             error_msg = f"Step execution failed: {str(e)}"
-            print(f"   ❌ {error_msg}")
+            print(f"   [ERROR] {error_msg}")
             step_context['errors'].append({
                 'step_name': step_name,
                 'error': error_msg,
@@ -1747,7 +1850,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             rows_to_export = []
             sql_data = []
             
-            print(f"🔍 DEBUG: Looking for SQL data in step_results and raw_results...")
+            print(f"[SEARCH] DEBUG: Looking for SQL data in step_results and raw_results...")
             
             # Method 1: Check step_results parameter first (most reliable)
             if step_results and 'sql_result' in step_results:
@@ -1790,14 +1893,14 @@ Generate practical, executable code that solves the user's query: {query}"""
                     sql_data = exec_summary.get('sql_data', [])
                     print(f"   Method 5 - execution_summary: Found {len(sql_data)} records")
                     
-            print(f"🔍 Final SQL data found: {len(sql_data)} records")
+            print(f"[SEARCH] Final SQL data found: {len(sql_data)} records")
             
             # Check for LLM3 processed results first (new aggregated format)
             processed_summary = results.get('processed_summary', {})
             if isinstance(processed_summary, dict) and processed_summary.get('display_type') == 'table':
                 llm3_content = processed_summary.get('content', [])
                 if llm3_content and isinstance(llm3_content, list) and len(llm3_content) > 0:
-                    print(f"📄 Exporting {len(llm3_content)} LLM3 aggregated records to CSV...")
+                    print(f"[FILE] Exporting {len(llm3_content)} LLM3 aggregated records to CSV...")
                     
                     # Use CSV headers from metadata if available, or intelligently select fields
                     csv_headers = []
@@ -1844,13 +1947,13 @@ Generate practical, executable code that solves the user's query: {query}"""
                             })
                             writer.writerow(export_row)
                             
-                    print(f"✅ Exported {len(llm3_content)} LLM3 aggregated records to: {filepath}")
+                    print(f"[SUCCESS] Exported {len(llm3_content)} LLM3 aggregated records to: {filepath}")
                     return filepath
             
             # Fallback to SQL data if LLM3 processed format not available
             if sql_data and isinstance(sql_data, list) and len(sql_data) > 0:
                 # Use SQL data as primary export - THIS IS THE REAL DATA!
-                print(f"📄 Exporting {len(sql_data)} SQL records to CSV...")
+                print(f"[FILE] Exporting {len(sql_data)} SQL records to CSV...")
                 
                 # Get column headers from first record
                 if isinstance(sql_data[0], dict):
@@ -1875,7 +1978,7 @@ Generate practical, executable code that solves the user's query: {query}"""
                             })
                             writer.writerow(export_row)
                             
-                    print(f"✅ Exported {len(sql_data)} SQL records to: {filepath}")
+                    print(f"[SUCCESS] Exported {len(sql_data)} SQL records to: {filepath}")
                     return filepath
             
             # Fallback: Export processed summary as text-based CSV
@@ -1898,11 +2001,11 @@ Generate practical, executable code that solves the user's query: {query}"""
                     'content': content[:1000] + '...' if len(content) > 1000 else content
                 })
             
-            print(f"✅ Exported summary to: {filepath}")
+            print(f"[SUCCESS] Exported summary to: {filepath}")
             return filepath
             
         except Exception as e:
-            print(f"❌ CSV export failed: {e}")
+            print(f"[ERROR] CSV export failed: {e}")
             return None
 
 # Test function
@@ -1918,11 +2021,11 @@ async def test_real_execution():
     verification_result = executor.verify_loaded_data()
     
     if not verification_result['files_status']['api_data']:
-        print("❌ API data file not found - cannot proceed")
+        print("[ERROR] API data file not found - cannot proceed")
         return {'success': False, 'error': 'API data file missing'}
     
     if not verification_result['files_status']['schema']:
-        print("❌ Schema file not found - cannot proceed")
+        print("[ERROR] Schema file not found - cannot proceed")
         return {'success': False, 'error': 'Schema file missing'}
     
     # Test query that should trigger both SQL and API operations  
@@ -1930,17 +2033,17 @@ async def test_real_execution():
     
     result = await executor.execute_query(test_query)
     
-    print(f"\n🎯 FINAL TEST RESULT:")
-    print(f"✅ Success: {result.get('success')}")
+    print(f"\n[TARGET] FINAL TEST RESULT:")
+    print(f"[SUCCESS] Success: {result.get('success')}")
     if result.get('success'):
-        print(f"📊 SQL Records: {result.get('sql_execution', {}).get('records_count', 0)}")
-        print(f"🔍 API Endpoints: {result.get('endpoint_filtering', {}).get('filtered_count', 0)}")
-        print(f"🎯 Entities: {result.get('execution_summary', {}).get('entities_involved', [])}")
-        print(f"🤖 Code Generated: {result.get('llm2_code_generation', {}).get('success', False)}")
+        print(f"[DATA] SQL Records: {result.get('sql_execution', {}).get('records_count', 0)}")
+        print(f"[SEARCH] API Endpoints: {result.get('endpoint_filtering', {}).get('filtered_count', 0)}")
+        print(f"[TARGET] Entities: {result.get('execution_summary', {}).get('entities_involved', [])}")
+        print(f"[BOT] Code Generated: {result.get('llm2_code_generation', {}).get('success', False)}")
         print(f"� Code Length: {result.get('llm2_code_generation', {}).get('code_length', 0)}")
-        print(f"�🚀 Ready for Execution: {result.get('execution_summary', {}).get('ready_for_execution', False)}")
+        print(f"�[LAUNCH] Ready for Execution: {result.get('execution_summary', {}).get('ready_for_execution', False)}")
     else:
-        print(f"❌ Error: {result.get('error')}")
+        print(f"[ERROR] Error: {result.get('error')}")
     
     return result
 

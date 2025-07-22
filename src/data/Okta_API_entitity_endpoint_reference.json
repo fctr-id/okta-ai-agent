@@ -4615,7 +4615,7 @@
       "name": "List all System Log events",
       "entity": "system_log",
       "operation": "list_events",
-      "description": "Limit 1000 (not 100) MUST be passed Make sure you pass the relevant event codes depending on what the user is asking. If there are possbile muiltipple event codes, pass all them in the filter",
+      "description": "Limit 1000 (not 100) MUST be passed Make sure you pass the relevant event codes depending on what the user is asking. If there are possbile muiltipple event codes, pass all them in the filter. Remember user logged in has sso, mfa ...etc events. If you are NOT aware, reply with 'I DO NOT KNOW THE EVENT CODES'",
       "folder_path": "System Log",
       "parameters": {
         "required": ["limit"],

@@ -62,6 +62,9 @@ async def execute_test_query(query: str, test_name: str, expected_workflow: str)
         # Analyze the execution pattern
         raw_results = result.get('raw_results', {})
         
+        # Initialize steps variable
+        steps = []
+        
         # Check LLM1 planning
         llm1_data = raw_results.get('llm1_planning', {})
         if llm1_data.get('success'):
