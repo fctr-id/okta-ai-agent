@@ -56,6 +56,13 @@ except ImportError as e:
     planning_agent = None
     PlanningDependencies = None
 
+try:
+    from api_code_gen_agent import execute_api_code_generation_legacy_wrapper
+    print("API Code Generation agent imported successfully (local copy)")
+except ImportError as e:
+    print(f"[ERROR] Failed to import API Code Generation agent: {e}")
+    execute_api_code_generation_legacy_wrapper = None
+
 # Constants for sampling and results processing (inspired by ExecutionManager)
 MAX_CHARS_FOR_FULL_RESULTS = 60000
 MAX_SAMPLES_PER_STEP = 5
@@ -65,11 +72,7 @@ class ExecutionPlanResponse(BaseModel):
     plan: Dict[str, Any]  # Contains steps, reasoning, partial_success_acceptable
     confidence: int
 
-class LLM2CodeResponse(BaseModel):
-    """LLM2 JSON response format according to system prompt"""
-    python_code: str
-    explanation: str
-    requirements: List[str]
+# NOTE: LLM2CodeResponse is now replaced by CodeGenerationOutput in api_code_gen_agent.py
 
 class ValidationError(Exception):
     """Custom exception for validation failures"""
@@ -101,20 +104,40 @@ class StrictValidator:
         
         for step in steps:
             tool_name = step.get('tool_name', '')
+            entity = step.get('entity', '')  # New entity field
             query_context = step.get('query_context', '')
             
-            # Check if this is a SQL step (by tool_name or query_context)
-            is_sql_step = (tool_name in sql_tables) or (query_context.upper().startswith('SQL:')) or (tool_name == 'sql_query')
+            # Simplified step classification using tool_name directly
+            is_sql_step = (tool_name == 'sql')
+            is_api_step = (tool_name == 'api')
+            
+            # Debug logging for step classification
+            print(f"[DEBUG] Step classification:")
+            print(f"  tool_name: '{tool_name}'")
+            print(f"  entity: '{entity}'")
+            print(f"  entity in sql_tables: {entity in sql_tables}")
+            print(f"  entity in api_entities: {entity in api_entities}")
+            print(f"  query_context: '{query_context[:100]}...'")
+            print(f"  mentions API/limit: {'api' in query_context.lower() or 'limit=' in query_context.lower()}")
+            print(f"  classified as: {'SQL' if is_sql_step else 'API' if is_api_step else 'UNKNOWN'}")
             
             if is_sql_step:
-                sql_steps.append(step)
-            elif tool_name in api_entities:
-                api_steps.append(step)
+                # Validate that entity exists in SQL tables
+                if entity not in sql_tables:
+                    invalid_entities.append(f"SQL entity '{entity}' not in tables: {list(sql_tables.keys())[:5]}...")
+                else:
+                    sql_steps.append(step)
+            elif is_api_step:
+                # Validate that entity exists in API entities
+                if entity not in api_entities:
+                    invalid_entities.append(f"API entity '{entity}' not in entities: {api_entities[:5]}...")
+                else:
+                    api_steps.append(step)
             else:
-                invalid_entities.append(tool_name)
+                invalid_entities.append(f"Invalid tool_name '{tool_name}' - must be 'sql' or 'api'")
         
         if invalid_entities:
-            raise ValidationError(f"PLANNING AGENT HALLUCINATION DETECTED - Invalid entities: {invalid_entities}. Must use API entities: {api_entities[:5]}... or SQL tables: {sql_tables[:5]}...")
+            raise ValidationError(f"PLANNING AGENT VALIDATION FAILED - {'; '.join(invalid_entities)}")
         
         # 2. Validate each step has required fields
         for i, step in enumerate(steps):
@@ -153,18 +176,27 @@ class PreciseEndpointFilter:
         print(f"[SEARCH] EXTRACTING ENTITIES AND OPERATIONS FROM PLANNING AGENT PLAN:")
         for i, step in enumerate(steps, 1):
             tool_name = step.get('tool_name', '').lower()
+            entity = step.get('entity', '').lower()
+            operation = step.get('operation', '')
             query_context = step.get('query_context', '')
             
-            # Check if this is an API step by checking if tool_name exists in entity_summary
-            if tool_name in self.entity_summary:
-                api_entities.append(tool_name)
-                # Get the default operation for this entity (usually first one)
-                entity_ops = self.entity_summary[tool_name].get('operations', ['list'])
-                default_op = entity_ops[0] if entity_ops else 'list'
-                operations.append(default_op.lower())
-                print(f"   Step {i}: API entity='{tool_name}', default_operation='{default_op}'")
+            # Check if this is an API step
+            if tool_name == 'api':
+                # For API steps, use the entity field
+                if entity in self.entity_summary:
+                    api_entities.append(entity)
+                    # Use explicit operation if provided, otherwise use default
+                    if operation:
+                        operations.append(operation.lower())
+                    else:
+                        entity_ops = self.entity_summary[entity].get('operations', ['list'])
+                        default_op = entity_ops[0] if entity_ops else 'list'
+                        operations.append(default_op.lower())
+                    print(f"   Step {i}: API entity='{entity}', operation='{operation or 'default'}'")
+                else:
+                    print(f"   Step {i}: API step but entity '{entity}' not found in entity_summary")
             else:
-                print(f"   Step {i}: SQL step '{tool_name}' (no operation filtering needed)")
+                print(f"   Step {i}: SQL step '{tool_name}' with entity '{entity}' (no operation filtering needed)")
         
         # Remove duplicates
         entities = list(set(api_entities))
@@ -459,11 +491,8 @@ class RealWorldHybridExecutor:
         else:
             correlation_id = f"hybrid_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             print(f"[NEW] Generated hybrid correlation ID: {correlation_id}")
-        
-        # CRITICAL: Always set the correlation ID to ensure ALL agents use the same ID
-        # This ensures Planning Agent, SQL Agent, AND Results Formatter Agent all use identical correlation IDs
-        set_correlation_id(correlation_id)
-        print(f"[LOCK] Correlation ID locked for all agents: {correlation_id}")
+            # Set the correlation ID for centralized logging so all agents use the same ID
+            set_correlation_id(correlation_id)
         
         try:
             # Phase 1: Planning Agent (REAL)
@@ -508,48 +537,64 @@ class RealWorldHybridExecutor:
             print(f"   [DATA] SQL data count: {len(sql_result.get('data', []))}")
             print(f"   [TARGET] Has SQL data: {has_sql_data}")
             print(f"   [LINK] API endpoints: {has_api_endpoints}")
-            print(f"   [NOTE] LLM2 condition (has_api_endpoints and not has_sql_data): {has_api_endpoints and not has_sql_data}")
+            # Check if we've already executed all planned steps
+            has_completed_steps = len(step_results.get('execution_context', {}).get('completed_steps', [])) > 0
+            planned_steps_count = len(llm1_plan.get('plan', {}).get('steps', [])) if llm1_plan else 0
             
-            # Only run LLM2 if we have API endpoints but no complete SQL data
-            # Skip LLM2 if we already have complete results from SQL
-            llm2_result = {'success': False, 'code': '', 'explanation': 'Skipped - using direct SQL results'}
+            print(f"   [NOTE] Planned steps: {planned_steps_count}, Completed steps: {len(step_results.get('execution_context', {}).get('completed_steps', []))}")
+            print(f"   [NOTE] Has completed steps: {has_completed_steps}")
+            print(f"   [NOTE] API endpoints available: {has_api_endpoints}")
             
-            if has_api_endpoints and not has_sql_data:
-                print(f"\n[BOT] PHASE 4: LLM2 CODE GENERATION")
+            # If we've completed all planned steps, skip legacy API code generation
+            if has_completed_steps and planned_steps_count > 0:
+                print(f"\n[SUCCESS] PHASE 4-6: STEPS ALREADY EXECUTED")
                 print("=" * 50)
-                print("[TARGET] Generating API code for endpoints without SQL data")
+                print(f"[INFO] All {planned_steps_count} planned steps completed via step-by-step execution")
+                print("[INFO] Skipping legacy API code generation - using step results directly")
                 
-                llm2_result = await self._execute_llm2_code_generation(
-                    planning_result, sql_result, filter_result, query, correlation_id, api_data_collected
-                )
+                api_code_result = {'success': True, 'code': '', 'explanation': 'Steps already executed'}
+                execution_result = {'success': True, 'stdout': 'Step execution completed', 'stderr': ''}
+                
             else:
-                print(f"\n[SKIP] PHASE 4: SKIPPING LLM2 CODE GENERATION")
-                print("=" * 50)
-                if has_sql_data:
-                    print("[SUCCESS] Complete SQL data available - proceeding directly to results processing")
+                # Fallback to legacy API code generation for simple cases
+                api_code_result = {'success': False, 'code': '', 'explanation': 'Skipped - no API endpoints'}
+                
+                if has_api_endpoints:
+                    print(f"\n[BOT] PHASE 4: API CODE GENERATION (Legacy Mode)")
+                    print("=" * 50)
+                    if has_sql_data:
+                        print("[TARGET] Generating hybrid SQL→API code using SQL data for API calls")
+                    else:
+                        print("[TARGET] Generating API-only code for endpoints")
+                    
+                    api_code_result = await self._execute_api_code_generation(
+                        planning_result, sql_result, filter_result, query, correlation_id, api_data_collected
+                    )
                 else:
+                    print(f"\n[SKIP] PHASE 4: SKIPPING API CODE GENERATION")
+                    print("=" * 50)
                     print("[INFO] No API endpoints to process")
-            
-            # Phase 5: Execute Generated Code (only if LLM2 generated code)
-            execution_result = None
-            if llm2_result.get('success') and llm2_result.get('code'):
-                print(f"\n[LAUNCH] PHASE 5: CODE EXECUTION")
-                print("=" * 50)
                 
-                execution_result = await self._execute_generated_code(
-                    llm2_result['code'], correlation_id
-                )
-            else:
-                print(f"\n[SKIP] PHASE 5: SKIPPING CODE EXECUTION")
-                print("=" * 50)
-                print("[INFO] No code generated by LLM2 - using step results directly")
-                execution_result = {'success': True, 'stdout': 'No code execution needed', 'stderr': ''}
+                # Phase 5: Execute Generated Code (only if API Code Generation generated code)
+                execution_result = None
+                if api_code_result.get('success') and api_code_result.get('code'):
+                    print(f"\n[LAUNCH] PHASE 5: CODE EXECUTION")
+                    print("=" * 50)
+                    
+                    execution_result = await self._execute_generated_code(
+                        api_code_result['code'], correlation_id
+                    )
+                else:
+                    print(f"\n[SKIP] PHASE 5: SKIPPING CODE EXECUTION")
+                    print("=" * 50)
+                    print("[INFO] No code generated by API Code Generation agent - using step results directly")
+                    execution_result = {'success': True, 'stdout': 'No code execution needed', 'stderr': ''}
             
             # Phase 6: Results Combination
             print(f"\n[TARGET] PHASE 6: RESULTS COMBINATION")
             print("=" * 50)
             
-            final_result = await self._combine_results(planning_result, sql_result, filter_result, llm2_result, correlation_id)
+            final_result = await self._combine_results(planning_result, sql_result, filter_result, api_code_result, correlation_id)
             
             # Add execution results to final result
             if execution_result:
@@ -560,13 +605,9 @@ class RealWorldHybridExecutor:
             print("=" * 50)
             
             try:
-                # CRITICAL: Ensure correlation ID is set before Results Formatter Agent execution
-                set_correlation_id(correlation_id)
-                
                 enhanced_final_result = await self._process_final_results_with_llm3(
                     combined_results=final_result,
                     original_query=query,
-                    correlation_id=correlation_id,
                     execution_result=execution_result,
                     step_context=step_results.get('execution_context', {})  # Pass step context
                 )
@@ -589,8 +630,8 @@ class RealWorldHybridExecutor:
             print(f"   [DATA] Planning Steps: {len(llm1_plan.get('plan', {}).get('steps', []))}")
             print(f"   [SAVE] SQL Results: {len(sql_result.get('data', []))} records")
             print(f"   [SEARCH] Filtered Endpoints: {filter_result.get('filtered_endpoint_count', 0)}")
-            print(f"   [BOT] LLM2 Code Generated: {llm2_result.get('success', False)}")
-            print(f"   [NOTE] Code Length: {len(llm2_result.get('code', ''))} characters")
+            print(f"   [BOT] API Code Generated: {api_code_result.get('success', False)}")
+            print(f"   [NOTE] Code Length: {len(api_code_result.get('code', ''))} characters")
             print(f"   [LAUNCH] Code Executed: {execution_result.get('success', False) if execution_result else False}")
             
             # Enhanced execution summary with Results Formatter Agent info
@@ -639,17 +680,32 @@ class RealWorldHybridExecutor:
         print(f"   [DATA] {len(available_entities)} API entities available")
         print(f"   [DB] {len(self.db_schema.get('sql_tables', {}))} SQL tables available")
         
+        # DEBUG: Log what data is being passed to Planning Agent
+        print(f"\n[DEBUG] PLANNING AGENT INPUT DATA:")
+        print(f"   [API] Entity names: {available_entities[:10]}{'...' if len(available_entities) > 10 else ''}")
+        
+        # Show sample entity with operations
+        if available_entities and entity_summary:
+            sample_entity = available_entities[0]
+            sample_ops = entity_summary.get(sample_entity, {})
+            print(f"   [API] Sample '{sample_entity}' operations: {sample_ops.get('operations', [])[:5]}")
+            print(f"   [API] Sample '{sample_entity}' methods: {sample_ops.get('methods', [])[:5]}")
+        
+        # Show SQL tables with columns
+        sql_tables = self.db_schema.get('sql_tables', {})
+        if sql_tables:
+            sample_table = list(sql_tables.keys())[0]
+            sample_columns = sql_tables[sample_table].get('columns', [])
+            print(f"   [DB] Sample '{sample_table}' columns: {sample_columns[:8]}{'...' if len(sample_columns) > 8 else ''}")
+        
         try:
-            # Create dependencies for Planning Agent
+            # Create dependencies for Planning Agent (FIXED: use 'sql_tables' key)
             planning_deps = PlanningDependencies(
                 available_entities=available_entities,
                 entity_summary=self.api_data.get('entity_summary', {}),
-                sql_tables=self.db_schema.get('tables', {}),
+                sql_tables=self.db_schema.get('sql_tables', {}),
                 flow_id=correlation_id
             )
-            
-            # CRITICAL: Ensure correlation ID is set before Planning Agent execution
-            set_correlation_id(correlation_id)
             
             # Log Planning Agent execution start
             self.logger.info(f"[{correlation_id}] Planning Agent: Starting execution plan generation")
@@ -677,6 +733,34 @@ class RealWorldHybridExecutor:
             print(f"   [LIST] Plan confidence: {planning_output.plan.confidence}")
             print(f"   [TARGET] Steps planned: {len(planning_output.plan.steps)}")
             
+            # Log complete raw Planning Agent JSON output
+            try:
+                planning_json = planning_output.model_dump()
+                self.logger.debug(f"[{correlation_id}] RAW PLANNING AGENT JSON OUTPUT:")
+                self.logger.debug(f"[{correlation_id}] {json.dumps(planning_json, indent=2)}")
+            except Exception as json_error:
+                self.logger.warning(f"[{correlation_id}] Failed to serialize planning output as JSON: {json_error}")
+            
+            # Log raw planning steps for debugging
+            self.logger.debug(f"[{correlation_id}] Raw Planning Agent steps:")
+            for i, step in enumerate(planning_output.plan.steps, 1):
+                tool_name = step.tool_name if hasattr(step, 'tool_name') else step.get('tool_name', 'unknown')
+                entity = step.entity if hasattr(step, 'entity') else step.get('entity', 'unknown')
+                operation = step.operation if hasattr(step, 'operation') else step.get('operation', 'None')
+                critical = step.critical if hasattr(step, 'critical') else step.get('critical', False)
+                query_context = step.query_context if hasattr(step, 'query_context') else step.get('query_context', '')
+                reasoning = step.reasoning if hasattr(step, 'reasoning') else step.get('reasoning', '')
+                
+                self.logger.debug(f"[{correlation_id}]   Step {i}: tool_name='{tool_name}', entity='{entity}', operation='{operation}', critical={critical}")
+                self.logger.debug(f"[{correlation_id}]     query_context: {query_context}")
+                self.logger.debug(f"[{correlation_id}]     reasoning: {reasoning}")
+                
+                # Updated warning logic for new structure
+                if tool_name == 'sql' and ("api" in query_context.lower() or "limit=" in query_context.lower()):
+                    self.logger.warning(f"[{correlation_id}]   ⚠️ Step {i} is SQL but mentions API/limit in query_context!")
+                elif tool_name == 'api' and entity in self.db_schema.get('sql_tables', {}):
+                    self.logger.warning(f"[{correlation_id}]   ⚠️ Step {i} is API but entity '{entity}' exists in SQL tables!")
+            
             # Convert to ExecutionPlanResponse format for compatibility
             execution_plan_response = ExecutionPlanResponse(
                 plan={
@@ -698,9 +782,10 @@ class RealWorldHybridExecutor:
                 return {'success': False, 'error': f'Planning Agent validation failed: {ve}'}
             
             # Display plan details
-            print(f"� PLANNING AGENT PLAN:")
+            print(f"🎯 PLANNING AGENT PLAN:")
             steps = execution_plan_response.plan.get('steps', [])
-            entities = list(set([step.get('tool_name', '') for step in steps]))
+            # Extract entity names for display (not tool_names which are just "sql"/"api")
+            entities = list(set([step.get('entity', step.get('tool_name', '')) for step in steps]))
             print(f"[TARGET] Entities: {entities}")
             print(f"[LIST] Steps: {len(steps)} steps planned")
             
@@ -769,9 +854,6 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
         try:
             # Use the real SQL agent with proper tenant_id and correlation ID
             sql_dependencies = SQLDependencies(tenant_id="default", flow_id=correlation_id)
-            
-            # CRITICAL: Ensure correlation ID is set before SQL Agent execution  
-            set_correlation_id(correlation_id)
             
             # Build context query if API context is provided
             context_query = query
@@ -917,245 +999,45 @@ KEY INSIGHT: Look at the actual columns and operations above to determine what d
                 'filtered_endpoints': []
             }
     
-    async def _execute_llm2_code_generation(self, planning_result: Dict, sql_result: Dict, filter_result: Dict, query: str, correlation_id: str, api_data_collected: List = None) -> Dict[str, Any]:
-        """Execute LLM2 code generation phase using SQL data + filtered endpoints"""
+    async def _execute_api_code_generation(self, planning_result: Dict, sql_result: Dict, filter_result: Dict, query: str, correlation_id: str, api_data_collected: List = None) -> Dict[str, Any]:
+        """Execute API code generation phase using the new PydanticAI API Code Generation Agent"""
         
-        # Prepare data for LLM2 first
-        sql_data = sql_result.get('data', [])
-        filtered_endpoints = filter_result.get('filtered_endpoints', [])
+        logger = get_logger("okta_ai_agent.real_world_hybrid_executor", log_dir=get_default_log_dir())
+        logger.info(f"[{correlation_id}] Starting API code generation phase")
         
-        print(f"[BOT] Generating Python code with SQL data + API endpoints...")
-        print(f"[DATA] LLM2 Context Summary:")
-        print(f"   [SAVE] SQL Records: {len(sql_data)}")
-        print(f"   [LINK] API Endpoints: {len(filtered_endpoints)}")
-        
-        # Log endpoint details for verification
-        for i, ep in enumerate(filtered_endpoints, 1):
-            print(f"   [LIST] Endpoint {i}: {ep.get('method', '')} {ep.get('url_pattern', '')}")
-            print(f"      • Name: {ep.get('name', '')}")
-            print(f"      • Entity: {ep.get('entity', '')}, Operation: {ep.get('operation', '')}")
-            req_params = ep.get('parameters', {}).get('required', [])
-            opt_params = ep.get('parameters', {}).get('optional', [])
-            print(f"      • Required: {req_params}")
-            print(f"      • Optional: {opt_params}")
-            print(f"      • Description: {ep.get('description', '')[:100]}...")
-        
-        
-        if not sql_data and not filtered_endpoints:
-            print("[WARNING] No SQL data or API endpoints available for code generation")
+        # Check if the new API Code Generation Agent is available
+        if execute_api_code_generation_legacy_wrapper is None:
+            logger.error(f"[{correlation_id}] API Code Generation agent not available")
             return {
-                'success': False, 
-                'error': 'No data available for code generation',
+                'success': False,
+                'error': 'API Code Generation agent not imported',
                 'code': '',
-                'explanation': ''
-            }
-        
-        # Build context for LLM2 with COMPLETE API data
-        context_info = {
-            'query': query,
-            'sql_data_sample': sql_data[:3] if sql_data else [],  # First 3 records as sample
-            'sql_record_count': len(sql_data),
-            'available_endpoints': [
-                {
-                    'id': ep.get('id', ''),
-                    'name': ep.get('name', ''),
-                    'method': ep.get('method', ''),
-                    'url_pattern': ep.get('url_pattern', ''),
-                    'entity': ep.get('entity', ''),
-                    'operation': ep.get('operation', ''),
-                    'description': ep.get('description', ''),
-                    'folder_path': ep.get('folder_path', ''),
-                    'parameters': ep.get('parameters', {})
-                }
-                for ep in filtered_endpoints
-            ],
-            'entities_involved': planning_result.get('entities', [])
-        }
-        
-        # Load LLM2 system prompt from file
-        llm2_prompt_path = os.path.join(os.path.dirname(__file__), "llm2_system_prompt.txt")
-        try:
-            with open(llm2_prompt_path, 'r', encoding='utf-8') as f:
-                base_llm2_prompt = f.read()
-        except FileNotFoundError:
-            print(f"[WARNING] llm2_system_prompt.txt not found at {llm2_prompt_path}, using fallback prompt")
-            base_llm2_prompt = "You are LLM2, a Python code generator for Okta operations. Generate working Python code that combines SQL data with API calls."
-        
-        # Create dynamic LLM2 system prompt with context
-        # Extract Step 2 description for LLM2 context
-        planning_plan = planning_result.get('execution_plan', {}).model_dump() if 'execution_plan' in planning_result else planning_result.get('planning_output', {}).execution_plan.model_dump() if 'planning_output' in planning_result else {}
-        steps = planning_plan.get('plan', {}).get('steps', []) if 'plan' in planning_plan else planning_plan.get('steps', [])
-        step2_description = "No specific step found"
-        
-        # Find the API step (usually step 2 for role assignments)
-        for step in steps:
-            if step.get('tool_name') in ['role_assignment', 'role']:
-                step2_description = f"Step: {step.get('tool_name')} - {step.get('query_context', '')} - Reason: {step.get('reason', '')}"
-                break
-        
-        llm2_system_prompt = f"""{base_llm2_prompt}
-
-DYNAMIC CONTEXT FOR THIS REQUEST:
-- LLM2 Task: {step2_description}
-- SQL Records Available: {len(sql_data)}
-- API Endpoints Available: {len(filtered_endpoints)}
-- Entities: {planning_result.get('entities', [])}
-
-AVAILABLE SQL DATA SAMPLE:
-{json.dumps(sql_data[:2], indent=2) if sql_data else 'No SQL data available'}
-
-AVAILABLE API ENDPOINTS WITH COMPLETE DOCUMENTATION:
-{json.dumps(context_info['available_endpoints'], indent=2)}
-
-🚨 CRITICAL API GUIDELINES - FOLLOW STRICTLY:
-
-1. **PARAMETER COMPLIANCE**:
-   - ALWAYS use ONLY the parameters listed in 'parameters.required' and 'parameters.optional'
-   - NEVER use parameters not in the API specification (like 'published' for system logs)
-   - For system_log endpoints, use 'since', 'until', 'filter', 'q', 'limit', 'sortOrder' ONLY
-   
-2. **URL CONSTRUCTION**:
-   - Use the exact 'url_pattern' provided
-   - Replace :paramName with actual values (e.g., :userId with actual user ID)
-   - Build full URLs: https://{{okta_domain}}/api/v1/...
-   
-3. **METHOD COMPLIANCE**:
-   - Use the exact HTTP method specified ('method' field)
-   - GET for retrieving data, POST for creating, PUT for updating, DELETE for removing
-   
-4. **DESCRIPTION ADHERENCE**:
-   - Read the 'description' field carefully for API-specific guidance
-   - Follow any special notes, limitations, or requirements mentioned
-   - Pay attention to default values, pagination, and rate limits
-   
-5. **TIME FILTERING** (Critical for logs/events):
-   - Use 'since' and 'until' parameters for time-based filtering
-   - Format: ISO 8601 with Z suffix (e.g., "2025-07-09T00:00:00.000Z")
-   - NEVER use 'published' in filter expressions - use 'since'/'until' instead
-   
-6. **FILTER EXPRESSIONS**:
-   - Follow SCIM filter syntax as documented
-   - Use correct operators: eq, ne, gt, lt, sw, co, ew
-   - Quote string values properly
-   
-7. **ERROR HANDLING**:
-   - Include proper error handling for API calls
-   - Handle rate limits, timeouts, and authentication errors
-   - Provide meaningful error messages
-
-GENERATE COMPLIANT CODE THAT STRICTLY FOLLOWS THESE API SPECIFICATIONS.
-
-Generate practical, executable code that solves the user's query: {query}"""
-        
-        try:
-            # Create LLM2 agent using coding model with strict JSON response format
-            coding_model = self.coding_model if self.coding_model else ModelConfig.get_model(ModelType.CODING)
-            llm2_agent = Agent(
-                model=coding_model,
-                system_prompt=llm2_system_prompt,
-                result_type=LLM2CodeResponse  # Enforce JSON structure
-            )
-            
-            print(f"[REFRESH] Running LLM2 code generation...")
-            
-            # Log LLM2 execution start with detailed context
-            self.logger.info(f"[{correlation_id}] LLM2 Code Generation: Starting code generation")
-            self.logger.debug(f"[{correlation_id}] LLM2 Context: SQL records={len(sql_data)}, API endpoints={len(filtered_endpoints)}")
-            
-            # Generate code
-            llm2_raw_result = await llm2_agent.run(
-                f"Generate Python code for: {step2_description}\n\nSQL Data Structure: {list(sql_data[0].keys()) if sql_data else []}\nAPI Endpoints: {len(filtered_endpoints)} available"
-            )
-            
-            llm2_output = llm2_raw_result.output
-            print(f"[SEARCH] LLM2 output type: {type(llm2_output)}")
-            
-            # Log LLM2 token usage if available
-            if hasattr(llm2_raw_result, 'usage') and llm2_raw_result.usage():
-                usage = llm2_raw_result.usage()
-                input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-                output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
-                self.logger.info(f"[{correlation_id}] LLM2 Code Generation completed - {input_tokens} in, {output_tokens} out tokens")
-            else:
-                self.logger.info(f"[{correlation_id}] LLM2 Code Generation completed successfully")
-            
-            # Parse LLM2 response - should be LLM2CodeResponse object
-            if isinstance(llm2_output, LLM2CodeResponse):
-                # Direct Pydantic model response
-                python_code = llm2_output.python_code
-                explanation = llm2_output.explanation
-                requirements = llm2_output.requirements
-                print(f"[SUCCESS] Successfully parsed LLM2 Pydantic response")
-            elif isinstance(llm2_output, str):
-                try:
-                    # Fallback: try to parse JSON manually
-                    llm2_response = json.loads(llm2_output)
-                    python_code = llm2_response.get('python_code', '')
-                    explanation = llm2_response.get('explanation', '')
-                    requirements = llm2_response.get('requirements', [])
-                    print(f"[SUCCESS] Successfully parsed LLM2 JSON response")
-                except json.JSONDecodeError as e:
-                    print(f"[ERROR] LLM2 returned invalid JSON: {e}")
-                    print(f"Raw output: {llm2_output[:500]}...")
-                    return {
-                        'success': False,
-                        'error': f'LLM2 JSON parsing failed: {e}',
-                        'code': '',
-                        'explanation': 'Failed to parse LLM2 response',
-                        'requirements': []
-                    }
-            else:
-                # Convert dict to expected format
-                llm2_response = llm2_output
-                python_code = llm2_response.get('python_code', '')
-                explanation = llm2_response.get('explanation', '')
-                requirements = llm2_response.get('requirements', [])
-            
-            # Clean up markdown formatting from code
-            if python_code:
-                # Remove markdown code blocks
-                python_code = re.sub(r'^```(?:python)?\s*\n', '', python_code, flags=re.MULTILINE)
-                python_code = re.sub(r'\n```\s*$', '', python_code, flags=re.MULTILINE)
-                python_code = python_code.strip()
-            
-            # Log the FULL generated code for debugging (user requested complete code visibility)
-            self.logger.info(f"[{correlation_id}] LLM2 Generated Code - Length: {len(python_code)} characters")
-            self.logger.debug(f"[{correlation_id}] LLM2 Complete Generated Code:\n{python_code}")
-            self.logger.debug(f"[{correlation_id}] LLM2 Explanation: {explanation}")
-            self.logger.debug(f"[{correlation_id}] LLM2 Requirements: {requirements}")
-            
-            print(f"[SUCCESS] LLM2 code generation completed")
-            print(f"[NOTE] Code length: {len(python_code)} characters")
-            print(f"[LIST] Requirements: {requirements}")
-            print(f"[SEARCH] Code preview: {python_code[:200]}{'...' if len(python_code) > 200 else ''}")
-            
-            return {
-                'success': True,
-                'code': python_code,
-                'explanation': explanation,
-                'requirements': requirements,
-                'context_used': {
-                    'sql_records': len(sql_data),
-                    'api_endpoints': len(filtered_endpoints)
-                },
+                'explanation': 'Agent import failed',
+                'requirements': [],
                 'correlation_id': correlation_id
             }
+        
+        try:
+            # Use the legacy wrapper for backward compatibility
+            result = await execute_api_code_generation_legacy_wrapper(
+                planning_result, sql_result, filter_result, query, correlation_id, api_data_collected
+            )
+            
+            logger.info(f"[{correlation_id}] API code generation completed successfully")
+            return result
             
         except Exception as e:
-            print(f"[ERROR] LLM2 code generation failed: {e}")
-            # Log the LLM2 error for debugging
-            self.logger.error(f"[{correlation_id}] LLM2 Code Generation failed: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"[{correlation_id}] API code generation failed: {e}")
             return {
                 'success': False,
                 'error': str(e),
                 'code': '',
-                'explanation': '',
-                'requirements': []
+                'explanation': 'API code generation failed',
+                'requirements': [],
+                'correlation_id': correlation_id
             }
     
-    async def _combine_results(self, planning_result: Dict, sql_result: Dict, filter_result: Dict, llm2_result: Dict, correlation_id: str) -> Dict[str, Any]:
+    async def _combine_results(self, planning_result: Dict, sql_result: Dict, filter_result: Dict, api_code_result: Dict, correlation_id: str) -> Dict[str, Any]:
         """Combine all results into final response"""
         
         print(f"[TARGET] Combining all results...")
@@ -1176,8 +1058,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             'sql_execution': {
                 'success': sql_result.get('success'),
                 'records_count': len(sql_result.get('data', [])),
-                'data_sample': sql_result.get('data', [])[:3],  # First 3 records as sample for display
-                'data': sql_result.get('data', []),  # Complete dataset for Results Formatter Agent counting
+                'data_sample': sql_result.get('data', [])[:3],  # First 3 records as sample
                 'sql_query': sql_result.get('sql_query', ''),
                 'explanation': sql_result.get('explanation', '')
             },
@@ -1188,12 +1069,12 @@ Generate practical, executable code that solves the user's query: {query}"""
                 'reduction_percentage': filter_result.get('reduction_percentage', 0),
                 'endpoints': filter_result.get('filtered_endpoints', [])
             },
-            'llm2_code_generation': {
-                'success': llm2_result.get('success', False),
-                'code': llm2_result.get('code', ''),
-                'explanation': llm2_result.get('explanation', ''),
-                'requirements': llm2_result.get('requirements', []),
-                'code_length': len(llm2_result.get('code', ''))
+            'api_code_generation': {
+                'success': api_code_result.get('success', False),
+                'code': api_code_result.get('code', ''),
+                'explanation': api_code_result.get('explanation', ''),
+                'requirements': api_code_result.get('requirements', []),
+                'code_length': len(api_code_result.get('code', ''))
             },
             'execution_summary': {
                 'total_sql_records': len(sql_result.get('data', [])),
@@ -1204,7 +1085,7 @@ Generate practical, executable code that solves the user's query: {query}"""
             }
         }
     
-    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, correlation_id: str, execution_result: Dict[str, Any] = None, step_context: Dict[str, Any] = None, use_structured: bool = True) -> Dict[str, Any]:
+    async def _process_final_results_with_llm3(self, combined_results: Dict[str, Any], original_query: str, execution_result: Dict[str, Any] = None, step_context: Dict[str, Any] = None, use_structured: bool = True) -> Dict[str, Any]:
         """
         Process final results using Results Formatter Agent with pandas enhancement.
         
@@ -1241,52 +1122,31 @@ Generate practical, executable code that solves the user's query: {query}"""
                 
                 # Fallback to old format if no variables stored
                 if not step_results_for_processing:
-                    # CRITICAL: For Results Formatter Agent, pass COMPLETE SQL data for proper counting
-                    # Use the full data from sql_execution, not just the sample
-                    sql_data = combined_results.get('sql_execution', {}).get('data', [])  # Use COMPLETE data
+                    sql_data = combined_results.get('sql_execution', {}).get('data', [])
                     if sql_data:
                         step_results_for_processing["step_1_sql"] = sql_data
-                        print(f"[DATA] Passing {len(sql_data)} SQL records to Results Formatter Agent")
                     
                     if execution_result and execution_result.get('success'):
                         stdout = execution_result.get('stdout', '')
                         if stdout:
                             step_results_for_processing["step_2_api"] = [{'raw_output': stdout}]
-
-                # CRITICAL: Pass the complete raw_results to Results Formatter Agent for proper record counting
-                # This allows the agent to count total records correctly for mode selection (sample vs complete)
-                # The Results Formatter Agent needs ALL data for counting, then will create samples internally for LLM
-                complete_results_structure = {
-                    'raw_results': combined_results,  # Complete results for counting
-                    'step_results': step_results_for_processing  # Processed results for formatting
-                }
-                
-                print(f"[DEBUG] Results Formatter Agent Data Summary:")
-                print(f"   SQL Records: {len(combined_results.get('sql_execution', {}).get('data', []))}")
-                print(f"   API Endpoints: {combined_results.get('endpoint_filtering', {}).get('filtered_count', 0)}")
-                print(f"   Total for counting: {len(combined_results.get('sql_execution', {}).get('data', []))}")
                 
                 # Use structured Results Formatter Agent processor
                 structured_response = await process_results_structured(
                     query=original_query,
-                    results=complete_results_structure,  # Pass complete structure for proper counting
+                    results=step_results_for_processing,
                     original_plan=None,
                     is_sample=False,
-                    metadata={'flow_id': correlation_id}  # Use the SAME correlation ID as other agents
+                    metadata={'flow_id': 'hybrid_executor_structured'}
                 )
                 
-                print(f"[SUCCESS] Results Formatter Agent processed with {structured_response.get('display_type')} format")
+                print(f"[SUCCESS] [Structured Results Formatter Agent] Successfully processed with {structured_response.get('display_type')} format")
                 
                 return {
                     'success': True,
                     'raw_results': combined_results,
                     'processed_summary': structured_response,
-                    'processing_method': 'results_formatter_structured_pydantic',
-                    'enhancement_features': {
-                        'pandas_analytics': True,
-                        'data_insights': True,
-                        'visualization_suggestions': True
-                    }
+                    'processing_method': 'results_formatter_structured_pydantic'
                 }
                 
             except Exception as e:
@@ -1310,17 +1170,11 @@ Generate practical, executable code that solves the user's query: {query}"""
         
         print(f"[LAUNCH] EXECUTING GENERATED CODE")
         
-        # Log code execution start (avoid logging full code due to size)
-        self.logger.info(f"[{correlation_id}] Code Execution: Starting execution of generated LLM2 code")
-        self.logger.debug(f"[{correlation_id}] Code length: {len(python_code)} characters")
-        
         try:
             # Save the code to a temporary file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(python_code)
                 temp_file = f.name
-            
-            self.logger.debug(f"[{correlation_id}] Code Execution: Saved code to temporary file: {temp_file}")
             
             # Execute the code and capture output
             result = subprocess.run(
@@ -1338,13 +1192,6 @@ Generate practical, executable code that solves the user's query: {query}"""
                 print(f"[SUCCESS] Code executed successfully!")
                 print(result.stdout)
                 
-                # Log successful execution results (truncate large outputs)
-                self.logger.info(f"[{correlation_id}] Code Execution: Completed successfully (return code: 0)")
-                stdout_preview = result.stdout[:500] + "..." if len(result.stdout) > 500 else result.stdout
-                self.logger.debug(f"[{correlation_id}] Code Execution stdout preview: {stdout_preview}")
-                if result.stderr:
-                    self.logger.debug(f"[{correlation_id}] Code Execution stderr: {result.stderr}")
-                
                 return {
                     'success': True,
                     'stdout': result.stdout,
@@ -1356,11 +1203,6 @@ Generate practical, executable code that solves the user's query: {query}"""
                 print(f"[ERROR] Code execution failed with return code {result.returncode}")
                 print(result.stderr)
                 
-                # Log failed execution
-                self.logger.error(f"[{correlation_id}] Code Execution: Failed with return code {result.returncode}")
-                self.logger.error(f"[{correlation_id}] Code Execution stderr: {result.stderr}")
-                self.logger.debug(f"[{correlation_id}] Code Execution stdout: {result.stdout}")
-                
                 return {
                     'success': False,
                     'stdout': result.stdout,
@@ -1371,7 +1213,6 @@ Generate practical, executable code that solves the user's query: {query}"""
                 
         except subprocess.TimeoutExpired:
             print(f"⏰ Code execution timed out after 60 seconds")
-            self.logger.error(f"[{correlation_id}] Code Execution: Timed out after 60 seconds")
             return {
                 'success': False,
                 'error': 'Execution timeout (60s)',
@@ -1380,7 +1221,6 @@ Generate practical, executable code that solves the user's query: {query}"""
             }
         except Exception as e:
             print(f"[ERROR] Failed to execute code: {e}")
-            self.logger.error(f"[{correlation_id}] Code Execution: Exception occurred - {e}")
             return {
                 'success': False,
                 'error': str(e),
@@ -1423,9 +1263,10 @@ Generate practical, executable code that solves the user's query: {query}"""
         print(f"[REFRESH] ENHANCED EXECUTION: {len(steps)} steps with context passing")
         for i, step in enumerate(steps, 1):
             tool_name = step.get('tool_name', '')
+            entity = step.get('entity', '')
             query_context = step.get('query_context', '')
             critical = step.get('critical', False)
-            print(f"   Step {i}: {tool_name} - {query_context} (Critical: {critical})")
+            print(f"   Step {i}: {tool_name}({entity}) - {query_context} (Critical: {critical})")
 
         # Results for backward compatibility
         sql_result = {'success': True, 'data': [], 'explanation': 'No SQL steps executed'}
@@ -1436,10 +1277,11 @@ Generate practical, executable code that solves the user's query: {query}"""
         for i, step in enumerate(steps, 1):
             step_start_time = time.time()
             tool_name = step.get('tool_name', '')
+            entity = step.get('entity', '')
             query_context = step.get('query_context', '')
             critical = step.get('critical', False)
             
-            print(f"\n[LIST] STEP {i}/{len(steps)}: {tool_name}")
+            print(f"\n[LIST] STEP {i}/{len(steps)}: {tool_name}({entity})")
             print(f"   Context: {query_context}")
             print(f"   Critical: {critical}")
             print(f"   Available Data: {len(step_context['accumulated_data'])} items")
@@ -1729,7 +1571,7 @@ Generate practical, executable code that solves the user's query: {query}"""
                     print(f"   [LAUNCH] API→SQL workflow detected - executing API call for data collection")
                     
                     # Generate and execute code for this API step
-                    api_llm2_result = await self._execute_llm2_code_generation(
+                    api_code_result = await self._execute_api_code_generation(
                         {'entities': [step_name], 'steps_count': 1}, 
                         {'success': True, 'data': [], 'records_count': 0},
                         filter_result, 
@@ -1737,10 +1579,10 @@ Generate practical, executable code that solves the user's query: {query}"""
                         correlation_id
                     )
                     
-                    if api_llm2_result.get('success') and api_llm2_result.get('code'):
+                    if api_code_result.get('success') and api_code_result.get('code'):
                         # Execute the API call
                         api_execution_result = await self._execute_generated_code(
-                            api_llm2_result['code'], 
+                            api_code_result['code'], 
                             correlation_id
                         )
                         
@@ -1792,7 +1634,11 @@ Generate practical, executable code that solves the user's query: {query}"""
                         return {'success': False, 'error': 'API code generation failed'}
                 else:
                     print(f"   [SUCCESS] API Step completed: {filter_result.get('filtered_endpoint_count', 0)} endpoints")
-                    return filter_result
+                    return {
+                        'success': True,
+                        'step_type': 'api',
+                        'result': filter_result
+                    }
                     
         except Exception as e:
             error_msg = f"Step execution failed: {str(e)}"
@@ -1805,18 +1651,27 @@ Generate practical, executable code that solves the user's query: {query}"""
             return {'success': False, 'error': error_msg}
 
     def _determine_step_type_simple(self, step: Dict) -> str:
-        """Simple step type determination"""
+        """Simple step type determination using new structure"""
         tool_name = step.get('tool_name', '')
-        query_context = step.get('query_context', '').upper()
         
-        sql_tables = ['users', 'groups', 'applications', 'user_group_memberships', 
-                     'user_application_assignments', 'group_application_assignments', 
-                     'user_factors', 'devices', 'user_devices', 'policies', 'sync_history']
-        
-        if tool_name in sql_tables or query_context.startswith('SQL:'):
+        # With new structure, tool_name directly indicates the type
+        if tool_name == 'sql':
             return 'sql'
-        else:
+        elif tool_name == 'api':
             return 'api'
+        else:
+            # Fallback for backward compatibility
+            entity = step.get('entity', tool_name)
+            query_context = step.get('query_context', '').upper()
+            
+            sql_tables = ['users', 'groups', 'applications', 'user_group_memberships', 
+                         'user_application_assignments', 'group_application_assignments', 
+                         'user_factors', 'devices', 'user_devices', 'policies', 'sync_history']
+            
+            if entity in sql_tables or query_context.startswith('SQL:'):
+                return 'sql'
+            else:
+                return 'api'
     
     async def _export_results_to_csv(self, results: Dict[str, Any], query: str, correlation_id: str, step_results: Dict[str, Any] = None) -> str:
         """

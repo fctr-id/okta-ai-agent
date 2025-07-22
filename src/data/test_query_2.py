@@ -37,16 +37,6 @@ async def execute_test_query(query: str, test_name: str, expected_workflow: str)
     try:
         # Initialize the real-world hybrid executor
         executor = RealWorldHybridExecutor()
-        print(f"🚀 RealWorldHybridExecutor initialized")
-        
-        # Print executor details
-        entities_count = len(executor.api_data.get('entity_summary', {}))
-        tables_count = len(executor.db_schema.get('tables', {}))
-        print(f"   📁 DB Path: {executor.db_path}")
-        print(f"   📁 API Data: {executor.api_data_path}")
-        print(f"   📁 Schema: {executor.schema_path}")
-        print(f"   📊 Entities loaded: {entities_count}")
-        print(f"   🗃️ Tables loaded: {tables_count}")
         
         print(f"\n🚀 EXECUTING REAL HYBRID QUERY")
         print("="*60)
@@ -130,9 +120,9 @@ async def execute_test_query(query: str, test_name: str, expected_workflow: str)
             print(f"   🔍 Endpoints Filtered: 0")
         
         # Code Generation and Execution
-        llm2_results = raw_results.get('llm2_code_generation', {})
-        code_generated = llm2_results.get('success', False)
-        code_length = llm2_results.get('code_length', 0)
+        api_code_results = raw_results.get('api_code_generation', {})
+        code_generated = api_code_results.get('success', False)
+        code_length = api_code_results.get('code_length', 0)
         
         execution_results = raw_results.get('execution_result')
         code_executed = execution_results is not None

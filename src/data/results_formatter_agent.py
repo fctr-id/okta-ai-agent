@@ -67,17 +67,19 @@ def _load_sample_data_prompt() -> str:
 Analyze samples and create efficient code for processing complete datasets."""
 
 # Create Results Formatter Agents with PydanticAI (2 specialized agents)
-# SIMPLIFIED: Use more flexible validation to avoid retry issues
+# Create PydanticAI agents with structured output
 complete_data_formatter = Agent(
     'openai:gpt-4o',
     system_prompt=_load_complete_data_prompt(),
-    retries=1  # Allow 1 retry but use more flexible validation
+    output_type=FormattedOutput,  # ✅ MODERN: Structured output
+    retries=1  # Allow 1 retry with structured validation
 )
 
 sample_data_formatter = Agent(
     'openai:gpt-4o', 
     system_prompt=_load_sample_data_prompt(),
-    retries=1  # Allow 1 retry but use more flexible validation
+    output_type=FormattedOutput,  # ✅ MODERN: Structured output
+    retries=1  # Allow 1 retry with structured validation
 )
 
 def _count_total_records(results: Dict[str, Any]) -> int:
@@ -101,15 +103,15 @@ def _count_total_records(results: Dict[str, Any]) -> int:
 def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> Dict[str, Any]:
     """Create intelligent samples from each step's output instead of sending all data"""
     
-    # Determine sample size based on total records - OPTIMIZED for LLM token efficiency
-    if total_records <= 5:
-        sample_size = total_records  # Send all if very small (5 or fewer)
-    elif total_records <= 50:
-        sample_size = min(3, total_records)  # Sample 3 records for small datasets
-    elif total_records <= 500:
-        sample_size = min(5, total_records)  # Sample 5 records for medium datasets
+    # Determine sample size based on total records
+    if total_records <= 10:
+        sample_size = total_records  # Send all if very small
+    elif total_records <= 100:
+        sample_size = min(10, total_records)  # Sample 10 records
+    elif total_records <= 1000:
+        sample_size = min(20, total_records)  # Sample 20 records  
     else:
-        sample_size = min(7, total_records)  # Sample 7 records for large datasets (max cap)
+        sample_size = min(50, total_records)  # Sample 50 records for large datasets
     
     print(f"📊 Creating samples: {sample_size} records from {total_records} total")
     
@@ -146,21 +148,17 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
                 if len(original_data) <= sample_size:
                     sampled_sql['data'] = original_data
                 else:
-                    # Optimized sampling: take strategic samples for LLM analysis
-                    if sample_size <= 3:
-                        # For small samples, take first, middle, last
-                        indices = [0, len(original_data)//2, len(original_data)-1]
-                        sampled_sql['data'] = [original_data[i] for i in indices[:sample_size]]
-                    else:
-                        # For larger samples, distribute evenly across the dataset
-                        step = len(original_data) // sample_size
-                        indices = [i * step for i in range(sample_size)]
-                        sampled_sql['data'] = [original_data[i] for i in indices]
+                    # Take first few, last few, and some middle records for variety
+                    first_records = original_data[:sample_size//3]
+                    last_records = original_data[-sample_size//3:]
+                    middle_start = len(original_data) // 2 - (sample_size//3)//2
+                    middle_records = original_data[middle_start:middle_start + (sample_size//3)]
                     
+                    sampled_sql['data'] = first_records + middle_records + last_records
                     sampled_sql['sample_info'] = {
                         'total_records': len(original_data),
                         'sampled_records': len(sampled_sql['data']),
-                        'sampling_strategy': 'strategic_distribution'
+                        'sampling_strategy': 'first_middle_last'
                     }
                 print(f"   📊 SQL data: {len(sampled_sql.get('data', []))} samples from {len(sql_exec.get('data', []))} records")
             
@@ -183,22 +181,14 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
                     if len(original_data) <= sample_size:
                         sampled_step['data'] = original_data
                     else:
-                        # Optimized sampling for API data
+                        # Take diverse samples
                         step_sample_size = min(sample_size, len(original_data))
-                        if step_sample_size <= 5:
-                            # For small samples, take evenly distributed records
-                            step = len(original_data) // step_sample_size
-                            indices = [i * step for i in range(step_sample_size)]
-                            sampled_step['data'] = [original_data[i] for i in indices]
-                        else:
-                            # For larger samples, use random sampling (fallback)
-                            import random
-                            sampled_step['data'] = random.sample(original_data, step_sample_size)
-                        
+                        import random
+                        sampled_step['data'] = random.sample(original_data, step_sample_size)
                         sampled_step['sample_info'] = {
                             'total_records': len(original_data),
                             'sampled_records': len(sampled_step['data']),
-                            'sampling_strategy': 'optimized_distribution' if step_sample_size <= 5 else 'random'
+                            'sampling_strategy': 'random'
                         }
                     print(f"   📊 {step.get('step_type', 'Unknown')} step: {len(sampled_step.get('data', []))} samples from {len(step.get('data', []))} records")
                 
@@ -267,9 +257,6 @@ async def _parse_and_enhance_response(result, flow_id: str, total_records: int, 
             }
             if hasattr(response_data, 'processing_code') and response_data.processing_code:
                 response_json['processing_code'] = response_data.processing_code
-                # Log the COMPLETE Results Formatter Agent processing code (user requested complete code visibility)
-                logger.info(f"[{flow_id}] Results Formatter Agent generated processing code (length: {len(response_data.processing_code)} chars)")
-                logger.debug(f"[{flow_id}] Results Formatter Agent Complete Processing Code:\n{response_data.processing_code}")
                 
         elif hasattr(result, 'data'):
             # String output - parse JSON
@@ -352,9 +339,6 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
     total_records = _count_total_records(results)
     flow_id = metadata.get("flow_id", "unknown") if metadata else "unknown"
     
-    # CRITICAL: Set the correlation ID to ensure consistent logging across all agents
-    set_correlation_id(flow_id)
-    
     logger.info(f"[{flow_id}] Results Formatter Agent Starting")
     logger.info(f"[{flow_id}] Processing {total_records} total records (is_sample: {is_sample})")
     logger.debug(f"[{flow_id}] Query: {query}")
@@ -369,7 +353,8 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
             if sql_data:
                 sample_record = sql_data[0]
                 logger.debug(f"[{flow_id}] Sample SQL Record Keys: {list(sample_record.keys())}")
-                logger.debug(f"[{flow_id}] Sample SQL Record: {sample_record}")
+                # Log the complete first record for debugging (not truncated fields)
+                logger.debug(f"[{flow_id}] Complete Sample SQL Record: {sample_record}")
     
     try:
         # Determine processing approach based on dataset size (prioritize complete processing for medium datasets)
@@ -417,11 +402,9 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
     
     prompt = _create_complete_data_prompt(query, results, original_plan, dataset_size_context, total_records)
     
-    # Log the prompt being sent to LLM (truncate large prompts)
-    logger.info(f"[{flow_id}] Sending prompt to Results Formatter Agent (Complete Data)")
-    logger.debug(f"[{flow_id}] Prompt length: {len(prompt)} characters")
-    prompt_preview = prompt[:1000] + "..." if len(prompt) > 1000 else prompt
-    logger.debug(f"[{flow_id}] Complete Data Prompt preview: {prompt_preview}")
+    # Log the prompt being sent to LLM
+    logger.debug(f"[{flow_id}] Prompt to LLM (length: {len(prompt)} chars):")
+    logger.debug(f"[{flow_id}] Prompt Content: {prompt[:1000]}..." if len(prompt) > 1000 else f"[{flow_id}] Prompt Content: {prompt}")
     
     try:
         logger.info(f"[{flow_id}] Sending prompt to PydanticAI complete data formatter...")
@@ -429,35 +412,28 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
         # Run formatter with flexible validation
         result = await complete_data_formatter.run(prompt)
         
-        # Log token usage if available
-        if hasattr(result, 'usage') and result.usage():
-            usage = result.usage()
-            input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-            output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
-            logger.info(f"[{flow_id}] Results Formatter Agent (Complete) - {input_tokens} in, {output_tokens} out tokens")
-        else:
-            logger.info(f"[{flow_id}] Results Formatter Agent (Complete) completed successfully")
-        
-        # Log the LLM response (truncated to prevent log bloat)
+        # Log the LLM response
         logger.debug(f"[{flow_id}] LLM Response Type: {type(result)}")
-        if hasattr(result, 'output'):
-            output_str = str(result.output)
-            logger.debug(f"[{flow_id}] LLM Response Data: {output_str[:500]}{'...' if len(output_str) > 500 else ''}")
-        elif hasattr(result, 'data'):
-            data_str = str(result.data)
-            logger.debug(f"[{flow_id}] LLM Response Data: {data_str[:500]}{'...' if len(data_str) > 500 else ''}")
+        if hasattr(result, 'data'):
+            logger.debug(f"[{flow_id}] LLM Response Data: {str(result.data)[:500]}...")
+            # Log if complete data processing generated code
+            if hasattr(result.data, 'processing_code') and result.data.processing_code:
+                logger.debug(f"[{flow_id}] COMPLETE DATA PROCESSING CODE GENERATED:\n{result.data.processing_code}")
         elif hasattr(result, 'message'):
-            msg_str = str(result.message)
-            logger.debug(f"[{flow_id}] LLM Response Data: {msg_str[:500]}{'...' if len(msg_str) > 500 else ''}")
+            logger.debug(f"[{flow_id}] LLM Response Message: {str(result.message)[:500]}...")
         else:
-            result_str = str(result)
-            logger.debug(f"[{flow_id}] LLM Response Data: {result_str[:500]}{'...' if len(result_str) > 500 else ''}")
+            logger.debug(f"[{flow_id}] LLM Response: {str(result)[:500]}...")
         
         formatted_result = await _parse_and_enhance_response(result, flow_id, total_records, is_complete=True)
         
         # Log the final formatted result
         logger.info(f"[{flow_id}] Complete data processing finished")
         logger.debug(f"[{flow_id}] Final Result Keys: {list(formatted_result.keys())}")
+        
+        # Log final processing code if any was generated for complete data processing
+        if 'processing_code' in formatted_result and formatted_result['processing_code']:
+            logger.debug(f"[{flow_id}] FINAL COMPLETE DATA PROCESSING CODE:\n{formatted_result['processing_code']}")
+        
         if 'content' in formatted_result:
             content = formatted_result['content']
             if isinstance(content, list):
@@ -488,44 +464,52 @@ async def _process_sample_data(query: str, sampled_results: Dict[str, Any], orig
                               flow_id: str, total_records: int) -> Dict[str, Any]:
     """Process sample data and generate code for full dataset processing"""
     
+    # Debug logging for samples received
+    logger.debug(f"[{flow_id}] Sample Data Processing - Samples received:")
+    if 'raw_results' in sampled_results and 'sql_execution' in sampled_results['raw_results']:
+        sql_data = sampled_results['raw_results']['sql_execution'].get('data', [])
+        logger.debug(f"[{flow_id}] SQL Sample Data: {len(sql_data)} records")
+        if sql_data:
+            # Log complete first 2 records for debugging (not truncated fields)
+            logger.debug(f"[{flow_id}] Complete first 2 SQL sample records: {sql_data[:2]}")
+    
     prompt = _create_sample_data_prompt(query, sampled_results, original_plan, total_records)
     
-    # Log sample data processing start (truncate large prompts)
-    logger.info(f"[{flow_id}] Starting sample data processing and code generation")
-    logger.debug(f"[{flow_id}] Sample Data Prompt length: {len(prompt)} characters")
-    prompt_preview = prompt[:1000] + "..." if len(prompt) > 1000 else prompt
-    logger.debug(f"[{flow_id}] Sample Data Prompt preview: {prompt_preview}")
+    # Debug logging for prompt being sent
+    logger.debug(f"[{flow_id}] Sample Data Prompt (length: {len(prompt)} chars):")
+    logger.debug(f"[{flow_id}] Sample Prompt Content: {prompt[:1000]}..." if len(prompt) > 1000 else f"[{flow_id}] Sample Prompt Content: {prompt}")
     
     try:
-        logger.info(f"[{flow_id}] Processing samples and generating code with specialized PydanticAI agent...")
+        if config['enable_token_reporting']:
+            logger.info(f"[{flow_id}] Processing samples and generating code with specialized PydanticAI agent...")
         
         # Run formatter with flexible validation
         result = await sample_data_formatter.run(prompt)
         
-        # Log token usage if available
-        if hasattr(result, 'usage') and result.usage():
-            usage = result.usage()
-            input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-            output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
-            logger.info(f"[{flow_id}] Results Formatter Agent (Sample) - {input_tokens} in, {output_tokens} out tokens")
+        # Debug logging for LLM response
+        logger.debug(f"[{flow_id}] Sample Data LLM Response Type: {type(result)}")
+        if hasattr(result, 'data'):
+            logger.debug(f"[{flow_id}] Sample Data LLM Response: {str(result.data)[:500]}...")
+            # Log if code generation was included
+            if hasattr(result.data, 'processing_code') and result.data.processing_code:
+                logger.debug(f"[{flow_id}] Generated Processing Code: {result.data.processing_code[:300]}...")
+                # Log the complete processing code for debugging
+                logger.debug(f"[{flow_id}] COMPLETE RESULTS FORMATTER PROCESSING CODE:\n{result.data.processing_code}")
+        elif hasattr(result, 'message'):
+            logger.debug(f"[{flow_id}] Sample Data LLM Message: {str(result.message)[:500]}...")
         else:
-            logger.info(f"[{flow_id}] Results Formatter Agent (Sample) completed successfully")
-        
-        # Log the sample processing response (truncated to prevent log bloat)
-        logger.debug(f"[{flow_id}] Sample LLM Response Type: {type(result)}")
-        if hasattr(result, 'output'):
-            output_str = str(result.output)
-            logger.debug(f"[{flow_id}] Sample LLM Response Data: {output_str[:500]}{'...' if len(output_str) > 500 else ''}")
+            logger.debug(f"[{flow_id}] Sample Data LLM Response: {str(result)[:500]}...")
         
         formatted_result = await _parse_and_enhance_response(result, flow_id, total_records, is_complete=False)
         
-        # Log the COMPLETE generated processing code if any (user requested complete code visibility)
-        if 'processing_code' in formatted_result and formatted_result['processing_code']:
-            processing_code = formatted_result['processing_code']
-            logger.info(f"[{flow_id}] Generated processing code for full dataset (length: {len(processing_code)} chars)")
-            logger.debug(f"[{flow_id}] Results Formatter Agent Complete Generated Processing Code:\n{processing_code}")
+        # Debug logging for final formatted output
+        logger.debug(f"[{flow_id}] Sample Data Final Result Keys: {list(formatted_result.keys())}")
+        if 'processing_code' in formatted_result:
+            logger.debug(f"[{flow_id}] Final Processing Code Generated: {formatted_result['processing_code'][:300] if formatted_result['processing_code'] else 'None'}...")
+            # Log the complete final processing code for debugging
+            if formatted_result['processing_code']:
+                logger.debug(f"[{flow_id}] COMPLETE FINAL PROCESSING CODE GENERATED:\n{formatted_result['processing_code']}")
         
-        logger.info(f"[{flow_id}] Sample data processing completed successfully")
         return formatted_result
         
     except Exception as e:
