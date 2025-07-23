@@ -1,0 +1,166 @@
+{
+  "entities": [
+    {
+      "entity": "application",
+      "operations": ["list", "create", "get", "replace", "delete", "activate", "deactivate", "assign_policy"]
+    },
+    {
+      "entity": "application_assignment",
+      "operations": ["list_group_assignments", "get_group_assignment", "assign_group", "update_group_assignment", "unassign_group", "list_user_assignments", "assign_user", "get_user_assignment", "update_user_assignment", "unassign_user"]
+    },
+    {
+      "entity": "application_connection",
+      "operations": ["get_default", "update_default", "get_jwks", "activate_default", "deactivate_default", "verify_oauth"]
+    },
+    {
+      "entity": "application_credential",
+      "operations": ["list_csrs", "create_csr", "get_csr", "revoke_csr", "publish_csr", "list_keys", "create_key", "get_key", "clone_key", "list_jwks", "create_jwk", "get_jwk", "delete_jwk", "activate_jwk", "deactivate_jwk", "list_secrets", "create_secret", "get_secret", "delete_secret", "activate_secret", "deactivate_secret"]
+    },
+    {
+      "entity": "application_feature",
+      "operations": ["list", "get", "update"]
+    },
+    {
+      "entity": "application_federated_claim",
+      "operations": ["list", "create", "get", "replace", "delete"]
+    },
+    {
+      "entity": "application_grant",
+      "operations": ["list", "create", "get", "delete"]
+    },
+    {
+      "entity": "application_logo",
+      "operations": ["upload"]
+    },
+    {
+      "entity": "application_sso",
+      "operations": ["get_saml_metadata"]
+    },
+    {
+      "entity": "application_token",
+      "operations": ["list", "revoke_all", "get", "revoke"]
+    },
+    {
+      "entity": "authenticator",
+      "operations": ["get_well_known_config", "list", "create", "get", "replace", "activate", "deactivate", "list_methods", "get_method", "replace_method", "activate_method", "deactivate_method"]
+    },
+    {
+      "entity": "behavior_rule",
+      "operations": ["list", "create", "get", "replace", "delete", "activate", "deactivate"]
+    },
+    {
+      "entity": "custom_role",
+      "operations": ["list", "create", "get", "replace", "delete", "list_permissions", "get_permission", "add_permission", "replace_permission", "remove_permission"]
+    },
+    {
+      "entity": "device",
+      "operations": ["list", "get", "delete", "activate", "deactivate", "suspend", "unsuspend", "list_users"]
+    },
+    {
+      "entity": "device_assurance_policy",
+      "operations": ["list", "create", "get", "replace", "delete"]
+    },
+    {
+      "entity": "device_integration",
+      "operations": ["list", "get", "activate", "deactivate"]
+    },
+    {
+      "entity": "device_posture_check",
+      "operations": ["list", "create", "list_defaults", "get", "replace", "delete"]
+    },
+    {
+      "entity": "group",
+      "operations": ["list", "create", "get", "replace", "delete", "list_assigned_apps", "list_members", "add_member", "remove_member"]
+    },
+    {
+      "entity": "group_owner",
+      "operations": ["list", "assign", "unassign"]
+    },
+    {
+      "entity": "group_rule",
+      "operations": ["list", "create", "get", "replace", "delete", "activate", "deactivate"]
+    },
+    {
+      "entity": "log_stream",
+      "operations": ["list", "create", "get", "replace", "delete", "activate", "deactivate"]
+    },
+    {
+      "entity": "network_zone",
+      "operations": ["list", "create", "get", "replace", "delete", "activate", "deactivate"]
+    },
+    {
+      "entity": "okta_application_settings",
+      "operations": ["get", "replace"]
+    },
+    {
+      "entity": "policy",
+      "operations": ["list", "create", "simulate", "get", "replace", "delete", "list_apps", "clone", "activate", "deactivate", "list_resources", "map_resource", "get_resource_mapping", "delete_resource_mapping", "list_rules", "create_rule", "get_rule", "replace_rule", "delete_rule", "activate_rule", "deactivate_rule"]
+    },
+    {
+      "entity": "resource_set",
+      "operations": ["list", "create", "get", "replace", "delete", "list_resources", "add_resource", "get_resource", "replace_resource_conditions", "delete_resource", "list_bindings", "create_binding", "get_binding", "delete_binding", "list_binding_members", "add_binding_members", "get_binding_member", "remove_binding_member"]
+    },
+    {
+      "entity": "role_assignment",
+      "operations": ["list_users_with_roles", "list_by_user", "assign_to_user", "get_for_user", "unassign_from_user", "list_governance_sources_for_user_role", "get_governance_source_for_user_role", "list_governance_source_resources_for_user_role", "list_by_group", "assign_to_group", "get_for_group", "unassign_from_group", "list_by_client", "assign_to_client", "get_for_client", "unassign_from_client", "list_app_targets_for_user_role", "assign_all_apps_target_to_user_role", "assign_app_target_to_user_role", "unassign_app_target_from_user_role", "assign_app_instance_target_to_user_role", "unassign_app_instance_target_from_user_role", "list_group_targets_for_user_role", "assign_group_target_to_user_role", "unassign_group_target_from_user_role", "list_app_targets_for_group_role", "assign_app_target_to_group_role", "unassign_app_target_from_group_role", "assign_app_instance_target_to_group_role", "unassign_app_instance_target_from_group_role", "list_group_targets_for_group_role", "assign_group_target_to_group_role", "unassign_group_target_from_group_role", "list_app_targets_for_client_role", "assign_app_target_to_client_role", "unassign_app_target_from_client_role", "assign_app_instance_target_to_client_role", "unassign_app_instance_target_from_client_role", "list_group_targets_for_client_role", "assign_group_target_to_client_role", "unassign_group_target_from_client_role"]
+    },
+    {
+      "entity": "system_log",
+      "operations": ["list_events"]
+    },
+    {
+      "entity": "user",
+      "operations": ["list", "create", "get", "update", "replace", "delete", "list_blocks", "list_app_links", "list_groups", "list_clients", "list_devices", "activate", "deactivate", "reactivate", "reset_factors", "suspend", "unlock", "unsuspend", "end_current_session", "revoke_all_sessions"]
+    },
+    {
+      "entity": "user_authenticator",
+      "operations": ["list_enrollments", "enroll_phone", "get_enrollment", "delete_enrollment", "list_yubikey_tokens", "upload_yubikey_seed", "get_yubikey_token", "list_factors", "enroll_factor", "list_supported_factors", "list_supported_security_questions", "get_factor", "unenroll_factor", "activate_factor", "resend_factor_enrollment", "get_factor_transaction_status", "verify_factor"]
+    }
+  ],
+  "sql_tables": [
+    {
+      "name": "users",
+      "columns": ["id", "tenant_id", "okta_id", "email", "first_name", "last_name", "login", "status", "mobile_phone", "employee_number", "department", "manager", "user_type", "country_code", "title", "organization", "created_at", "last_updated_at", "status_changed_at", "is_deleted", "custom_attrib_1", "custom_attrib_2", "custom_attrib_3", "custom_attrib_4", "custom_attrib_5", "testAttrib"]
+    },
+    {
+      "name": "groups",
+      "columns": ["id", "tenant_id", "okta_id", "name", "description", "created_at", "last_updated_at", "is_deleted"]
+    },
+    {
+      "name": "user_group_memberships",
+      "columns": ["user_okta_id", "group_okta_id", "tenant_id", "created_at", "updated_at"]
+    },
+    {
+      "name": "applications",
+      "columns": ["id", "tenant_id", "okta_id", "name", "label", "status", "sign_on_mode", "policy_id", "created_at", "last_updated_at", "is_deleted"]
+    },
+    {
+      "name": "user_application_assignments",
+      "columns": ["user_okta_id", "application_okta_id", "tenant_id", "assignment_id", "credentials_setup", "hidden", "created_at", "updated_at"]
+    },
+    {
+      "name": "group_application_assignments",
+      "columns": ["group_okta_id", "application_okta_id", "tenant_id", "assignment_id", "created_at", "updated_at"]
+    },
+    {
+      "name": "user_factors",
+      "columns": ["id", "tenant_id", "okta_id", "user_okta_id", "factor_type", "provider", "status", "authenticator_name", "created_at", "last_updated_at"]
+    },
+    {
+      "name": "devices",
+      "columns": ["id", "tenant_id", "okta_id", "status", "display_name", "platform", "manufacturer", "model", "serial_number", "created_at", "last_updated_at"]
+    },
+    {
+      "name": "user_devices",
+      "columns": ["id", "tenant_id", "user_okta_id", "device_okta_id", "management_status", "screen_lock_type", "created_at"]
+    },
+    {
+      "name": "policies",
+      "columns": ["id", "tenant_id", "okta_id", "name", "description", "status", "type", "created_at", "last_updated_at"]
+    },
+    {
+      "name": "sync_history",
+      "columns": ["id", "tenant_id", "entity_type", "start_time", "end_time", "status", "success", "error_details", "records_processed"]
+    }
+  ]
+}

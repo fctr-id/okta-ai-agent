@@ -54,26 +54,21 @@ class PlanningDependencies:
 
 class ExecutionStep(BaseModel):
     """Individual execution step in the plan"""
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "tool_name": "system_log",
-            "operation": "list_events",
-            "query_context": "Get login events for the last 7 days to identify active users",
-            "critical": True,
-            "reasoning": "Identify users who have logged in recently"
-        }
-    })
     
     tool_name: str = Field(
-        description='Entity name for API calls or table name for SQL operations',
+        description='Execution method: "sql" or "api"',
+        pattern=r'^(sql|api)$'
+    )
+    entity: str = Field(
+        description='The actual entity/table name (e.g., "users", "system_log", "groups")',
         min_length=1
     )
     operation: Optional[str] = Field(
-        description='Exact operation name for API calls (null for SQL steps)',
+        description='Exact operation name for API steps, null for SQL steps',
         default=None
     )
     query_context: str = Field(
-        description='Detailed context for this step describing what data to collect',
+        description='Detailed description of what data to collect',
         min_length=1
     )
     critical: bool = Field(
@@ -86,33 +81,7 @@ class ExecutionStep(BaseModel):
     )
 
 class ExecutionPlan(BaseModel):
-    """Complete execution plan structure"""
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "entities": ["users", "system_log"],
-            "steps": [
-                {
-                    "tool_name": "system_log", 
-                    "query_context": "Get login events for the last 7 days to identify active users",
-                    "critical": True,
-                    "reasoning": "Identify users who have logged in recently"
-                },
-                {
-                    "tool_name": "users",
-                    "query_context": "Find applications and groups for the specified users",
-                    "critical": True, 
-                    "reasoning": "Retrieve user application and group data from SQL"
-                }
-            ],
-            "reasoning": "Break user query into: API for recent login events, SQL for fetching applications and groups for those users",
-            "confidence": 85
-        }
-    })
-    
-    entities: List[str] = Field(
-        description='List of entities/tables involved in the execution plan',
-        min_items=1
-    )
+    """Execution plan within the response"""
     steps: List[ExecutionStep] = Field(
         description='Ordered list of execution steps',
         min_items=1
@@ -121,6 +90,16 @@ class ExecutionPlan(BaseModel):
         description='High-level reasoning for the chosen approach',
         min_length=10
     )
+    partial_success_acceptable: Optional[bool] = Field(
+        description='Whether partial success is acceptable',
+        default=True
+    )
+
+class PlanningResponse(BaseModel):
+    """Complete planning response structure that matches system prompt format"""
+    plan: ExecutionPlan = Field(
+        description='Execution plan with steps and reasoning'
+    )
     confidence: int = Field(
         description='Confidence level in the execution plan (0-100)',
         ge=0,
@@ -128,27 +107,14 @@ class ExecutionPlan(BaseModel):
     )
 
 class PlanningOutput(BaseModel):
-    """Output structure for the Planning Agent"""
-    model_config = ConfigDict(json_schema_extra={
-        "example": {
-            "plan": {
-                "entities": ["users", "system_log"],
-                "steps": [
-                    {
-                        "tool_name": "system_log",
-                        "query_context": "Get login events for the last 7 days to identify active users", 
-                        "critical": True,
-                        "reasoning": "Identify users who have logged in recently"
-                    }
-                ],
-                "reasoning": "Break user query into API and SQL components",
-                "confidence": 85
-            }
-        }
-    })
-    
+    """Output structure for the Planning Agent - matches system prompt format"""
     plan: ExecutionPlan = Field(
         description='The complete execution plan for the user query'
+    )
+    confidence: int = Field(
+        description='Confidence level in the execution plan (0-100)',
+        ge=0,
+        le=100
     )
 
 # Load system prompt from file
@@ -210,9 +176,9 @@ SQL TABLES: {sql_table_names}"""
         # Return a basic fallback prompt
         return """You are a hybrid query planner. Create execution plans with 'plan' containing 'entities', 'steps', 'reasoning', and 'confidence'."""
 
-# Load the base system prompt at module level
+# Load base system prompt for static instructions
 def load_base_system_prompt() -> str:
-    """Load the base system prompt from file"""
+    """Load the base system prompt from file for static instructions"""
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
         prompt_path = os.path.join(script_dir, "planning_agent_system_prompt.txt")
@@ -220,12 +186,71 @@ def load_base_system_prompt() -> str:
         with open(prompt_path, 'r', encoding='utf-8') as f:
             return f.read()
     except Exception as e:
-        logger.error(f"Failed to load system prompt file: {e}")
-        # Return a basic fallback prompt
-        return """You are a hybrid query planner. Create execution plans with 'plan' containing 'entities', 'steps', 'reasoning', and 'confidence'."""
+        logger.error(f"Failed to load base system prompt file: {e}")
+        return "You are a HYBRID query planner for an Okta system."
 
-# Load base prompt at import time
-BASE_SYSTEM_PROMPT = load_base_system_prompt()
+def get_dynamic_instructions_text(deps: PlanningDependencies) -> str:
+    """Get dynamic instructions text for debugging (same logic as @planning_agent.instructions)"""
+    # Build entity operations in clean JSON format
+    api_entities = {}
+    for entity, details in deps.entity_summary.items():
+        operations = details.get('operations', [])
+        
+        # Filter to most relevant operations for planning (max 8 per entity)
+        key_operations = []
+        
+        # Priority operations based on common query patterns
+        priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
+        
+        # Add priority operations first
+        for op in priority_ops:
+            if op in operations:
+                key_operations.append(op)
+        
+        # Add other operations up to limit
+        for op in operations:
+            if op not in key_operations and len(key_operations) < 8:
+                key_operations.append(op)
+        
+        # Simple clean format - just the operations list
+        api_entities[entity] = key_operations
+    
+    # Build SQL tables in clean JSON format
+    sql_tables = {}
+    for table_name, table_info in deps.sql_tables.items():
+        columns = table_info.get('columns', [])
+        
+        # Show key columns for planning
+        key_columns = []
+        priority_cols = ['id', 'okta_id', 'name', 'email', 'login', 'status', 'user_okta_id', 'group_okta_id', 'application_okta_id']
+        
+        for col in columns:
+            col_name = col['name'] if isinstance(col, dict) else str(col)
+            if col_name in priority_cols or 'okta_id' in col_name.lower():
+                key_columns.append(col_name)
+        
+        # Add other important columns
+        for col in columns:
+            col_name = col['name'] if isinstance(col, dict) else str(col)
+            if col_name not in key_columns and len(key_columns) < 6:
+                key_columns.append(col_name)
+        
+        # Simple clean format - just the columns list
+        sql_tables[table_name] = key_columns
+    
+    # Create minimal JSON context
+    context_data = {
+        "api_entities": api_entities,
+        "sql_tables": sql_tables
+    }
+    
+    # Return JSON context with ultra-compact formatting to save context tokens
+    return f"""
+AVAILABLE DATA SOURCES (JSON Format):
+```json
+{json.dumps(context_data, separators=(',', ':'))}
+```
+DATA AVAILABILITY SUMMARY:"""
 
 # Create the Planning Agent with PydanticAI
 planning_agent = Agent(
@@ -233,8 +258,74 @@ planning_agent = Agent(
     output_type=PlanningOutput,  # ✅ MODERN: Use output_type not deprecated result_type
     deps_type=PlanningDependencies,
     retries=0,  # No retries to avoid wasting money on failed attempts
-    system_prompt=BASE_SYSTEM_PROMPT  # Static base prompt, will be enhanced at runtime
+    instructions=load_base_system_prompt()  # Static base instruction from file
 )
+
+@planning_agent.instructions
+def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
+    """Dynamic instructions that include current context as clean JSON"""
+    deps = ctx.deps
+    
+    # Build entity operations in clean JSON format
+    api_entities = {}
+    for entity, details in deps.entity_summary.items():
+        operations = details.get('operations', [])
+        
+        # Filter to most relevant operations for planning (max 8 per entity)
+        key_operations = []
+        
+        # Priority operations based on common query patterns
+        priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
+        
+        # Add priority operations first
+        for op in priority_ops:
+            if op in operations:
+                key_operations.append(op)
+        
+        # Add other operations up to limit
+        for op in operations:
+            if op not in key_operations and len(key_operations) < 8:
+                key_operations.append(op)
+        
+        # Simple clean format - just the operations list
+        api_entities[entity] = key_operations
+    
+    # Build SQL tables in clean JSON format
+    sql_tables = {}
+    for table_name, table_info in deps.sql_tables.items():
+        columns = table_info.get('columns', [])
+        
+        # Show key columns for planning
+        key_columns = []
+        priority_cols = ['id', 'okta_id', 'name', 'email', 'login', 'status', 'user_okta_id', 'group_okta_id', 'application_okta_id']
+        
+        for col in columns:
+            col_name = col['name'] if isinstance(col, dict) else str(col)
+            if col_name in priority_cols or 'okta_id' in col_name.lower():
+                key_columns.append(col_name)
+        
+        # Add other important columns
+        for col in columns:
+            col_name = col['name'] if isinstance(col, dict) else str(col)
+            if col_name not in key_columns and len(key_columns) < 6:
+                key_columns.append(col_name)
+        
+        # Simple clean format - just the columns list
+        sql_tables[table_name] = key_columns
+    
+    # Create minimal JSON context
+    context_data = {
+        "api_entities": api_entities,
+        "sql_tables": sql_tables
+    }
+    
+    # Return JSON context with ultra-compact formatting to save context tokens
+    return f"""
+AVAILABLE DATA SOURCES (JSON Format):
+```json
+{json.dumps(context_data, separators=(',', ':'))}
+```
+"""
 
 async def generate_execution_plan(
     query: str,
@@ -270,14 +361,48 @@ async def generate_execution_plan(
             flow_id=flow_id
         )
         
+        # Debug: Log what we're about to send to the agent
+        logger.info(f"[{flow_id}] About to call planning agent with query: {query}")
+        logger.debug(f"[{flow_id}] Dependencies: entities={len(available_entities)}, sql_tables={len(sql_tables)}")
+        
+        # Debug: Capture and log the complete system prompt BEFORE calling the agent
+        try:
+            # Get the static base prompt
+            static_prompt = load_base_system_prompt()
+            
+            # Get the dynamic instructions
+            dynamic_instructions = get_dynamic_instructions_text(deps)
+            
+            # Log the complete prompt
+            logger.info(f"[{flow_id}] === COMPLETE SYSTEM PROMPT START ===")
+            logger.info(f"[{flow_id}] STATIC PROMPT:")
+            logger.info(f"[{flow_id}] {static_prompt}")
+            logger.info(f"[{flow_id}] DYNAMIC INSTRUCTIONS:")
+            logger.info(f"[{flow_id}] {dynamic_instructions}")
+            logger.info(f"[{flow_id}] === COMPLETE SYSTEM PROMPT END ===")
+        except Exception as e:
+            logger.error(f"[{flow_id}] Failed to capture system prompt for debugging: {e}")
+        
         # Generate plan using PydanticAI
         result = await planning_agent.run(query, deps=deps)
+        
+        # Debug: Dump the complete system prompt and messages
+        if hasattr(result, 'all_messages') and result.all_messages():
+            logger.info(f"[{flow_id}] FULL SYSTEM PROMPT DEBUG:")
+            for i, message in enumerate(result.all_messages()):
+                if hasattr(message, 'role') and hasattr(message, 'content'):
+                    logger.info(f"[{flow_id}] Message {i} ({message.role}):")
+                    logger.info(f"[{flow_id}] Content: {message.content}")
+                    logger.info(f"[{flow_id}] ---")
+                else:
+                    logger.info(f"[{flow_id}] Message {i}: {message}")
+        else:
+            logger.warning(f"[{flow_id}] Could not access all_messages for prompt debugging")
         
         # Pretty print the execution plan for debugging
         import json
         logger.info(f"[{flow_id}] Generated execution plan:\n{json.dumps(result.output.plan.model_dump(), indent=2)}")
-        logger.debug(f"[{flow_id}] Plan confidence: {result.output.plan.confidence}%")
-        logger.debug(f"[{flow_id}] Plan entities: {result.output.plan.entities}")
+        logger.debug(f"[{flow_id}] Plan confidence: {result.output.confidence}%")
         logger.debug(f"[{flow_id}] Plan steps: {len(result.output.plan.steps)}")
         
         # Token usage tracking
@@ -290,6 +415,7 @@ async def generate_execution_plan(
         return {
             'success': True,
             'plan': result.output.plan.model_dump(),
+            'confidence': result.output.confidence,
             'usage': {
                 'input_tokens': getattr(result.usage(), 'request_tokens', 0) if result.usage() else 0,
                 'output_tokens': getattr(result.usage(), 'response_tokens', 0) if result.usage() else 0,
@@ -328,36 +454,3 @@ def extract_json_from_text(text: str) -> dict:
     else:
         # Try to parse the entire text as JSON
         return json.loads(text)
-
-# For testing the agent directly
-async def test_planning_agent():
-    """Simple test function for the planning agent"""
-    flow_id = generate_correlation_id("test")
-    set_correlation_id(flow_id)
-    
-    # Mock data for testing
-    mock_entities = ["user", "group", "application", "system_log"]
-    mock_entity_summary = {
-        "user": {"operations": ["list_users", "get_user"], "methods": ["GET"]},
-        "system_log": {"operations": ["list_events"], "methods": ["GET"]}
-    }
-    mock_sql_tables = {
-        "users": {"columns": ["id", "email", "status"]},
-        "groups": {"columns": ["id", "name", "description"]}
-    }
-    
-    test_query = "Find users who logged in the last 7 days and their applications"
-    
-    result = await generate_execution_plan(
-        query=test_query,
-        available_entities=mock_entities,
-        entity_summary=mock_entity_summary,
-        sql_tables=mock_sql_tables,
-        flow_id=flow_id
-    )
-    
-    print(f"Planning Agent Test Result: {result}")
-    return result
-
-if __name__ == "__main__":
-    asyncio.run(test_planning_agent())

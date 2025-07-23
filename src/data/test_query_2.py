@@ -1,53 +1,57 @@
 #!/usr/bin/env python3
 """
+PRODUCTION TEST QUERY 2 - MODERNIZED with Modern Execution Manager
+
 Test Query 2: SQL→API Workflow
 Find users of group sso-super-admins and fetch their apps, groups and assigned roles.
 
 Expected workflow: 
 1. SQL: Get users in the sso-super-admins group
 2. API: Get application assignments and roles for those users
+
+Uses the same interface as RealWorldHybridExecutor but with our simplified Modern Execution Manager.
 """
 
 import asyncio
 import sys
 import os
+from datetime import datetime
 
-# Add the parent directory to the Python path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
+# Add local path for modern imports
+sys.path.append(os.path.dirname(__file__))
 
-from src.data.real_world_hybrid_executor import RealWorldHybridExecutor
+from modern_execution_manager import modern_executor
 
 async def test_query_2():
     """Test SQL→API workflow with group-based user query"""
     
+    print("🎯 MODERN END-TO-END TEST: QUERY 2")
+    print("=" * 70)
+    
     # The query that should trigger SQL first, then API
     query = "Find users in the group sso-super-admins and fetch their apps, groups and roles"
     
-    print("🧪 END-TO-END TEST: QUERY 2 (SQL→API)")
-    print("="*70)
-    print(f"🎯 QUERY 2: {query}")
-    print("Expected workflow: SQL (group members) → API (app assignments + roles)")
-    print("="*70)
-    
-    return await execute_test_query(query, "QUERY 2 (SQL→API)", "SQL→API")
-
-async def execute_test_query(query: str, test_name: str, expected_workflow: str):
-    """Execute a test query and analyze results"""
+    print(f"📝 Query: {query}")
+    print(f"🔗 Expected workflow: SQL (group members) → API (app assignments + roles)")
+    print(f"🕒 Test start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 70)
     
     try:
-        # Initialize the real-world hybrid executor
-        executor = RealWorldHybridExecutor()
+        # Execute the query using Modern Execution Manager (same interface as RealWorldHybridExecutor)
+        print(f"\n🚀 Executing with Modern Execution Manager...")
+        result = await modern_executor.execute_query(query)
         
-        print(f"\n🚀 EXECUTING REAL HYBRID QUERY")
-        print("="*60)
-        print(f"📝 Query: {query}")
-        
-        # Execute the query
-        result = await executor.execute_query(query)
-        
-        print(f"\n🎯 {test_name} RESULTS:")
-        print("="*50)
+        print(f"\n� EXECUTION RESULTS:")
+        print("=" * 50)
         print(f"✅ Overall Success: {result.get('success', False)}")
+        print(f"🔗 Correlation ID: {result.get('correlation_id', 'N/A')}")
+        print(f"📋 Total Steps: {result.get('total_steps', 0)}")
+        print(f"✅ Successful Steps: {result.get('successful_steps', 0)}")
+        print(f"❌ Failed Steps: {result.get('failed_steps', 0)}")
+        
+        # Show step details
+        step_results = result.get('step_results', [])
+        if step_results:
         
         # Analyze the execution pattern
         raw_results = result.get('raw_results', {})

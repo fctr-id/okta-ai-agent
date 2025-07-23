@@ -97,52 +97,156 @@ class ModernExecutionManager:
         """Initialize the modern execution manager"""
         self.error_handler = BasicErrorHandler()
         
-        # Load API data and DB schema (same as old executor)
+        # Load simple reference format
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        self.api_data_path = os.path.join(project_root, "src", "data", "Okta_API_entitity_endpoint_reference.json")
-        self.db_schema_path = os.path.join(project_root, "src", "data", "okta_schema.json")
+        self.simple_ref_path = os.path.join(project_root, "src", "data", "lightweight_api_reference.json")
+        self.full_api_path = os.path.join(project_root, "src", "data", "Okta_API_entitity_endpoint_reference.json")
         
-        # Load data files
-        self.api_data = self._load_api_data()
-        self.db_schema = self._load_db_schema()
+        # Load simple reference for planning
+        self.simple_ref_data = self._load_simple_reference()
         
-        # Extract planning dependencies
-        self.available_entities = list(self.api_data.get('entity_summary', {}).keys())
-        self.entity_summary = self.api_data.get('entity_summary', {})
-        self.sql_tables = self.db_schema.get('sql_tables', {})
-        self.endpoints = self.api_data.get('endpoints', [])  # Load endpoints for filtering
+        # Load full API data for endpoint filtering during execution
+        self.full_api_data = self._load_api_data()
+        
+        # Extract planning dependencies from simple reference
+        self.available_entities = [entity['entity'] for entity in self.simple_ref_data.get('entities', [])]
+        self.entity_summary = {entity['entity']: {'operations': entity['operations'], 'methods': []} 
+                              for entity in self.simple_ref_data.get('entities', [])}
+        self.sql_tables = {table['name']: {'columns': table['columns']} 
+                          for table in self.simple_ref_data.get('sql_tables', [])}
+        self.endpoints = self.full_api_data.get('endpoints', [])  # Load endpoints for filtering
         
         logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, {len(self.sql_tables)} SQL tables, {len(self.endpoints)} endpoints")
     
+    def _generate_lightweight_reference(self) -> Dict[str, Any]:
+        """Generate lightweight API reference from comprehensive sources"""
+        try:
+            # Load comprehensive API reference - REQUIRED
+            api_data = self._load_api_data()
+            entity_summary = api_data.get('entity_summary', {})
+            
+            if not entity_summary:
+                raise FileNotFoundError(f"Okta API reference file not found or empty: {self.full_api_path}")
+            
+            # Load SQL schema - REQUIRED
+            schema_path = os.path.join(os.path.dirname(self.simple_ref_path), "okta_schema.json")
+            sql_tables = []
+            
+            with open(schema_path, 'r') as f:
+                schema_data = json.load(f)
+                # Handle different schema formats
+                if 'tables' in schema_data:
+                    sql_tables = schema_data['tables']
+                elif 'sql_tables' in schema_data:
+                    # Convert from object format to array format
+                    sql_tables_obj = schema_data['sql_tables']
+                    sql_tables = []
+                    for table_name, table_info in sql_tables_obj.items():
+                        sql_tables.append({
+                            "name": table_name,
+                            "columns": table_info.get('columns', [])
+                        })
+                else:
+                    raise ValueError(f"Invalid schema format in {schema_path}. Expected 'tables' or 'sql_tables' key.")
+            
+            if not sql_tables:
+                raise ValueError(f"No SQL tables found in schema file: {schema_path}")
+            
+            # Convert entity summary to lightweight format
+            entities = []
+            for entity_name, entity_data in entity_summary.items():
+                entities.append({
+                    "entity": entity_name,
+                    "operations": entity_data.get('operations', [])
+                })
+            
+            # Sort entities alphabetically for consistency
+            entities.sort(key=lambda x: x['entity'])
+            
+            lightweight_data = {
+                "entities": entities,
+                "sql_tables": sql_tables
+            }
+            
+            # Save the generated file with compact formatting
+            with open(self.simple_ref_path, 'w') as f:
+                # Custom JSON formatting to keep arrays on one line
+                json_str = json.dumps(lightweight_data, indent=2)
+                
+                # Post-process to put operations and columns arrays on single lines
+                import re
+                
+                # Pattern for operations arrays
+                operations_pattern = r'("operations":\s*\[\s*\n)((?:\s*"[^"]*",?\s*\n?)*?)(\s*\])'
+                # Pattern for columns arrays  
+                columns_pattern = r'("columns":\s*\[\s*\n)((?:\s*"[^"]*",?\s*\n?)*?)(\s*\])'
+                
+                def compress_array(match):
+                    prefix = match.group(1).split(':')[0] + ':'  # Get the key part
+                    array_content = match.group(2)
+                    
+                    # Extract array items
+                    items = re.findall(r'"([^"]*)"', array_content)
+                    # Format as single line
+                    if items:
+                        items_str = ', '.join(f'"{item}"' for item in items)
+                        return f'{prefix} [{items_str}]'
+                    else:
+                        return f'{prefix} []'
+                
+                # Apply compression to both operations and columns
+                json_str = re.sub(operations_pattern, compress_array, json_str, flags=re.MULTILINE)
+                json_str = re.sub(columns_pattern, compress_array, json_str, flags=re.MULTILINE)
+                
+                # Write the formatted JSON
+                f.write(json_str)
+            
+            logger.info(f"Generated lightweight API reference with {len(entities)} entities and {len(sql_tables)} SQL tables")
+            return lightweight_data
+            
+        except FileNotFoundError as e:
+            error_msg = f"Required source file missing: {e}"
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        except Exception as e:
+            error_msg = f"Failed to generate lightweight reference: {e}"
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
+
+    def _load_simple_reference(self) -> Dict[str, Any]:
+        """Load simple reference format for planning, generating it if missing"""
+        try:
+            with open(self.simple_ref_path, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logger.warning(f"Simple reference file not found: {self.simple_ref_path}")
+            logger.info("Generating lightweight API reference from comprehensive sources...")
+            return self._generate_lightweight_reference()
+        except Exception as e:
+            logger.error(f"Failed to load simple reference: {e}")
+            logger.info("Attempting to regenerate lightweight API reference...")
+            return self._generate_lightweight_reference()
+
     def _load_api_data(self) -> Dict[str, Any]:
-        """Load API entity data from JSON file"""
+        """Load full API entity data for endpoint filtering"""
         try:
-            with open(self.api_data_path, 'r') as f:
+            with open(self.full_api_path, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
-            logger.warning(f"API data file not found: {self.api_data_path}")
-            return {'entity_summary': {}}
+            logger.warning(f"Full API data file not found: {self.full_api_path}")
+            return {'endpoints': []}
         except Exception as e:
-            logger.error(f"Failed to load API data: {e}")
-            return {'entity_summary': {}}
+            logger.error(f"Failed to load full API data: {e}")
+            return {'endpoints': []}
     
-    def _load_db_schema(self) -> Dict[str, Any]:
-        """Load database schema from JSON file"""
-        try:
-            with open(self.db_schema_path, 'r') as f:
-                return json.load(f)
-        except FileNotFoundError:
-            logger.warning(f"DB schema file not found: {self.db_schema_path}")
-            return {'sql_tables': {}}
-        except Exception as e:
-            logger.error(f"Failed to load DB schema: {e}")
-            return {'sql_tables': {}}
+
     
     def _get_entity_endpoints_for_step(self, step: ExecutionStep) -> List[Dict[str, Any]]:
-        """Get filtered endpoints for a specific API step (copied from old executor)"""
-        # Handle both old 'entity' field and new 'tool_name' field for compatibility
-        entity_name = getattr(step, 'entity', None) or getattr(step, 'tool_name', None)
+        """Get filtered endpoints for a specific API step"""
+        # Use the entity field from the new format
+        entity_name = step.entity
         if not entity_name:
+            logger.warning(f"No entity specified in step: {step}")
             return []
         
         entity = entity_name.lower()
@@ -150,8 +254,18 @@ class ModernExecutionManager:
         operations = [operation.lower()]
         methods = ['GET']  # Default to GET for most operations
         
-        # Use the exact same filtering logic as old executor
-        return self._get_entity_operation_matches(entity, operations, methods)
+        # Get matches with precise filtering
+        matches = self._get_entity_operation_matches(entity, operations, methods)
+        
+        # Log detailed info if no matches found for debugging
+        if not matches:
+            available_for_entity = [ep for ep in self.endpoints if ep.get('entity', '').lower() == entity]
+            logger.error(f"No endpoint matches found for entity='{entity}', operation='{operation}', methods={methods}")
+            logger.error(f"Available endpoints for entity '{entity}': {[ep.get('operation') for ep in available_for_entity]}")
+            if available_for_entity:
+                logger.error(f"First available endpoint for '{entity}': {available_for_entity[0]}")
+        
+        return matches
     
     def _get_entity_operation_matches(self, entity: str, operations: List[str], methods: List[str]) -> List[Dict]:
         """Get endpoints matching entity + operation + method (copied from old executor)"""
@@ -184,32 +298,10 @@ class ModernExecutionManager:
         return True
     
     def _operation_matches(self, endpoint_op: str, requested_ops: List[str]) -> bool:
-        """Check if endpoint operation matches any requested operation (copied from old executor)"""
+        """Check if endpoint operation matches any requested operation - PRECISE MATCHING ONLY"""
         for requested_op in requested_ops:
-            if self._semantic_operation_match(endpoint_op, requested_op.lower()):
+            if endpoint_op.lower() == requested_op.lower():
                 return True
-        return False
-    
-    def _semantic_operation_match(self, endpoint_op: str, requested_op: str) -> bool:
-        """Semantic matching for operations with common aliases (copied from old executor)"""
-        # Direct match
-        if endpoint_op == requested_op:
-            return True
-        
-        # Common aliases
-        aliases = {
-            'list': ['list', 'get', 'retrieve', 'fetch'],
-            'list_members': ['list_members', 'members', 'list'],
-            'list_user_assignments': ['list_user_assignments', 'assignments', 'list'],
-            'list_factors': ['list_factors', 'factors', 'list_enrollments', 'list'],
-            'get': ['get', 'retrieve', 'fetch'],
-            'create': ['create', 'add', 'post'],
-        }
-        
-        for alias_group in aliases.values():
-            if endpoint_op in alias_group and requested_op in alias_group:
-                return True
-        
         return False
     
     async def execute_query(self, query: str) -> Dict[str, Any]:
@@ -371,6 +463,35 @@ class ModernExecutionManager:
                 'phase': 'execution_error'
             }
     
+    def regenerate_lightweight_reference(self) -> Dict[str, Any]:
+        """
+        Public method to manually regenerate the lightweight API reference.
+        
+        This method:
+        1. Reads the comprehensive Okta API reference
+        2. Reads the SQL schema (with fallback to defaults)
+        3. Generates a new lightweight_api_reference.json file
+        4. Updates internal data structures
+        
+        Returns:
+            Dict containing the generated reference data
+        """
+        logger.info("Manually regenerating lightweight API reference...")
+        
+        # Generate new reference
+        new_reference = self._generate_lightweight_reference()
+        
+        # Update internal data structures
+        self.simple_ref_data = new_reference
+        self.available_entities = [entity['entity'] for entity in new_reference.get('entities', [])]
+        self.entity_summary = {entity['entity']: {'operations': entity['operations'], 'methods': []} 
+                              for entity in new_reference.get('entities', [])}
+        self.sql_tables = {table['name']: {'columns': table['columns']} 
+                          for table in new_reference.get('sql_tables', [])}
+        
+        logger.info(f"Lightweight reference regenerated: {len(self.available_entities)} entities, {len(self.sql_tables)} SQL tables")
+        return new_reference
+    
     async def execute_steps(self, plan: ExecutionPlan, correlation_id: str) -> ExecutionResults:
         """
         Execute all steps in the plan in order.
@@ -418,9 +539,14 @@ class ModernExecutionManager:
                     result.sample_extracted = sample
                     previous_sample = sample
                     logger.info(f"[{correlation_id}] Step {step_num} completed successfully")
-                    logger.info(f"[{correlation_id}] === SAMPLE DATA FOR NEXT STEP ===")
-                    logger.info(f"[{correlation_id}] {sample}")
-                    logger.info(f"[{correlation_id}] === END SAMPLE DATA ===")
+                    
+                    # Log sample data concisely
+                    if isinstance(sample, list) and sample:
+                        logger.debug(f"[{correlation_id}] Sample for next step: {len(sample)} items, first: {sample[0] if sample else 'None'}")
+                    elif sample:
+                        logger.debug(f"[{correlation_id}] Sample for next step: {sample}")
+                    else:
+                        logger.debug(f"[{correlation_id}] No sample data extracted")
                 else:
                     failed_steps += 1
                     previous_sample = None  # No sample for failed steps
@@ -530,10 +656,21 @@ class ModernExecutionManager:
             # Get filtered endpoints for this specific step (using old executor logic)
             available_endpoints = self._get_entity_endpoints_for_step(step)
             
+            # HARD STOP: If no endpoints found, fail the entire query immediately
+            if not available_endpoints:
+                error_msg = f"CRITICAL: No API endpoints found for entity='{step.entity}', operation='{getattr(step, 'operation', None)}'. Cannot proceed with API code generation."
+                logger.error(f"[{correlation_id}] {error_msg}")
+                return StepResult(
+                    step_number=step_number,
+                    step_type="api",
+                    success=False,
+                    error=error_msg
+                )
+            
             # Call API Code Gen Agent with enhanced logging using wrapper function
             logger.debug(f"[{correlation_id}] Calling API Code Gen Agent with context: {step.query_context}")
-            # Handle both old 'entity' field and new 'tool_name' field for compatibility
-            entity_name = getattr(step, 'entity', None) or getattr(step, 'tool_name', None) or "users"
+            # Use the entity field from the new format
+            entity_name = step.entity or "users"
             api_result_dict = await generate_api_code(
                 query=step.query_context,
                 sql_data_sample=previous_sample if isinstance(previous_sample, list) else [{"sample": "data"}],
@@ -566,9 +703,14 @@ class ModernExecutionManager:
                 # Use the actual execution output
                 actual_data = execution_result.get('output', [])
                 logger.info(f"[{correlation_id}] API code execution successful, got {len(actual_data) if isinstance(actual_data, list) else 'N/A'} results")
-                logger.info(f"[{correlation_id}] === API EXECUTION OUTPUT ===")
-                logger.info(f"[{correlation_id}] {actual_data[:3] if isinstance(actual_data, list) and actual_data else 'No data'}")
-                logger.info(f"[{correlation_id}] === END API OUTPUT ===")
+                
+                # Log only one sample element to avoid log spam
+                if isinstance(actual_data, list) and actual_data:
+                    logger.debug(f"[{correlation_id}] Sample API result (1 of {len(actual_data)}): {actual_data[0]}")
+                elif actual_data:
+                    logger.debug(f"[{correlation_id}] API result sample: {actual_data}")
+                else:
+                    logger.debug(f"[{correlation_id}] API execution returned no data")
                 
                 result_data = {
                     'code': api_result_dict['code'],
@@ -667,16 +809,6 @@ import sys
 import json
 try:
 {indented_code}
-    # Try to capture any printed output or variables
-    # This is a best-effort attempt to get structured data
-    if 'result' in locals():
-        print(json.dumps({{"status": "success", "data": result}}))
-    elif 'users' in locals():
-        print(json.dumps({{"status": "success", "data": users}}))
-    elif 'data' in locals():
-        print(json.dumps({{"status": "success", "data": data}}))
-    else:
-        print(json.dumps({{"status": "success", "data": []}}))
 except Exception as e:
     print(json.dumps({{"status": "error", "error": str(e)}}))
 """
@@ -713,10 +845,12 @@ except Exception as e:
                             'stderr': result.stderr
                         }
                 except json.JSONDecodeError:
-                    logger.warning(f"[{correlation_id}] Could not parse JSON output, using raw stdout")
+                    logger.error(f"[{correlation_id}] Generated code did not output valid JSON. This is a critical failure.")
+                    logger.error(f"[{correlation_id}] Raw stdout: {result.stdout}")
+                    logger.error(f"[{correlation_id}] Raw stderr: {result.stderr}")
                     return {
-                        'success': True,
-                        'output': result.stdout.strip().split('\n') if result.stdout.strip() else [],
+                        'success': False,
+                        'error': 'Generated code must output valid JSON format. Check API Code Generation Agent prompt compliance.',
                         'stdout': result.stdout,
                         'stderr': result.stderr
                     }

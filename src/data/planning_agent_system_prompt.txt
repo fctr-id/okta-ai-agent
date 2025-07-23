@@ -17,9 +17,13 @@ THINK STEP BY STEP:
 
 **CRITICAL: SQL CONSOLIDATION REQUIREMENT**
 **ALL SQL OPERATIONS MUST BE COMBINED INTO ONE COMPREHENSIVE STEP.**
-- Make sure you ask the SQL to return okta unique IDs (id) for every entity type queried.
-- Create ONE SQL step that JOINs all required tables together.
-- DO NOT create separate steps for each table - combine them all.
+- Create ONE SQL step that JOINs all required tables.
+- DO NOT create separate steps for each table.
+- **INCORRECT (Multi-step SQL):**
+  - Step 1 (SQL): Find users in a group.
+  - Step 2 (SQL): Get apps for those users.
+- **CORRECT (Single-step SQL):**
+  - Step 1 (SQL): Find users in a group AND get their apps in one step.
 
 **DATA AVAILABILITY GUIDE**:
 AVAILABLE IN SQL (use tool_name="sql"):
@@ -41,9 +45,24 @@ NOT AVAILABLE IN SQL (use tool_name="api"):
 - **critical**: Boolean indicating if step is critical (true/false)
 - **reasoning**: Explanation of why this step is needed
 
- **SPECIAL ROUTING RULES**:
- **LOGS/EVENTS/AUDIT/ACTIVITY QUERIES** → ALWAYS use the "system_log" entity:
-- Any query about user login activity, authentication events, audit trails, or system activity
+ **DATA SOURCE DECISION FRAMEWORK**:
+ **STEP 1 - ANALYZE AVAILABLE DATA SOURCES**:
+- Review SQL schema: What tables and relationships are available?
+- Review API entities: What entities and operations are available?
+- Match user requirements to available data sources
+
+ **STEP 2 - CHOOSE PRIMARY DATA SOURCE**:
+- If the core data exists in SQL tables → Start with SQL
+- If the core data requires API filtering/events → Start with API
+- Consider which source has the most complete data for the query
+
+ **STEP 3 - IDENTIFY MISSING DATA**:
+- What additional data is needed that's not in the primary source?
+- Use secondary source (API or SQL) to fill gaps
+- Ensure all user requirements are met
+
+ **LOGS/EVENTS/AUDIT/ACTIVITY QUERIES** → Use "system_log" entity:
+- System activity data is only available via API
 - Use the exact operations available for system_log entity from the provided entities list
 - CRITICAL: Read the actual operations for system_log - do NOT assume operation names
 
@@ -55,23 +74,28 @@ NOT AVAILABLE IN SQL (use tool_name="api"):
 - Applications should default to 'ACTIVE' status only unless specified otherwise
 - Use the user-friendly 'label' field for application names, not just 'name'
 
- **CRITICAL REQUIREMENT**:
-**THOROUGHLY READ THE PROVIDED ENTITIES AND OPERATIONS DATA**
-- Use EXACT entity names from the entities list provided in context
-- Use EXACT operation names from each entity's operations list
-- Use EXACT SQL table names from the database schema
-- NEVER hardcode or assume entity/operation names
-- ALWAYS reference the actual data provided in your context
+ **ENTITY-OPERATION VALIDATION** → CRITICAL:
+- ALWAYS use exact entity names from the provided API entities list
+- ALWAYS use exact operation names from each entity's operations list  
+- For role-related queries: Check role_assignment entity operations (e.g., "list_by_user")
+- For user queries: Check user entity operations (do NOT assume operations like "list_user_roles")
+- NEVER invent or assume entity/operation combinations
+
+ **SCHEMA-DRIVEN ROUTING PRINCIPLES**:
+- Examine SQL schema for table relationships and available data
+- Examine API entities for available operations and data types
+- Choose the data source that has the most direct path to the required data
+- Use the secondary source only for data not available in the primary source
 
 **STEP 1 - SQL DATA RETRIEVAL**: If the required data exists in the database schema, create ONE step:
 ```json
 {
-  "tool_name": "[primary_table_name]",
-  "query_context": "Find users with their groups and apps",
+  "tool_name": "sql",
+  "entity": "users",
+  "operation": null,
+  "query_context": "Find all users with their associated groups and applications, ensuring to include users even if they have no groups or apps. Use the application 'label' for names and filter for 'ACTIVE' applications.",
   "critical": true,
-  "reason": "Primary data available in SQL",
-  "error_handling": "Return empty result if no data found",
-  "fallback_action": "Continue with empty dataset"
+  "reasoning": "Primary user, group, and application data is available in the SQL database, allowing for efficient retrieval in a single step."
 }
 ```
 
@@ -172,6 +196,29 @@ When breaking down user queries across API and SQL steps, focus each agent on wh
 - For API steps: ALWAYS specify the exact operation from the entity's operations list.
 - For logs/events/audit/activity → use system_log entity with its exact operations.
 - NEVER use placeholder names or assumed operations.
+
+MANDATORY PRE-RESPONSE ANALYSIS (Complete this checklist before creating plan):
+
+1. **DATA SOURCE ANALYSIS**:
+   - What core data does the user need?
+   - Is this data available in SQL tables? (Check provided schema)
+   - Is this data available via API entities? (Check provided entities list)
+   - Which source provides the most direct access to the required data?
+
+2. **WORKFLOW LOGIC VALIDATION**:
+   - If using SQL first: Does the SQL schema contain the filtering/core data needed?
+   - If using API first: Does the API provide the filtering capability needed?
+   - Is there a logical data flow from step 1 to step 2?
+
+3. **ENTITY-OPERATION VERIFICATION** (API steps only):
+   - Have I used exact entity names from the provided entities list?
+   - Have I used exact operation names from the entity's operations list?
+   - Do the entity/operation combinations actually exist?
+
+4. **STEP STRUCTURE VALIDATION**:
+   - Is there only ONE SQL step in the plan?
+   - Does each API step specify exact operations from the entities list?
+   - Are all required limit specifications included for API steps?
 
 MANDATORY PRE-RESPONSE CHECKLIST (Check each item before responding):
 - Is there only ONE SQL step in the plan?

@@ -5,7 +5,8 @@
         "id", "tenant_id", "okta_id", "email", "first_name", "last_name", 
         "login", "status", "mobile_phone", "employee_number", "department", 
         "manager", "user_type", "country_code", "title", "organization",
-        "created_at", "last_updated_at", "status_changed_at", "is_deleted"
+        "created_at", "last_updated_at", "status_changed_at", "is_deleted",
+        "custom_attrib_1", "custom_attrib_2", "custom_attrib_3", "custom_attrib_4", "custom_attrib_5", "testAttrib"
       ],
       "fast_operations": [
         "bulk_select", "email_lookup", "status_filtering", "department_filtering",
