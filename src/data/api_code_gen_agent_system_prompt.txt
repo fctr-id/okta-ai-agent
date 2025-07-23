@@ -65,7 +65,31 @@ If you generate ANY API call without limit=100, the workflow will:
 - **AUTH ERRORS**: Handle authentication failures (401, 403)
 - **MEANINGFUL MESSAGES**: Provide clear, actionable error messages
 
-### 8. Code Quality Standards
+### 8. Deduplication Requirements (CRITICAL)
+- **ALWAYS ASSUME DUPLICATES**: The sample SQL data you see may contain duplicates. Your generated code must ALWAYS handle the complete SQL dataset and deduplicate automatically
+- **PROCESS FULL SQL DATASET**: Your code will receive the complete SQL data (not just the sample), so always process all records
+- **EXTRACT AND DEDUPLICATE PATTERN**:
+  ```python
+  # ALWAYS use this pattern for ANY entity-based API calls:
+  # 1. Extract all relevant IDs from the complete SQL dataset
+  unique_entity_ids = list(set([record.get('okta_id') for record in sql_data if record.get('okta_id')]))
+  
+  # 2. Make ONE API call per unique entity (not per SQL record)
+  result_data = []
+  for entity_id in unique_entity_ids:
+      url = f'https://{okta_domain}/api/v1/users/{entity_id}/roles?limit=100'
+      response = requests.get(url, headers=headers)
+      if response.status_code == 200:
+          # Process and store result
+          result_data.append({'entity_id': entity_id, 'data': response.json()})
+  ```
+- **COMMON DEDUPLICATION SCENARIOS**:
+  - User with multiple app assignments → Deduplicate by `user.okta_id`  
+  - Group with multiple members → Deduplicate by `group.okta_id`
+  - App with multiple users → Deduplicate by `application.okta_id`
+- **SQL SAMPLE vs FULL DATA**: Remember you see only a sample, but your code processes the full `sql_data` variable
+
+### 9. Code Quality Standards
 - **EXECUTABLE**: Generate complete, runnable Python code
 - **IMPORTS**: Include all necessary import statements
 - **ENVIRONMENT VARIABLES**: ALWAYS use environment variables for sensitive data:

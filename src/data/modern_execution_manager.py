@@ -37,7 +37,7 @@ from pydantic import BaseModel
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 # Import existing agents from local directory
-from sql_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging
+from sql_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
 from api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
 from planning_agent import ExecutionPlan, ExecutionStep, planning_agent
 from results_formatter_agent import process_results_structured
@@ -625,13 +625,25 @@ class ModernExecutionManager:
                     success=False,
                     error=error_msg
                 )
+            
             # Create a mock result object that matches the expected structure
             class MockSQLResult:
-                def __init__(self, sql_text, explanation):
+                def __init__(self, sql_text, explanation, data):
                     self.sql = sql_text
                     self.explanation = explanation
+                    self.data = data  # Add actual SQL execution results
             
-            result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'])
+            # Execute the generated SQL query against the database
+            if sql_dict['sql'] and sql_dict['sql'].strip():
+                db_data = await self._execute_raw_sql_query(sql_dict['sql'], correlation_id)
+                logger.info(f"[{correlation_id}] SQL execution completed: {len(db_data)} records returned")
+                if db_data:
+                    logger.debug(f"[{correlation_id}] Sample SQL record (1 of {len(db_data)}): {db_data[0]}")
+            else:
+                logger.warning(f"[{correlation_id}] No SQL query generated or empty query")
+                db_data = []
+            
+            result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'], db_data)
             
             return StepResult(
                 step_number=step_number,
@@ -673,6 +685,8 @@ class ModernExecutionManager:
             
             # Call API Code Gen Agent with enhanced logging using wrapper function
             logger.debug(f"[{correlation_id}] Calling API Code Gen Agent with context: {step.query_context}")
+            logger.debug(f"[{correlation_id}] Available endpoints being passed to API agent: {len(available_endpoints)} endpoints")
+            logger.debug(f"[{correlation_id}] First endpoint structure: {available_endpoints[0] if available_endpoints else 'None'}")
             # Use the entity field from the new format
             entity_name = step.entity or "users"
             api_result_dict = await generate_api_code(
@@ -761,6 +775,16 @@ class ModernExecutionManager:
         """
         if step_result is None:
             return None
+        
+        # Special handling for MockSQLResult objects
+        if hasattr(step_result, 'data') and hasattr(step_result, 'sql'):
+            # This is a MockSQLResult object - extract the actual data
+            sql_data = step_result.data
+            if isinstance(sql_data, list) and sql_data:
+                sample_size = min(3, len(sql_data))
+                return sql_data[:sample_size]
+            else:
+                return []
         
         # Handle list results - take first 3 items
         if isinstance(step_result, list):
@@ -888,6 +912,56 @@ except Exception as e:
                     os.unlink(temp_file_path)
             except:
                 pass
+
+    async def _execute_raw_sql_query(self, sql_query: str, correlation_id: str) -> List[Dict]:
+        """
+        Execute raw SQL query against the database and return results.
+        
+        Args:
+            sql_query: The SQL query to execute
+            correlation_id: Correlation ID for logging
+            
+        Returns:
+            List of dictionaries containing query results
+        """
+        logger.debug(f"[{correlation_id}] Executing SQL query against database...")
+        
+        # Safety check using the same validation as old executor
+        if not is_safe_sql(sql_query):
+            logger.warning(f"[{correlation_id}] SQL query failed safety check - blocking execution")
+            logger.warning(f"[{correlation_id}] Unsafe query: {sql_query}")
+            return []
+        
+        try:
+            import sqlite3
+            
+            # Database path (same as old executor)
+            db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+            db_path = os.path.abspath(db_path)
+            
+            # Connect to database
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row  # Enable column access by name
+            cursor = conn.cursor()
+            
+            # Execute query
+            cursor.execute(sql_query)
+            rows = cursor.fetchall()
+            
+            # Convert to list of dictionaries
+            data = [dict(row) for row in rows]
+            
+            conn.close()
+            
+            logger.info(f"[{correlation_id}] SQL query executed successfully: {len(data)} records returned")
+            if data:
+                logger.debug(f"[{correlation_id}] Sample record keys: {list(data[0].keys())}")
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Database query failed: {e}")
+            return []
 
 
 # Create singleton instance

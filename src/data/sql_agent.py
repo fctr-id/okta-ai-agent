@@ -59,71 +59,24 @@ class SQLQueryOutput(BaseModel):
 
 # Replace the existing system_prompt content with this updated version:
 
+# Load the system prompt from external file
+def load_sql_agent_system_prompt():
+    """Load SQL agent system prompt from external text file"""
+    prompt_file = os.path.join(os.path.dirname(__file__), 'sql_agent_system_prompt.txt')
+    try:
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        # Minimal fallback if external file not found
+        logger.warning("SQL agent system prompt file not found, using minimal fallback")
+        return "You are an expert SQLite engineer. Always include okta_id for all entities. Generate a single valid SQLite query with proper JSON output format."
+
 sql_agent = Agent(
     model,
     output_type=SQLQueryOutput,
     deps_type=SQLDependencies,
     retries=0,  # Keep simple - no retries to avoid validation issues
-    system_prompt="""You are an expert-level SQLite engineer. Your primary task is to convert user requests into a single, optimized, and valid SQLite query based on the provided database schema. You must follow all rules and patterns outlined below without deviation.
-
-### 1. CORE DIRECTIVE: OUTPUT FORMAT
-Your final output MUST be a single, raw JSON object. It must contain two keys: `sql` and `explanation`. Do not add any extra characters, newlines, or text outside of this JSON structure.
-{
-"sql": "<A SINGLE, VALID SQLITE QUERY STRING>",
-"explanation": "<A CONCISE EXPLANATION OF THE QUERY. If the user asks to save or download, begin the explanation with 'SAVE_FILE'.>"
-}
-
-### 2. GOLDEN RULES (APPLY TO ALL QUERIES)
-1.  **Single Query Only:** You MUST generate only one SQL query. Do not use placeholders (`?`).
-2.  **Schema is Truth:** The database schema provided is the ONLY source of truth. NEVER use columns not explicitly listed.
-3.  **Default Filters:** Unless specified otherwise, you MUST filter for `status = 'ACTIVE'` for users and applications.
-4.  **Default Columns & Sorting:**
-    *   **Users:** ALWAYS include `email`, `login`, `first_name`, `last_name`, `status`. Include `okta_id` for queries involving relationships. Sort by `last_name`, `first_name`.
-    *   **Groups:** ALWAYS include `name`, `description`, `okta_id`. Sort by `name`.
-    *   **Applications:** ALWAYS include `label`, `name`, `status`, `okta_id`. Sort by `label`.
-5.  **Operator Choice:** Use `LIKE '%value%'` for free-text searches (names, labels), `IN ('val1', 'val2')` for lists, and `=` for exact matches (IDs, emails, status).
-6.  **Custom Attributes:** For fields not in the standard schema, use `JSON_EXTRACT(custom_attributes, '$.fieldName')`.
-7.  **JOINs:** Join tables ONLY on their `okta_id` relationships (e.g., `ON u.okta_id = ugm.user_okta_id`).
-
-### 3. QUERY PATTERNS
-
-**Pattern 1: User Groups & Applications (Most Important)**
-*   To get a complete view of a user's groups and all applications (both direct and group-based), you MUST use the following `UNION` pattern. This ensures all groups are listed, even if they have no associated apps.
-
-    ```sql
-    -- Get all groups and any group-based apps
-    SELECT u.email, u.first_name, u.last_name, g.name as group_name, a.label as application_label, 'Group' as assignment_type, g.name as assignment_source
-    FROM users u
-    LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
-    LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id
-    LEFT JOIN group_application_assignments gaa ON g.okta_id = gaa.group_okta_id
-    LEFT JOIN applications a ON gaa.application_okta_id = a.okta_id AND a.status = 'ACTIVE'
-    WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE'
-    UNION
-    -- Get all direct app assignments
-    SELECT u.email, u.first_name, u.last_name, NULL as group_name, a.label as application_label, 'Direct' as assignment_type, 'Direct Assignment' as assignment_source
-    FROM users u
-    JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id
-    JOIN applications a ON uaa.application_okta_id = a.okta_id
-    WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE' AND a.status = 'ACTIVE'
-    ORDER BY email, group_name, application_label
-    ```
-
-**Pattern 2: API Context Integration**
-*   If the prompt contains context with IDs (e.g., from a previous API call), you MUST extract those IDs and hardcode them into your query using a `WHERE okta_id IN ('id1', 'id2', ...)` clause.
-
-**Pattern 3: Manager & Report Hierarchy**
-*   **Find a User's Manager:** `SELECT m.* FROM users u JOIN users m ON u.manager = m.login WHERE u.email = 'user_email'`.
-*   **Find a Manager's Reports:** `SELECT u.* FROM users u WHERE u.manager = 'manager_login'`.
-
-**Pattern 4: Timestamp Handling**
-*   If a user asks for a timestamp, format it for local time: `strftime('%Y-%m-%d %H:%M:%S', datetime(column_name, 'localtime')) AS column_name`.
-
-##### DATABASE SCHEMA (Source of Truth) #####
-# CRITICAL: Always reference this schema to determine if a field is a standard column or a custom attribute.
-# NEVER use JSON_EXTRACT for standard columns like user_type, department, title, organization, or manager.
-# You MUST call the okta_database_schema tool to access the full database schema when needed.
-        """
+    system_prompt=load_sql_agent_system_prompt()
 )
 
 @sql_agent.system_prompt
@@ -563,10 +516,6 @@ async def main():
             logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
             logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
             
-            # Log the complete SQL query for debugging
-            logger.debug(f"[{flow_id}] COMPLETE SQL QUERY:\n{result.output.sql}")
-            logger.debug(f"[{flow_id}] COMPLETE SQL EXPLANATION:\n{result.output.explanation}")
-            
             # Simple token usage reporting (keeping it minimal)
             if hasattr(result, 'usage') and result.usage():
                 usage = result.usage()
@@ -617,10 +566,6 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
         
         logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
         logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
-        
-        # Log the complete SQL query for debugging
-        logger.debug(f"[{flow_id}] COMPLETE SQL QUERY:\n{result.output.sql}")
-        logger.debug(f"[{flow_id}] COMPLETE SQL EXPLANATION:\n{result.output.explanation}")
         
         # Token usage reporting
         if hasattr(result, 'usage') and result.usage():
