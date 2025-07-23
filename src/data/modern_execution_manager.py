@@ -245,6 +245,10 @@ class ModernExecutionManager:
             
             # Trust the agent - just extract the plan
             execution_plan = planning_result.output.plan
+            
+            # Pretty print the execution plan for debugging
+            import json
+            logger.info(f"[{correlation_id}] Generated execution plan:\n{json.dumps(execution_plan.model_dump(), indent=2)}")
             logger.info(f"[{correlation_id}] Planning completed: {len(execution_plan.steps)} steps generated")
             
             # Phase 2: Execute steps using Modern Execution Manager
@@ -615,12 +619,15 @@ class ModernExecutionManager:
         try:
             # Create a temporary Python file
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+                # Indent the entire generated code block to fit inside try/except
+                indented_code = '\n'.join('    ' + line for line in python_code.split('\n'))
+                
                 # Wrap the code to capture output as JSON
                 wrapped_code = f"""
 import sys
 import json
 try:
-{python_code}
+{indented_code}
     # Try to capture any printed output or variables
     # This is a best-effort attempt to get structured data
     if 'result' in locals():

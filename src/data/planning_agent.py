@@ -273,7 +273,9 @@ async def generate_execution_plan(
         # Generate plan using PydanticAI
         result = await planning_agent.run(query, deps=deps)
         
-        logger.debug(f"[{flow_id}] Generated execution plan: {result.output.plan.model_dump()}")
+        # Pretty print the execution plan for debugging
+        import json
+        logger.info(f"[{flow_id}] Generated execution plan:\n{json.dumps(result.output.plan.model_dump(), indent=2)}")
         logger.debug(f"[{flow_id}] Plan confidence: {result.output.plan.confidence}%")
         logger.debug(f"[{flow_id}] Plan entities: {result.output.plan.entities}")
         logger.debug(f"[{flow_id}] Plan steps: {len(result.output.plan.steps)}")
