@@ -336,6 +336,10 @@ class ModernExecutionManager:
         try:
             logger.info(f"[{correlation_id}] Starting Modern Execution Manager query execution")
             
+            # Log AI provider configuration
+            ai_provider = os.getenv('AI_PROVIDER', 'not_set')
+            logger.info(f"[{correlation_id}] AI_PROVIDER: {ai_provider}")
+            
             # Phase 1: Use Planning Agent to generate execution plan
             logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
             

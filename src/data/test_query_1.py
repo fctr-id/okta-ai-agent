@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-PRODUCTION TEST QUERY 1 - MODERNIZED with Modern Execution Manager
+INTERACTIVE QUERY TEST - MODERNIZED with Modern Execution Manager
 
-Tests: "Find users logged in the last 7 days and fetch me their apps and groups"
+Interactive test that accepts user input for any query.
 Expected workflow: Query → Planning Agent → Modern Execution Manager → Results
 
 Uses the same interface as RealWorldHybridExecutor but with our simplified Modern Execution Manager.
+Default query: "Find users logged in the last 7 days and fetch me their apps and groups"
 """
 
 import asyncio
@@ -19,16 +20,25 @@ sys.path.append(os.path.dirname(__file__))
 from modern_execution_manager import modern_executor
 
 async def test_query_1():
-    """Test Query 1: Users logged in last 7 days with their apps and groups"""
+    """Test with user-provided query"""
     
-    print("🎯 MODERN END-TO-END TEST: QUERY 1")
+    print("🎯 MODERN END-TO-END TEST: INTERACTIVE QUERY")
     print("=" * 70)
     
-    # The query that should trigger API→SQL workflow
-    query = "Find users logged in the last 7 days and fetch me their applications and groups"
+    # Get query from user input
+    print("💬 Enter your query (or press Enter for default):")
+    print("   Default: 'Find users logged in the last 7 days and fetch me their applications and groups'")
+    print()
     
-    print(f"📝 Query: {query}")
-    print(f"🔗 Expected workflow: API (login events) → SQL (user details)")
+    user_input = input("🔍 Query: ").strip()
+    
+    if not user_input:
+        query = "Find users logged in the last 7 days and fetch me their applications and groups"
+        print(f"   Using default query")
+    else:
+        query = user_input
+    
+    print(f"\n� Executing Query: {query}")
     print(f"🕒 Test start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     
@@ -75,19 +85,17 @@ async def test_query_1():
         print(f"\n🏆 TEST ASSESSMENT:")
         print("=" * 40)
         if overall_success and success_rate >= 1.0:
-            print(f"🎉 QUERY 1 - COMPLETE SUCCESS!")
+            print(f"🎉 QUERY TEST - COMPLETE SUCCESS!")
             print(f"   All steps executed successfully")
-            print(f"   Ready to proceed to Query 2")
             return True
         elif overall_success and success_rate >= 0.5:
-            print(f"✅ QUERY 1 - SUCCESS!")
+            print(f"✅ QUERY TEST - SUCCESS!")
             print(f"   Success rate: {success_rate:.1%}")
-            print(f"   Ready to proceed to Query 2")
             return True
         else:
-            print(f"❌ QUERY 1 - FAILED")
+            print(f"❌ QUERY TEST - FAILED")
             print(f"   Success rate: {success_rate:.1%}")
-            print(f"   Check logs before proceeding")
+            print(f"   Check logs for details")
             return False
             
     except Exception as e:
@@ -99,7 +107,7 @@ async def test_query_1():
 
 async def main():
     """Main test execution"""
-    print(f"🚀 Starting Modern Test Query 1...")
+    print(f"🚀 Starting Modern Interactive Query Test...")
     print(f"🕒 Test timestamp: {datetime.now().isoformat()}")
     print()
     
@@ -108,11 +116,11 @@ async def main():
     
     print(f"\n{'='*70}")
     if success:
-        print(f"🎉 MODERN TEST QUERY 1 - SUCCESS!")
-        print(f"✅ Ready to proceed to Test Query 2")
+        print(f"🎉 INTERACTIVE QUERY TEST - SUCCESS!")
+        print(f"✅ Modern Execution Manager working correctly")
     else:
-        print(f"❌ MODERN TEST QUERY 1 - NEEDS ATTENTION")
-        print(f"⚠️  Check logs for issues before proceeding")
+        print(f"❌ INTERACTIVE QUERY TEST - NEEDS ATTENTION")
+        print(f"⚠️  Check logs for issues")
     print(f"{'='*70}")
     
     return success

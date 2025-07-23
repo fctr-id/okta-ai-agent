@@ -189,69 +189,6 @@ def load_base_system_prompt() -> str:
         logger.error(f"Failed to load base system prompt file: {e}")
         return "You are a HYBRID query planner for an Okta system."
 
-def get_dynamic_instructions_text(deps: PlanningDependencies) -> str:
-    """Get dynamic instructions text for debugging (same logic as @planning_agent.instructions)"""
-    # Build entity operations in clean JSON format
-    api_entities = {}
-    for entity, details in deps.entity_summary.items():
-        operations = details.get('operations', [])
-        
-        # Filter to most relevant operations for planning (max 8 per entity)
-        key_operations = []
-        
-        # Priority operations based on common query patterns
-        priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
-        
-        # Add priority operations first
-        for op in priority_ops:
-            if op in operations:
-                key_operations.append(op)
-        
-        # Add other operations up to limit
-        for op in operations:
-            if op not in key_operations and len(key_operations) < 8:
-                key_operations.append(op)
-        
-        # Simple clean format - just the operations list
-        api_entities[entity] = key_operations
-    
-    # Build SQL tables in clean JSON format
-    sql_tables = {}
-    for table_name, table_info in deps.sql_tables.items():
-        columns = table_info.get('columns', [])
-        
-        # Show key columns for planning
-        key_columns = []
-        priority_cols = ['id', 'okta_id', 'name', 'email', 'login', 'status', 'user_okta_id', 'group_okta_id', 'application_okta_id']
-        
-        for col in columns:
-            col_name = col['name'] if isinstance(col, dict) else str(col)
-            if col_name in priority_cols or 'okta_id' in col_name.lower():
-                key_columns.append(col_name)
-        
-        # Add other important columns
-        for col in columns:
-            col_name = col['name'] if isinstance(col, dict) else str(col)
-            if col_name not in key_columns and len(key_columns) < 6:
-                key_columns.append(col_name)
-        
-        # Simple clean format - just the columns list
-        sql_tables[table_name] = key_columns
-    
-    # Create minimal JSON context
-    context_data = {
-        "api_entities": api_entities,
-        "sql_tables": sql_tables
-    }
-    
-    # Return JSON context with ultra-compact formatting to save context tokens
-    return f"""
-AVAILABLE DATA SOURCES (JSON Format):
-```json
-{json.dumps(context_data, separators=(',', ':'))}
-```
-DATA AVAILABILITY SUMMARY:"""
-
 # Create the Planning Agent with PydanticAI
 planning_agent = Agent(
     model,
@@ -307,25 +244,135 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
         # Add other important columns
         for col in columns:
             col_name = col['name'] if isinstance(col, dict) else str(col)
-            if col_name not in key_columns and len(key_columns) < 6:
+            if col_name not in key_columns:
                 key_columns.append(col_name)
         
         # Simple clean format - just the columns list
         sql_tables[table_name] = key_columns
     
-    # Create minimal JSON context
+    # Create minimal JSON context with SQL first (prioritized data source)
     context_data = {
-        "api_entities": api_entities,
-        "sql_tables": sql_tables
+        "sql_tables": sql_tables,
+        "api_entities": api_entities
     }
     
-    # Return JSON context with ultra-compact formatting to save context tokens
+    # Custom JSON formatting: readable structure but compact arrays
+    def format_json_compact_arrays(data):
+        """Format JSON with compact arrays but readable object structure"""
+        result = "{\n"
+        for i, (key, value) in enumerate(data.items()):
+            result += f'  "{key}": {{\n'
+            for j, (sub_key, sub_value) in enumerate(value.items()):
+                # Format arrays as single lines
+                array_str = json.dumps(sub_value, separators=(', ', ': '))
+                result += f'    "{sub_key}": {array_str}'
+                if j < len(value) - 1:
+                    result += ","
+                result += "\n"
+            result += "  }"
+            if i < len(data) - 1:
+                result += ","
+            result += "\n"
+        result += "}"
+        return result
+    
+    # Return JSON context with balanced formatting - readable structure but compact arrays
     return f"""
 AVAILABLE DATA SOURCES (JSON Format):
 ```json
-{json.dumps(context_data, separators=(',', ':'))}
+{format_json_compact_arrays(context_data)}
 ```
 """
+
+
+def _get_dynamic_instructions_direct(deps: PlanningDependencies) -> str:
+    """
+    Helper function to generate dynamic instructions for debugging without RunContext.
+    This duplicates the logic from get_dynamic_instructions() for debugging purposes.
+    """
+    # Build entity operations in clean JSON format
+    api_entities = {}
+    for entity, details in deps.entity_summary.items():
+        operations = details.get('operations', [])
+        
+        # Filter to most relevant operations for planning (max 8 per entity)
+        key_operations = []
+        
+        # Priority operations based on common query patterns
+        priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
+        
+        # Add priority operations first
+        for op in priority_ops:
+            if op in operations:
+                key_operations.append(op)
+        
+        # Add other operations up to limit
+        for op in operations:
+            if op not in key_operations and len(key_operations) < 8:
+                key_operations.append(op)
+        
+        # Simple clean format - just the operations list
+        api_entities[entity] = key_operations
+    
+    # Build SQL tables in clean JSON format
+    sql_tables = {}
+    for table_name, table_info in deps.sql_tables.items():
+        columns = table_info.get('columns', [])
+        
+        # Show key columns for planning
+        key_columns = []
+        priority_cols = ['id', 'okta_id', 'name', 'email', 'login', 'status', 'user_okta_id', 'group_okta_id', 'application_okta_id']
+        
+        for col in columns:
+            col_name = col['name'] if isinstance(col, dict) else str(col)
+            if col_name in priority_cols or 'okta_id' in col_name.lower():
+                key_columns.append(col_name)
+        
+        # Add other important columns
+        for col in columns:
+            col_name = col['name'] if isinstance(col, dict) else str(col)
+            if col_name not in key_columns:
+                key_columns.append(col_name)
+        
+        # Simple clean format - just the columns list
+        sql_tables[table_name] = key_columns
+    
+    # Build formatted context data (match original function format)
+    context_data = {
+        "sql_tables": sql_tables,
+        "api_entities": api_entities
+    }
+    
+    # Use the same formatting logic as the main function
+    def format_json_compact_arrays(data):
+        result = "{\n"
+        for i, (key, value) in enumerate(data.items()):
+            result += f'  "{key}": {{\n'
+            if isinstance(value, dict):
+                for j, (sub_key, sub_value) in enumerate(value.items()):
+                    if isinstance(sub_value, list):
+                        items_str = ', '.join(f'"{item}"' for item in sub_value)
+                        result += f'    "{sub_key}": [{items_str}]'
+                    else:
+                        result += f'    "{sub_key}": {json.dumps(sub_value)}'
+                    if j < len(value) - 1:
+                        result += ","
+                    result += "\n"
+            result += "  }"
+            if i < len(data) - 1:
+                result += ","
+            result += "\n"
+        result += "}"
+        return result
+    
+    # Return JSON context with balanced formatting - readable structure but compact arrays
+    return f"""
+AVAILABLE DATA SOURCES (JSON Format):
+```json
+{format_json_compact_arrays(context_data)}
+```
+"""
+
 
 async def generate_execution_plan(
     query: str,
@@ -370,8 +417,8 @@ async def generate_execution_plan(
             # Get the static base prompt
             static_prompt = load_base_system_prompt()
             
-            # Get the dynamic instructions
-            dynamic_instructions = get_dynamic_instructions_text(deps)
+            # Get the dynamic instructions by calling the function logic directly
+            dynamic_instructions = _get_dynamic_instructions_direct(deps)
             
             # Log the complete prompt
             logger.info(f"[{flow_id}] === COMPLETE SYSTEM PROMPT START ===")
