@@ -7,7 +7,23 @@ Simple pass-through orchestrator that:
 - Passes sample data between steps for context
 - Returns all step results without complex processing
 
-This replaces the complex real_world_hybrid_executor.py with a simple step walker.
+This replaces the complex real_world_hybrid_exe            # Check if the wrapper function was successful
+            if not sql_dict.get('success', False):
+                error_msg = sql_dict.get('error', 'Unknown SQL generation error')
+                return StepResult(
+                    step_number=step_number,
+                    step_type="sql",
+                    success=False,
+                    error=error_msg
+                )
+            
+            # Create a mock result object that matches the expected structure
+            class MockSQLResult:
+                def __init__(self, sql_text, explanation):
+                    self.sql = sql_text
+                    self.explanation = explanation
+            
+            result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'])imple step walker.
 """
 
 from typing import Dict, List, Any, Optional
@@ -27,10 +43,10 @@ from planning_agent import ExecutionPlan, ExecutionStep, planning_agent
 from results_formatter_agent import process_results_structured
 
 # Import logging
-from utils.logging import get_logger
+from utils.logging import get_logger, get_default_log_dir
 
 # Configure logging
-logger = get_logger(__name__)
+logger = get_logger(__name__, log_dir=get_default_log_dir())
 
 
 class StepResult(BaseModel):
@@ -267,19 +283,30 @@ class ModernExecutionManager:
                 
                 if step_result.success and step_result.result:
                     if step_result.step_type == "SQL":
-                        # Extract SQL data for results formatter
-                        sql_data = step_result.result.get('data', [])
-                        step_results_for_processing[step_name] = sql_data
-                        raw_results['sql_execution'] = step_result.result
-                        logger.debug(f"[{correlation_id}] Added SQL data: {len(sql_data)} records")
+                        # For SQL steps, result contains sql and explanation attributes
+                        # We need to create a dictionary structure for results processing
+                        sql_result_dict = {
+                            'success': True,
+                            'sql': getattr(step_result.result, 'sql', ''),
+                            'explanation': getattr(step_result.result, 'explanation', ''),
+                            'data': []  # SQL queries don't execute, just generate
+                        }
+                        step_results_for_processing[step_name] = []
+                        raw_results['sql_execution'] = sql_result_dict
+                        logger.debug(f"[{correlation_id}] Added SQL query generation result")
                         
                     elif step_result.step_type == "API":
-                        # Extract API execution results
-                        api_data = step_result.result.get('stdout', '')
-                        if api_data:
-                            step_results_for_processing[step_name] = [{'raw_output': api_data}]
-                        raw_results['execution_result'] = step_result.result
-                        logger.debug(f"[{correlation_id}] Added API data: {len(api_data)} chars")
+                        # Extract API execution results - result is a dictionary
+                        if isinstance(step_result.result, dict):
+                            api_data = step_result.result.get('execution_output', [])
+                            step_results_for_processing[step_name] = api_data
+                            raw_results['execution_result'] = step_result.result
+                            logger.debug(f"[{correlation_id}] Added API data: {len(api_data) if isinstance(api_data, list) else 'N/A'} results")
+                        else:
+                            # Fallback for other formats
+                            step_results_for_processing[step_name] = []
+                            raw_results['execution_result'] = {'execution_output': []}
+                            logger.debug(f"[{correlation_id}] No API data available")
             
             # Call Results Formatter Agent like old executor
             try:
@@ -446,23 +473,35 @@ class ModernExecutionManager:
                 flow_id=correlation_id
             )
             
-            # Check if the wrapper function was successful
-            if not sql_result_dict.get('success', False):
-                error_msg = sql_result_dict.get('error', 'Unknown SQL generation error')
+            # Handle both dictionary response and AgentRunResult response
+            if hasattr(sql_result_dict, 'output'):
+                # This is an AgentRunResult object, extract the data
+                sql_dict = {
+                    'success': True,
+                    'sql': sql_result_dict.output.sql,
+                    'explanation': sql_result_dict.output.explanation,
+                    'usage': getattr(sql_result_dict, 'usage', lambda: None)()
+                }
+            else:
+                # This is a dictionary response as expected
+                sql_dict = sql_result_dict
+            
+            # Check if the operation was successful
+            if not sql_dict.get('success', False):
+                error_msg = sql_dict.get('error', 'Unknown SQL generation error')
                 return StepResult(
                     step_number=step_number,
                     step_type="sql",
                     success=False,
                     error=error_msg
                 )
-            
             # Create a mock result object that matches the expected structure
             class MockSQLResult:
                 def __init__(self, sql_text, explanation):
                     self.sql = sql_text
                     self.explanation = explanation
             
-            result_data = MockSQLResult(sql_result_dict['sql'], sql_result_dict['explanation'])
+            result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'])
             
             return StepResult(
                 step_number=step_number,

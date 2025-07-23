@@ -563,14 +563,9 @@ async def main():
             logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
             logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
             
-            # Log the complete SQL query with clean formatting
-            logger.debug(f"[{flow_id}] " + "="*60)
-            logger.debug(f"[{flow_id}] 🔍 COMPLETE SQL QUERY:")
-            logger.debug(f"[{flow_id}] " + "="*60)
-            logger.debug(f"[{flow_id}] \n{result.output.sql}")
-            logger.debug(f"[{flow_id}] " + "="*60)
-            logger.debug(f"[{flow_id}] 📝 SQL EXPLANATION: {result.output.explanation}")
-            logger.debug(f"[{flow_id}] " + "="*60)
+            # Log the complete SQL query for debugging
+            logger.debug(f"[{flow_id}] COMPLETE SQL QUERY:\n{result.output.sql}")
+            logger.debug(f"[{flow_id}] COMPLETE SQL EXPLANATION:\n{result.output.explanation}")
             
             # Simple token usage reporting (keeping it minimal)
             if hasattr(result, 'usage') and result.usage():
@@ -623,14 +618,9 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
         logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
         logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
         
-        # Log the complete SQL query with clean formatting
-        logger.debug(f"[{flow_id}] " + "="*60)
-        logger.debug(f"[{flow_id}] 🔍 COMPLETE SQL QUERY:")
-        logger.debug(f"[{flow_id}] " + "="*60)
-        logger.debug(f"[{flow_id}] \n{result.output.sql}")
-        logger.debug(f"[{flow_id}] " + "="*60)
-        logger.debug(f"[{flow_id}] 📝 SQL EXPLANATION: {result.output.explanation}")
-        logger.debug(f"[{flow_id}] " + "="*60)
+        # Log the complete SQL query for debugging
+        logger.debug(f"[{flow_id}] COMPLETE SQL QUERY:\n{result.output.sql}")
+        logger.debug(f"[{flow_id}] COMPLETE SQL EXPLANATION:\n{result.output.explanation}")
         
         # Token usage reporting
         if hasattr(result, 'usage') and result.usage():
@@ -639,21 +629,25 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
             output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
             logger.info(f"[{flow_id}] SQL generation completed - {input_tokens} in, {output_tokens} out tokens")
 
-        # Return the actual PydanticAI result object, not a dictionary
-        return result
+        return {
+            'success': True,
+            'sql': result.output.sql,
+            'explanation': result.output.explanation,
+            'usage': result.usage() if hasattr(result, 'usage') and result.usage() else None
+        }
 
     except ModelRetry as e:
         logger.error(f"[{flow_id}] SQL generation retry needed: {e}")
-        raise e  # Re-raise to maintain PydanticAI error handling
+        return {'success': False, 'error': f"Retry needed: {e}"}
     except UnexpectedModelBehavior as e:
         logger.error(f"[{flow_id}] SQL generation unexpected behavior: {e}")
-        raise e  # Re-raise to maintain PydanticAI error handling
+        return {'success': False, 'error': f"Unexpected behavior: {e}"}
     except UsageLimitExceeded as e:
         logger.error(f"[{flow_id}] SQL generation usage limit exceeded: {e}")
-        raise e  # Re-raise to maintain PydanticAI error handling
+        return {'success': False, 'error': f"Usage limit exceeded: {e}"}
     except Exception as e:
         logger.error(f"[{flow_id}] SQL generation failed: {e}")
-        raise e  # Re-raise to maintain error handling
+        return {'success': False, 'error': str(e)}
 
 
 if __name__ == "__main__":
