@@ -563,9 +563,14 @@ async def main():
             logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
             logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
             
-            # Log the complete SQL query for debugging
-            logger.debug(f"[{flow_id}] COMPLETE SQL QUERY:\n{result.output.sql}")
-            logger.debug(f"[{flow_id}] COMPLETE SQL EXPLANATION:\n{result.output.explanation}")
+            # Log the complete SQL query with clean formatting
+            logger.debug(f"[{flow_id}] " + "="*60)
+            logger.debug(f"[{flow_id}] 🔍 COMPLETE SQL QUERY:")
+            logger.debug(f"[{flow_id}] " + "="*60)
+            logger.debug(f"[{flow_id}] \n{result.output.sql}")
+            logger.debug(f"[{flow_id}] " + "="*60)
+            logger.debug(f"[{flow_id}] 📝 SQL EXPLANATION: {result.output.explanation}")
+            logger.debug(f"[{flow_id}] " + "="*60)
             
             # Simple token usage reporting (keeping it minimal)
             if hasattr(result, 'usage') and result.usage():
@@ -618,9 +623,14 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
         logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
         logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
         
-        # Log the complete SQL query for debugging
-        logger.debug(f"[{flow_id}] COMPLETE SQL QUERY:\n{result.output.sql}")
-        logger.debug(f"[{flow_id}] COMPLETE SQL EXPLANATION:\n{result.output.explanation}")
+        # Log the complete SQL query with clean formatting
+        logger.debug(f"[{flow_id}] " + "="*60)
+        logger.debug(f"[{flow_id}] 🔍 COMPLETE SQL QUERY:")
+        logger.debug(f"[{flow_id}] " + "="*60)
+        logger.debug(f"[{flow_id}] \n{result.output.sql}")
+        logger.debug(f"[{flow_id}] " + "="*60)
+        logger.debug(f"[{flow_id}] 📝 SQL EXPLANATION: {result.output.explanation}")
+        logger.debug(f"[{flow_id}] " + "="*60)
         
         # Token usage reporting
         if hasattr(result, 'usage') and result.usage():

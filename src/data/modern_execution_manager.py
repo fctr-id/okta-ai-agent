@@ -23,7 +23,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 # Import existing agents from local directory
 from sql_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging
 from api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
-from planning_agent import ExecutionPlan, ExecutionStep, planning_agent, generate_execution_plan
+from planning_agent import ExecutionPlan, ExecutionStep, planning_agent
 from results_formatter_agent import process_results_structured
 
 # Import logging
@@ -93,7 +93,7 @@ class ModernExecutionManager:
         # Extract planning dependencies
         self.available_entities = list(self.api_data.get('entity_summary', {}).keys())
         self.entity_summary = self.api_data.get('entity_summary', {})
-        self.sql_tables = self._enhance_sql_schema_with_custom_attributes(self.db_schema.get('sql_tables', {}))
+        self.sql_tables = self.db_schema.get('sql_tables', {})
         self.endpoints = self.api_data.get('endpoints', [])  # Load endpoints for filtering
         
         logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, {len(self.sql_tables)} SQL tables, {len(self.endpoints)} endpoints")
@@ -122,91 +122,79 @@ class ModernExecutionManager:
             logger.error(f"Failed to load DB schema: {e}")
             return {'sql_tables': {}}
     
-    def _enhance_sql_schema_with_custom_attributes(self, sql_tables: Dict[str, Any]) -> Dict[str, Any]:
-        """Enhance SQL schema with dynamic custom attributes from environment variables"""
-        try:
-            # Import settings to get custom attributes
-            try:
-                from config.settings import settings
-            except ImportError:
-                from src.config.settings import settings
-                
-            custom_attrs = settings.okta_user_custom_attributes_list
-            
-            # Make a copy to avoid modifying the original
-            enhanced_tables = dict(sql_tables)
-            
-            # Add custom attributes to users table if it exists
-            if 'users' in enhanced_tables and custom_attrs:
-                users_table = dict(enhanced_tables['users'])
-                
-                # Add custom_attributes column if not already present
-                columns = list(users_table.get('columns', []))
-                if 'custom_attributes' not in columns:
-                    columns.append('custom_attributes')
-                    users_table['columns'] = columns
-                
-                # Add custom attributes metadata for planning agent
-                users_table['custom_attributes'] = {
-                    'type': 'JSON',
-                    'available_attributes': custom_attrs,
-                    'description': f'JSON column containing custom user attributes: {", ".join(custom_attrs)}'
-                }
-                
-                enhanced_tables['users'] = users_table
-                logger.debug(f"Enhanced users table schema with {len(custom_attrs)} custom attributes: {custom_attrs}")
-            
-            elif custom_attrs:
-                logger.warning(f"Custom attributes defined ({custom_attrs}) but users table not found in schema")
-            
-            return enhanced_tables
-            
-        except (ImportError, AttributeError) as e:
-            logger.warning(f"Could not load custom attributes from settings: {e}")
-            return sql_tables
-        except Exception as e:
-            logger.error(f"Failed to enhance SQL schema with custom attributes: {e}")
-            return sql_tables
-    
     def _get_entity_endpoints_for_step(self, step: ExecutionStep) -> List[Dict[str, Any]]:
-        """Get filtered endpoints for a specific API step using precise planning agent information"""
-        # For API steps, use the precise entity, operation, and method provided by planning agent
-        if step.tool_name != 'api':
+        """Get filtered endpoints for a specific API step (copied from old executor)"""
+        # Handle both old 'entity' field and new 'tool_name' field for compatibility
+        entity_name = getattr(step, 'entity', None) or getattr(step, 'tool_name', None)
+        if not entity_name:
             return []
         
-        # Use the precise information from planning agent
-        entity = step.entity  # Planning agent provides exact entity name
-        operation = step.operation  # Planning agent provides exact operation name  
-        method = step.method  # Planning agent provides exact HTTP method
+        entity = entity_name.lower()
+        operation = getattr(step, 'operation', None) or 'list'  # Default to list
+        operations = [operation.lower()]
+        methods = ['GET']  # Default to GET for most operations
         
-        if not entity or not operation or not method:
-            logger.warning(f"Missing required fields for API step. Entity: {entity}, Operation: {operation}, Method: {method}")
-            return []
-        
-        logger.debug(f"Filtering endpoints for entity: {entity}, operation: {operation}, method: {method}")
-        
-        # Filter endpoints using exact match criteria from the API JSON
-        matches = self._get_precise_endpoint_matches(entity, operation, method)
-        logger.debug(f"Found {len(matches)} matching endpoints")
-        return matches
+        # Use the exact same filtering logic as old executor
+        return self._get_entity_operation_matches(entity, operations, methods)
     
-    def _get_precise_endpoint_matches(self, entity: str, operation: str, method: str) -> List[Dict]:
-        """Get endpoints matching exact entity + operation + method from API JSON"""
+    def _get_entity_operation_matches(self, entity: str, operations: List[str], methods: List[str]) -> List[Dict]:
+        """Get endpoints matching entity + operation + method (copied from old executor)"""
         matches = []
         
         for endpoint in self.endpoints:
-            # Check exact match for all three criteria
-            endpoint_entity = endpoint.get('entity', '')
-            endpoint_operation = endpoint.get('operation', '')
-            endpoint_method = endpoint.get('method', '')
-            
-            if (endpoint_entity == entity and 
-                endpoint_operation == operation and 
-                endpoint_method.upper() == method.upper()):
+            if self._is_precise_match(endpoint, entity, operations, methods):
                 matches.append(endpoint)
-                logger.debug(f"Matched endpoint: {endpoint.get('name', 'Unknown')} - {method} {endpoint.get('url_pattern', '')}")
         
         return matches
+    
+    def _is_precise_match(self, endpoint: Dict, target_entity: str, operations: List[str], methods: List[str]) -> bool:
+        """Check if endpoint matches entity + operation + method criteria (copied from old executor)"""
+        
+        # 1. Method must match exactly
+        endpoint_method = endpoint.get('method', '').upper()
+        if endpoint_method not in methods:
+            return False
+        
+        # 2. Entity must match exactly  
+        endpoint_entity = endpoint.get('entity', '').lower()
+        if endpoint_entity != target_entity.lower():
+            return False
+        
+        # 3. Operation must match (with some semantic flexibility)
+        endpoint_operation = endpoint.get('operation', '').lower()
+        if not self._operation_matches(endpoint_operation, operations):
+            return False
+        
+        return True
+    
+    def _operation_matches(self, endpoint_op: str, requested_ops: List[str]) -> bool:
+        """Check if endpoint operation matches any requested operation (copied from old executor)"""
+        for requested_op in requested_ops:
+            if self._semantic_operation_match(endpoint_op, requested_op.lower()):
+                return True
+        return False
+    
+    def _semantic_operation_match(self, endpoint_op: str, requested_op: str) -> bool:
+        """Semantic matching for operations with common aliases (copied from old executor)"""
+        # Direct match
+        if endpoint_op == requested_op:
+            return True
+        
+        # Common aliases
+        aliases = {
+            'list': ['list', 'get', 'retrieve', 'fetch'],
+            'list_members': ['list_members', 'members', 'list'],
+            'list_user_assignments': ['list_user_assignments', 'assignments', 'list'],
+            'list_factors': ['list_factors', 'factors', 'list_enrollments', 'list'],
+            'get': ['get', 'retrieve', 'fetch'],
+            'create': ['create', 'add', 'post'],
+        }
+        
+        for alias_group in aliases.values():
+            if endpoint_op in alias_group and requested_op in alias_group:
+                return True
+        
+        return False
     
     async def execute_query(self, query: str) -> Dict[str, Any]:
         """
@@ -243,29 +231,20 @@ class ModernExecutionManager:
             # Phase 1: Use Planning Agent to generate execution plan
             logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
             
-            # Execute Planning Agent with enhanced logging using wrapper function
-            planning_result_dict = await generate_execution_plan(
-                query=query,
+            # Create dependencies for Planning Agent (same as old executor)
+            from planning_agent import PlanningDependencies
+            planning_deps = PlanningDependencies(
                 available_entities=self.available_entities,
                 entity_summary=self.entity_summary,
                 sql_tables=self.sql_tables,
                 flow_id=correlation_id
             )
             
-            # Check if the wrapper function was successful
-            if not planning_result_dict.get('success', False):
-                error_msg = planning_result_dict.get('error', 'Unknown planning error')
-                logger.error(f"[{correlation_id}] Planning failed: {error_msg}")
-                return {
-                    'success': False,
-                    'error': error_msg,
-                    'correlation_id': correlation_id,
-                    'query': query,
-                    'phase': 'planning_failed'
-                }
+            # Execute Planning Agent with dependencies - trust the agent to handle validation
+            planning_result = await planning_agent.run(query, deps=planning_deps)
             
-            # Extract the execution plan from the dictionary result
-            execution_plan = ExecutionPlan(**planning_result_dict['plan'])
+            # Trust the agent - just extract the plan
+            execution_plan = planning_result.output.plan
             logger.info(f"[{correlation_id}] Planning completed: {len(execution_plan.steps)} steps generated")
             
             # Phase 2: Execute steps using Modern Execution Manager
@@ -408,9 +387,13 @@ class ModernExecutionManager:
                     result.sample_extracted = sample
                     previous_sample = sample
                     logger.info(f"[{correlation_id}] Step {step_num} completed successfully")
+                    logger.info(f"[{correlation_id}] === SAMPLE DATA FOR NEXT STEP ===")
+                    logger.info(f"[{correlation_id}] {sample}")
+                    logger.info(f"[{correlation_id}] === END SAMPLE DATA ===")
                 else:
                     failed_steps += 1
                     previous_sample = None  # No sample for failed steps
+                    logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
                 
                 step_results.append(result)
                 
@@ -452,18 +435,30 @@ class ModernExecutionManager:
         try:
             # Call SQL Agent with enhanced logging using wrapper function
             logger.debug(f"[{correlation_id}] Calling SQL Agent with context: {step.query_context}")
-            sql_result = await generate_sql_query_with_logging(
+            sql_result_dict = await generate_sql_query_with_logging(
                 question=step.query_context,
                 tenant_id="test_tenant",
                 include_deleted=False,
                 flow_id=correlation_id
             )
             
-            # Extract the actual result from PydanticAI response (same as original)
-            if hasattr(sql_result, 'output'):
-                result_data = sql_result.output
-            else:
-                result_data = sql_result
+            # Check if the wrapper function was successful
+            if not sql_result_dict.get('success', False):
+                error_msg = sql_result_dict.get('error', 'Unknown SQL generation error')
+                return StepResult(
+                    step_number=step_number,
+                    step_type="sql",
+                    success=False,
+                    error=error_msg
+                )
+            
+            # Create a mock result object that matches the expected structure
+            class MockSQLResult:
+                def __init__(self, sql_text, explanation):
+                    self.sql = sql_text
+                    self.explanation = explanation
+            
+            result_data = MockSQLResult(sql_result_dict['sql'], sql_result_dict['explanation'])
             
             return StepResult(
                 step_number=step_number,
@@ -489,20 +484,19 @@ class ModernExecutionManager:
             StepResult with API execution output
         """
         try:
-            # Get filtered endpoints for this specific step (using precise planning agent data)
+            # Get filtered endpoints for this specific step (using old executor logic)
             available_endpoints = self._get_entity_endpoints_for_step(step)
             
-            # Use precise entity from planning agent
-            entity = step.entity
-            
             # Call API Code Gen Agent with enhanced logging using wrapper function
-            logger.debug(f"[{correlation_id}] Calling API Code Gen Agent with entity: {entity}, operation: {step.operation}, method: {step.method}")
+            logger.debug(f"[{correlation_id}] Calling API Code Gen Agent with context: {step.query_context}")
+            # Handle both old 'entity' field and new 'tool_name' field for compatibility
+            entity_name = getattr(step, 'entity', None) or getattr(step, 'tool_name', None) or "users"
             api_result_dict = await generate_api_code(
                 query=step.query_context,
                 sql_data_sample=previous_sample if isinstance(previous_sample, list) else [{"sample": "data"}],
                 sql_record_count=len(previous_sample) if isinstance(previous_sample, list) else 1,
                 available_endpoints=available_endpoints,
-                entities_involved=[entity],
+                entities_involved=[entity_name],
                 step_description=step.reasoning if hasattr(step, 'reasoning') else step.query_context,
                 correlation_id=correlation_id
             )
@@ -517,9 +511,44 @@ class ModernExecutionManager:
                     error=error_msg
                 )
             
-            # Use the dictionary directly as result_data - no need for Mock classes
-            # The downstream code can access result_data['code'], result_data['explanation'], etc.
-            result_data = api_result_dict
+            # Phase 5: Execute the generated API code to get actual data
+            logger.info(f"[{correlation_id}] Phase 5: Executing generated API code")
+            logger.info(f"[{correlation_id}] === GENERATED API CODE ===")
+            logger.info(f"[{correlation_id}]\n{api_result_dict.get('code', 'No code')}")
+            logger.info(f"[{correlation_id}] === END GENERATED CODE ===")
+            
+            execution_result = self._execute_generated_code(api_result_dict.get('code', ''), correlation_id)
+            
+            if execution_result.get('success', False):
+                # Use the actual execution output
+                actual_data = execution_result.get('output', [])
+                logger.info(f"[{correlation_id}] API code execution successful, got {len(actual_data) if isinstance(actual_data, list) else 'N/A'} results")
+                logger.info(f"[{correlation_id}] === API EXECUTION OUTPUT ===")
+                logger.info(f"[{correlation_id}] {actual_data[:3] if isinstance(actual_data, list) and actual_data else 'No data'}")
+                logger.info(f"[{correlation_id}] === END API OUTPUT ===")
+                
+                result_data = {
+                    'code': api_result_dict['code'],
+                    'explanation': api_result_dict['explanation'],
+                    'requirements': api_result_dict.get('requirements', []),
+                    'execution_output': actual_data,
+                    'executed': True
+                }
+            else:
+                logger.error(f"[{correlation_id}] API code execution failed: {execution_result.get('error', 'Unknown error')}")
+                logger.info(f"[{correlation_id}] === EXECUTION ERROR DETAILS ===")
+                logger.info(f"[{correlation_id}] STDOUT: {execution_result.get('stdout', 'None')}")
+                logger.info(f"[{correlation_id}] STDERR: {execution_result.get('stderr', 'None')}")
+                logger.info(f"[{correlation_id}] === END ERROR DETAILS ===")
+                # Fall back to code generation result without execution
+                result_data = {
+                    'code': api_result_dict['code'],
+                    'explanation': api_result_dict['explanation'],
+                    'requirements': api_result_dict.get('requirements', []),
+                    'execution_output': [],
+                    'executed': False,
+                    'execution_error': execution_result.get('error', 'Unknown error')
+                }
             
             return StepResult(
                 step_number=step_number,
@@ -551,6 +580,11 @@ class ModernExecutionManager:
         
         # Handle dict results with nested data
         if isinstance(step_result, dict):
+            # Special handling for API execution results
+            if 'execution_output' in step_result and isinstance(step_result['execution_output'], list):
+                sample_size = min(3, len(step_result['execution_output']))
+                return step_result['execution_output'][:sample_size] if sample_size > 0 else []
+            
             # Check for common list keys
             for key in ['items', 'data', 'results', 'users', 'groups', 'applications']:
                 if key in step_result and isinstance(step_result[key], list):
@@ -562,6 +596,114 @@ class ModernExecutionManager:
         
         # For other types, return as-is
         return step_result
+
+    def _execute_generated_code(self, python_code: str, correlation_id: str) -> Dict[str, Any]:
+        """
+        Execute generated Python code in a subprocess and capture output.
+        
+        Args:
+            python_code: The Python code to execute
+            correlation_id: Correlation ID for logging
+            
+        Returns:
+            Dict with success status and output or error
+        """
+        import subprocess
+        import tempfile
+        import json
+        
+        try:
+            # Create a temporary Python file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+                # Wrap the code to capture output as JSON
+                wrapped_code = f"""
+import sys
+import json
+try:
+{python_code}
+    # Try to capture any printed output or variables
+    # This is a best-effort attempt to get structured data
+    if 'result' in locals():
+        print(json.dumps({{"status": "success", "data": result}}))
+    elif 'users' in locals():
+        print(json.dumps({{"status": "success", "data": users}}))
+    elif 'data' in locals():
+        print(json.dumps({{"status": "success", "data": data}}))
+    else:
+        print(json.dumps({{"status": "success", "data": []}}))
+except Exception as e:
+    print(json.dumps({{"status": "error", "error": str(e)}}))
+"""
+                temp_file.write(wrapped_code)
+                temp_file_path = temp_file.name
+            
+            # Execute the code
+            logger.debug(f"[{correlation_id}] Executing generated code in subprocess...")
+            result = subprocess.run(
+                [sys.executable, temp_file_path],
+                capture_output=True,
+                text=True,
+                timeout=60  # 60 second timeout
+            )
+            
+            # Parse the output
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    output = json.loads(result.stdout.strip())
+                    if output.get('status') == 'success':
+                        logger.info(f"[{correlation_id}] Code execution successful")
+                        return {
+                            'success': True,
+                            'output': output.get('data', []),
+                            'stdout': result.stdout,
+                            'stderr': result.stderr
+                        }
+                    else:
+                        logger.error(f"[{correlation_id}] Code execution failed: {output.get('error', 'Unknown error')}")
+                        return {
+                            'success': False,
+                            'error': output.get('error', 'Unknown error'),
+                            'stdout': result.stdout,
+                            'stderr': result.stderr
+                        }
+                except json.JSONDecodeError:
+                    logger.warning(f"[{correlation_id}] Could not parse JSON output, using raw stdout")
+                    return {
+                        'success': True,
+                        'output': result.stdout.strip().split('\n') if result.stdout.strip() else [],
+                        'stdout': result.stdout,
+                        'stderr': result.stderr
+                    }
+            else:
+                error_msg = result.stderr or f"Process failed with return code {result.returncode}"
+                logger.error(f"[{correlation_id}] Code execution failed: {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'stdout': result.stdout,
+                    'stderr': result.stderr
+                }
+                
+        except subprocess.TimeoutExpired:
+            logger.error(f"[{correlation_id}] Code execution timed out")
+            return {
+                'success': False,
+                'error': 'Code execution timed out after 60 seconds'
+            }
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Code execution failed with exception: {e}")
+            return {
+                'success': False,
+                'error': f'Execution exception: {str(e)}'
+            }
+        finally:
+            # Clean up temporary file
+            try:
+                import os
+                if 'temp_file_path' in locals():
+                    os.unlink(temp_file_path)
+            except:
+                pass
 
 
 # Create singleton instance

@@ -56,10 +56,8 @@ class ExecutionStep(BaseModel):
     """Individual execution step in the plan"""
     model_config = ConfigDict(json_schema_extra={
         "example": {
-            "tool_name": "api",
-            "entity": "system_log",
+            "tool_name": "system_log",
             "operation": "list_events",
-            "method": "GET",
             "query_context": "Get login events for the last 7 days to identify active users",
             "critical": True,
             "reasoning": "Identify users who have logged in recently"
@@ -67,19 +65,11 @@ class ExecutionStep(BaseModel):
     })
     
     tool_name: str = Field(
-        description='Execution method: "sql" or "api"',
-        min_length=1
-    )
-    entity: str = Field(
         description='Entity name for API calls or table name for SQL operations',
         min_length=1
     )
     operation: Optional[str] = Field(
         description='Exact operation name for API calls (null for SQL steps)',
-        default=None
-    )
-    method: Optional[str] = Field(
-        description='HTTP method for API calls (GET, POST, PUT, DELETE). Auto-derived from operation if not specified.',
         default=None
     )
     query_context: str = Field(
@@ -185,16 +175,7 @@ def load_system_prompt(deps: PlanningDependencies) -> str:
         for table_name, table_info in deps.sql_tables.items():
             columns = table_info.get('columns', [])
             column_names = [col['name'] if isinstance(col, dict) else str(col) for col in columns]
-            
-            # Add custom attributes info if available
-            custom_attrs_info = ""
-            if table_name == 'users' and 'custom_attributes' in table_info:
-                custom_attrs_data = table_info['custom_attributes']
-                available_attrs = custom_attrs_data.get('available_attributes', [])
-                if available_attrs:
-                    custom_attrs_info = f" | custom_attributes available: {', '.join(available_attrs)}"
-            
-            sql_schema_text.append(f"  • {table_name}: columns=[{', '.join(column_names[:10])}{'...' if len(column_names) > 10 else ''}]{custom_attrs_info}")
+            sql_schema_text.append(f"  • {table_name}: columns=[{', '.join(column_names[:10])}{'...' if len(column_names) > 10 else ''}]")
         
         sql_schema_info = "\n".join(sql_schema_text)
         
@@ -222,16 +203,6 @@ SQL TABLES: {sql_table_names}"""
         
         logger.debug(f"[{deps.flow_id}] System prompt built with {len(deps.available_entities)} entities, {len(deps.sql_tables)} SQL tables")
         
-        # Print complete system prompt for verification (only when DEBUG level)
-        if logger.isEnabledFor(10):  # DEBUG level = 10
-            logger.debug(f"[{deps.flow_id}] COMPLETE SYSTEM PROMPT (START)")
-            logger.debug(f"[{deps.flow_id}] " + "="*80)
-            # Split into lines and log each line with prefix for readability
-            for i, line in enumerate(updated_prompt.split('\n'), 1):
-                logger.debug(f"[{deps.flow_id}] {i:3d}: {line}")
-            logger.debug(f"[{deps.flow_id}] " + "="*80)
-            logger.debug(f"[{deps.flow_id}] COMPLETE SYSTEM PROMPT (END)")
-        
         return updated_prompt
         
     except Exception as e:
@@ -256,32 +227,14 @@ def load_base_system_prompt() -> str:
 # Load base prompt at import time
 BASE_SYSTEM_PROMPT = load_base_system_prompt()
 
-# Create the Planning Agent with PydanticAI using dynamic system prompt
+# Create the Planning Agent with PydanticAI
 planning_agent = Agent(
     model,
     output_type=PlanningOutput,  # ✅ MODERN: Use output_type not deprecated result_type
     deps_type=PlanningDependencies,
-    retries=2,  # Allow retries for better reliability
+    retries=0,  # No retries to avoid wasting money on failed attempts
+    system_prompt=BASE_SYSTEM_PROMPT  # Static base prompt, will be enhanced at runtime
 )
-
-@planning_agent.system_prompt
-def dynamic_system_prompt(ctx: RunContext[PlanningDependencies]) -> str:
-    """Dynamic system prompt that includes current entities and SQL schema"""
-    logger.debug(f"[{ctx.deps.flow_id}] Planning Agent: Building dynamic system prompt")
-    logger.debug(f"[{ctx.deps.flow_id}] Available entities count: {len(ctx.deps.available_entities)}")
-    logger.debug(f"[{ctx.deps.flow_id}] Entity summary keys: {list(ctx.deps.entity_summary.keys())}")
-    logger.debug(f"[{ctx.deps.flow_id}] SQL tables count: {len(ctx.deps.sql_tables)}")
-    
-    # Check for custom attributes specifically
-    if 'users' in ctx.deps.sql_tables and 'custom_attributes' in ctx.deps.sql_tables['users']:
-        custom_attrs = ctx.deps.sql_tables['users']['custom_attributes'].get('available_attributes', [])
-        logger.debug(f"[{ctx.deps.flow_id}] Custom attributes found: {custom_attrs}")
-    else:
-        logger.debug(f"[{ctx.deps.flow_id}] No custom attributes found in users table")
-    
-    prompt = load_system_prompt(ctx.deps)
-    logger.debug(f"[{ctx.deps.flow_id}] Dynamic system prompt generated, length: {len(prompt)} characters")
-    return prompt
 
 async def generate_execution_plan(
     query: str,
@@ -320,10 +273,7 @@ async def generate_execution_plan(
         # Generate plan using PydanticAI
         result = await planning_agent.run(query, deps=deps)
         
-        # Pretty print the execution plan for better readability
-        plan_dict = result.output.plan.model_dump()
-        logger.debug(f"[{flow_id}] Generated execution plan (pretty printed):")
-        logger.debug(f"[{flow_id}] {json.dumps(plan_dict, indent=2)}")
+        logger.debug(f"[{flow_id}] Generated execution plan: {result.output.plan.model_dump()}")
         logger.debug(f"[{flow_id}] Plan confidence: {result.output.plan.confidence}%")
         logger.debug(f"[{flow_id}] Plan entities: {result.output.plan.entities}")
         logger.debug(f"[{flow_id}] Plan steps: {len(result.output.plan.steps)}")

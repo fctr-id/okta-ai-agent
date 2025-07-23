@@ -68,11 +68,11 @@ class CodeGenerationOutput(BaseModel):
 
     python_code: str = Field(
         description='Complete Python code that solves the user query by combining SQL data with API calls',
-        min_length=10
+        min_length=5  # Relaxed minimum length for better LLM compatibility
     )
     explanation: str = Field(
         description='Clear explanation of what the code does and how it works',
-        min_length=10
+        min_length=5  # Relaxed minimum length for better LLM compatibility
     )
     requirements: List[str] = Field(
         description='Python package requirements needed to run the code',
@@ -110,7 +110,7 @@ api_code_gen_agent = Agent(
     model,
     system_prompt=BASE_SYSTEM_PROMPT,
     output_type=CodeGenerationOutput,
-    retries=1  # Allow one retry for transient issues
+    retries=0  # No retries to avoid wasting money on failed attempts
 )
 
 @api_code_gen_agent.system_prompt
