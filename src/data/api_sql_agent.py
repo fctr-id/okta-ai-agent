@@ -4,9 +4,16 @@ This agent is NOT exposed to end users - only used by system components
 """
 import json
 import os
+import sys
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from pydantic_ai import Agent
+
+# Add project root to path for imports
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,8 +31,8 @@ except ImportError:
     model = get_simple_model()
 
 class ApiSqlDependencies(BaseModel):
-    """Dependencies for internal API-SQL processing"""
-    api_data_sample: List[Dict[str, Any]]
+    """Dependencies for internal API-SQL processing - flexible data flow"""
+    api_data_sample: Any  # Completely flexible - let LLM handle any data type
     api_data_count: int
     processing_context: str
     temp_table_mode: bool = False
@@ -81,12 +88,17 @@ class ApiSqlAgent:
     async def process_api_data(self, api_data: List[Dict[str, Any]], 
                               processing_context: str, 
                               correlation_id: str,
-                              use_temp_table: bool = False) -> Any:
-        """Process API data with internal capabilities"""
+                              use_temp_table: bool = False,
+                              all_step_contexts: Optional[Dict[str, Any]] = None) -> Any:
+        """Process API data with internal capabilities and enhanced context awareness"""
         
         logger.info(f"[{correlation_id}] API-SQL Agent processing {len(api_data)} records")
         logger.debug(f"[{correlation_id}] Processing context: {processing_context}")
         logger.debug(f"[{correlation_id}] Temp table mode: {use_temp_table}")
+        
+        # Enhanced context logging
+        if all_step_contexts:
+            logger.debug(f"[{correlation_id}] Enhanced context provided with {len(all_step_contexts)} previous steps")
         
         # Sample for LLM context
         sample_data = api_data[:5] if api_data else []
@@ -100,8 +112,21 @@ class ApiSqlAgent:
             flow_id=correlation_id
         )
         
-        # Execute internal agent
-        result = await self.agent.run(processing_context, deps=deps)
+        # Build enhanced user message with previous step contexts
+        user_message = processing_context
+        if all_step_contexts:
+            user_message += "\n\nPREVIOUS STEP CONTEXTS:\n"
+            for step_key, step_data in all_step_contexts.items():
+                if isinstance(step_data, dict):
+                    context = step_data.get('context', 'No context available')
+                    sample = step_data.get('sample', 'No sample available')
+                    user_message += f"\n{step_key}_context: {context}"
+                    user_message += f"\n{step_key}_sample: {sample}"
+                else:
+                    user_message += f"\n{step_key}: {step_data}"
+        
+        # Execute internal agent with enhanced context
+        result = await self.agent.run(user_message, deps=deps)
         
         # Validate generated SQL for security
         from sql_security_validator import validate_internal_sql

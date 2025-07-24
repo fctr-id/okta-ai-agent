@@ -25,20 +25,24 @@ async def test_query_1():
     print("🎯 MODERN END-TO-END TEST: INTERACTIVE QUERY")
     print("=" * 70)
     
-    # Get query from user input
-    print("💬 Enter your query (or press Enter for default):")
-    print("   Default: 'Find users logged in the last 7 days and fetch me their applications and groups'")
-    print()
-    
-    user_input = input("🔍 Query: ").strip()
-    
-    if not user_input:
-        query = "Find users logged in the last 7 days and fetch me their applications and groups"
-        print(f"   Using default query")
+    # Get query from command line args or user input
+    if len(sys.argv) > 1:
+        query = " ".join(sys.argv[1:])
+        print(f"💬 Using provided query: {query}")
     else:
-        query = user_input
+        print("💬 Enter your query (or press Enter for default):")
+        print("   Default: 'Find users logged in the last 7 days and fetch me their applications and groups'")
+        print()
+        
+        user_input = input("🔍 Query: ").strip()
+        
+        if not user_input:
+            query = "Find users logged in the last 7 days and fetch me their applications and groups"
+            print(f"   Using default query")
+        else:
+            query = user_input
     
-    print(f"\n� Executing Query: {query}")
+    print(f"\n🎯 Executing Query: {query}")
     print(f"🕒 Test start: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
     

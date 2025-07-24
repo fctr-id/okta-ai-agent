@@ -8,26 +8,24 @@ This executor implements a variable-based data flow pattern that scales with any
 
 1. DATA STORAGE PATTERN:
    - data_variables: {"sql_data_step_1": [all_records], "api_data_step_2": response}
-   - accumulated_data: [{"variable": "sql_data_step_1", "sample": [3_records]}, ...]
-   - step_metadata: {"step_1": {"type": "sql", "success": True, "record_count": 1000}}
+   - step_metadata: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query description"}}
 
 2. STEP EXECUTION PATTERN:
+   - Each step gets ENHANCED CONTEXT from ALL previous steps
    - Each step gets FULL data from previous step for processing
-   - Each step gets SAMPLE data (3 records) for LLM context
    - Each step stores FULL results using _store_step_data()
-   - Each step stores SAMPLE context for next LLM call
 
 3. ADDING NEW TOOLS/STEPS:
    - Add new tool type in execute_steps() elif block
    - Create _execute_[tool]_step() method following pattern:
-     * Get sample: self._get_sample_data_for_llm(max_records=5)
+     * Get enhanced context: self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
      * Get full data: self._get_full_data_from_previous_step(step_number)
-     * Process with tool agent (full data for processing, samples for LLM)
-     * Store results: self._store_step_data(step_number, "tool_type", data, metadata)
+     * Process with tool agent (full data for processing, enhanced context for LLM)
+     * Store results: self._store_step_data(step_number, "tool_type", data, metadata, step_context)
    - No changes needed to existing steps - fully repeatable!
 
 4. DATA ACCESS PATTERN:
-   - LLM Context: Always use samples (3 records max) for code generation
+   - LLM Context: Always use enhanced context from ALL previous steps for intelligent decisions
    - Processing: Always use full datasets for actual execution
    - Variable Lookup: Access any previous step data by variable name
    - Automatic Storage: All results stored with consistent naming
@@ -101,7 +99,14 @@ class StepResult(BaseModel):
     success: bool
     result: Any = None
     error: Optional[str] = None
-    sample_extracted: Any = None
+
+
+class MockSQLResult:
+    """Mock SQL result object for consistent step result structure"""
+    def __init__(self, sql_text: str, explanation: str, data: List[Dict[str, Any]]):
+        self.sql = sql_text
+        self.explanation = explanation
+        self.data = data
 
 
 class ExecutionResults(BaseModel):
@@ -145,6 +150,11 @@ class ModernExecutionManager:
         """Initialize the modern execution manager"""
         self.error_handler = BasicErrorHandler()
         
+        # Import settings to get tenant_id
+        from src.config.settings import Settings
+        settings = Settings()
+        self.tenant_id = settings.tenant_id  # Derived from OKTA_CLIENT_ORGURL
+        
         # Load simple reference format
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
         self.simple_ref_path = os.path.join(project_root, "src", "data", "lightweight_api_reference.json")
@@ -167,14 +177,13 @@ class ModernExecutionManager:
         # REPEATABLE DATA FLOW PATTERN: Variable-based data management
         # Based on proven old executor approach - scales with any number of tools/steps
         self.data_variables = {}      # Full datasets: {"sql_data_step_1": [all_records], "api_data_step_2": response}
-        self.accumulated_data = []    # Sample contexts for LLM: [{"variable": "sql_data_step_1", "sample": [3_records]}, ...]
-        self.step_metadata = {}       # Step tracking: {"step_1": {"type": "sql", "success": True, "record_count": 1000}}
+        self.step_metadata = {}       # Step tracking: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query"}}
         
         logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, {len(self.sql_tables)} SQL tables, {len(self.endpoints)} endpoints")
     
     # REPEATABLE DATA FLOW METHODS - Scale with any number of tools/steps
     
-    def _store_step_data(self, step_number: int, step_type: str, data: Any, metadata: Dict[str, Any] = None) -> str:
+    def _store_step_data(self, step_number: int, step_type: str, data: Any, metadata: Dict[str, Any] = None, step_context: str = None) -> str:
         """
         Store step data using repeatable variable-based pattern.
         
@@ -183,6 +192,7 @@ class ModernExecutionManager:
             step_type: Type of step (sql, api, etc.)
             data: Full dataset to store
             metadata: Additional metadata about the step
+            step_context: Query context for this step
             
         Returns:
             Variable name for accessing this data
@@ -192,31 +202,60 @@ class ModernExecutionManager:
         # Store full dataset
         self.data_variables[variable_name] = data
         
-        # Store metadata
+        # Store metadata including step context
         self.step_metadata[f"step_{step_number}"] = {
             "type": step_type,
             "variable_name": variable_name,
+            "step_context": step_context,  # Store step context for enhanced context system
             "record_count": len(data) if isinstance(data, list) else 1,
             "success": True,
             **(metadata or {})
         }
         
-        # Create sample context for LLM usage (5 records for better variety)
-        sample_data = data[:5] if isinstance(data, list) and len(data) > 0 else data
-        sample_context = {
-            "variable_name": variable_name,
-            "step_number": step_number,
-            "step_type": step_type,
-            "sample_data": sample_data,
-            "total_records": len(data) if isinstance(data, list) else 1
-        }
-        
-        # Add to accumulated data for LLM context
-        self.accumulated_data.append(sample_context)
-        
         logger.debug(f"Stored {step_type} step data: variable={variable_name}, records={len(data) if isinstance(data, list) else 1}")
         return variable_name
     
+    def _get_all_previous_step_contexts_and_samples(self, current_step_number: int, max_samples: int = 3) -> Dict[str, Any]:
+        """
+        Get contexts and samples from ALL previous steps for enhanced LLM understanding.
+        
+        Args:
+            current_step_number: Current step number
+            max_samples: Maximum number of sample items per step
+            
+        Returns:
+            Dictionary with all previous step contexts and samples
+        """
+        all_contexts = {}
+        
+        # Iterate through all previous steps
+        for step_num in range(1, current_step_number):
+            step_key = f"step_{step_num}"
+            
+            # Get step context from metadata
+            if step_key in self.step_metadata:
+                step_metadata = self.step_metadata[step_key]
+                step_context = step_metadata.get("step_context", f"Step {step_num} context not available")
+                
+                # Get step data samples
+                variable_name = step_metadata.get("variable_name")
+                if variable_name and variable_name in self.data_variables:
+                    step_data = self.data_variables[variable_name]
+                    
+                    # Sample the data
+                    if isinstance(step_data, list):
+                        step_sample = step_data[:max_samples] if len(step_data) > max_samples else step_data
+                    else:
+                        step_sample = step_data
+                else:
+                    step_sample = []
+                
+                # Store in the order you specified: context first, then sample
+                all_contexts[f"step_{step_num}_context"] = step_context
+                all_contexts[f"step_{step_num}_sample"] = step_sample
+        
+        return all_contexts
+
     def _get_full_data_from_previous_step(self, current_step_number: int) -> Any:
         """
         Get full dataset from the previous step using variable lookup.
@@ -236,48 +275,11 @@ class ModernExecutionManager:
             variable_name = self.step_metadata[previous_step_key]["variable_name"]
             return self.data_variables.get(variable_name, [])
         
-        # Fallback: look through accumulated data for latest sample
-        if self.accumulated_data:
-            latest_sample = self.accumulated_data[-1]
-            variable_name = latest_sample.get("variable_name")
-            if variable_name:
-                return self.data_variables.get(variable_name, [])
-        
         return []
-    
-    def _get_sample_data_for_llm(self, max_records: int = 5) -> List[Dict[str, Any]]:
-        """
-        Get sample data from previous steps for LLM context.
-        Strategy: Random 5 records (or all if fewer) for better variety.
-        
-        Args:
-            max_records: Maximum number of sample records to return (default 5)
-            
-        Returns:
-            Sample data list for LLM context
-        """
-        import random
-        
-        if not self.accumulated_data:
-            return []
-        
-        # Get the most recent sample data
-        latest_sample = self.accumulated_data[-1]
-        sample_data = latest_sample.get("sample_data", [])
-        
-        # Simple strategy: If more than max_records, take random sample. Otherwise, take all.
-        if isinstance(sample_data, list):
-            if len(sample_data) <= max_records:
-                return sample_data  # Return all if max_records or fewer
-            else:
-                return random.sample(sample_data, max_records)  # Random sample if more than max_records
-        else:
-            return [sample_data] if sample_data else []
     
     def _clear_execution_data(self):
         """Clear all execution data for fresh run - maintains repeatability."""
         self.data_variables.clear()
-        self.accumulated_data.clear()
         self.step_metadata.clear()
         logger.debug("Cleared execution data for fresh run")
     
@@ -722,11 +724,16 @@ class ModernExecutionManager:
                     # Data storage is handled automatically in step execution methods
                     # Log current data state
                     total_variables = len(self.data_variables)
-                    total_samples = len(self.accumulated_data)
-                    logger.debug(f"[{correlation_id}] Data state: {total_variables} variables, {total_samples} sample contexts")
+                    total_metadata = len(self.step_metadata)
+                    logger.debug(f"[{correlation_id}] Data state: {total_variables} variables, {total_metadata} step metadata entries")
                 else:
                     failed_steps += 1
                     logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
+                    
+                    # CRITICAL ERROR HANDLING: Stop execution on step failure
+                    logger.error(f"[{correlation_id}] Stopping execution due to step {step_num} failure")
+                    logger.error(f"[{correlation_id}] Failed step details: {step.tool_name} - {result.error}")
+                    break  # Stop executing remaining steps
                 
                 step_results.append(result)
                 
@@ -763,42 +770,44 @@ class ModernExecutionManager:
         - Store full results for next step access
         """
         try:
-            # REPEATABLE PATTERN: Get sample data for LLM context
-            sample_data_for_llm = self._get_sample_data_for_llm(max_records=5)
-            
             # REPEATABLE PATTERN: Get full data from previous step for processing
             full_previous_data = self._get_full_data_from_previous_step(step_number)
             
             # Determine which SQL agent to use based on step position
             if step_number == 1:
                 logger.info(f"[{correlation_id}] Step {step_number}: First SQL step, using User SQL Agent")
-                return await self._execute_user_sql_step(step, sample_data_for_llm, correlation_id, step_number)
+                return await self._execute_user_sql_step(step, correlation_id, step_number)
             else:
                 logger.info(f"[{correlation_id}] Step {step_number}: Multi-step SQL processing, using Internal API-SQL Agent")
-                return await self._execute_api_sql_step(step, sample_data_for_llm, full_previous_data, correlation_id, step_number)
+                return await self._execute_api_sql_step(step, full_previous_data, correlation_id, step_number)
                 
         except Exception as e:
             return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
 
-    async def _execute_user_sql_step(self, step: ExecutionStep, sample_data: Any, correlation_id: str, step_number: int) -> StepResult:
+    async def _execute_user_sql_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
         """
         Execute standard user SQL step using repeatable pattern.
         
         REPEATABLE PATTERN:
-        - Use sample data for LLM context (already provided)
+        - Get enhanced context from all previous steps
         - Execute SQL to get full results
         - Store full results using variable-based storage
         """
         logger.debug(f"[{correlation_id}] Executing user SQL step")
+        
+        # Get enhanced context from all previous steps
+        all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
+        logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
         
         # Call existing SQL Agent with enhanced logging using wrapper function
         logger.debug(f"[{correlation_id}] Calling User SQL Agent with context: {step.query_context}")
         
         sql_result_dict = await generate_sql_query_with_logging(
             question=step.query_context,
-            tenant_id="test_tenant",
+            tenant_id=self.tenant_id,  # Use actual tenant_id from settings
             include_deleted=False,
-            flow_id=correlation_id
+            flow_id=correlation_id,
+            all_step_contexts=all_step_contexts  # NEW: Enhanced context from all previous steps
         )
         
         # Handle both dictionary response and AgentRunResult response
@@ -845,38 +854,49 @@ class ModernExecutionManager:
         
         logger.info(f"[{correlation_id}] SQL step completed: {len(db_data)} records stored as {variable_name}")
         
-        # Create result with SQL execution data
-        class MockSQLResult:
-            def __init__(self, sql_text, explanation, data):
-                self.sql = sql_text
-                self.explanation = explanation
-                self.data = data
+        # Check if SQL execution was successful
+        has_meaningful_data = isinstance(db_data, list) and len(db_data) > 0
+        sql_executed_successfully = bool(sql_dict and sql_dict.get('sql'))
         
+        step_success = has_meaningful_data and sql_executed_successfully
+        
+        if not step_success:
+            if not has_meaningful_data:
+                logger.warning(f"[{correlation_id}] SQL step marked as FAILED: no data returned from database")
+            if not sql_executed_successfully:
+                logger.warning(f"[{correlation_id}] SQL step marked as FAILED: SQL generation or execution failed")
+        
+        # Create result with SQL execution data
         result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'], db_data)
         
         return StepResult(
             step_number=step_number,
             step_type="SQL",
-            success=True,
+            success=step_success,
             result=result_data
         )
     
-    async def _execute_api_sql_step(self, step: ExecutionStep, sample_data: List[Dict[str, Any]], full_data: List[Dict[str, Any]], correlation_id: str, step_number: int) -> StepResult:
+    async def _execute_api_sql_step(self, step: ExecutionStep, full_data: List[Dict[str, Any]], correlation_id: str, step_number: int) -> StepResult:
         """
         Execute API → SQL step using repeatable pattern with Internal API-SQL Agent.
         
         REPEATABLE PATTERN:
-        - Use sample data for LLM context (already provided)
+        - Use enhanced context from all previous steps
         - Use full data for processing (full API data from previous step)
         - Store full SQL results for next step access
         """
         
-        data_count = len(full_data) if isinstance(full_data, list) else 0
-        sample_count = len(sample_data) if isinstance(sample_data, list) else 0
-        logger.info(f"[{correlation_id}] Processing API data with Internal API-SQL Agent: {data_count} full records, {sample_count} samples for LLM")
+        # ENHANCED PATTERN: Get context and samples from ALL previous steps
+        all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
         
-        # Determine if we should use temp table mode based on size
-        use_temp_table = data_count >= 500
+        data_count = len(full_data) if isinstance(full_data, list) else 0
+        logger.info(f"[{correlation_id}] Processing API data with Internal API-SQL Agent: {data_count} full records")
+        logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
+        
+        # ALWAYS use temp table mode to avoid placeholder issues
+        # This is safer and more robust than placeholder replacement
+        use_temp_table = True
+        logger.debug(f"[{correlation_id}] Using temp table mode for all API-SQL operations")
         
         # Call Internal API-SQL Agent - IT handles all the complexity
         # Use full data for processing, not just samples
@@ -884,14 +904,33 @@ class ModernExecutionManager:
             api_data=full_data,  # REPEATABLE PATTERN: Use full data for processing
             processing_context=step.query_context,
             correlation_id=correlation_id,
-            use_temp_table=use_temp_table
+            use_temp_table=use_temp_table,
+            all_step_contexts=all_step_contexts  # NEW: Enhanced context from all previous steps
         )
         
         # The Internal API-SQL Agent generates the complete SQL query
-        # We just execute it - no complex logic here
-        if result.output.processing_query:
+        # For temp table mode, we need to create table and insert data first
+        if result.output.uses_temp_table and result.output.temp_table_schema:
+            logger.info(f"[{correlation_id}] Creating temporary table and inserting {data_count} API records")
+            
+            try:
+                # Execute temp table operations in a single connection session
+                db_data = await self._execute_temp_table_workflow(
+                    temp_table_schema=result.output.temp_table_schema,
+                    processing_query=result.output.processing_query,
+                    api_data=full_data,
+                    correlation_id=correlation_id
+                )
+                logger.info(f"[{correlation_id}] Temp table API-SQL processing completed: {len(db_data)} results")
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Temp table workflow failed: {e}")
+                db_data = []
+            
+        elif result.output.processing_query:
+            # Direct mode (shouldn't happen now since we force temp table)
             db_data = await self._execute_raw_sql_query(result.output.processing_query, correlation_id)
-            logger.info(f"[{correlation_id}] API-SQL processing completed: {len(db_data)} results")
+            logger.info(f"[{correlation_id}] Direct API-SQL processing completed: {len(db_data)} results")
         else:
             logger.warning(f"[{correlation_id}] No SQL query generated by Internal API-SQL Agent")
             db_data = []
@@ -906,18 +945,13 @@ class ModernExecutionManager:
                 "explanation": result.output.explanation,
                 "input_record_count": data_count,
                 "use_temp_table": use_temp_table
-            }
+            },
+            step_context=step.query_context  # NEW: Store step context
         )
         
         logger.info(f"[{correlation_id}] API-SQL step completed: {len(db_data)} records stored as {variable_name}")
         
         # Create result object that matches expected structure
-        class MockSQLResult:
-            def __init__(self, sql_text, explanation, data):
-                self.sql = sql_text
-                self.explanation = explanation
-                self.data = data
-        
         result_data = MockSQLResult(result.output.processing_query, result.output.explanation, db_data)
         
         return StepResult(
@@ -952,14 +986,15 @@ class ModernExecutionManager:
                     error=error_msg
                 )
             
-            # REPEATABLE PATTERN: Get sample data for LLM context
-            sample_data_for_llm = self._get_sample_data_for_llm(max_records=5)
+            # ENHANCED PATTERN: Get context and samples from ALL previous steps
+            all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
             
             # REPEATABLE PATTERN: Get full data from previous step for processing
             full_previous_data = self._get_full_data_from_previous_step(step_number)
             actual_record_count = len(full_previous_data) if isinstance(full_previous_data, list) else 1
             
-            logger.info(f"[{correlation_id}] API Code Gen: Processing {actual_record_count} records, using {len(sample_data_for_llm)} samples for LLM")
+            logger.info(f"[{correlation_id}] API Code Gen: Processing {actual_record_count} records")
+            logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
             
             # Call API Code Gen Agent with enhanced logging using wrapper function
             logger.debug(f"[{correlation_id}] Calling API Code Gen Agent with context: {step.query_context}")
@@ -970,12 +1005,12 @@ class ModernExecutionManager:
             entity_name = step.entity or "users"
             api_result_dict = await generate_api_code(
                 query=step.query_context,
-                sql_data_sample=sample_data_for_llm,  # Only samples for LLM context
                 sql_record_count=actual_record_count,  # Full record count for processing logic
                 available_endpoints=available_endpoints,
                 entities_involved=[entity_name],
                 step_description=step.reasoning if hasattr(step, 'reasoning') else step.query_context,
-                correlation_id=correlation_id
+                correlation_id=correlation_id,
+                all_step_contexts=all_step_contexts  # Enhanced context from all previous steps
             )
             
             # Check if the wrapper function was successful
@@ -1026,7 +1061,8 @@ class ModernExecutionManager:
                         "code_generated": True,
                         "code_executed": True,
                         "explanation": api_result_dict['explanation']
-                    }
+                    },
+                    step_context=step.query_context  # NEW: Store step context
                 )
                 
                 logger.info(f"[{correlation_id}] API step completed: {len(actual_data) if isinstance(actual_data, list) else 1} records stored as {variable_name}")
@@ -1055,67 +1091,51 @@ class ModernExecutionManager:
                         "code_generated": True,
                         "code_executed": False,
                         "execution_error": execution_result.get('error', 'Unknown error')
-                    }
+                    },
+                    step_context=step.query_context  # NEW: Store step context
                 )
                 logger.warning(f"[{correlation_id}] API step failed: empty results stored as {variable_name}")
+            
+            # Determine if step should be considered successful
+            has_meaningful_data = False
+            execution_successful = False
+            
+            if isinstance(result_data, list) and len(result_data) > 0:
+                has_meaningful_data = True
+            elif isinstance(result_data, dict) and result_data:
+                has_meaningful_data = True
+            
+            # Check if code executed without critical errors
+            if execution_result.get('error'):
+                error_msg = execution_result.get('error', '').lower()
+                # Critical errors that should fail the step
+                if any(critical in error_msg for critical in ['import', 'module', 'syntax', 'indentation']):
+                    execution_successful = False
+                    logger.error(f"[{correlation_id}] API step has critical execution error: {execution_result.get('error')}")
+                else:
+                    execution_successful = True  # Non-critical error (like network timeout)
+            else:
+                execution_successful = True
+            
+            # Step is successful only if both conditions are met
+            step_success = has_meaningful_data and execution_successful
+            
+            if not step_success:
+                if not has_meaningful_data:
+                    logger.warning(f"[{correlation_id}] API step marked as FAILED: no meaningful data returned")
+                if not execution_successful:
+                    logger.warning(f"[{correlation_id}] API step marked as FAILED: critical execution error")
             
             return StepResult(
                 step_number=step_number,
                 step_type="api",
-                success=True,
+                success=step_success,
                 result=result_data
             )
             
         except Exception as e:
             return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
     
-    def _extract_sample(self, step_result: Any) -> Any:
-        """
-        Extract a small sample from step result for next step context.
-        
-        Args:
-            step_result: Result from previous step
-            
-        Returns:
-            Sample data (first 2-3 items) for next step
-        """
-        if step_result is None:
-            return None
-        
-        # Special handling for MockSQLResult objects
-        if hasattr(step_result, 'data') and hasattr(step_result, 'sql'):
-            # This is a MockSQLResult object - extract the actual data
-            sql_data = step_result.data
-            if isinstance(sql_data, list) and sql_data:
-                sample_size = min(3, len(sql_data))
-                return sql_data[:sample_size]
-            else:
-                return []
-        
-        # Handle list results - take first 3 items
-        if isinstance(step_result, list):
-            sample_size = min(3, len(step_result))
-            return step_result[:sample_size] if sample_size > 0 else []
-        
-        # Handle dict results with nested data
-        if isinstance(step_result, dict):
-            # Special handling for API execution results
-            if 'execution_output' in step_result and isinstance(step_result['execution_output'], list):
-                sample_size = min(3, len(step_result['execution_output']))
-                return step_result['execution_output'][:sample_size] if sample_size > 0 else []
-            
-            # Check for common list keys
-            for key in ['items', 'data', 'results', 'users', 'groups', 'applications']:
-                if key in step_result and isinstance(step_result[key], list):
-                    sample_size = min(3, len(step_result[key]))
-                    return step_result[key][:sample_size] if sample_size > 0 else []
-            
-            # If no list found, return the dict as-is (it might be a single entity)
-            return step_result
-        
-        # For other types, return as-is
-        return step_result
-
     def _execute_generated_code(self, python_code: str, correlation_id: str, step: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Execute generated Python code in a subprocess and capture output.
@@ -1130,10 +1150,24 @@ class ModernExecutionManager:
         import subprocess
         import tempfile
         import json
+        import shutil
         
         try:
-            # Create a temporary Python file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as temp_file:
+            # Create a temporary directory for execution
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Copy the base API client to the temp directory
+                api_client_source = os.path.join(os.path.dirname(__file__), 'base_okta_api_client.py')
+                api_client_dest = os.path.join(temp_dir, 'base_okta_api_client.py')
+                
+                if os.path.exists(api_client_source):
+                    shutil.copy2(api_client_source, api_client_dest)
+                    logger.debug(f"[{correlation_id}] Copied base_okta_api_client.py to execution directory")
+                else:
+                    logger.warning(f"[{correlation_id}] base_okta_api_client.py not found at {api_client_source}")
+                
+                # Create the main execution file
+                temp_file_path = os.path.join(temp_dir, 'generated_code.py')
+                
                 # Indent the entire generated code block to fit inside try/except
                 indented_code = '\n'.join('    ' + line for line in python_code.split('\n'))
                 
@@ -1146,26 +1180,28 @@ try:
 except Exception as e:
     print(json.dumps({{"status": "error", "error": str(e)}}))
 """
-                temp_file.write(wrapped_code)
-                temp_file_path = temp_file.name
-            
-            # Execute the code with appropriate timeout based on entity type
-            logger.debug(f"[{correlation_id}] Executing generated code in subprocess...")
-            
-            # Determine timeout based on entity type
-            if step.entity == 'system_log':
-                execution_timeout = SYSTEM_LOG_TIMEOUT
-                logger.debug(f"[{correlation_id}] Using system_log timeout: {execution_timeout} seconds")
-            else:
-                execution_timeout = API_EXECUTION_TIMEOUT
-                logger.debug(f"[{correlation_id}] Using standard API timeout: {execution_timeout} seconds")
                 
-            result = subprocess.run(
-                [sys.executable, temp_file_path],
-                capture_output=True,
-                text=True,
-                timeout=execution_timeout
-            )
+                with open(temp_file_path, 'w') as temp_file:
+                    temp_file.write(wrapped_code)
+            
+                # Execute the code with appropriate timeout based on entity type
+                logger.debug(f"[{correlation_id}] Executing generated code in subprocess...")
+                
+                # Determine timeout based on entity type
+                if step and step.entity == 'system_log':
+                    execution_timeout = SYSTEM_LOG_TIMEOUT
+                    logger.debug(f"[{correlation_id}] Using system_log timeout: {execution_timeout} seconds")
+                else:
+                    execution_timeout = API_EXECUTION_TIMEOUT
+                    logger.debug(f"[{correlation_id}] Using standard API timeout: {execution_timeout} seconds")
+                    
+                result = subprocess.run(
+                    [sys.executable, temp_file_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=execution_timeout,
+                    cwd=temp_dir  # Set working directory to temp dir so imports work
+                )
             
             # Parse the output
             if result.returncode == 0 and result.stdout.strip():
@@ -1220,54 +1256,81 @@ except Exception as e:
                 'success': False,
                 'error': f'Execution exception: {str(e)}'
             }
-        finally:
-            # Clean up temporary file
-            try:
-                import os
-                if 'temp_file_path' in locals():
-                    os.unlink(temp_file_path)
-            except:
-                pass
 
-    async def _execute_raw_sql_query(self, sql_query: str, correlation_id: str) -> List[Dict]:
+    async def _execute_raw_sql_query(self, sql_query: str, correlation_id: str, use_internal_validation: bool = False) -> List[Dict]:
         """
         Execute raw SQL query against the database and return results.
+        Uses thread pool to avoid blocking the event loop.
         
         Args:
             sql_query: The SQL query to execute
             correlation_id: Correlation ID for logging
+            use_internal_validation: If True, use internal SQL validation (allows temp tables)
             
         Returns:
             List of dictionaries containing query results
         """
         logger.debug(f"[{correlation_id}] Executing SQL query against database...")
         
-        # Safety check using the same validation as old executor
-        if not is_safe_sql(sql_query):
-            logger.warning(f"[{correlation_id}] SQL query failed safety check - blocking execution")
-            logger.warning(f"[{correlation_id}] Unsafe query: {sql_query}")
-            return []
+        # Safety check - use internal validation for temp table operations
+        if use_internal_validation:
+            from sql_security_validator import validate_internal_sql
+            is_valid, error_msg = validate_internal_sql(sql_query, correlation_id)
+            if not is_valid:
+                logger.warning(f"[{correlation_id}] Internal SQL validation failed: {error_msg}")
+                logger.warning(f"[{correlation_id}] Unsafe query: {sql_query}")
+                return []
+        else:
+            # Use standard user validation
+            if not is_safe_sql(sql_query):
+                logger.warning(f"[{correlation_id}] SQL query failed safety check - blocking execution")
+                logger.warning(f"[{correlation_id}] Unsafe query: {sql_query}")
+                return []
+        
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _sync_sql_execute():
+            try:
+                import sqlite3
+                
+                # Database path (same as old executor)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                # Connect to database
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row  # Enable column access by name
+                
+                # Enable WAL mode for concurrent access
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                conn.execute("PRAGMA cache_size=10000")
+                conn.execute("PRAGMA temp_store=memory")
+                
+                cursor = conn.cursor()
+                
+                # Execute query
+                cursor.execute(sql_query)
+                rows = cursor.fetchall()
+                
+                # Convert to list of dictionaries
+                data = [dict(row) for row in rows]
+                
+                conn.close()
+                
+                return data
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Database query failed: {e}")
+                return []
         
         try:
-            import sqlite3
-            
-            # Database path (same as old executor)
-            db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
-            db_path = os.path.abspath(db_path)
-            
-            # Connect to database
-            conn = sqlite3.connect(db_path)
-            conn.row_factory = sqlite3.Row  # Enable column access by name
-            cursor = conn.cursor()
-            
-            # Execute query
-            cursor.execute(sql_query)
-            rows = cursor.fetchall()
-            
-            # Convert to list of dictionaries
-            data = [dict(row) for row in rows]
-            
-            conn.close()
+            # Run SQL in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                data = await loop.run_in_executor(executor, _sync_sql_execute)
             
             logger.info(f"[{correlation_id}] SQL query executed successfully: {len(data)} records returned")
             if data:
@@ -1278,6 +1341,273 @@ except Exception as e:
         except Exception as e:
             logger.error(f"[{correlation_id}] Database query failed: {e}")
             return []
+
+    async def _execute_temp_table_workflow(self, temp_table_schema: str, processing_query: str, 
+                                          api_data: List[Any], correlation_id: str) -> List[Dict[str, Any]]:
+        """
+        Execute the complete temp table workflow in a single database connection session.
+        This ensures the TEMPORARY table remains available throughout the entire operation.
+        
+        Args:
+            temp_table_schema: SQL schema to create the temporary table
+            processing_query: Main SQL query that uses the temporary table
+            api_data: Data to insert into the temporary table
+            correlation_id: Correlation ID for logging
+            
+        Returns:
+            List of query results
+        """
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _sync_temp_table_workflow():
+            try:
+                import sqlite3
+                
+                # Database path (same as old executor)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                # Single connection for entire workflow
+                conn = sqlite3.connect(db_path)
+                
+                try:
+                    # Enable WAL mode for concurrent access  
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA synchronous=NORMAL")
+                    
+                    cursor = conn.cursor()
+                    
+                    # Step 1: Create temporary table
+                    logger.debug(f"[{correlation_id}] Creating temporary table with schema: {temp_table_schema}")
+                    cursor.execute(temp_table_schema)
+                    
+                    # Step 2: Insert API data
+                    if api_data:
+                        # Get the first record to determine the structure
+                        first_record = api_data[0]
+                        
+                        # Handle different API data formats intelligently  
+                        if isinstance(first_record, str):
+                            # Simple string list (user IDs from step 1) - direct okta_id insertion
+                            columns = ['okta_id']
+                            insert_sql = f"INSERT OR IGNORE INTO temp_api_users (okta_id) VALUES (?)"
+                            logger.debug(f"[{correlation_id}] Converting string list to okta_id format for temp table")
+                        elif isinstance(first_record, dict):
+                            # Dictionary format - need to extract okta_id equivalent 
+                            if 'user_id' in first_record:
+                                # Role assignment format: {"user_id": "...", "roles": [...]}
+                                columns = ['okta_id']  # temp table expects okta_id
+                                insert_sql = f"INSERT OR IGNORE INTO temp_api_users (okta_id) VALUES (?)"
+                                logger.debug(f"[{correlation_id}] Converting role assignment dict to okta_id format for temp table")
+                            else:
+                                # Generic dictionary format
+                                columns = list(first_record.keys())
+                                placeholders = ', '.join(['?' for _ in columns])
+                                column_names = ', '.join(columns)
+                                insert_sql = f"INSERT OR IGNORE INTO temp_api_users ({column_names}) VALUES ({placeholders})"
+                                logger.debug(f"[{correlation_id}] Using dictionary format for temp table")
+                        else:
+                            logger.warning(f"[{correlation_id}] Unknown API data format: {type(first_record)}")
+                            return []
+                        
+                        logger.debug(f"[{correlation_id}] Inserting {len(api_data)} records into temp table")
+                        logger.debug(f"[{correlation_id}] Insert SQL: {insert_sql}")
+                        
+                        # Insert all records with intelligent value extraction
+                        for record in api_data:
+                            if isinstance(record, str):
+                                # Handle string records (user IDs) - direct okta_id value
+                                values = [record]
+                            elif isinstance(record, dict):
+                                if 'user_id' in record:
+                                    # Role assignment format - extract user_id as okta_id
+                                    values = [record['user_id']]  
+                                else:
+                                    # Generic dictionary format - use all values
+                                    values = [record.get(col) for col in columns]
+                            else:
+                                logger.warning(f"[{correlation_id}] Skipping unknown record type: {type(record)}")
+                                continue
+                                
+                            cursor.execute(insert_sql, values)
+                        
+                        conn.commit()
+                        logger.info(f"[{correlation_id}] Successfully inserted {len(api_data)} records into temp table")
+                    
+                    # Step 3: Execute main processing query
+                    logger.debug(f"[{correlation_id}] Executing processing query: {processing_query}")
+                    cursor.execute(processing_query, [self.tenant_id])  # Add tenant_id parameter
+                    
+                    # Fetch all results
+                    columns = [description[0] for description in cursor.description]
+                    rows = cursor.fetchall()
+                    
+                    # Convert to list of dictionaries
+                    results = []
+                    for row in rows:
+                        results.append(dict(zip(columns, row)))
+                    
+                    logger.debug(f"[{correlation_id}] Processing query returned {len(results)} results")
+                    
+                    # Step 4: Temp table cleanup happens automatically when connection closes
+                    cursor.close()
+                    
+                    return results
+                    
+                finally:
+                    # Ensure connection is closed (temp table auto-drops)
+                    conn.close()
+                    logger.debug(f"[{correlation_id}] Temporary table automatically cleaned up")
+                    
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Temp table workflow failed: {e}")
+                raise
+        
+        try:
+            # Run workflow in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                return await loop.run_in_executor(executor, _sync_temp_table_workflow)
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Failed to execute temp table workflow: {e}")
+            raise
+
+    async def _insert_api_data_into_temp_table(self, api_data: List[Dict[str, Any]], correlation_id: str) -> None:
+        """
+        Insert API data into the temporary table created by the API-SQL agent.
+        Uses thread pool to avoid blocking the event loop.
+        
+        Args:
+            api_data: List of API response data to insert
+            correlation_id: Correlation ID for logging
+        """
+        if not api_data:
+            logger.warning(f"[{correlation_id}] No API data to insert into temp table")
+            return
+        
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _sync_insert_data():
+            try:
+                import sqlite3
+                
+                # Database path (same as old executor)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                # Connect to database
+                conn = sqlite3.connect(db_path)
+                
+                # Enable WAL mode for concurrent access  
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                
+                cursor = conn.cursor()
+                
+                # Get the first record to determine the structure
+                first_record = api_data[0]
+                
+                # Handle both string lists (user IDs) and dictionary lists
+                if isinstance(first_record, str):
+                    # Convert string list to dictionary list for temp table insertion
+                    # Assume these are okta_id values for temp_api_users table
+                    columns = ['okta_id']
+                    logger.debug(f"[{correlation_id}] Converting string list to okta_id dictionary format")
+                else:
+                    # Standard dictionary format
+                    columns = list(first_record.keys())
+                
+                # Create parameterized INSERT statement
+                # Assume temp table is named temp_api_users (standard from prompt)
+                placeholders = ', '.join(['?' for _ in columns])
+                column_names = ', '.join(columns)
+                
+                insert_sql = f"INSERT OR IGNORE INTO temp_api_users ({column_names}) VALUES ({placeholders})"
+                
+                logger.debug(f"[{correlation_id}] Inserting {len(api_data)} records into temp table")
+                logger.debug(f"[{correlation_id}] Insert SQL: {insert_sql}")
+                
+                # Insert all records
+                for record in api_data:
+                    if isinstance(record, str):
+                        # Handle string records (user IDs) - convert to dictionary format
+                        values = [record]  # okta_id value
+                    else:
+                        # Handle dictionary records - standard format
+                        values = [record.get(col) for col in columns]
+                    cursor.execute(insert_sql, values)
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                logger.info(f"[{correlation_id}] Successfully inserted {len(api_data)} records into temp table")
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to insert API data into temp table: {e}")
+                raise
+        
+        try:
+            # Run insertion in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                await loop.run_in_executor(executor, _sync_insert_data)
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Failed to insert API data into temp table: {e}")
+            raise
+
+    async def _cleanup_temp_table(self, correlation_id: str) -> None:
+        """
+        Drop the temporary table created during API-SQL processing.
+        Uses thread pool to avoid blocking the event loop.
+        
+        Args:
+            correlation_id: Correlation ID for logging
+        """
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _sync_cleanup():
+            try:
+                import sqlite3
+                
+                # Database path (same as old executor)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                # Connect to database
+                conn = sqlite3.connect(db_path)
+                
+                # Enable WAL mode for concurrent access
+                conn.execute("PRAGMA journal_mode=WAL")
+                
+                cursor = conn.cursor()
+                
+                # Drop the temp table (standard name from prompt)
+                drop_sql = "DROP TABLE IF EXISTS temp_api_users"
+                cursor.execute(drop_sql)
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                logger.debug(f"[{correlation_id}] Temporary table cleaned up successfully")
+                
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Failed to cleanup temp table (non-critical): {e}")
+        
+        try:
+            # Run cleanup in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                await loop.run_in_executor(executor, _sync_cleanup)
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Failed to cleanup temp table (non-critical): {e}")
 
 
 # Create singleton instance

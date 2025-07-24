@@ -113,8 +113,8 @@ class SQLSecurityValidator:
         if not cleaned_sql:
             return False, "SQL query is empty after cleaning"
         
-        # 1. Check query structure
-        structure_valid, structure_error = self._validate_structure(cleaned_sql)
+        # 1. Check query structure (with agent type awareness)
+        structure_valid, structure_error = self._validate_structure(cleaned_sql, agent_type)
         if not structure_valid:
             return False, f"Structure validation failed: {structure_error}"
         
@@ -153,8 +153,24 @@ class SQLSecurityValidator:
         # Normalize to lowercase for pattern matching
         return cleaned.lower()
 
-    def _validate_structure(self, sql: str) -> Tuple[bool, Optional[str]]:
-        """Validate basic SQL structure"""
+    def _validate_structure(self, sql: str, agent_type: SQLAgentType) -> Tuple[bool, Optional[str]]:
+        """Validate basic SQL structure with agent-specific rules"""
+        
+        # For internal agents, allow CREATE TEMPORARY TABLE statements
+        if agent_type == SQLAgentType.INTERNAL:
+            # Check if this is a temp table creation
+            temp_table_patterns = [
+                r'^\s*create\s+temp\s+table\s+temp_\w+',
+                r'^\s*create\s+temporary\s+table\s+temp_\w+'
+            ]
+            if any(re.match(pattern, sql, re.IGNORECASE) for pattern in temp_table_patterns):
+                # For temp table creation, just check balanced parentheses
+                paren_count = sql.count('(') - sql.count(')')
+                if paren_count != 0:
+                    return False, "Unbalanced parentheses in query"
+                return True, None
+        
+        # Standard validation for SELECT/WITH queries
         # Must start with SELECT or WITH
         if not any(re.match(pattern, sql) for pattern in self.valid_start_patterns):
             return False, "Query must start with SELECT or WITH"

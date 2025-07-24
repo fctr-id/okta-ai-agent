@@ -73,7 +73,7 @@ When breaking down user queries across API and SQL steps, focus each agent on wh
 - Example query context: "...using application label field for user-friendly application names and filtering for ACTIVE applications"
 
 ** API LIMIT REQUIREMENTS - CRITICAL FOR CODE GENERATION**:
-- **SYSTEM_LOG ENDPOINTS**: MUST specify "Use limit=1000 for system_log API calls" in query_context
+- **SYSTEM_LOG ENDPOINTS**: MUST specify "Use limit=1000 for system_log API calls" in query_context.ALso pass the relevat okta event codes tha match the query
 - **ALL OTHER API ENDPOINTS**: MUST specify "Use limit=100 for API calls" in query_context  
 - **MANDATORY INCLUSION**: Every API step's query_context MUST include the appropriate limit instruction
 - **EXAMPLES**:

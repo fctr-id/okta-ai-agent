@@ -47,12 +47,12 @@ except ImportError:
 class ApiCodeGenDependencies:
     """Dependencies for the API Code Generation Agent with dynamic context"""
     query: str
-    sql_data_sample: List[Dict[str, Any]]
     sql_record_count: int
     available_endpoints: List[Dict[str, Any]]
     entities_involved: List[str]
     step_description: str
     flow_id: str = ""  # Correlation ID for flow tracking
+    all_step_contexts: Dict[str, Any] = None  # Enhanced context from all previous steps
 
 class CodeGenerationOutput(BaseModel):
     """Structured output for API code generation"""
@@ -127,8 +127,8 @@ DYNAMIC CONTEXT FOR THIS REQUEST:
 - API Endpoints Available: {len(deps.available_endpoints)}
 - Entities: {deps.entities_involved}
 
-AVAILABLE SQL DATA SAMPLE:
-{json.dumps(deps.sql_data_sample[:2], indent=2) if deps.sql_data_sample else 'No SQL data available'}
+ENHANCED CONTEXT - PREVIOUS STEP DATA:
+{json.dumps(deps.all_step_contexts, indent=2) if deps.all_step_contexts else 'No previous step data available'}
 
 AVAILABLE API ENDPOINTS WITH COMPLETE DOCUMENTATION:
 {json.dumps(deps.available_endpoints, indent=2)}
@@ -175,24 +175,24 @@ Generate practical, executable code that solves the user's query: {deps.query}""
 
 async def generate_api_code(
     query: str,
-    sql_data_sample: List[Dict[str, Any]],
     sql_record_count: int,
     available_endpoints: List[Dict[str, Any]],
     entities_involved: List[str],
     step_description: str,
-    correlation_id: str
+    correlation_id: str,
+    all_step_contexts: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
     Generate Python code for Okta API operations using PydanticAI
     
     Args:
         query: User's original query
-        sql_data_sample: Sample of SQL data to work with
         sql_record_count: Total count of SQL records
         available_endpoints: List of filtered API endpoints
         entities_involved: List of entities from planning
         step_description: Description of the step to implement
         correlation_id: Correlation ID for logging
+        all_step_contexts: Enhanced context from all previous steps
         
     Returns:
         Dict containing success status, generated code, and metadata
@@ -205,47 +205,67 @@ async def generate_api_code(
     logger.debug(f"[{correlation_id}] SQL records: {sql_record_count}, API endpoints: {len(available_endpoints)}")
     
     try:
-        # Validate inputs
-        if not sql_data_sample and not available_endpoints:
-            logger.warning(f"[{correlation_id}] No SQL data or API endpoints available for code generation")
+        # Validate inputs - now using enhanced context instead of sql_data_sample
+        if not all_step_contexts and not available_endpoints:
+            logger.warning(f"[{correlation_id}] No step contexts or API endpoints available for code generation")
             return {
                 'success': False,
                 'error': 'No data available for code generation',
                 'code': '',
-                'explanation': 'No SQL data or API endpoints provided',
+                'explanation': 'No step contexts or API endpoints provided',
                 'requirements': [],
                 'correlation_id': correlation_id
             }
         
-        # Create dependencies
+        # Create dependencies (removed sql_data_sample, now using enhanced context)
         dependencies = ApiCodeGenDependencies(
             query=query,
-            sql_data_sample=sql_data_sample,
             sql_record_count=sql_record_count,
             available_endpoints=available_endpoints,
             entities_involved=entities_involved,
             step_description=step_description,
-            flow_id=correlation_id
+            flow_id=correlation_id,
+            all_step_contexts=all_step_contexts or {}  # Enhanced context
         )
         
-        # Create user message for code generation
-        # Handle different data structures from previous steps
-        if sql_data_sample:
-            if isinstance(sql_data_sample[0], dict):
-                data_structure = list(sql_data_sample[0].keys())
-            else:
-                data_structure = f"Data type: {type(sql_data_sample[0]).__name__} (sample: {sql_data_sample[0] if len(str(sql_data_sample[0])) < 50 else str(sql_data_sample[0])[:50] + '...'})"
-        else:
-            data_structure = []
+        # Create user message for code generation with enhanced context
+        # Extract data structure from enhanced context instead of sql_data_sample
+        data_structure = "Available from enhanced context"
+        if all_step_contexts:
+            # Look for sample data in previous steps
+            for key, value in all_step_contexts.items():
+                if key.endswith('_sample') and value:
+                    if isinstance(value, list) and len(value) > 0:
+                        if isinstance(value[0], dict):
+                            data_structure = f"Sample data structure: {list(value[0].keys())}"
+                        else:
+                            data_structure = f"Sample data type: {type(value[0]).__name__}"
+                        break
+                    elif isinstance(value, dict):
+                        data_structure = f"Sample data structure: {list(value.keys())}"
+                        break
         
-        user_message = f"Generate Python code for: {step_description}\n\nPrevious Step Data Structure: {data_structure}\nAPI Endpoints: {len(available_endpoints)} available"
+        # Build enhanced context string
+        context_info = ""
+        if all_step_contexts:
+            context_info = "\n\nPREVIOUS STEP CONTEXTS:\n"
+            for key, value in all_step_contexts.items():
+                if key.endswith('_context'):
+                    context_info += f"- {key}: {value}\n"
+                elif key.endswith('_sample'):
+                    sample_str = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
+                    context_info += f"- {key}: {sample_str}\n"
+        
+        user_message = f"Generate Python code for: {step_description}\n\nCurrent Step Data Structure: {data_structure}\nAPI Endpoints: {len(available_endpoints)} available{context_info}"
         
         logger.debug(f"[{correlation_id}] Running API code generation with PydanticAI agent")
-        # Log complete first 2 sample records for debugging (not truncated fields)
-        if sql_data_sample:
-            logger.debug(f"[{correlation_id}] Complete SQL sample received (first 2 records): {sql_data_sample[:2]}")
+        # Log enhanced context information
+        if all_step_contexts:
+            context_summary = {k: f"{type(v).__name__}({len(v) if isinstance(v, (list, dict)) else 'scalar'})" 
+                             for k, v in all_step_contexts.items()}
+            logger.debug(f"[{correlation_id}] Enhanced context received: {context_summary}")
         else:
-            logger.debug(f"[{correlation_id}] SQL sample received: None")
+            logger.debug(f"[{correlation_id}] No enhanced context provided")
         logger.debug(f"[{correlation_id}] Available endpoints: {len(available_endpoints)}")
         logger.debug(f"[{correlation_id}] Entities involved: {entities_involved}")
         
@@ -379,7 +399,6 @@ async def execute_api_code_generation_legacy_wrapper(
     # Call the new API code generation function
     return await generate_api_code(
         query=query,
-        sql_data_sample=sql_data[:3] if sql_data else [],
         sql_record_count=len(sql_data),
         available_endpoints=[
             {
@@ -417,7 +436,6 @@ if __name__ == "__main__":
         
         result = await generate_api_code(
             query="Get user details",
-            sql_data_sample=sample_data,
             sql_record_count=1,
             available_endpoints=sample_endpoints,
             entities_involved=["users"],

@@ -193,9 +193,9 @@ async def main():
         print("-" * 80)
 
 
-async def generate_sql_query_with_logging(question: str, tenant_id: str = "default", include_deleted: bool = False, flow_id: str = None) -> dict:
+async def generate_sql_query_with_logging(question: str, tenant_id: str = "default", include_deleted: bool = False, flow_id: str = None, all_step_contexts: Optional[Dict[str, Any]] = None) -> dict:
     """
-    Wrapper function for SQL agent with enhanced debug logging.
+    Wrapper function for SQL agent with enhanced debug logging and context awareness.
     
     This function provides the debug logging that shows the complete SQL queries
     and explanations that were missing when calling sql_agent.run() directly.
@@ -205,6 +205,7 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
         tenant_id: Tenant identifier
         include_deleted: Whether to include deleted records
         flow_id: Flow correlation ID
+        all_step_contexts: Enhanced context from all previous steps
     """
     if not flow_id:
         flow_id = generate_correlation_id()
@@ -213,9 +214,26 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
         logger.info(f"[{flow_id}] SQL Agent: Starting query generation")
         logger.debug(f"[{flow_id}] Input query: {question}")
         
+        # Enhanced context logging
+        if all_step_contexts:
+            logger.debug(f"[{flow_id}] Enhanced context provided with {len(all_step_contexts)} previous steps")
+        
+        # Build enhanced user message with previous step contexts
+        user_message = question
+        if all_step_contexts:
+            user_message += "\n\nPREVIOUS STEP CONTEXTS:\n"
+            for step_key, step_data in all_step_contexts.items():
+                if isinstance(step_data, dict):
+                    context = step_data.get('context', 'No context available')
+                    sample = step_data.get('sample', 'No sample available')
+                    user_message += f"\n{step_key}_context: {context}"
+                    user_message += f"\n{step_key}_sample: {sample}"
+                else:
+                    user_message += f"\n{step_key}: {step_data}"
+        
         # Use structured output directly (no manual JSON parsing needed)
         deps = SQLDependencies(tenant_id=tenant_id, include_deleted=include_deleted, flow_id=flow_id)
-        result = await sql_agent.run(question, deps=deps)
+        result = await sql_agent.run(user_message, deps=deps)
         
         logger.debug(f"[{flow_id}] Generated SQL: {result.output.sql}")
         logger.debug(f"[{flow_id}] SQL Explanation: {result.output.explanation}")
