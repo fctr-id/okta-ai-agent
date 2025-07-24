@@ -20,7 +20,7 @@ This executor implements a variable-based data flow pattern that scales with any
 3. ADDING NEW TOOLS/STEPS:
    - Add new tool type in execute_steps() elif block
    - Create _execute_[tool]_step() method following pattern:
-     * Get sample: self._get_sample_data_for_llm(max_records=3)
+     * Get sample: self._get_sample_data_for_llm(max_records=5)
      * Get full data: self._get_full_data_from_previous_step(step_number)
      * Process with tool agent (full data for processing, samples for LLM)
      * Store results: self._store_step_data(step_number, "tool_type", data, metadata)
@@ -58,6 +58,40 @@ from utils.logging import get_logger, get_default_log_dir
 
 # Configure logging
 logger = get_logger(__name__, log_dir=get_default_log_dir())
+
+# ================================================================
+# TIMEOUT CONFIGURATION - EASY TO MODIFY
+# ================================================================
+# 
+# CURRENT TIMEOUT VALUES:
+# - API Operations: 180s (3 min) - Standard API calls with pagination
+# - System Logs: 300s (5 min) - Extended for heavy system log queries  
+# - SQL Operations: 60s (1 min) - Database queries
+# - HTTP Requests: 30s - Individual API requests (used in generated code)
+#
+# REASONING FOR VALUES:
+# - System log queries need 5 minutes due to pagination + large datasets
+# - Regular API calls need 3 minutes for multiple paginated calls
+# - SQL queries are fast, 1 minute is sufficient
+# - HTTP requests timeout quickly to fail fast and retry
+# ================================================================
+
+# API Execution Timeouts (in seconds)
+API_EXECUTION_TIMEOUT = 180           # Subprocess timeout for API code execution (3 minutes)
+SYSTEM_LOG_TIMEOUT = 300              # Extended timeout for system_log queries (5 minutes)
+SQL_EXECUTION_TIMEOUT = 60            # Subprocess timeout for SQL operations (1 minute)
+
+# Database Timeouts (in seconds)
+DATABASE_CONNECTION_TIMEOUT = 30      # SQLite connection timeout
+SQL_QUERY_TIMEOUT = 60                # Individual SQL query execution timeout
+
+# HTTP Request Timeouts (in seconds) - Used in generated API code
+HTTP_REQUEST_TIMEOUT = 30             # Individual HTTP request timeout to Okta API
+
+# LLM Model Timeouts (in seconds)
+LLM_MODEL_TIMEOUT = 60                # AI model HTTP client timeout
+
+# ================================================================
 
 
 class StepResult(BaseModel):
@@ -167,8 +201,8 @@ class ModernExecutionManager:
             **(metadata or {})
         }
         
-        # Create sample context for LLM usage
-        sample_data = data[:3] if isinstance(data, list) and len(data) > 0 else data
+        # Create sample context for LLM usage (5 records for better variety)
+        sample_data = data[:5] if isinstance(data, list) and len(data) > 0 else data
         sample_context = {
             "variable_name": variable_name,
             "step_number": step_number,
@@ -211,16 +245,19 @@ class ModernExecutionManager:
         
         return []
     
-    def _get_sample_data_for_llm(self, max_records: int = 3) -> List[Dict[str, Any]]:
+    def _get_sample_data_for_llm(self, max_records: int = 5) -> List[Dict[str, Any]]:
         """
         Get sample data from previous steps for LLM context.
+        Strategy: Random 5 records (or all if fewer) for better variety.
         
         Args:
-            max_records: Maximum number of sample records to return
+            max_records: Maximum number of sample records to return (default 5)
             
         Returns:
             Sample data list for LLM context
         """
+        import random
+        
         if not self.accumulated_data:
             return []
         
@@ -228,9 +265,12 @@ class ModernExecutionManager:
         latest_sample = self.accumulated_data[-1]
         sample_data = latest_sample.get("sample_data", [])
         
-        # Ensure we don't exceed max_records
+        # Simple strategy: If more than max_records, take random sample. Otherwise, take all.
         if isinstance(sample_data, list):
-            return sample_data[:max_records]
+            if len(sample_data) <= max_records:
+                return sample_data  # Return all if max_records or fewer
+            else:
+                return random.sample(sample_data, max_records)  # Random sample if more than max_records
         else:
             return [sample_data] if sample_data else []
     
@@ -495,39 +535,48 @@ class ModernExecutionManager:
             # Process results through Results Formatter Agent (like old executor)
             logger.info(f"[{correlation_id}] Processing results through Results Formatter Agent...")
             
-            # Build step_results_for_processing in the format expected by results formatter
+            # Build step_results_for_processing using our data_variables storage (FULL DATASETS)
             step_results_for_processing = {}
             raw_results = {}
             
+            # Collect ALL data from our variable-based storage
+            all_collected_data = []
+            for variable_name, data in self.data_variables.items():
+                logger.debug(f"[{correlation_id}] Collecting data from {variable_name}: {len(data)} records")
+                all_collected_data.extend(data)
+            
+            # Build step results for processing with ACTUAL DATA
             for i, step_result in enumerate(execution_results.steps, 1):
                 step_name = f"step_{i}_{step_result.step_type.lower()}"
                 
                 if step_result.success and step_result.result:
                     if step_result.step_type == "SQL":
-                        # For SQL steps, result contains sql and explanation attributes
-                        # We need to create a dictionary structure for results processing
+                        # For SQL steps, get the actual executed data from our storage
+                        variable_name = f"sql_data_step_{i}"
+                        sql_data = self.data_variables.get(variable_name, [])
+                        
                         sql_result_dict = {
                             'success': True,
                             'sql': getattr(step_result.result, 'sql', ''),
                             'explanation': getattr(step_result.result, 'explanation', ''),
-                            'data': []  # SQL queries don't execute, just generate
+                            'data': sql_data  # ACTUAL SQL RESULTS
                         }
-                        step_results_for_processing[step_name] = []
+                        step_results_for_processing[step_name] = sql_data  # PASS ACTUAL DATA
                         raw_results['sql_execution'] = sql_result_dict
-                        logger.debug(f"[{correlation_id}] Added SQL query generation result")
+                        logger.debug(f"[{correlation_id}] Added SQL data: {len(sql_data)} records")
                         
                     elif step_result.step_type == "API":
-                        # Extract API execution results - result is a dictionary
-                        if isinstance(step_result.result, dict):
-                            api_data = step_result.result.get('execution_output', [])
-                            step_results_for_processing[step_name] = api_data
-                            raw_results['execution_result'] = step_result.result
-                            logger.debug(f"[{correlation_id}] Added API data: {len(api_data) if isinstance(api_data, list) else 'N/A'} results")
-                        else:
-                            # Fallback for other formats
-                            step_results_for_processing[step_name] = []
-                            raw_results['execution_result'] = {'execution_output': []}
-                            logger.debug(f"[{correlation_id}] No API data available")
+                        # For API steps, get the actual executed data from our storage
+                        variable_name = f"api_data_step_{i}"
+                        api_data = self.data_variables.get(variable_name, [])
+                        
+                        step_results_for_processing[step_name] = api_data  # PASS ACTUAL DATA
+                        raw_results['execution_result'] = {'execution_output': api_data}
+                        logger.debug(f"[{correlation_id}] Added API data: {len(api_data)} records")
+            
+            # Log total data being passed to Results Formatter
+            total_records = sum(len(data) for data in step_results_for_processing.values() if isinstance(data, list))
+            logger.info(f"[{correlation_id}] Passing {total_records} total records to Results Formatter")
             
             # Call Results Formatter Agent like old executor
             try:
@@ -715,37 +764,22 @@ class ModernExecutionManager:
         """
         try:
             # REPEATABLE PATTERN: Get sample data for LLM context
-            sample_data_for_llm = self._get_sample_data_for_llm(max_records=3)
+            sample_data_for_llm = self._get_sample_data_for_llm(max_records=5)
             
             # REPEATABLE PATTERN: Get full data from previous step for processing
             full_previous_data = self._get_full_data_from_previous_step(step_number)
             
-            # Determine which SQL agent to use based on previous data
-            if self._is_api_to_sql_step(step, full_previous_data, step_number):
-                logger.info(f"[{correlation_id}] Step {step_number}: API→SQL processing detected, using Internal API-SQL Agent")
-                return await self._execute_api_sql_step(step, sample_data_for_llm, full_previous_data, correlation_id, step_number)
-            else:
-                logger.info(f"[{correlation_id}] Step {step_number}: Standard SQL processing, using User SQL Agent")
+            # Determine which SQL agent to use based on step position
+            if step_number == 1:
+                logger.info(f"[{correlation_id}] Step {step_number}: First SQL step, using User SQL Agent")
                 return await self._execute_user_sql_step(step, sample_data_for_llm, correlation_id, step_number)
+            else:
+                logger.info(f"[{correlation_id}] Step {step_number}: Multi-step SQL processing, using Internal API-SQL Agent")
+                return await self._execute_api_sql_step(step, sample_data_for_llm, full_previous_data, correlation_id, step_number)
                 
         except Exception as e:
             return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
-    
-    def _is_api_to_sql_step(self, step: ExecutionStep, full_previous_data: Any, step_number: int) -> bool:
-        """
-        Detect if this is API → SQL processing using repeatable pattern.
-        
-        REPEATABLE PATTERN: Check data variables to determine processing type
-        """
-        return (
-            step.tool_name == "sql" and 
-            step_number > 1 and  # Not the first step
-            isinstance(full_previous_data, list) and 
-            len(full_previous_data) > 0 and
-            isinstance(full_previous_data[0], dict) and
-            'okta_id' in full_previous_data[0]  # API data signature
-        )
-    
+
     async def _execute_user_sql_step(self, step: ExecutionStep, sample_data: Any, correlation_id: str, step_number: int) -> StepResult:
         """
         Execute standard user SQL step using repeatable pattern.
@@ -759,6 +793,7 @@ class ModernExecutionManager:
         
         # Call existing SQL Agent with enhanced logging using wrapper function
         logger.debug(f"[{correlation_id}] Calling User SQL Agent with context: {step.query_context}")
+        
         sql_result_dict = await generate_sql_query_with_logging(
             question=step.query_context,
             tenant_id="test_tenant",
@@ -918,7 +953,7 @@ class ModernExecutionManager:
                 )
             
             # REPEATABLE PATTERN: Get sample data for LLM context
-            sample_data_for_llm = self._get_sample_data_for_llm(max_records=3)
+            sample_data_for_llm = self._get_sample_data_for_llm(max_records=5)
             
             # REPEATABLE PATTERN: Get full data from previous step for processing
             full_previous_data = self._get_full_data_from_previous_step(step_number)
@@ -959,7 +994,7 @@ class ModernExecutionManager:
             logger.info(f"[{correlation_id}]\n{api_result_dict.get('code', 'No code')}")
             logger.info(f"[{correlation_id}] === END GENERATED CODE ===")
             
-            execution_result = self._execute_generated_code(api_result_dict.get('code', ''), correlation_id)
+            execution_result = self._execute_generated_code(api_result_dict.get('code', ''), correlation_id, step)
             
             if execution_result.get('success', False):
                 # Use the actual execution output
@@ -1081,7 +1116,7 @@ class ModernExecutionManager:
         # For other types, return as-is
         return step_result
 
-    def _execute_generated_code(self, python_code: str, correlation_id: str) -> Dict[str, Any]:
+    def _execute_generated_code(self, python_code: str, correlation_id: str, step: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Execute generated Python code in a subprocess and capture output.
         
@@ -1114,13 +1149,22 @@ except Exception as e:
                 temp_file.write(wrapped_code)
                 temp_file_path = temp_file.name
             
-            # Execute the code
+            # Execute the code with appropriate timeout based on entity type
             logger.debug(f"[{correlation_id}] Executing generated code in subprocess...")
+            
+            # Determine timeout based on entity type
+            if step.entity == 'system_log':
+                execution_timeout = SYSTEM_LOG_TIMEOUT
+                logger.debug(f"[{correlation_id}] Using system_log timeout: {execution_timeout} seconds")
+            else:
+                execution_timeout = API_EXECUTION_TIMEOUT
+                logger.debug(f"[{correlation_id}] Using standard API timeout: {execution_timeout} seconds")
+                
             result = subprocess.run(
                 [sys.executable, temp_file_path],
                 capture_output=True,
                 text=True,
-                timeout=60  # 60 second timeout
+                timeout=execution_timeout
             )
             
             # Parse the output
@@ -1164,10 +1208,11 @@ except Exception as e:
                 }
                 
         except subprocess.TimeoutExpired:
-            logger.error(f"[{correlation_id}] Code execution timed out")
+            timeout_used = SYSTEM_LOG_TIMEOUT if (step and step.entity == 'system_log') else API_EXECUTION_TIMEOUT
+            logger.error(f"[{correlation_id}] Code execution timed out after {timeout_used} seconds")
             return {
                 'success': False,
-                'error': 'Code execution timed out after 60 seconds'
+                'error': f'Code execution timed out after {timeout_used} seconds'
             }
         except Exception as e:
             logger.error(f"[{correlation_id}] Code execution failed with exception: {e}")

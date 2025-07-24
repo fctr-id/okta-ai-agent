@@ -8,6 +8,7 @@ import os
 import json
 import re
 import sys
+from typing import List, Dict, Any, Optional
 
 # Add src path for importing utils
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -198,6 +199,12 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
     
     This function provides the debug logging that shows the complete SQL queries
     and explanations that were missing when calling sql_agent.run() directly.
+    
+    Args:
+        question: The SQL question to generate query for
+        tenant_id: Tenant identifier
+        include_deleted: Whether to include deleted records
+        flow_id: Flow correlation ID
     """
     if not flow_id:
         flow_id = generate_correlation_id()
