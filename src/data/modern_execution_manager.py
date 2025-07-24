@@ -1,29 +1,39 @@
 """
 Modern Execution Manager for Okta AI Agent.
 
-Simple pass-through orchestrator that:
-- Walks through planning agent steps in order
-- Executes SQL and     async def _execute_sql_step(self, step: ExecutionStep, previous_sample: dict, correlation_id: str, step_number: int) -> StepResult:PI steps using existing agents
-- Passes sample data between steps for context
-- Returns all step results without complex processing
+REPEATABLE DATA FLOW ARCHITECTURE:
+================================
 
-This replaces the complex real_world_hybrid_exe            # Check if the wrapper function was successful
-            if not sql_dict.get('success', False):
-                error_msg = sql_dict.get('error', 'Unknown SQL generation error')
-                return StepResult(
-                    step_number=step_number,
-                    step_type="sql",
-                    success=False,
-                    error=error_msg
-                )
-            
-            # Create a mock result object that matches the expected structure
-            class MockSQLResult:
-                def __init__(self, sql_text, explanation):
-                    self.sql = sql_text
-                    self.explanation = explanation
-            
-            result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'])imple step walker.
+This executor implements a variable-based data flow pattern that scales with any number of tools/steps:
+
+1. DATA STORAGE PATTERN:
+   - data_variables: {"sql_data_step_1": [all_records], "api_data_step_2": response}
+   - accumulated_data: [{"variable": "sql_data_step_1", "sample": [3_records]}, ...]
+   - step_metadata: {"step_1": {"type": "sql", "success": True, "record_count": 1000}}
+
+2. STEP EXECUTION PATTERN:
+   - Each step gets FULL data from previous step for processing
+   - Each step gets SAMPLE data (3 records) for LLM context
+   - Each step stores FULL results using _store_step_data()
+   - Each step stores SAMPLE context for next LLM call
+
+3. ADDING NEW TOOLS/STEPS:
+   - Add new tool type in execute_steps() elif block
+   - Create _execute_[tool]_step() method following pattern:
+     * Get sample: self._get_sample_data_for_llm(max_records=3)
+     * Get full data: self._get_full_data_from_previous_step(step_number)
+     * Process with tool agent (full data for processing, samples for LLM)
+     * Store results: self._store_step_data(step_number, "tool_type", data, metadata)
+   - No changes needed to existing steps - fully repeatable!
+
+4. DATA ACCESS PATTERN:
+   - LLM Context: Always use samples (3 records max) for code generation
+   - Processing: Always use full datasets for actual execution
+   - Variable Lookup: Access any previous step data by variable name
+   - Automatic Storage: All results stored with consistent naming
+
+This replaces complex sample extraction and "last step" tracking with a clean,
+scalable variable-based approach proven in the old executor.
 """
 
 from typing import Dict, List, Any, Optional
@@ -41,6 +51,7 @@ from sql_agent import sql_agent, SQLDependencies, generate_sql_query_with_loggin
 from api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
 from planning_agent import ExecutionPlan, ExecutionStep, planning_agent
 from results_formatter_agent import process_results_structured
+from api_sql_agent import api_sql_agent  # NEW: Internal API-SQL agent
 
 # Import logging
 from utils.logging import get_logger, get_default_log_dir
@@ -88,7 +99,10 @@ class BasicErrorHandler:
 
 class ModernExecutionManager:
     """
-    Simple execution manager that walks through plan steps and executes them.
+    Advanced multi-step execution engine for complex Okta AI Agent workflows.
+    
+    Orchestrates SQL and API operations with intelligent data flow management,
+    variable-based storage, and repeatable patterns for adding new tools.
     
     Core philosophy: Trust the agents to do their jobs. Just orchestrate the steps.
     """
@@ -116,7 +130,118 @@ class ModernExecutionManager:
                           for table in self.simple_ref_data.get('sql_tables', [])}
         self.endpoints = self.full_api_data.get('endpoints', [])  # Load endpoints for filtering
         
+        # REPEATABLE DATA FLOW PATTERN: Variable-based data management
+        # Based on proven old executor approach - scales with any number of tools/steps
+        self.data_variables = {}      # Full datasets: {"sql_data_step_1": [all_records], "api_data_step_2": response}
+        self.accumulated_data = []    # Sample contexts for LLM: [{"variable": "sql_data_step_1", "sample": [3_records]}, ...]
+        self.step_metadata = {}       # Step tracking: {"step_1": {"type": "sql", "success": True, "record_count": 1000}}
+        
         logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, {len(self.sql_tables)} SQL tables, {len(self.endpoints)} endpoints")
+    
+    # REPEATABLE DATA FLOW METHODS - Scale with any number of tools/steps
+    
+    def _store_step_data(self, step_number: int, step_type: str, data: Any, metadata: Dict[str, Any] = None) -> str:
+        """
+        Store step data using repeatable variable-based pattern.
+        
+        Args:
+            step_number: Current step number
+            step_type: Type of step (sql, api, etc.)
+            data: Full dataset to store
+            metadata: Additional metadata about the step
+            
+        Returns:
+            Variable name for accessing this data
+        """
+        variable_name = f"{step_type}_data_step_{step_number}"
+        
+        # Store full dataset
+        self.data_variables[variable_name] = data
+        
+        # Store metadata
+        self.step_metadata[f"step_{step_number}"] = {
+            "type": step_type,
+            "variable_name": variable_name,
+            "record_count": len(data) if isinstance(data, list) else 1,
+            "success": True,
+            **(metadata or {})
+        }
+        
+        # Create sample context for LLM usage
+        sample_data = data[:3] if isinstance(data, list) and len(data) > 0 else data
+        sample_context = {
+            "variable_name": variable_name,
+            "step_number": step_number,
+            "step_type": step_type,
+            "sample_data": sample_data,
+            "total_records": len(data) if isinstance(data, list) else 1
+        }
+        
+        # Add to accumulated data for LLM context
+        self.accumulated_data.append(sample_context)
+        
+        logger.debug(f"Stored {step_type} step data: variable={variable_name}, records={len(data) if isinstance(data, list) else 1}")
+        return variable_name
+    
+    def _get_full_data_from_previous_step(self, current_step_number: int) -> Any:
+        """
+        Get full dataset from the previous step using variable lookup.
+        
+        Args:
+            current_step_number: Current step number
+            
+        Returns:
+            Full dataset from previous step, or empty list if none
+        """
+        if current_step_number <= 1:
+            return []
+        
+        # Look for the most recent step's variable
+        previous_step_key = f"step_{current_step_number - 1}"
+        if previous_step_key in self.step_metadata:
+            variable_name = self.step_metadata[previous_step_key]["variable_name"]
+            return self.data_variables.get(variable_name, [])
+        
+        # Fallback: look through accumulated data for latest sample
+        if self.accumulated_data:
+            latest_sample = self.accumulated_data[-1]
+            variable_name = latest_sample.get("variable_name")
+            if variable_name:
+                return self.data_variables.get(variable_name, [])
+        
+        return []
+    
+    def _get_sample_data_for_llm(self, max_records: int = 3) -> List[Dict[str, Any]]:
+        """
+        Get sample data from previous steps for LLM context.
+        
+        Args:
+            max_records: Maximum number of sample records to return
+            
+        Returns:
+            Sample data list for LLM context
+        """
+        if not self.accumulated_data:
+            return []
+        
+        # Get the most recent sample data
+        latest_sample = self.accumulated_data[-1]
+        sample_data = latest_sample.get("sample_data", [])
+        
+        # Ensure we don't exceed max_records
+        if isinstance(sample_data, list):
+            return sample_data[:max_records]
+        else:
+            return [sample_data] if sample_data else []
+    
+    def _clear_execution_data(self):
+        """Clear all execution data for fresh run - maintains repeatability."""
+        self.data_variables.clear()
+        self.accumulated_data.clear()
+        self.step_metadata.clear()
+        logger.debug("Cleared execution data for fresh run")
+    
+    # END REPEATABLE DATA FLOW METHODS
     
     def _generate_lightweight_reference(self) -> Dict[str, Any]:
         """Generate lightweight API reference from comprehensive sources"""
@@ -306,13 +431,13 @@ class ModernExecutionManager:
     
     async def execute_query(self, query: str) -> Dict[str, Any]:
         """
-        Main execution method that provides the same interface as RealWorldHybridExecutor.
+        Main execution method for complex multi-step query processing.
         
         Flow:
         1. Generate/use existing correlation ID
         2. Use Planning Agent to generate execution plan
         3. Execute steps using Modern Execution Manager
-        4. Return results in compatible format
+        4. Return structured results
         
         Args:
             query: Natural language query to execute
@@ -429,7 +554,7 @@ class ModernExecutionManager:
             success_rate = sum(1 for step in execution_results.steps if step.success) / len(execution_results.steps)
             overall_success = success_rate >= 0.5  # At least 50% success
             
-            # Build compatible result structure (matching old executor format)
+            # Build structured result with comprehensive execution details
             result = {
                 'success': overall_success,
                 'correlation_id': correlation_id,
@@ -498,7 +623,7 @@ class ModernExecutionManager:
     
     async def execute_steps(self, plan: ExecutionPlan, correlation_id: str) -> ExecutionResults:
         """
-        Execute all steps in the plan in order.
+        Execute all steps in the plan in order using repeatable variable-based data flow.
         
         Args:
             plan: ExecutionPlan from planning agent
@@ -509,8 +634,10 @@ class ModernExecutionManager:
         """
         logger.info(f"[{correlation_id}] Starting execution of {len(plan.steps)} steps")
         
+        # REPEATABLE PATTERN: Clear data for fresh execution run
+        self._clear_execution_data()
+        
         step_results = []
-        previous_sample = None
         successful_steps = 0
         failed_steps = 0
         
@@ -522,11 +649,14 @@ class ModernExecutionManager:
             try:
                 # Execute step based on type
                 if step.tool_name == "sql":
-                    result = await self._execute_sql_step(step, previous_sample, correlation_id, step_num)
+                    result = await self._execute_sql_step(step, correlation_id, step_num)
                 elif step.tool_name == "api":
-                    result = await self._execute_api_step(step, previous_sample, correlation_id, step_num)
+                    result = await self._execute_api_step(step, correlation_id, step_num)
+                # REPEATABLE PATTERN: Add new tool types here
+                # elif step.tool_name == "new_tool":
+                #     result = await self._execute_new_tool_step(step, correlation_id, step_num)
                 else:
-                    # Unknown step type
+                    # Unknown step type - REPEATABLE PATTERN: Handle new tool types here
                     logger.warning(f"[{correlation_id}] Unknown step type: {step.tool_name}")
                     result = StepResult(
                         step_number=step_num,
@@ -535,25 +665,18 @@ class ModernExecutionManager:
                         error=f"Unknown step type: {step.tool_name}"
                     )
                 
-                # Track success/failure
+                # REPEATABLE PATTERN: Track step results and store data automatically
                 if result.success:
                     successful_steps += 1
-                    # Extract sample for next step
-                    sample = self._extract_sample(result.result)
-                    result.sample_extracted = sample
-                    previous_sample = sample
                     logger.info(f"[{correlation_id}] Step {step_num} completed successfully")
                     
-                    # Log sample data concisely
-                    if isinstance(sample, list) and sample:
-                        logger.debug(f"[{correlation_id}] Sample for next step: {len(sample)} items, first: {sample[0] if sample else 'None'}")
-                    elif sample:
-                        logger.debug(f"[{correlation_id}] Sample for next step: {sample}")
-                    else:
-                        logger.debug(f"[{correlation_id}] No sample data extracted")
+                    # Data storage is handled automatically in step execution methods
+                    # Log current data state
+                    total_variables = len(self.data_variables)
+                    total_samples = len(self.accumulated_data)
+                    logger.debug(f"[{correlation_id}] Data state: {total_variables} variables, {total_samples} sample contexts")
                 else:
                     failed_steps += 1
-                    previous_sample = None  # No sample for failed steps
                     logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
                 
                 step_results.append(result)
@@ -581,92 +704,203 @@ class ModernExecutionManager:
         logger.info(f"[{correlation_id}] Execution completed: {successful_steps}/{len(plan.steps)} steps successful")
         return execution_results
     
-    async def _execute_sql_step(self, step: ExecutionStep, previous_sample: Any, correlation_id: str, step_number: int) -> StepResult:
+    async def _execute_sql_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
         """
-        Execute SQL step using SQL Agent.
+        Execute SQL step using repeatable variable-based data flow pattern.
         
-        Args:
-            step: SQL step to execute
-            previous_sample: Sample data from previous step
-            correlation_id: Correlation ID for tracking
-            
-        Returns:
-            StepResult with SQL execution output
+        REPEATABLE PATTERN: 
+        - Get sample data for LLM context (max 3 records)
+        - Get full data from previous step for processing  
+        - Store full results for next step access
         """
         try:
-            # Call SQL Agent with enhanced logging using wrapper function
-            logger.debug(f"[{correlation_id}] Calling SQL Agent with context: {step.query_context}")
-            sql_result_dict = await generate_sql_query_with_logging(
-                question=step.query_context,
-                tenant_id="test_tenant",
-                include_deleted=False,
-                flow_id=correlation_id
-            )
+            # REPEATABLE PATTERN: Get sample data for LLM context
+            sample_data_for_llm = self._get_sample_data_for_llm(max_records=3)
             
-            # Handle both dictionary response and AgentRunResult response
-            if hasattr(sql_result_dict, 'output'):
-                # This is an AgentRunResult object, extract the data
-                sql_dict = {
-                    'success': True,
-                    'sql': sql_result_dict.output.sql,
-                    'explanation': sql_result_dict.output.explanation,
-                    'usage': getattr(sql_result_dict, 'usage', lambda: None)()
-                }
+            # REPEATABLE PATTERN: Get full data from previous step for processing
+            full_previous_data = self._get_full_data_from_previous_step(step_number)
+            
+            # Determine which SQL agent to use based on previous data
+            if self._is_api_to_sql_step(step, full_previous_data, step_number):
+                logger.info(f"[{correlation_id}] Step {step_number}: API→SQL processing detected, using Internal API-SQL Agent")
+                return await self._execute_api_sql_step(step, sample_data_for_llm, full_previous_data, correlation_id, step_number)
             else:
-                # This is a dictionary response as expected
-                sql_dict = sql_result_dict
-            
-            # Check if the operation was successful
-            if not sql_dict.get('success', False):
-                error_msg = sql_dict.get('error', 'Unknown SQL generation error')
-                return StepResult(
-                    step_number=step_number,
-                    step_type="sql",
-                    success=False,
-                    error=error_msg
-                )
-            
-            # Create a mock result object that matches the expected structure
-            class MockSQLResult:
-                def __init__(self, sql_text, explanation, data):
-                    self.sql = sql_text
-                    self.explanation = explanation
-                    self.data = data  # Add actual SQL execution results
-            
-            # Execute the generated SQL query against the database
-            if sql_dict['sql'] and sql_dict['sql'].strip():
-                db_data = await self._execute_raw_sql_query(sql_dict['sql'], correlation_id)
-                logger.info(f"[{correlation_id}] SQL execution completed: {len(db_data)} records returned")
-                if db_data:
-                    logger.debug(f"[{correlation_id}] Sample SQL record (1 of {len(db_data)}): {db_data[0]}")
-            else:
-                logger.warning(f"[{correlation_id}] No SQL query generated or empty query")
-                db_data = []
-            
-            result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'], db_data)
-            
-            return StepResult(
-                step_number=step_number,
-                step_type="sql",
-                success=True,
-                result=result_data
-            )
-            
+                logger.info(f"[{correlation_id}] Step {step_number}: Standard SQL processing, using User SQL Agent")
+                return await self._execute_user_sql_step(step, sample_data_for_llm, correlation_id, step_number)
+                
         except Exception as e:
             return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
     
-    async def _execute_api_step(self, step: ExecutionStep, previous_sample: Any, correlation_id: str, step_number: int) -> StepResult:
+    def _is_api_to_sql_step(self, step: ExecutionStep, full_previous_data: Any, step_number: int) -> bool:
         """
-        Execute API step using API Code Gen Agent.
+        Detect if this is API → SQL processing using repeatable pattern.
         
-        Args:
-            step: API step to execute
-            previous_sample: Sample data from previous step
-            correlation_id: Correlation ID for tracking
-            step_number: Current step number
-            
-        Returns:
-            StepResult with API execution output
+        REPEATABLE PATTERN: Check data variables to determine processing type
+        """
+        return (
+            step.tool_name == "sql" and 
+            step_number > 1 and  # Not the first step
+            isinstance(full_previous_data, list) and 
+            len(full_previous_data) > 0 and
+            isinstance(full_previous_data[0], dict) and
+            'okta_id' in full_previous_data[0]  # API data signature
+        )
+    
+    async def _execute_user_sql_step(self, step: ExecutionStep, sample_data: Any, correlation_id: str, step_number: int) -> StepResult:
+        """
+        Execute standard user SQL step using repeatable pattern.
+        
+        REPEATABLE PATTERN:
+        - Use sample data for LLM context (already provided)
+        - Execute SQL to get full results
+        - Store full results using variable-based storage
+        """
+        logger.debug(f"[{correlation_id}] Executing user SQL step")
+        
+        # Call existing SQL Agent with enhanced logging using wrapper function
+        logger.debug(f"[{correlation_id}] Calling User SQL Agent with context: {step.query_context}")
+        sql_result_dict = await generate_sql_query_with_logging(
+            question=step.query_context,
+            tenant_id="test_tenant",
+            include_deleted=False,
+            flow_id=correlation_id
+        )
+        
+        # Handle both dictionary response and AgentRunResult response
+        if hasattr(sql_result_dict, 'output'):
+            sql_dict = {
+                'success': True,
+                'sql': sql_result_dict.output.sql,
+                'explanation': sql_result_dict.output.explanation,
+                'usage': getattr(sql_result_dict, 'usage', lambda: None)()
+            }
+        else:
+            sql_dict = sql_result_dict
+        
+        # Check if the operation was successful
+        if not sql_dict.get('success', False):
+            error_msg = sql_dict.get('error', 'Unknown SQL generation error')
+            return StepResult(
+                step_number=step_number,
+                step_type="SQL",
+                success=False,
+                error=error_msg
+            )
+        
+        # Execute the generated SQL query against the database
+        if sql_dict['sql'] and sql_dict['sql'].strip():
+            db_data = await self._execute_raw_sql_query(sql_dict['sql'], correlation_id)
+            logger.info(f"[{correlation_id}] SQL execution completed: {len(db_data)} records returned")
+            if db_data:
+                logger.debug(f"[{correlation_id}] Sample SQL record (1 of {len(db_data)}): {db_data[0]}")
+        else:
+            logger.warning(f"[{correlation_id}] No SQL query generated or empty query")
+            db_data = []
+        
+        # REPEATABLE PATTERN: Store full results for next step access
+        variable_name = self._store_step_data(
+            step_number=step_number,
+            step_type="sql",
+            data=db_data,
+            metadata={
+                "sql_query": sql_dict['sql'],
+                "explanation": sql_dict['explanation']
+            }
+        )
+        
+        logger.info(f"[{correlation_id}] SQL step completed: {len(db_data)} records stored as {variable_name}")
+        
+        # Create result with SQL execution data
+        class MockSQLResult:
+            def __init__(self, sql_text, explanation, data):
+                self.sql = sql_text
+                self.explanation = explanation
+                self.data = data
+        
+        result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'], db_data)
+        
+        return StepResult(
+            step_number=step_number,
+            step_type="SQL",
+            success=True,
+            result=result_data
+        )
+    
+    async def _execute_api_sql_step(self, step: ExecutionStep, sample_data: List[Dict[str, Any]], full_data: List[Dict[str, Any]], correlation_id: str, step_number: int) -> StepResult:
+        """
+        Execute API → SQL step using repeatable pattern with Internal API-SQL Agent.
+        
+        REPEATABLE PATTERN:
+        - Use sample data for LLM context (already provided)
+        - Use full data for processing (full API data from previous step)
+        - Store full SQL results for next step access
+        """
+        
+        data_count = len(full_data) if isinstance(full_data, list) else 0
+        sample_count = len(sample_data) if isinstance(sample_data, list) else 0
+        logger.info(f"[{correlation_id}] Processing API data with Internal API-SQL Agent: {data_count} full records, {sample_count} samples for LLM")
+        
+        # Determine if we should use temp table mode based on size
+        use_temp_table = data_count >= 500
+        
+        # Call Internal API-SQL Agent - IT handles all the complexity
+        # Use full data for processing, not just samples
+        result = await api_sql_agent.process_api_data(
+            api_data=full_data,  # REPEATABLE PATTERN: Use full data for processing
+            processing_context=step.query_context,
+            correlation_id=correlation_id,
+            use_temp_table=use_temp_table
+        )
+        
+        # The Internal API-SQL Agent generates the complete SQL query
+        # We just execute it - no complex logic here
+        if result.output.processing_query:
+            db_data = await self._execute_raw_sql_query(result.output.processing_query, correlation_id)
+            logger.info(f"[{correlation_id}] API-SQL processing completed: {len(db_data)} results")
+        else:
+            logger.warning(f"[{correlation_id}] No SQL query generated by Internal API-SQL Agent")
+            db_data = []
+        
+        # REPEATABLE PATTERN: Store full SQL results for next step access
+        variable_name = self._store_step_data(
+            step_number=step_number,
+            step_type="api_sql",
+            data=db_data,
+            metadata={
+                "sql_query": result.output.processing_query,
+                "explanation": result.output.explanation,
+                "input_record_count": data_count,
+                "use_temp_table": use_temp_table
+            }
+        )
+        
+        logger.info(f"[{correlation_id}] API-SQL step completed: {len(db_data)} records stored as {variable_name}")
+        
+        # Create result object that matches expected structure
+        class MockSQLResult:
+            def __init__(self, sql_text, explanation, data):
+                self.sql = sql_text
+                self.explanation = explanation
+                self.data = data
+        
+        result_data = MockSQLResult(result.output.processing_query, result.output.explanation, db_data)
+        
+        return StepResult(
+            step_number=step_number,
+            step_type="API_SQL",
+            success=True,
+            result=result_data
+        )
+    
+    async def _execute_api_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
+        """
+        Execute API step using repeatable variable-based data flow pattern.
+        
+        REPEATABLE PATTERN:
+        - Get sample data for LLM context (max 3 records)
+        - Get full data from previous step for processing
+        - Execute API code generation and processing
+        - Store full results for next step access
         """
         try:
             # Get filtered endpoints for this specific step (using old executor logic)
@@ -683,16 +917,26 @@ class ModernExecutionManager:
                     error=error_msg
                 )
             
+            # REPEATABLE PATTERN: Get sample data for LLM context
+            sample_data_for_llm = self._get_sample_data_for_llm(max_records=3)
+            
+            # REPEATABLE PATTERN: Get full data from previous step for processing
+            full_previous_data = self._get_full_data_from_previous_step(step_number)
+            actual_record_count = len(full_previous_data) if isinstance(full_previous_data, list) else 1
+            
+            logger.info(f"[{correlation_id}] API Code Gen: Processing {actual_record_count} records, using {len(sample_data_for_llm)} samples for LLM")
+            
             # Call API Code Gen Agent with enhanced logging using wrapper function
             logger.debug(f"[{correlation_id}] Calling API Code Gen Agent with context: {step.query_context}")
             logger.debug(f"[{correlation_id}] Available endpoints being passed to API agent: {len(available_endpoints)} endpoints")
             logger.debug(f"[{correlation_id}] First endpoint structure: {available_endpoints[0] if available_endpoints else 'None'}")
+            
             # Use the entity field from the new format
             entity_name = step.entity or "users"
             api_result_dict = await generate_api_code(
                 query=step.query_context,
-                sql_data_sample=previous_sample if isinstance(previous_sample, list) else [{"sample": "data"}],
-                sql_record_count=len(previous_sample) if isinstance(previous_sample, list) else 1,
+                sql_data_sample=sample_data_for_llm,  # Only samples for LLM context
+                sql_record_count=actual_record_count,  # Full record count for processing logic
                 available_endpoints=available_endpoints,
                 entities_involved=[entity_name],
                 step_description=step.reasoning if hasattr(step, 'reasoning') else step.query_context,
@@ -737,6 +981,20 @@ class ModernExecutionManager:
                     'execution_output': actual_data,
                     'executed': True
                 }
+                
+                # REPEATABLE PATTERN: Store full API results for next step access
+                variable_name = self._store_step_data(
+                    step_number=step_number,
+                    step_type="api",
+                    data=actual_data,
+                    metadata={
+                        "code_generated": True,
+                        "code_executed": True,
+                        "explanation": api_result_dict['explanation']
+                    }
+                )
+                
+                logger.info(f"[{correlation_id}] API step completed: {len(actual_data) if isinstance(actual_data, list) else 1} records stored as {variable_name}")
             else:
                 logger.error(f"[{correlation_id}] API code execution failed: {execution_result.get('error', 'Unknown error')}")
                 logger.info(f"[{correlation_id}] === EXECUTION ERROR DETAILS ===")
@@ -752,6 +1010,19 @@ class ModernExecutionManager:
                     'executed': False,
                     'execution_error': execution_result.get('error', 'Unknown error')
                 }
+                
+                # REPEATABLE PATTERN: Store empty results for failed API execution
+                variable_name = self._store_step_data(
+                    step_number=step_number,
+                    step_type="api",
+                    data=[],
+                    metadata={
+                        "code_generated": True,
+                        "code_executed": False,
+                        "execution_error": execution_result.get('error', 'Unknown error')
+                    }
+                )
+                logger.warning(f"[{correlation_id}] API step failed: empty results stored as {variable_name}")
             
             return StepResult(
                 step_number=step_number,

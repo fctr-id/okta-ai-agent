@@ -229,7 +229,16 @@ async def generate_api_code(
         )
         
         # Create user message for code generation
-        user_message = f"Generate Python code for: {step_description}\n\nSQL Data Structure: {list(sql_data_sample[0].keys()) if sql_data_sample else []}\nAPI Endpoints: {len(available_endpoints)} available"
+        # Handle different data structures from previous steps
+        if sql_data_sample:
+            if isinstance(sql_data_sample[0], dict):
+                data_structure = list(sql_data_sample[0].keys())
+            else:
+                data_structure = f"Data type: {type(sql_data_sample[0]).__name__} (sample: {sql_data_sample[0] if len(str(sql_data_sample[0])) < 50 else str(sql_data_sample[0])[:50] + '...'})"
+        else:
+            data_structure = []
+        
+        user_message = f"Generate Python code for: {step_description}\n\nPrevious Step Data Structure: {data_structure}\nAPI Endpoints: {len(available_endpoints)} available"
         
         logger.debug(f"[{correlation_id}] Running API code generation with PydanticAI agent")
         # Log complete first 2 sample records for debugging (not truncated fields)

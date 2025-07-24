@@ -70,3 +70,7 @@ src/data/results/*
 docs/pydantic-ai-migration-spec.md
 .github/copilot-instructions.md
 docs/pydantic-ai-migration-spec.md
+src/data/DUAL_SQL_AGENT_IMPLEMENTATION.md
+src/data/MODERN_EXECUTION_FLOW_SPECIFICATION.md
+docs/Modern_Execution_Manager_SUCCESS.md
+src/data/MODERN_EXECUTION_FLOW_SPECIFICATION.md

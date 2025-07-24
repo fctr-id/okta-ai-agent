@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-INTERACTIVE QUERY TEST - MODERNIZED with Modern Execution Manager
+INTERACTIVE QUERY TEST - Modern Execution Manager
 
-Interactive test that accepts user input for any query.
+Interactive test that accepts user input for any complex multi-step query.
 Expected workflow: Query → Planning Agent → Modern Execution Manager → Results
 
-Uses the same interface as RealWorldHybridExecutor but with our simplified Modern Execution Manager.
+Tests the advanced Modern Execution Manager with its variable-based data flow architecture.
 Default query: "Find users logged in the last 7 days and fetch me their apps and groups"
 """
 
@@ -43,7 +43,7 @@ async def test_query_1():
     print("=" * 70)
     
     try:
-        # Execute the query using Modern Execution Manager (same interface as RealWorldHybridExecutor)
+        # Execute the query using Modern Execution Manager's advanced multi-step processing
         print(f"\n🚀 Executing with Modern Execution Manager...")
         result = await modern_executor.execute_query(query)
         
