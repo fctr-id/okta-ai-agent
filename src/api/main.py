@@ -115,7 +115,7 @@ async def health_check():
 @app.get("/{full_path:path}")
 async def serve_frontend(request: Request, full_path: str):
     # Define the base directory for static files (using absolute path)
-    static_dir = os.path.abspath("src/backend/app/static")
+    static_dir = os.path.abspath("src/api/static")
     
     # Clean the path to prevent directory traversal
     # Remove any '..' path segments and normalize
