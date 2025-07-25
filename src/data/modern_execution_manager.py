@@ -277,6 +277,58 @@ class ModernExecutionManager:
         
         return []
     
+    def _generate_data_injection_code(self, current_step_number: int, correlation_id: str) -> str:
+        """
+        Generate Python code that injects previous step data as variables.
+        This creates the missing link between enhanced context and execution environment.
+        
+        Args:
+            current_step_number: Current step number
+            correlation_id: Correlation ID for logging
+            
+        Returns:
+            Python code string that creates accessible variables
+        """
+        import json  # Import here for json.dumps usage
+        
+        if not current_step_number or current_step_number <= 1:
+            return "# No previous step data to inject"
+        
+        injection_lines = ["# === DATA INJECTION: Previous Step Data ==="]
+        
+        # Inject data from all previous steps
+        for step_num in range(1, current_step_number):
+            step_key = f"step_{step_num}"
+            
+            if step_key in self.step_metadata:
+                variable_name = self.step_metadata[step_key]["variable_name"]
+                step_data = self.data_variables.get(variable_name, [])
+                
+                # Create both the enhanced context variable name AND a simplified version
+                step_sample_var = f"step_{step_num}_sample"
+                step_context_var = f"step_{step_num}_context"
+                
+                # Get sample data (first 3 records for context)
+                if isinstance(step_data, list):
+                    sample_data = step_data[:3] if len(step_data) > 3 else step_data
+                else:
+                    sample_data = step_data
+                
+                # Get step context
+                step_context = self.step_metadata[step_key].get("step_context", f"Step {step_num} context")
+                
+                # Generate the injection code with Python-compatible serialization
+                injection_lines.append(f"# Step {step_num} data injection")
+                injection_lines.append(f"{step_sample_var} = {repr(sample_data)}")
+                injection_lines.append(f"{step_context_var} = {repr(step_context)}")
+                injection_lines.append(f"# Full data available as: {variable_name} = {repr(step_data)}")
+                injection_lines.append("")
+        
+        injection_lines.append("# === END DATA INJECTION ===")
+        
+        logger.debug(f"[{correlation_id}] Generated data injection code for {current_step_number-1} previous steps")
+        return "\n".join(injection_lines)
+    
     def _clear_execution_data(self):
         """Clear all execution data for fresh run - maintains repeatability."""
         self.data_variables.clear()
@@ -547,34 +599,49 @@ class ModernExecutionManager:
                 logger.debug(f"[{correlation_id}] Collecting data from {variable_name}: {len(data)} records")
                 all_collected_data.extend(data)
             
-            # Build step results for processing with ACTUAL DATA
+            # Build step results for processing with ACTUAL DATA (Generic for all step types)
             for i, step_result in enumerate(execution_results.steps, 1):
                 step_name = f"step_{i}_{step_result.step_type.lower()}"
                 
                 if step_result.success and step_result.result:
-                    if step_result.step_type == "SQL":
-                        # For SQL steps, get the actual executed data from our storage
-                        variable_name = f"sql_data_step_{i}"
-                        sql_data = self.data_variables.get(variable_name, [])
+                    # Generic approach: Try multiple variable name patterns for any step type
+                    step_type_lower = step_result.step_type.lower()
+                    possible_variable_names = [
+                        f"{step_type_lower}_data_step_{i}",           # e.g., api_sql_data_step_2
+                        f"{step_type_lower.replace('_', '')}_data_step_{i}",  # e.g., apisql_data_step_2
+                        f"{'_'.join(step_type_lower.split('_'))}_data_step_{i}",  # e.g., api_sql_data_step_2
+                        f"sql_data_step_{i}",                        # legacy SQL pattern
+                        f"api_data_step_{i}",                        # legacy API pattern
+                    ]
+                    
+                    # Find the actual variable that exists in our storage
+                    step_data = []
+                    found_variable = None
+                    for variable_name in possible_variable_names:
+                        if variable_name in self.data_variables:
+                            step_data = self.data_variables.get(variable_name, [])
+                            found_variable = variable_name
+                            break
+                    
+                    if found_variable:
+                        # Build result dictionary based on step type characteristics
+                        if 'sql' in step_type_lower:
+                            # SQL-like steps (SQL, API_SQL, etc.)
+                            result_dict = {
+                                'success': True,
+                                'sql': getattr(step_result.result, 'sql', ''),
+                                'explanation': getattr(step_result.result, 'explanation', ''),
+                                'data': step_data
+                            }
+                            raw_results['sql_execution'] = result_dict
+                        else:
+                            # API-like steps (API, etc.)
+                            raw_results['execution_result'] = {'execution_output': step_data}
                         
-                        sql_result_dict = {
-                            'success': True,
-                            'sql': getattr(step_result.result, 'sql', ''),
-                            'explanation': getattr(step_result.result, 'explanation', ''),
-                            'data': sql_data  # ACTUAL SQL RESULTS
-                        }
-                        step_results_for_processing[step_name] = sql_data  # PASS ACTUAL DATA
-                        raw_results['sql_execution'] = sql_result_dict
-                        logger.debug(f"[{correlation_id}] Added SQL data: {len(sql_data)} records")
-                        
-                    elif step_result.step_type == "API":
-                        # For API steps, get the actual executed data from our storage
-                        variable_name = f"api_data_step_{i}"
-                        api_data = self.data_variables.get(variable_name, [])
-                        
-                        step_results_for_processing[step_name] = api_data  # PASS ACTUAL DATA
-                        raw_results['execution_result'] = {'execution_output': api_data}
-                        logger.debug(f"[{correlation_id}] Added API data: {len(api_data)} records")
+                        step_results_for_processing[step_name] = step_data
+                        logger.debug(f"[{correlation_id}] Added {step_result.step_type} data from {found_variable}: {len(step_data)} records")
+                    else:
+                        logger.warning(f"[{correlation_id}] No data found for {step_result.step_type} step {i} (tried: {possible_variable_names})")
             
             # Log total data being passed to Results Formatter
             total_records = sum(len(data) for data in step_results_for_processing.values() if isinstance(data, list))
@@ -592,6 +659,9 @@ class ModernExecutionManager:
                 
                 logger.info(f"[{correlation_id}] Results formatting completed with {formatted_response.get('display_type', 'unknown')} format")
                 logger.debug(f"[{correlation_id}] Formatted response keys: {list(formatted_response.keys())}")
+                
+                # Save results to file
+                await self._save_results_to_file(query, formatted_response, step_results_for_processing, correlation_id)
                 
             except Exception as e:
                 logger.error(f"[{correlation_id}] Results formatting failed: {e}")
@@ -1029,7 +1099,12 @@ class ModernExecutionManager:
             logger.info(f"[{correlation_id}]\n{api_result_dict.get('code', 'No code')}")
             logger.info(f"[{correlation_id}] === END GENERATED CODE ===")
             
-            execution_result = self._execute_generated_code(api_result_dict.get('code', ''), correlation_id, step)
+            execution_result = self._execute_generated_code(
+                api_result_dict.get('code', ''), 
+                correlation_id, 
+                step, 
+                current_step_number=step_number  # CRITICAL: Pass step number for data injection
+            )
             
             if execution_result.get('success', False):
                 # Use the actual execution output
@@ -1136,13 +1211,15 @@ class ModernExecutionManager:
         except Exception as e:
             return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
     
-    def _execute_generated_code(self, python_code: str, correlation_id: str, step: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _execute_generated_code(self, python_code: str, correlation_id: str, step: Optional[Dict[str, Any]] = None, current_step_number: int = None) -> Dict[str, Any]:
         """
-        Execute generated Python code in a subprocess and capture output.
+        Execute generated Python code in a subprocess with access to previous step data.
         
         Args:
             python_code: The Python code to execute
             correlation_id: Correlation ID for logging
+            step: Current step information
+            current_step_number: Current step number for data injection
             
         Returns:
             Dict with success status and output or error
@@ -1165,16 +1242,20 @@ class ModernExecutionManager:
                 else:
                     logger.warning(f"[{correlation_id}] base_okta_api_client.py not found at {api_client_source}")
                 
+                # CRITICAL FIX: Inject previous step data into execution environment
+                data_injection_code = self._generate_data_injection_code(current_step_number, correlation_id)
+                
                 # Create the main execution file
                 temp_file_path = os.path.join(temp_dir, 'generated_code.py')
                 
                 # Indent the entire generated code block to fit inside try/except
                 indented_code = '\n'.join('    ' + line for line in python_code.split('\n'))
                 
-                # Wrap the code to capture output as JSON
+                # Wrap the code with data injection and error handling
                 wrapped_code = f"""
 import sys
 import json
+{data_injection_code}
 try:
 {indented_code}
 except Exception as e:
@@ -1402,12 +1483,11 @@ except Exception as e:
                                 insert_sql = f"INSERT OR IGNORE INTO temp_api_users (okta_id) VALUES (?)"
                                 logger.debug(f"[{correlation_id}] Converting role assignment dict to okta_id format for temp table")
                             else:
-                                # Generic dictionary format
-                                columns = list(first_record.keys())
-                                placeholders = ', '.join(['?' for _ in columns])
-                                column_names = ', '.join(columns)
-                                insert_sql = f"INSERT OR IGNORE INTO temp_api_users ({column_names}) VALUES ({placeholders})"
-                                logger.debug(f"[{correlation_id}] Using dictionary format for temp table")
+                                # Complex API data (like login events) - extract user ID intelligently
+                                # Always use okta_id schema to match LLM-generated temp table
+                                columns = ['okta_id']
+                                insert_sql = f"INSERT OR IGNORE INTO temp_api_users (okta_id) VALUES (?)"
+                                logger.debug(f"[{correlation_id}] Using okta_id extraction for complex API data")
                         else:
                             logger.warning(f"[{correlation_id}] Unknown API data format: {type(first_record)}")
                             return []
@@ -1424,9 +1504,16 @@ except Exception as e:
                                 if 'user_id' in record:
                                     # Role assignment format - extract user_id as okta_id
                                     values = [record['user_id']]  
+                                elif 'actor' in record and 'id' in record.get('actor', {}):
+                                    # Login event format - extract actor.id as okta_id
+                                    values = [record['actor']['id']]
+                                elif 'id' in record:
+                                    # Standard user record - extract id as okta_id
+                                    values = [record['id']]
                                 else:
-                                    # Generic dictionary format - use all values
-                                    values = [record.get(col) for col in columns]
+                                    # Cannot extract user ID - skip record
+                                    logger.warning(f"[{correlation_id}] Cannot extract user ID from record keys: {list(record.keys())[:5]}")
+                                    continue
                             else:
                                 logger.warning(f"[{correlation_id}] Skipping unknown record type: {type(record)}")
                                 continue
@@ -1518,8 +1605,9 @@ except Exception as e:
                     columns = ['okta_id']
                     logger.debug(f"[{correlation_id}] Converting string list to okta_id dictionary format")
                 else:
-                    # Standard dictionary format
-                    columns = list(first_record.keys())
+                    # Dictionary format - always use okta_id schema for consistency
+                    columns = ['okta_id']
+                    logger.debug(f"[{correlation_id}] Using okta_id extraction for dictionary format")
                 
                 # Create parameterized INSERT statement
                 # Assume temp table is named temp_api_users (standard from prompt)
@@ -1537,8 +1625,20 @@ except Exception as e:
                         # Handle string records (user IDs) - convert to dictionary format
                         values = [record]  # okta_id value
                     else:
-                        # Handle dictionary records - standard format
-                        values = [record.get(col) for col in columns]
+                        # Handle dictionary records - extract okta_id intelligently
+                        if 'user_id' in record:
+                            # Role assignment format
+                            values = [record['user_id']]
+                        elif 'actor' in record and 'id' in record.get('actor', {}):
+                            # Login event format
+                            values = [record['actor']['id']]
+                        elif 'id' in record:
+                            # Standard user record
+                            values = [record['id']]
+                        else:
+                            # Cannot extract - skip record
+                            logger.warning(f"[{correlation_id}] Cannot extract okta_id, skipping record")
+                            continue
                     cursor.execute(insert_sql, values)
                 
                 conn.commit()
@@ -1608,6 +1708,163 @@ except Exception as e:
                 await loop.run_in_executor(executor, _sync_cleanup)
         except Exception as e:
             logger.warning(f"[{correlation_id}] Failed to cleanup temp table (non-critical): {e}")
+
+    async def _save_results_to_file(self, query: str, formatted_response: Dict[str, Any], 
+                                   raw_data: Dict[str, Any], correlation_id: str) -> None:
+        """
+        Save query results to files for analysis and debugging.
+        
+        Args:
+            query: Original user query
+            formatted_response: Formatted response from Results Formatter Agent
+            raw_data: Raw data from all steps
+            correlation_id: Correlation ID for this execution
+        """
+        try:
+            import json
+            from datetime import datetime
+            
+            # Create timestamp for unique filenames
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_correlation = correlation_id.replace('-', '_')[:20]  # Truncate for filename
+            
+            # Create results directory if it doesn't exist
+            results_dir = os.path.join(os.path.dirname(__file__), "results")
+            os.makedirs(results_dir, exist_ok=True)
+            
+            # Save formatted results (what user sees)
+            formatted_file = os.path.join(results_dir, f"query_results_{timestamp}_{safe_correlation}.json")
+            
+            # Calculate record count based on display type
+            record_count = 0
+            if formatted_response.get('display_type') == 'table':
+                content = formatted_response.get('content', [])
+                if isinstance(content, list):
+                    record_count = len(content)
+                elif isinstance(content, dict):
+                    rows = content.get('rows', [])
+                    record_count = len(rows)
+            
+            formatted_data = {
+                "query": query,
+                "timestamp": datetime.now().isoformat(),
+                "correlation_id": correlation_id,
+                "formatted_response": formatted_response,
+                "summary": {
+                    "display_type": formatted_response.get('display_type', 'unknown'),
+                    "record_count": record_count,
+                    "metadata": formatted_response.get('metadata', {})
+                }
+            }
+            
+            with open(formatted_file, 'w', encoding='utf-8') as f:
+                json.dump(formatted_data, f, indent=2, ensure_ascii=False)
+            
+            # Save raw data (for debugging)
+            raw_file = os.path.join(results_dir, f"raw_data_{timestamp}_{safe_correlation}.json")
+            raw_export = {
+                "query": query,
+                "timestamp": datetime.now().isoformat(),
+                "correlation_id": correlation_id,
+                "raw_step_data": {}
+            }
+            
+            # Export all step data with record counts
+            for variable_name, data in self.data_variables.items():
+                raw_export["raw_step_data"][variable_name] = {
+                    "record_count": len(data) if isinstance(data, list) else 1,
+                    "data_type": str(type(data).__name__),
+                    "sample": data[:3] if isinstance(data, list) and len(data) > 0 else data,
+                    "full_data": data  # Include full data for analysis
+                }
+            
+            with open(raw_file, 'w', encoding='utf-8') as f:
+                json.dump(raw_export, f, indent=2, ensure_ascii=False, default=str)
+            
+            # Create a readable summary file
+            summary_file = os.path.join(results_dir, f"summary_{timestamp}_{safe_correlation}.md")
+            summary_content = f"""# Query Results Summary
+
+## Query Information
+- **Query**: {query}
+- **Execution Time**: {datetime.now().isoformat()}
+- **Correlation ID**: {correlation_id}
+
+## Results Overview
+- **Display Type**: {formatted_response.get('display_type', 'unknown')}
+- **Processing Method**: Results Formatter Agent (LLM Intelligence)
+- **Code Generation**: No - Direct data formatting by LLM
+
+## Data Processing
+"""
+            
+            # Add step summary
+            if formatted_response.get('display_type') == 'table':
+                table_data = formatted_response.get('content', [])
+                
+                # Handle different content formats
+                if isinstance(table_data, str):
+                    # Code generation mode - content is a description string
+                    summary_content += f"- **Content**: {table_data}\n\n"
+                    summary_content += "## Generated Processing Code\n"
+                    if formatted_response.get('processing_code'):
+                        summary_content += "```python\n"
+                        summary_content += formatted_response['processing_code']
+                        summary_content += "\n```\n\n"
+                elif isinstance(table_data, list) and table_data:
+                    # Extract headers from first record
+                    headers = list(table_data[0].keys()) if table_data else []
+                    rows = table_data
+                    summary_content += f"- **Table Format**: {len(headers)} columns, {len(rows)} rows\n"
+                    summary_content += f"- **Columns**: {', '.join(headers)}\n\n"
+                    
+                    # Add sample of table data
+                    summary_content += "## Sample Results\n"
+                    if rows:
+                        summary_content += "| " + " | ".join(headers) + " |\n"
+                        summary_content += "|" + "|".join(["---" for _ in headers]) + "|\n"
+                        for row in rows[:3]:  # Show first 3 rows
+                            values = [str(row.get(header, 'N/A')) for header in headers]
+                            summary_content += "| " + " | ".join(values) + " |\n"
+                elif isinstance(table_data, dict):
+                    # Legacy format with headers/rows structure
+                    headers = table_data.get('headers', [])
+                    rows = table_data.get('rows', [])
+                    summary_content += f"- **Table Format**: {len(headers)} columns, {len(rows)} rows\n"
+                    summary_content += f"- **Columns**: {', '.join(headers)}\n\n"
+                    
+                    # Add sample of table data
+                    summary_content += "## Sample Results\n"
+                    if rows:
+                        summary_content += "| " + " | ".join(headers) + " |\n"
+                        summary_content += "|" + "|".join(["---" for _ in headers]) + "|\n"
+                        for row in rows[:3]:  # Show first 3 rows
+                            values = [str(row.get(header, 'N/A')) for header in headers]
+                            summary_content += "| " + " | ".join(values) + " |\n"
+            
+            # Add step information
+            summary_content += f"\n## Processing Steps\n"
+            for variable_name, data in self.data_variables.items():
+                record_count = len(data) if isinstance(data, list) else 1
+                summary_content += f"- **{variable_name}**: {record_count} records\n"
+            
+            # Add metadata
+            if formatted_response.get('metadata'):
+                summary_content += f"\n## Execution Metadata\n"
+                metadata = formatted_response['metadata']
+                for key, value in metadata.items():
+                    summary_content += f"- **{key}**: {value}\n"
+            
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                f.write(summary_content)
+            
+            logger.info(f"[{correlation_id}] Results saved to files:")
+            logger.info(f"[{correlation_id}]   - Formatted: {formatted_file}")
+            logger.info(f"[{correlation_id}]   - Raw Data: {raw_file}")
+            logger.info(f"[{correlation_id}]   - Summary: {summary_file}")
+            
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Failed to save results to file: {e}")
 
 
 # Create singleton instance

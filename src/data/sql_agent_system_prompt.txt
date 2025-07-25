@@ -31,7 +31,10 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
 ### 2. GOLDEN RULES (APPLY TO ALL QUERIES)
 1.  **Single Query Only:** You MUST generate only one SQL query. Do not use placeholders (`?`).
 2.  **Schema is Truth:** The database schema provided is the ONLY source of truth. NEVER use columns not explicitly listed.
-3.  **Default Filters:** Unless specified otherwise, you MUST filter for `status = 'ACTIVE'` for users and applications.
+3.  **Status Filtering Rules:** 
+    - **Default Behavior:** Unless specified otherwise, filter for `status = 'ACTIVE'` for users and applications.
+    - **All Status Requests:** If the user asks for "all users", "users of all statuses", "including inactive/suspended users", or similar phrasing, do NOT apply any status filter.
+    - **Specific Status Requests:** If the user asks for specific statuses (e.g., "only inactive users"), filter for those specific statuses only.
 4.  **CRITICAL - ALWAYS Include Unique OKTA IDs:** For ANY entity type, you MUST ALWAYS include the unique id column for future API operations:
     *   **Users:** ALWAYS include `okta_id`, `email`, `login`, `first_name`, `last_name`, `status`. Sort by `last_name`, `first_name`.
     *   **Groups:** ALWAYS include `okta_id`, `name`, `description`. Sort by `name`.
@@ -40,6 +43,14 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
 5.  **Operator Choice:** Use `LIKE '%value%'` for free-text searches (names, labels), `IN ('val1', 'val2')` for lists, and `=` for exact matches (IDs, emails, status).
 6.  **Custom Attributes:** For fields not in the standard schema, use `JSON_EXTRACT(custom_attributes, '$.fieldName')`.
 7.  **JOINs:** Join tables ONLY on their `okta_id` relationships (e.g., `ON u.okta_id = ugm.user_okta_id`).
+
+### 2.5. SQLITE SYNTAX RULES (CRITICAL)
+1.  **GROUP_CONCAT Syntax:** SQLite GROUP_CONCAT does NOT support multiple arguments. Use `GROUP_CONCAT(column)` NOT `GROUP_CONCAT(column, ', ')`.
+    - ✅ CORRECT: `GROUP_CONCAT(DISTINCT g.name)` 
+    - ❌ WRONG: `GROUP_CONCAT(DISTINCT g.name, ', ')`
+    - To use custom separators, use: `GROUP_CONCAT(DISTINCT g.name, '; ')` (separator as second argument only)
+2.  **DISTINCT in Aggregates:** Use `GROUP_CONCAT(DISTINCT column)` to avoid duplicates.
+3.  **String Concatenation:** Use `||` operator for string concatenation, not `+`.
 
 ### 3. QUERY PATTERNS
 

@@ -12,6 +12,7 @@ Enhanced architecture following the proven results_processor_agent.py pattern:
 import asyncio
 import json
 import logging
+import json
 import time
 import re
 import sys
@@ -67,26 +68,88 @@ def _load_sample_data_prompt() -> str:
 Analyze samples and create efficient code for processing complete datasets."""
 
 # Create Results Formatter Agents with PydanticAI (2 specialized agents)
-# Create PydanticAI agents with structured output
+# Create PydanticAI agents with string output to avoid validation issues
 complete_data_formatter = Agent(
     'openai:gpt-4o',
     system_prompt=_load_complete_data_prompt(),
-    output_type=FormattedOutput,  # ✅ MODERN: Structured output
-    retries=1  # Allow 1 retry with structured validation
+    # No output_type - will return raw string which we can parse manually
+    retries=0  # No retries to avoid wasting money on failed attempts
 )
 
 sample_data_formatter = Agent(
     'openai:gpt-4o', 
     system_prompt=_load_sample_data_prompt(),
-    output_type=FormattedOutput,  # ✅ MODERN: Structured output
-    retries=1  # Allow 1 retry with structured validation
+    # No output_type - will return raw string which we can parse manually
+    retries=0  # No retries to avoid wasting money on failed attempts
 )
+
+def _parse_raw_llm_response(raw_response: str, flow_id: str) -> Dict[str, Any]:
+    """Parse raw LLM response string into structured format"""
+    try:
+        # Log the raw response we're trying to parse
+        logger.debug(f"[{flow_id}] Raw LLM Response to parse: {raw_response[:1000]}...")
+        
+        # Try to find JSON in the response
+        raw_str = str(raw_response).strip()
+        
+        # Look for JSON block markers
+        if '```json' in raw_str:
+            start = raw_str.find('```json') + 7
+            end = raw_str.find('```', start)
+            if end != -1:
+                json_str = raw_str[start:end].strip()
+            else:
+                json_str = raw_str[start:].strip()
+        elif raw_str.startswith('{') and raw_str.endswith('}'):
+            json_str = raw_str
+        else:
+            # Try to find JSON anywhere in the response
+            import re
+            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            matches = re.findall(json_pattern, raw_str, re.DOTALL)
+            if matches:
+                json_str = matches[-1]  # Take the last/largest match
+            else:
+                raise ValueError("No JSON found in response")
+        
+        # Parse the JSON
+        parsed = json.loads(json_str)
+        logger.debug(f"[{flow_id}] Successfully parsed JSON: {list(parsed.keys())}")
+        
+        # Ensure required fields exist with defaults
+        result = {
+            'display_type': parsed.get('display_type', 'markdown'),
+            'content': parsed.get('content', {'text': 'Processing completed'}),
+            'metadata': parsed.get('metadata', {'status': 'completed'}),
+            'processing_code': parsed.get('processing_code', None)
+        }
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"[{flow_id}] Failed to parse raw LLM response: {e}")
+        logger.error(f"[{flow_id}] Raw response was: {raw_response}")
+        
+        # Return a minimal fallback structure
+        return {
+            'display_type': 'markdown',
+            'content': {'text': f'**Raw Response**: {raw_response}'},
+            'metadata': {'status': 'parsing_failed', 'error': str(e)},
+            'processing_code': None
+        }
 
 def _count_total_records(results: Dict[str, Any]) -> int:
     """Count total records across all data sources"""
     total = 0
     
-    # Count SQL records
+    # NEW: Handle direct step data structure from Modern Execution Manager
+    # Modern Execution Manager passes step_results_for_processing directly as results
+    for step_name, step_data in results.items():
+        if isinstance(step_data, list):
+            total += len(step_data)
+            continue
+    
+    # LEGACY: Keep old structure support for backward compatibility
     if 'raw_results' in results:
         raw_results = results['raw_results']
         sql_data = raw_results.get('sql_execution', {}).get('data', [])
@@ -242,94 +305,6 @@ Your tasks:
 
 Include performance optimizations and processing recommendations in your metadata."""
 
-async def _parse_and_enhance_response(result, flow_id: str, total_records: int, is_complete: bool) -> Dict[str, Any]:
-    """Parse PydanticAI response and enhance with metadata - flexible parsing"""
-    
-    try:
-        # Try structured output first, then fall back to string parsing
-        if hasattr(result, 'output') and hasattr(result.output, 'display_type'):
-            # Structured output (PydanticAI with output_type)
-            response_data = result.output
-            response_json = {
-                "display_type": response_data.display_type,
-                "content": response_data.content,
-                "metadata": response_data.metadata
-            }
-            if hasattr(response_data, 'processing_code') and response_data.processing_code:
-                response_json['processing_code'] = response_data.processing_code
-                
-        elif hasattr(result, 'data'):
-            # String output - parse JSON
-            raw_text = result.data
-            # Try to extract JSON from the response
-            import re
-            json_match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-            if json_match:
-                response_json = json.loads(json_match.group())
-            else:
-                # Fallback to simple response
-                response_json = {
-                    "display_type": "markdown",
-                    "content": {"text": raw_text},
-                    "metadata": {"execution_summary": "Simple text response"}
-                }
-        else:
-            # Direct string result
-            raw_text = str(result)
-            response_json = {
-                "display_type": "markdown", 
-                "content": {"text": raw_text},
-                "metadata": {"execution_summary": "Direct string response"}
-            }
-        
-        # Enhance metadata with dataset info
-        if 'metadata' not in response_json:
-            response_json['metadata'] = {}
-            
-        response_json['metadata']['total_records_processed'] = total_records
-        response_json['metadata']['processing_mode'] = 'complete' if is_complete else 'sample'
-        
-        if total_records >= 1000:
-            response_json['metadata']['performance_recommendation'] = "Consider Polars for enterprise-scale processing"
-        
-        # Token usage reporting (if enabled)
-        if config['enable_token_reporting'] and hasattr(result, 'usage'):
-            usage = result.usage()
-            if usage:
-                logger.debug(f"[{flow_id}] Token Usage:")
-                logger.debug(f"   Input: {getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))} tokens")
-                logger.debug(f"   Output: {getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))} tokens") 
-                logger.debug(f"   Total: {getattr(usage, 'total_tokens', 0)} tokens")
-                
-                # Add to response
-                input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-                output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
-                total_tokens = getattr(usage, 'total_tokens', input_tokens + output_tokens)
-                response_json['usage_info'] = {
-                    'input_tokens': input_tokens,
-                    'output_tokens': output_tokens,
-                    'total_tokens': total_tokens,
-                    'estimated_cost': f"${((input_tokens * 0.00001) + (output_tokens * 0.00003)):.6f}"
-                }
-        
-        logger.info(f"[{flow_id}] Successfully processed with flexible parsing")
-        return response_json
-        
-    except Exception as e:
-        logger.error(f"[{flow_id}] Response parsing failed: {e}")
-        # Create fallback response
-        return {
-            'display_type': 'markdown',
-            'content': {'text': f'Processing completed but response parsing failed: {e}'},
-            'metadata': {
-                'execution_summary': f'Parsing failed: {e}',
-                'confidence_level': 'Low',
-                'total_records_processed': total_records,
-                'processing_mode': 'complete' if is_complete else 'sample'
-            },
-            'usage_info': {'error': 'Response parsing failed'}
-        }
-
 async def format_results(query: str, results: Dict[str, Any], is_sample: bool = False, 
                          original_plan: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Enhanced results formatting with conditional processing based on dataset size"""
@@ -356,15 +331,34 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
                 # Log the complete first record for debugging (not truncated fields)
                 logger.debug(f"[{flow_id}] Complete Sample SQL Record: {sample_record}")
     
+    def _estimate_token_count(data):
+        """
+        Estimate token count for LLM processing.
+        Rough estimation: 1 token ≈ 4 characters for English text
+        """
+        try:
+            import json
+            data_str = json.dumps(data, ensure_ascii=False)
+            # Rough token estimation: 1 token ≈ 4 characters
+            estimated_tokens = len(data_str) // 4
+            return estimated_tokens
+        except:
+            # Fallback to string length estimation
+            data_str = str(data)
+            return len(data_str) // 4
+
     try:
-        # Determine processing approach based on dataset size (prioritize complete processing for medium datasets)
-        if total_records <= 200:  # Process up to 200 records directly to ensure aggregation works
-            # Small-to-medium dataset - process directly with aggregation
-            logger.info(f"[{flow_id}] Processing complete dataset directly")
+        # Determine processing approach based on estimated token count (LLM context-aware)
+        estimated_tokens = _estimate_token_count(results)
+        token_threshold = 5000  # Conservative threshold to stay within LLM context limits
+        
+        if estimated_tokens <= token_threshold:  # Process if within token limits
+            # Small-to-medium dataset - process directly with aggregation  
+            logger.info(f"[{flow_id}] Processing complete dataset directly (estimated {estimated_tokens} tokens, {total_records} records)")
             return await _process_complete_data(query, results, original_plan, flow_id, total_records)
         else:
             # Large dataset - use sampling for efficiency and to avoid token limits
-            logger.info(f"[{flow_id}] Processing samples for large dataset ({total_records} records)")
+            logger.info(f"[{flow_id}] Processing samples for large dataset (estimated {estimated_tokens} tokens, {total_records} records)")
             sampled_results = _create_intelligent_samples(results, total_records)
             return await _process_sample_data(query, sampled_results, original_plan, flow_id, total_records)
             
@@ -410,38 +404,22 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
         logger.info(f"[{flow_id}] Sending prompt to PydanticAI complete data formatter...")
         
         # Run formatter with flexible validation
-        result = await complete_data_formatter.run(prompt)
-        
-        # Log the LLM response
-        logger.debug(f"[{flow_id}] LLM Response Type: {type(result)}")
-        if hasattr(result, 'data'):
-            logger.debug(f"[{flow_id}] LLM Response Data: {str(result.data)[:500]}...")
-            # Log if complete data processing generated code
-            if hasattr(result.data, 'processing_code') and result.data.processing_code:
-                logger.debug(f"[{flow_id}] COMPLETE DATA PROCESSING CODE GENERATED:\n{result.data.processing_code}")
-        elif hasattr(result, 'message'):
-            logger.debug(f"[{flow_id}] LLM Response Message: {str(result.message)[:500]}...")
-        else:
-            logger.debug(f"[{flow_id}] LLM Response: {str(result)[:500]}...")
-        
-        formatted_result = await _parse_and_enhance_response(result, flow_id, total_records, is_complete=True)
+        try:
+            result = await complete_data_formatter.run(prompt)
+            
+            # Since we're not using structured output, result should be a string
+            raw_response = str(result.data) if hasattr(result, 'data') else str(result)
+            
+            # Parse the raw response manually
+            formatted_result = _parse_raw_llm_response(raw_response, flow_id)
+            
+        except Exception as validation_error:
+            logger.error(f"[{flow_id}] Complete data processing failed: {validation_error}")
+            # Re-raise the error to be caught by outer exception handler
+            raise validation_error
         
         # Log the final formatted result
         logger.info(f"[{flow_id}] Complete data processing finished")
-        logger.debug(f"[{flow_id}] Final Result Keys: {list(formatted_result.keys())}")
-        
-        # Log final processing code if any was generated for complete data processing
-        if 'processing_code' in formatted_result and formatted_result['processing_code']:
-            logger.debug(f"[{flow_id}] FINAL COMPLETE DATA PROCESSING CODE:\n{formatted_result['processing_code']}")
-        
-        if 'content' in formatted_result:
-            content = formatted_result['content']
-            if isinstance(content, list):
-                logger.info(f"[{flow_id}] Final Content: {len(content)} items")
-                if content:
-                    logger.debug(f"[{flow_id}] Sample Content Item: {content[0]}")
-            else:
-                logger.debug(f"[{flow_id}] Final Content: {str(content)[:200]}...")
         
         return formatted_result
         
@@ -484,23 +462,19 @@ async def _process_sample_data(query: str, sampled_results: Dict[str, Any], orig
             logger.info(f"[{flow_id}] Processing samples and generating code with specialized PydanticAI agent...")
         
         # Run formatter with flexible validation
-        result = await sample_data_formatter.run(prompt)
-        
-        # Debug logging for LLM response
-        logger.debug(f"[{flow_id}] Sample Data LLM Response Type: {type(result)}")
-        if hasattr(result, 'data'):
-            logger.debug(f"[{flow_id}] Sample Data LLM Response: {str(result.data)[:500]}...")
-            # Log if code generation was included
-            if hasattr(result.data, 'processing_code') and result.data.processing_code:
-                logger.debug(f"[{flow_id}] Generated Processing Code: {result.data.processing_code[:300]}...")
-                # Log the complete processing code for debugging
-                logger.debug(f"[{flow_id}] COMPLETE RESULTS FORMATTER PROCESSING CODE:\n{result.data.processing_code}")
-        elif hasattr(result, 'message'):
-            logger.debug(f"[{flow_id}] Sample Data LLM Message: {str(result.message)[:500]}...")
-        else:
-            logger.debug(f"[{flow_id}] Sample Data LLM Response: {str(result)[:500]}...")
-        
-        formatted_result = await _parse_and_enhance_response(result, flow_id, total_records, is_complete=False)
+        try:
+            result = await sample_data_formatter.run(prompt)
+            
+            # Since we're not using structured output, result should be a string
+            raw_response = str(result.data) if hasattr(result, 'data') else str(result)
+            
+            # Parse the raw response manually
+            formatted_result = _parse_raw_llm_response(raw_response, flow_id)
+            
+        except Exception as validation_error:
+            logger.error(f"[{flow_id}] Sample data processing failed: {validation_error}")
+            # Re-raise the error to be caught by outer exception handler
+            raise validation_error
         
         # Debug logging for final formatted output
         logger.debug(f"[{flow_id}] Sample Data Final Result Keys: {list(formatted_result.keys())}")

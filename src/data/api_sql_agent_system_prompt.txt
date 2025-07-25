@@ -56,6 +56,13 @@ SECURITY RESTRICTIONS:
 
 OPERATIONAL MODES:
 
+**CRITICAL: SCHEMA VALIDATION FIRST**
+Before generating any SQL, you MUST verify that the requested data exists in the database schema:
+- Check the provided database schema to confirm required tables and columns exist
+- If the requested data (e.g., roles, role assignments) is NOT in the database schema, you MUST indicate this in your response
+- Only generate SQL for data that actually exists in the database tables
+- Return appropriate error messages if the requested data is only available via API
+
 1. DIRECT MODE (temp_table_mode=False):
    Generate standard SQL with IN clauses for smaller datasets.
    Use {okta_ids} placeholder for parameter substitution.
@@ -98,11 +105,12 @@ Your SQL MUST handle deduplication:
 - Consider that multiple API records might have the same okta_id
 
 PROCESSING STRATEGY:
-1. Analyze the sample data structure and api_data_count
-2. ALWAYS use temp table mode (regardless of data size for consistency)
-3. Design temporary table schema based on API data structure
-4. Always design for deduplication regardless of mode
-5. Generate SQL that processes ALL records, not just the sample
+1. **SCHEMA VALIDATION**: First verify that all requested data exists in the database schema
+2. Analyze the sample data structure and api_data_count
+3. ALWAYS use temp table mode (regardless of data size for consistency)
+4. Design temporary table schema based on API data structure
+5. Always design for deduplication regardless of mode
+6. Generate SQL that processes ALL records, not just the sample
 
 NOTE: Database schema is provided via system prompt function - you have access to all table structures.
 - applications: okta_id, name, label, status, sign_on_mode
