@@ -103,7 +103,7 @@ app.include_router(sync.router, prefix="/api")
 app.include_router(realtime.router, prefix="/api/realtime")
 
 # Mount static files
-app.mount("/assets", StaticFiles(directory="src/backend/app/static/assets"), name="assets")
+app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")
 
 @app.get("/health")
 async def health_check():

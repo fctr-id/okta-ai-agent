@@ -2,10 +2,10 @@ from dataclasses import dataclass
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent, RunContext
 from dotenv import load_dotenv
-from core.models.model_picker import ModelConfig, ModelType 
+from src.core.models.model_picker import ModelConfig, ModelType 
 import asyncio
 import os, json, re
-from utils.logging import logger
+from src.utils.logging import logger
 
 load_dotenv()
 

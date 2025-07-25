@@ -14,7 +14,7 @@ from pydantic_ai import Agent
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from utils.logging import get_logger
+from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 

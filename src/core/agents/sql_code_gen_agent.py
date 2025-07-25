@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 
 # Add src path for importing utils
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
+from src.utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
 
 load_dotenv()
 

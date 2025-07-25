@@ -23,28 +23,28 @@ from pydantic import BaseModel, Field
 from pydantic_ai import capture_run_messages
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Union, Set, Tuple, Callable, AsyncGenerator
-from utils.pagination_limits import paginate_results as _base_paginate_results, handle_single_entity_request as _base_handle_single_entity_request, make_async_request, normalize_okta_response
-from legacy.realtime_mode.tools.specialized_tools.user_app_access import can_user_access_application
+from src.utils.pagination_limits import paginate_results as _base_paginate_results, handle_single_entity_request as _base_handle_single_entity_request, make_async_request, normalize_okta_response
+from src.legacy.realtime_mode.tools.specialized_tools.user_app_access import can_user_access_application
 
 
 # Import our new error handling
-from utils.error_handling import (
+from src.utils.error_handling import (
     BaseError, ExecutionError, ApiError, safe_execute_async,
     format_error_for_user, ErrorSeverity
 )
-from utils.logging import get_logger
+from src.utils.logging import get_logger
 
-from legacy.realtime_mode.okta_realtime_client import OktaRealtimeDeps
-from legacy.realtime_mode.agents.reasoning_agent import ExecutionPlan, PlanStep
-from legacy.realtime_mode.agents.coding_agent import coding_agent
-from legacy.realtime_mode.code_execution_utils import execute_okta_code, is_error_result
-from config.settings import settings
+from src.legacy.realtime_mode.okta_realtime_client import OktaRealtimeDeps
+from src.legacy.realtime_mode.agents.reasoning_agent import ExecutionPlan, PlanStep
+from src.legacy.realtime_mode.agents.coding_agent import coding_agent
+from src.legacy.realtime_mode.code_execution_utils import execute_okta_code, is_error_result
+from src.config.settings import settings
 
 # Import results processor agent
-from legacy.realtime_mode.agents.results_processor_agent import results_processor
+from src.legacy.realtime_mode.agents.results_processor_agent import results_processor
 
 # Tool registry imports
-from utils.tool_registry import get_tool_prompt, get_all_tools
+from src.utils.tool_registry import get_tool_prompt, get_all_tools
 
 # Configure logging
 logger = get_logger(__name__)
@@ -104,7 +104,7 @@ class ExecutionManager:
         """
         # Initialize Okta dependencies
         if okta_deps is None:
-            from legacy.realtime_mode.okta_realtime_client import OktaRealtimeDeps
+            from src.legacy.realtime_mode.okta_realtime_client import OktaRealtimeDeps
             self.okta_deps = OktaRealtimeDeps(
                 domain=settings.OKTA_CLIENT_ORGURL,
                 api_token=settings.OKTA_API_TOKEN,

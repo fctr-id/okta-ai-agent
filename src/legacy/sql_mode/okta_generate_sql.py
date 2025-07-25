@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic_ai import Agent, RunContext
-from core.models.model_picker import ModelConfig, ModelType
+from src.core.models.model_picker import ModelConfig, ModelType
 from dotenv import load_dotenv
 import asyncio
 import os

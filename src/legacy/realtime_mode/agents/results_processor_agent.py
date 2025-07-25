@@ -180,8 +180,8 @@ class ResultsProcessorAgent:
         
         # Create the agent with the system prompt, model, and output type
         self.agent = Agent(
-            system=system_prompt,
-            model=model  
+            model=model,
+            system_prompt=system_prompt
         )
     
     async def process_results(self, query: str, results: dict, original_plan: Any, 

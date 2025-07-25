@@ -4,7 +4,7 @@ from typing import Dict, AsyncGenerator, Tuple, List, Any
 import json
 import re
 from src.utils.logging import logger
-from api.services.ai_service import AIService
+from src.api.services.ai_service import AIService
 from html_sanitizer import Sanitizer
 from src.core.security.dependencies import get_current_user, get_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
