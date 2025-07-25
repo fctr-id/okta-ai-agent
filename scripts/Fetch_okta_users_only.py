@@ -14,9 +14,9 @@ project_root = script_dir.parent
 sys.path.append(str(project_root))
 
 from src.config.settings import settings
-from src.okta_db_sync.db.operations import DatabaseOperations
-from src.okta_db_sync.db.models import SyncStatus, SyncHistory, User, UserFactor
-from src.okta_db_sync.okta_client.client import OktaClientWrapper
+from src.core.okta.sync.operations import DatabaseOperations
+from src.core.okta.sync.models import SyncStatus, SyncHistory, User, UserFactor
+from src.core.okta.client.client import OktaClientWrapper
 from src.utils.logging import logger
 from sqlalchemy import select, func, and_, text
 from sqlalchemy.inspection import inspect

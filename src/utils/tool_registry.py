@@ -10,7 +10,7 @@ This module provides:
 import importlib
 from typing import List, Dict, Optional, Any, Callable, Union
 import logging
-from src.utils.logging import get_logger
+from utils.logging import get_logger
 
 # Configure logging
 logger = get_logger(__name__)
@@ -270,13 +270,13 @@ def load_tools() -> bool:
     try:
         # Import tool modules
         packages_to_try = [
-            "src.core.realtime.tools.user_tools",
-            "src.core.realtime.tools.group_tools",
-            "src.core.realtime.tools.datetime_tools",
-            "src.core.realtime.tools.logevents_tools",
-            "src.core.realtime.tools.application_tools",
-            "src.core.realtime.tools.network_policy_tools",
-            "src.core.realtime.tools.specialized_tools.user_app_access",
+            "legacy.realtime_mode.tools.user_tools",
+            "legacy.realtime_mode.tools.group_tools",
+            "legacy.realtime_mode.tools.datetime_tools",
+            "legacy.realtime_mode.tools.logevents_tools",
+            "legacy.realtime_mode.tools.application_tools",
+            "legacy.realtime_mode.tools.network_policy_tools",
+            "legacy.realtime_mode.tools.specialized_tools.user_app_access",
             # Add more tool modules as they become available
         ]
         

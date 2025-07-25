@@ -44,10 +44,10 @@ logger.debug("Environment variables loaded")
 # Import settings and required modules
 try:
     from src.config.settings import settings
-    from src.core.realtime.okta_realtime_client import get_okta_realtime_deps
-    from src.core.model_picker import ModelConfig, ModelType
-    from src.core.realtime.agents.reasoning_agent import routing_agent, ExecutionPlan
-    from src.core.realtime.execution_manager import ExecutionManager
+    from src.legacy.realtime_mode.okta_realtime_client import get_okta_realtime_deps
+    from src.core.models.model_picker import ModelConfig, ModelType
+    from src.legacy.realtime_mode.agents.reasoning_agent import routing_agent, ExecutionPlan
+    from src.legacy.realtime_mode.execution_manager import ExecutionManager
 except ImportError as e:
     error = DependencyError(
         message="Could not import required modules",

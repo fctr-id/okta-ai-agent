@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 # Get concurrent limit from settings
 try:
-    from src.config.settings import settings
+    from config.settings import settings
     DEFAULT_CONCURRENT_LIMIT = settings.OKTA_CONCURRENT_LIMIT
 except (ImportError, AttributeError):
     DEFAULT_CONCURRENT_LIMIT = 10  # Default fallback
@@ -360,7 +360,7 @@ async def make_async_request(client, method: str, url: str, headers: Dict = None
         # If it's a full URL, we need to validate and extract the path
         if is_full_url:
             # Validate the URL before proceeding
-            from src.utils.security_config import is_okta_url_allowed
+            from utils.security_config import is_okta_url_allowed
             if not is_okta_url_allowed(url):
                 error_msg = f"Security violation: URL {url} is not an authorized Okta URL"
                 logger.error(error_msg)
@@ -612,7 +612,7 @@ async def _paginate_direct_api(
 #    
 #    # Security check for full URLs
 #    if initial_url.startswith(('http://', 'https://')):
-#        from src.utils.security_config import is_okta_url_allowed
+#        from utils.security_config import is_okta_url_allowed
 #        if not is_okta_url_allowed(initial_url):
 #            return {"status": "error", "error": f"Unauthorized URL: {initial_url}"}
 #        

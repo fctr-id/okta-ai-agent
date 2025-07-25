@@ -8,7 +8,7 @@ used throughout the application to enforce secure operations.
 from typing import List, Dict, Any, Set, Optional
 import re
 import ast
-from src.utils.logging import get_logger
+from utils.logging import get_logger
 import os
 from urllib.parse import urlparse
 
@@ -94,7 +94,7 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
 
 # Allowed modules
 ALLOWED_MODULES: Set[str] = {
-    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time', 'src.utils.pagination_limits', 'aiohttp'
+    'okta', 'asyncio', 'typing', 'datetime', 'json', 'time', 'utils.pagination_limits', 'aiohttp'
 }
 
 # Dangerous patterns to check for in code

@@ -48,7 +48,7 @@ if [ ! -f /app/src/backend/certs/cert.pem ] || [ ! -f /app/src/backend/certs/key
 fi \n\
 \n\
 # Start the server with SSL \n\
-exec python -m uvicorn src.backend.app.main:app --host 0.0.0.0 --port 8001 --ssl-keyfile /app/src/backend/certs/key.pem --ssl-certfile /app/src/backend/certs/cert.pem \n\
+exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --ssl-keyfile /app/src/backend/certs/key.pem --ssl-certfile /app/src/backend/certs/cert.pem \n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
 # Environment variables

@@ -171,7 +171,7 @@ if __name__ == "__main__":
     
     if args.no_https:
         print("WARNING: Running without HTTPS. This is not recommended for production use.")
-        command = f"python -m uvicorn src.backend.app.main:app --reload --host {args.host} --port {args.port} --log-level {args.log_level}"
+        command = f"python -m uvicorn src.api.main:app --reload --host {args.host} --port {args.port} --log-level {args.log_level}"
         run_command(command)
     else:
         # Generate certificates if needed
@@ -180,7 +180,7 @@ if __name__ == "__main__":
         
         # Run with HTTPS
         command = (
-            f"python -m uvicorn src.backend.app.main:app --reload --host {args.host} "
+            f"python -m uvicorn src.api.main:app --reload --host {args.host} "
             f"--port {args.port} --log-level {args.log_level} "
             f"--ssl-keyfile {key_path} --ssl-certfile {cert_path}"
         )
