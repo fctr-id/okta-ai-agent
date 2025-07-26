@@ -14,13 +14,13 @@ from pydantic_ai import Agent
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from utils.logging import get_logger
+from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 # Use the model picker approach from the working version
 try:
-    from core.models.model_picker import ModelConfig, ModelType
+    from src.core.models.model_picker import ModelConfig, ModelType
     model = ModelConfig.get_model(ModelType.CODING)
 except ImportError:
     # Fallback to simple model configuration

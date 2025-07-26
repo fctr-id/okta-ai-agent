@@ -34,7 +34,7 @@ logger = get_logger("okta_ai_agent.planning_agent", log_dir=get_default_log_dir(
 
 # Use the model picker approach for consistent model configuration
 try:
-    from src.core.model_picker import ModelConfig, ModelType
+    from src.core.models.model_picker import ModelConfig, ModelType
     model = ModelConfig.get_model(ModelType.REASONING)
 except ImportError:
     # Fallback to simple model configuration
@@ -120,7 +120,7 @@ class PlanningOutput(BaseModel):
 # Load system prompt from file
 def load_system_prompt(deps: PlanningDependencies) -> str:
     """Load and customize system prompt with dynamic context"""
-    system_prompt_path = os.path.join(os.path.dirname(__file__), "planning_agent_system_prompt.txt")
+    system_prompt_path = os.path.join(os.path.dirname(__file__), "prompts", "planning_agent_system_prompt.txt")
     
     try:
         with open(system_prompt_path, 'r', encoding='utf-8') as f:
@@ -181,7 +181,7 @@ def load_base_system_prompt() -> str:
     """Load the base system prompt from file for static instructions"""
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        prompt_path = os.path.join(script_dir, "planning_agent_system_prompt.txt")
+        prompt_path = os.path.join(script_dir, "prompts", "planning_agent_system_prompt.txt")
         
         with open(prompt_path, 'r', encoding='utf-8') as f:
             return f.read()

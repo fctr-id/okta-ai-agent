@@ -44,12 +44,12 @@ from pydantic import BaseModel
 # Add src path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-# Import existing agents from local directory
-from sql_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
-from api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
-from planning_agent import ExecutionPlan, ExecutionStep, planning_agent
-from results_formatter_agent import process_results_structured
-from api_sql_agent import api_sql_agent  # NEW: Internal API-SQL agent
+# Import existing agents from agents directory
+from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
+from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
+from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent
+from src.core.agents.results_formatter_agent import process_results_structured
+from src.core.agents.api_sql_code_gen_agent import api_sql_agent  # NEW: Internal API-SQL agent
 
 # Import logging
 from src.utils.logging import get_logger, get_default_log_dir
@@ -563,7 +563,7 @@ class ModernExecutionManager:
             logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
             
             # Create dependencies for Planning Agent (same as old executor)
-            from planning_agent import PlanningDependencies
+            from src.core.agents.planning_agent import PlanningDependencies
             planning_deps = PlanningDependencies(
                 available_entities=self.available_entities,
                 entity_summary=self.entity_summary,
@@ -1355,7 +1355,7 @@ except Exception as e:
         
         # Safety check - use internal validation for temp table operations
         if use_internal_validation:
-            from sql_security_validator import validate_internal_sql
+            from src.core.security.sql_security_validator import validate_internal_sql
             is_valid, error_msg = validate_internal_sql(sql_query, correlation_id)
             if not is_valid:
                 logger.warning(f"[{correlation_id}] Internal SQL validation failed: {error_msg}")

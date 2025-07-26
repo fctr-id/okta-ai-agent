@@ -33,7 +33,7 @@ logger = get_logger("okta_ai_agent.api_code_gen_agent", log_dir=get_default_log_
 
 # Use the model picker approach for consistent model configuration
 try:
-    from src.core.model_picker import ModelConfig, ModelType
+    from src.core.models.model_picker import ModelConfig, ModelType
     model = ModelConfig.get_model(ModelType.CODING)
 except ImportError:
     # Fallback to simple model configuration
@@ -88,7 +88,7 @@ class CodeGenerationOutput(BaseModel):
     )
 
 # Load system prompt from file
-SYSTEM_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "api_code_gen_agent_system_prompt.txt")
+SYSTEM_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "api_code_gen_agent_system_prompt.txt")
 
 try:
     with open(SYSTEM_PROMPT_PATH, 'r', encoding='utf-8') as f:

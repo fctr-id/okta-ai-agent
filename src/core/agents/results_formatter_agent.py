@@ -46,7 +46,7 @@ class FormattedOutput(BaseModel):
 def _load_complete_data_prompt() -> str:
     """Load system prompt for complete data processing"""
     try:
-        prompt_file = r"c:\Users\Dharanidhar\Desktop\github-repos\okta-ai-agent\src\data\results_formatter_complete_data_prompt.txt"
+        prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_complete_data_prompt.txt")
         with open(prompt_file, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
@@ -59,7 +59,7 @@ Create comprehensive, user-friendly data presentations with all records included
 def _load_sample_data_prompt() -> str:
     """Load system prompt for sample data processing and code generation"""
     try:
-        prompt_file = r"c:\Users\Dharanidhar\Desktop\github-repos\okta-ai-agent\src\data\results_formatter_sample_data_prompt.txt"
+        prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_sample_data_prompt.txt")
         with open(prompt_file, 'r', encoding='utf-8') as f:
             return f.read()
     except FileNotFoundError:
