@@ -124,7 +124,7 @@ class AIService:
     @staticmethod
     async def get_last_sync_info(executor: SQLExecutor) -> Dict[str, Any]:
         """Get sync timestamp for the most recent successful sync"""
-        from utils.logging import logger
+        from src.utils.logging import logger
         
         try:
             # Simple query that just gets the timestamp

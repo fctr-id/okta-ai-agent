@@ -270,13 +270,13 @@ def load_tools() -> bool:
     try:
         # Import tool modules
         packages_to_try = [
-            "legacy.realtime_mode.tools.user_tools",
-            "legacy.realtime_mode.tools.group_tools",
-            "legacy.realtime_mode.tools.datetime_tools",
-            "legacy.realtime_mode.tools.logevents_tools",
-            "legacy.realtime_mode.tools.application_tools",
-            "legacy.realtime_mode.tools.network_policy_tools",
-            "legacy.realtime_mode.tools.specialized_tools.user_app_access",
+            "src.legacy.realtime_mode.tools.user_tools",
+            "src.legacy.realtime_mode.tools.group_tools",
+            "src.legacy.realtime_mode.tools.datetime_tools",
+            "src.legacy.realtime_mode.tools.logevents_tools",
+            "src.legacy.realtime_mode.tools.application_tools",
+            "src.legacy.realtime_mode.tools.network_policy_tools",
+            "src.legacy.realtime_mode.tools.specialized_tools.user_app_access",
             # Add more tool modules as they become available
         ]
         

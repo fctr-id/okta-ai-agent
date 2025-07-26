@@ -178,13 +178,11 @@ class ResultsProcessorAgent:
         # Get the REASONING model since that's more appropriate for data formatting
         model = model_config or ModelConfig.get_model(ModelType.REASONING)
         
-        # Create the agent with the model - system prompt will be passed in run calls
+        # Create the agent with the model and system prompt
         self.agent = Agent(
-            model=model  
+            model=model,
+            system_prompt=system_prompt
         )
-        
-        # Store the system prompt for use in run calls
-        self.system_prompt = system_prompt
     
     async def process_results(self, query: str, results: dict, original_plan: Any, 
                              is_sample: bool = False, metadata: dict = None) -> ProcessingResponse:
@@ -203,8 +201,8 @@ class ResultsProcessorAgent:
             else:
                 user_prompt = self._create_complete_data_prompt(query, results, original_plan)
             
-            # Call the processor agent with system prompt
-            response = await self.agent.run(user_prompt, system=self.system_prompt)
+            # Call the processor agent
+            response = await self.agent.run(user_prompt)
             
             # Log the raw response for debugging
             logger.debug(f"[{flow_id}] Raw agent response: {response.output}")

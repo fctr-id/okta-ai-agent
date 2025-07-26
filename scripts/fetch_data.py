@@ -1,8 +1,11 @@
 import asyncio
 import sys
+import os
+# Add parent directory to Python path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone
 from src.config.settings import settings
-from core.okta.sync.engine import SyncOrchestrator
+from src.core.okta.sync.engine import SyncOrchestrator
 from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import SyncStatus, SyncHistory
