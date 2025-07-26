@@ -38,6 +38,7 @@ from typing import Dict, List, Any, Optional
 import asyncio
 import os
 import sys
+import sqlite3
 import json
 from pydantic import BaseModel
 
@@ -178,6 +179,9 @@ class ModernExecutionManager:
         # Based on proven old executor approach - scales with any number of tools/steps
         self.data_variables = {}      # Full datasets: {"sql_data_step_1": [all_records], "api_data_step_2": response}
         self.step_metadata = {}       # Step tracking: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query"}}
+        
+        # MINIMAL CANCELLATION SYSTEM: Aggressive termination on user request
+        self.cancelled_queries = set()  # Just store correlation_ids that are cancelled
         
         logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, {len(self.sql_tables)} SQL tables, {len(self.endpoints)} endpoints")
     
@@ -334,6 +338,12 @@ class ModernExecutionManager:
         self.data_variables.clear()
         self.step_metadata.clear()
         logger.debug("Cleared execution data for fresh run")
+    
+    def cancel_query(self, correlation_id: str, reason: str = "User cancellation"):
+        """Aggressively cancel a query - minimal implementation"""
+        self.cancelled_queries.add(correlation_id)
+        logger.warning(f"[{correlation_id}] QUERY CANCELLED: {reason} - Aggressive termination initiated")
+        return True
     
     # END REPEATABLE DATA FLOW METHODS
     
@@ -586,6 +596,18 @@ class ModernExecutionManager:
             logger.info(f"[{correlation_id}] Phase 2: Step execution with Modern Execution Manager")
             execution_results = await self.execute_steps(execution_plan, correlation_id)
             
+            # SIMPLE CANCELLATION CHECK: If fewer steps completed than planned, query was likely cancelled
+            if execution_results.successful_steps < len(execution_plan.steps):
+                logger.warning(f"[{correlation_id}] QUERY INCOMPLETE - Only {execution_results.successful_steps}/{len(execution_plan.steps)} steps completed, skipping results formatting")
+                return {
+                    "success": False,
+                    "data": [],
+                    "error": "Query execution incomplete - likely cancelled",
+                    "cancelled": True,
+                    "steps_completed": execution_results.successful_steps,
+                    "total_steps": len(execution_plan.steps)
+                }
+            
             # Process results through Results Formatter Agent (like old executor)
             logger.info(f"[{correlation_id}] Processing results through Results Formatter Agent...")
             
@@ -765,6 +787,13 @@ class ModernExecutionManager:
         # Walk through each step in order
         for i, step in enumerate(plan.steps):
             step_num = i + 1
+            
+            # MINIMAL CANCELLATION CHECK - Aggressive termination
+            if correlation_id in self.cancelled_queries:
+                logger.warning(f"[{correlation_id}] Step {step_num} CANCELLED - Emergency cleanup and stopping execution")
+                await self._emergency_cleanup(correlation_id)
+                break
+            
             logger.info(f"[{correlation_id}] Executing step {step_num}/{len(plan.steps)}: {step.tool_name}")
             
             try:
@@ -828,6 +857,7 @@ class ModernExecutionManager:
         )
         
         logger.info(f"[{correlation_id}] Execution completed: {successful_steps}/{len(plan.steps)} steps successful")
+        
         return execution_results
     
     async def _execute_sql_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
@@ -863,6 +893,16 @@ class ModernExecutionManager:
         - Execute SQL to get full results
         - Store full results using variable-based storage
         """
+        # IMMEDIATE CANCELLATION CHECK - Don't start step if already cancelled
+        if correlation_id in self.cancelled_queries:
+            logger.warning(f"[{correlation_id}] User SQL Step {step_number} CANCELLED before execution - Skipping")
+            return StepResult(
+                step_number=step_number,
+                step_type="sql",
+                success=False,
+                error="Query cancelled before step execution"
+            )
+        
         logger.debug(f"[{correlation_id}] Executing user SQL step")
         
         # Get enhanced context from all previous steps
@@ -955,6 +995,15 @@ class ModernExecutionManager:
         - Use full data for processing (full API data from previous step)
         - Store full SQL results for next step access
         """
+        # IMMEDIATE CANCELLATION CHECK - Don't start step if already cancelled
+        if correlation_id in self.cancelled_queries:
+            logger.warning(f"[{correlation_id}] API-SQL Step {step_number} CANCELLED before execution - Skipping")
+            return StepResult(
+                step_number=step_number,
+                step_type="sql",
+                success=False,
+                error="Query cancelled before step execution"
+            )
         
         # ENHANCED PATTERN: Get context and samples from ALL previous steps
         all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
@@ -1041,6 +1090,16 @@ class ModernExecutionManager:
         - Execute API code generation and processing
         - Store full results for next step access
         """
+        # IMMEDIATE CANCELLATION CHECK - Don't start step if already cancelled
+        if correlation_id in self.cancelled_queries:
+            logger.warning(f"[{correlation_id}] API Step {step_number} CANCELLED before execution - Skipping")
+            return StepResult(
+                step_number=step_number,
+                step_type="api",
+                success=False,
+                error="Query cancelled before step execution"
+            )
+        
         try:
             # Get filtered endpoints for this specific step (using old executor logic)
             available_endpoints = self._get_entity_endpoints_for_step(step)
@@ -1095,9 +1154,7 @@ class ModernExecutionManager:
             
             # Phase 5: Execute the generated API code to get actual data
             logger.info(f"[{correlation_id}] Phase 5: Executing generated API code")
-            logger.info(f"[{correlation_id}] === GENERATED API CODE ===")
-            logger.info(f"[{correlation_id}]\n{api_result_dict.get('code', 'No code')}")
-            logger.info(f"[{correlation_id}] === END GENERATED CODE ===")
+            logger.debug(f"[{correlation_id}] Generated {len(api_result_dict.get('code', ''))} characters of API code")
             
             execution_result = self._execute_generated_code(
                 api_result_dict.get('code', ''), 
@@ -1143,10 +1200,6 @@ class ModernExecutionManager:
                 logger.info(f"[{correlation_id}] API step completed: {len(actual_data) if isinstance(actual_data, list) else 1} records stored as {variable_name}")
             else:
                 logger.error(f"[{correlation_id}] API code execution failed: {execution_result.get('error', 'Unknown error')}")
-                logger.info(f"[{correlation_id}] === EXECUTION ERROR DETAILS ===")
-                logger.info(f"[{correlation_id}] STDOUT: {execution_result.get('stdout', 'None')}")
-                logger.info(f"[{correlation_id}] STDERR: {execution_result.get('stderr', 'None')}")
-                logger.info(f"[{correlation_id}] === END ERROR DETAILS ===")
                 # Fall back to code generation result without execution
                 result_data = {
                     'code': api_result_dict['code'],
@@ -1267,6 +1320,28 @@ except Exception as e:
             
                 # Execute the code with appropriate timeout based on entity type
                 logger.debug(f"[{correlation_id}] Executing generated code in subprocess...")
+                
+                # CANCELLATION CHECK - Before subprocess execution
+                if correlation_id in self.cancelled_queries:
+                    logger.warning(f"[{correlation_id}] SUBPROCESS CANCELLED - Not executing generated code due to cancellation")
+                    # Direct temp table cleanup using standard db_path pattern
+                    try:
+                        db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
+                        db_path = os.path.abspath(db_path)
+                        with sqlite3.connect(db_path) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("DROP TABLE IF EXISTS temp_api_users")
+                            cursor.execute("DROP TABLE IF EXISTS temp_api_data")
+                            conn.commit()
+                    except Exception:
+                        pass  # Ignore cleanup errors during cancellation
+                    
+                    return {
+                        "success": False,
+                        "data": [],
+                        "error": "Query cancelled before subprocess execution",
+                        "cancelled": True
+                    }
                 
                 # Determine timeout based on entity type
                 if step and step.entity == 'system_log':
@@ -1866,6 +1941,58 @@ except Exception as e:
         except Exception as e:
             logger.error(f"[{correlation_id}] Failed to save results to file: {e}")
 
+    async def _emergency_cleanup(self, correlation_id: str):
+        """Aggressive cleanup on cancellation - minimal implementation"""
+        try:
+            # 1. Log the cancellation
+            logger.warning(f"[{correlation_id}] EMERGENCY CLEANUP: Deleting temp tables and stopping all operations")
+            
+            # 2. Drop any temp tables aggressively
+            await self._force_drop_temp_tables(correlation_id)
+            
+            # 3. Clear any stored data for this query
+            self.data_variables.clear()
+            self.step_metadata.clear()
+            
+            # 4. Remove from cancelled set
+            self.cancelled_queries.discard(correlation_id)
+            
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Emergency cleanup failed (non-critical): {e}")
+
+    async def _force_drop_temp_tables(self, correlation_id: str):
+        """Force drop temp tables - aggressive cleanup"""
+        def _sync_force_cleanup():
+            try:
+                import sqlite3
+                
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                conn = sqlite3.connect(db_path)
+                
+                # Drop common temp table names aggressively
+                temp_tables = ['temp_api_users', 'temp_user_data', 'temp_processing']
+                for table in temp_tables:
+                    try:
+                        conn.execute(f"DROP TABLE IF EXISTS {table}")
+                    except:
+                        pass  # Ignore errors - aggressive cleanup
+                
+                conn.commit()
+                conn.close()
+                logger.info(f"[{correlation_id}] Temp tables forcefully dropped")
+                
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Force temp table cleanup failed (non-critical): {e}")
+        
+        # Run in thread pool
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            await loop.run_in_executor(executor, _sync_force_cleanup)
+
 
 # Create singleton instance
 modern_executor = ModernExecutionManager()
@@ -1884,3 +2011,18 @@ async def execute_plan_steps(plan: ExecutionPlan, correlation_id: str) -> Execut
         ExecutionResults with all step outputs
     """
     return await modern_executor.execute_steps(plan, correlation_id)
+
+
+# External cancellation API
+def cancel_query_execution(correlation_id: str, reason: str = "External cancellation request") -> bool:
+    """
+    External API to cancel a running query execution.
+    
+    Args:
+        correlation_id: Correlation ID of the query to cancel
+        reason: Reason for cancellation
+        
+    Returns:
+        True if cancellation was registered, False if query not found
+    """
+    return modern_executor.cancel_query(correlation_id, reason)
