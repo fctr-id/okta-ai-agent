@@ -14,16 +14,16 @@ from sse_starlette.sse import EventSourceResponse
 from html_sanitizer import Sanitizer
 
 # --- Project-specific Imports ---
-from src.core.security.dependencies import get_current_user, get_db_session
-from src.core.okta.sync.models import AuthUser, UserRole
+from core.security.dependencies import get_current_user, get_db_session
+from core.okta.sync.models import AuthUser, UserRole
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.legacy.realtime_mode.okta_realtime_client import get_okta_realtime_deps
-from src.legacy.realtime_mode.agents.reasoning_agent import routing_agent, ExecutionPlan as CoreExecutionPlan, RoutingResult
-from src.legacy.realtime_mode.execution_manager import ExecutionManager
-from src.utils.error_handling import BaseError, format_error_for_user
-from src.utils.logging import get_logger, set_correlation_id
-from src.utils.tool_registry import build_tools_documentation
+from legacy.realtime_mode.okta_realtime_client import get_okta_realtime_deps
+from legacy.realtime_mode.agents.reasoning_agent import routing_agent, ExecutionPlan as CoreExecutionPlan, RoutingResult
+from legacy.realtime_mode.execution_manager import ExecutionManager
+from utils.error_handling import BaseError, format_error_for_user
+from utils.logging import get_logger, set_correlation_id
+from utils.tool_registry import build_tools_documentation
 
 logger = get_logger(__name__)
 

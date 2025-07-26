@@ -26,9 +26,9 @@ sys.path.append(str(project_root))
 sys.path.append(str(project_root / "src"))
 
 # Import core utilities
-from src.utils.logging import get_logger, generate_correlation_id, set_correlation_id
-from src.utils.error_handling import BaseError, ExecutionError, format_error_for_user
-from src.config.settings import settings
+from utils.logging import get_logger, generate_correlation_id, set_correlation_id
+from utils.error_handling import BaseError, ExecutionError, format_error_for_user
+from config.settings import settings
 from core.models.model_picker import ModelConfig, ModelType
 
 # Initialize logger

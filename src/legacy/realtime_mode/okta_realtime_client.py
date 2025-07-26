@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import logging
 
 from okta.client import Client as OktaClient
-from src.config.settings import settings
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 

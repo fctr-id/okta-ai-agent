@@ -17,15 +17,15 @@ Core Components:
 from typing import List, Optional, Type, TypeVar, Any, Dict, Callable
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.core.okta.client.client import OktaClientWrapper
-from src.core.okta.sync.operations import DatabaseOperations
-from src.core.okta.sync.models import (
+from core.okta.client.client import OktaClientWrapper
+from core.okta.sync.operations import DatabaseOperations
+from core.okta.sync.models import (
     User, Group, Authenticator, Application, Policy, Base, 
     SyncHistory, SyncStatus, UserFactor, Device,
     user_application_assignments, group_application_assignments,
     user_group_memberships
 )
-from src.utils.logging import logger
+from utils.logging import logger
 import asyncio
 from sqlalchemy import insert, text, select, and_
 from datetime import datetime
@@ -418,7 +418,7 @@ class SyncOrchestrator:
             # Get sync history ID for updates
             async with self.db.get_session() as session:
                 # Find active sync
-                from src.core.okta.sync.models import SyncHistory, SyncStatus
+                from core.okta.sync.models import SyncHistory, SyncStatus
                 stmt = select(SyncHistory).where(
                     and_(
                         SyncHistory.tenant_id == self.tenant_id,
@@ -544,7 +544,7 @@ class SyncOrchestrator:
                 # 5. Devices fourth (conditional sync)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     # Check if device sync is enabled
-                    from src.config.settings import settings
+                    from config.settings import settings
                     if settings.SYNC_OKTA_DEVICES:
                         logger.info("Step 4: Syncing Devices")
                         await self.sync_model_streaming(Device, okta.list_devices)

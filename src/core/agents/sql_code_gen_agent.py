@@ -12,7 +12,7 @@ from typing import List, Dict, Any, Optional
 
 # Add src path for importing utils
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from src.utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
+from utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
 
 load_dotenv()
 
@@ -83,7 +83,7 @@ sql_agent = Agent(
 @sql_agent.system_prompt
 async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
     """Access the complete okta database schema to answer user questions"""
-    from src.data.schemas.shared_schema import get_okta_database_schema
+    from data.schemas.shared_schema import get_okta_database_schema
     return get_okta_database_schema()
 
 def extract_json_from_text(text: str) -> dict:

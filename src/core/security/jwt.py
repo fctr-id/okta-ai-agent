@@ -5,8 +5,8 @@ import time
 import base64
 import json
 from typing import Optional, Dict, Any, Union
-from src.config.settings import settings
-from src.utils.logging import logger
+from config.settings import settings
+from utils.logging import logger
 #import logging
 
 #logger.setLevel(logging.DEBUG)

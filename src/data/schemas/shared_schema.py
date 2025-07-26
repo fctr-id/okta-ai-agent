@@ -8,7 +8,7 @@ def get_okta_database_schema() -> str:
     
     # Get custom attributes dynamically
     try:
-        from src.config.settings import settings
+        from config.settings import settings
         custom_attrs = settings.okta_user_custom_attributes_list
     except (ImportError, AttributeError):
         custom_attrs = []

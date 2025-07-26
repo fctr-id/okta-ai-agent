@@ -17,17 +17,17 @@ import signal
 from datetime import datetime
 import logging
 
-from src.config.settings import settings
-from src.core.security.dependencies import get_current_user
-from src.core.okta.sync.models import SyncHistory, SyncStatus
-from src.core.okta.sync.operations import DatabaseOperations
-from src.core.okta.client.client import OktaClientWrapper
+from config.settings import settings
+from core.security.dependencies import get_current_user
+from core.okta.sync.models import SyncHistory, SyncStatus
+from core.okta.sync.operations import DatabaseOperations
+from core.okta.client.client import OktaClientWrapper
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.core.security.dependencies import get_db_session
+from core.security.dependencies import get_db_session
 from sqlalchemy import func, select, and_
 from datetime import timezone, datetime
 from asyncio import CancelledError
-from src.utils.logging import get_logger
+from utils.logging import get_logger
 
 # Create a logger instance for this module
 sync_logger = get_logger(__name__)
@@ -102,7 +102,7 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
         await db_ops.init_db()
         
         # Import the SyncOrchestrator
-        from src.core.okta.sync.engine import SyncOrchestrator
+        from core.okta.sync.engine import SyncOrchestrator
         
         # Create the orchestrator
         orchestrator = SyncOrchestrator(tenant_id, db_ops)
@@ -118,7 +118,7 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
         await run_sync_with_cancellation_check(orchestrator, sync_id)
         
         # Get counts from database after sync is complete
-        from src.core.okta.sync.models import User, Group, Application, Policy, Device
+        from core.okta.sync.models import User, Group, Application, Policy, Device
         
         # Check for cancellation again before counting entities
         if sync_cancellation_flags.get(sync_id, False):

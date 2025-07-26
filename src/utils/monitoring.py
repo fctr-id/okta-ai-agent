@@ -11,7 +11,7 @@ import json
 import os
 from pathlib import Path
 import asyncio
-from src.utils.logging import logger
+from utils.logging import logger
 
 class AgentMetrics:
     """

@@ -4,10 +4,10 @@ from typing import Optional, Dict, Any, Union
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from src.core.security.jwt import decode_access_token
-from src.core.okta.sync.operations import DatabaseOperations
-from src.core.okta.sync.models import AuthUser
-from src.utils.logging import logger
+from core.security.jwt import decode_access_token
+from core.okta.sync.operations import DatabaseOperations
+from core.okta.sync.models import AuthUser
+from utils.logging import logger
 
 # Create cookie security scheme with new name
 oauth2_scheme = APIKeyCookie(name="fctr_session")

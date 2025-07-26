@@ -1,13 +1,8 @@
 import asyncio
 import sys
-import os
 from datetime import datetime, timezone
-
-# Add project root to Python path so we can import from src
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-
 from src.config.settings import settings
-from src.core.okta.sync.engine import SyncOrchestrator
+from core.okta.sync.engine import SyncOrchestrator
 from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import SyncStatus, SyncHistory
