@@ -102,7 +102,7 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
         await db_ops.init_db()
         
         # Import the SyncOrchestrator
-        from core.okta.sync.engine import SyncOrchestrator
+        from src.core.okta.sync.engine import SyncOrchestrator
         
         # Create the orchestrator
         orchestrator = SyncOrchestrator(tenant_id, db_ops)
@@ -118,7 +118,7 @@ async def run_sync_operation(sync_id: int, db_session: AsyncSession):
         await run_sync_with_cancellation_check(orchestrator, sync_id)
         
         # Get counts from database after sync is complete
-        from core.okta.sync.models import User, Group, Application, Policy, Device
+        from src.core.okta.sync.models import User, Group, Application, Policy, Device
         
         # Check for cancellation again before counting entities
         if sync_cancellation_flags.get(sync_id, False):
