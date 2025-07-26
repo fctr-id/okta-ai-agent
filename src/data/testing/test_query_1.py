@@ -14,10 +14,11 @@ import sys
 import os
 from datetime import datetime
 
-# Add local path for modern imports
-sys.path.append(os.path.dirname(__file__))
+# Add project root to path for proper imports
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+sys.path.append(project_root)
 
-from modern_execution_manager import modern_executor
+from src.core.orchestration.modern_execution_manager import modern_executor
 
 async def test_query_1():
     """Test with user-provided query"""

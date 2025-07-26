@@ -82,7 +82,7 @@ class ApiSqlCodeGenAgent:
     @staticmethod
     def get_database_schema() -> str:
         """Get the database schema for the API SQL agent"""
-        from data.schemas.shared_schema import get_okta_database_schema
+        from src.data.schemas.shared_schema import get_okta_database_schema
         return get_okta_database_schema()
     
     async def process_api_data(self, api_data: List[Dict[str, Any]], 

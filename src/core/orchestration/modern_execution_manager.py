@@ -42,14 +42,14 @@ import json
 from pydantic import BaseModel
 
 # Add src path for imports
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 # Import existing agents from agents directory
 from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
 from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
 from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent
 from src.core.agents.results_formatter_agent import process_results_structured
-from src.core.agents.api_sql_code_gen_agent import api_sql_agent  # NEW: Internal API-SQL agent
+from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 
 # Import logging
 from src.utils.logging import get_logger, get_default_log_dir
@@ -151,14 +151,14 @@ class ModernExecutionManager:
         self.error_handler = BasicErrorHandler()
         
         # Import settings to get tenant_id
-        from config.settings import Settings
+        from src.config.settings import Settings
         settings = Settings()
         self.tenant_id = settings.tenant_id  # Derived from OKTA_CLIENT_ORGURL
         
         # Load simple reference format
-        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-        self.simple_ref_path = os.path.join(project_root, "src", "data", "lightweight_api_reference.json")
-        self.full_api_path = os.path.join(project_root, "src", "data", "Okta_API_entitity_endpoint_reference.json")
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+        self.simple_ref_path = os.path.join(project_root, "src", "data", "schemas", "lightweight_api_reference.json")
+        self.full_api_path = os.path.join(project_root, "src", "data", "schemas", "Okta_API_entitity_endpoint_reference.json")
         
         # Load simple reference for planning
         self.simple_ref_data = self._load_simple_reference()
@@ -970,7 +970,7 @@ class ModernExecutionManager:
         
         # Call Internal API-SQL Agent - IT handles all the complexity
         # Use full data for processing, not just samples
-        result = await api_sql_agent.process_api_data(
+        result = await api_sql_code_gen_agent.process_api_data(
             api_data=full_data,  # REPEATABLE PATTERN: Use full data for processing
             processing_context=step.query_context,
             correlation_id=correlation_id,
@@ -1233,7 +1233,7 @@ class ModernExecutionManager:
             # Create a temporary directory for execution
             with tempfile.TemporaryDirectory() as temp_dir:
                 # Copy the base API client to the temp directory
-                api_client_source = os.path.join(os.path.dirname(__file__), 'base_okta_api_client.py')
+                api_client_source = os.path.join(os.path.dirname(__file__), '..', 'okta', 'client', 'base_okta_api_client.py')
                 api_client_dest = os.path.join(temp_dir, 'base_okta_api_client.py')
                 
                 if os.path.exists(api_client_source):
@@ -1376,8 +1376,8 @@ except Exception as e:
             try:
                 import sqlite3
                 
-                # Database path (same as old executor)
-                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
                 db_path = os.path.abspath(db_path)
                 
                 # Connect to database
@@ -1446,8 +1446,8 @@ except Exception as e:
             try:
                 import sqlite3
                 
-                # Database path (same as old executor)
-                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
                 db_path = os.path.abspath(db_path)
                 
                 # Single connection for entire workflow
@@ -1582,8 +1582,8 @@ except Exception as e:
             try:
                 import sqlite3
                 
-                # Database path (same as old executor)
-                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
                 db_path = os.path.abspath(db_path)
                 
                 # Connect to database
@@ -1676,8 +1676,8 @@ except Exception as e:
             try:
                 import sqlite3
                 
-                # Database path (same as old executor)
-                db_path = os.path.join(os.path.dirname(__file__), '..', '..', 'sqlite_db', 'okta_sync.db')
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
                 db_path = os.path.abspath(db_path)
                 
                 # Connect to database

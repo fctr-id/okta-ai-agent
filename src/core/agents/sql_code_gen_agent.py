@@ -83,7 +83,7 @@ sql_agent = Agent(
 @sql_agent.system_prompt
 async def okta_database_schema(ctx: RunContext[SQLDependencies]) -> str:
     """Access the complete okta database schema to answer user questions"""
-    from data.schemas.shared_schema import get_okta_database_schema
+    from src.data.schemas.shared_schema import get_okta_database_schema
     return get_okta_database_schema()
 
 def extract_json_from_text(text: str) -> dict:
