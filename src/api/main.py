@@ -6,9 +6,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 from .routers import query, auth, sync, realtime
-from utils.logging import logger
-from core.okta.sync.operations import DatabaseOperations
-from core.okta.sync.models import AuthUser
+from src.utils.logging import logger
+from src.core.okta.sync.operations import DatabaseOperations
+from src.core.okta.sync.models import AuthUser
 from sqlalchemy import inspect, create_engine
 
 # Security Headers Middleware
@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
     
     await db.init_db()
     
-    from config.settings import settings
+    from src.config.settings import settings
     
     engine = create_engine(f"sqlite:///{settings.SQLITE_PATH}")
     inspector = inspect(engine)
@@ -103,7 +103,7 @@ app.include_router(sync.router, prefix="/api")
 app.include_router(realtime.router, prefix="/api/realtime")
 
 # Mount static files
-app.mount("/assets", StaticFiles(directory="src/backend/app/static/assets"), name="assets")
+app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")
 
 @app.get("/health")
 async def health_check():
@@ -115,7 +115,7 @@ async def health_check():
 @app.get("/{full_path:path}")
 async def serve_frontend(request: Request, full_path: str):
     # Define the base directory for static files (using absolute path)
-    static_dir = os.path.abspath("src/backend/app/static")
+    static_dir = os.path.abspath("src/api/static")
     
     # Clean the path to prevent directory traversal
     # Remove any '..' path segments and normalize

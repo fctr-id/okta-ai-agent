@@ -22,11 +22,11 @@ import time, logging, re
 from okta.client import Client as OktaClient
 from datetime import datetime
 from typing import List, Any, Optional, Tuple, TypeVar, Type, Dict, Final, Callable, Union
-from config.settings import settings
-from utils.logging import logger    
+from src.config.settings import settings
+from src.utils.logging import logger    
 from okta.models import User, Group, Policy, Application
 from datetime import timezone
-from utils.pagination_limits import _paginate_direct_api
+from src.utils.pagination_limits import _paginate_direct_api
 
 
 T = TypeVar('T')
@@ -671,7 +671,7 @@ class OktaClientWrapper:
         """Process single user with relationships concurrently"""
         try:
             # Import settings here to avoid circular imports
-            from config.settings import settings
+            from src.config.settings import settings
             
             # Extract user ID from either object or dict
             user_okta_id = user['id'] if isinstance(user, dict) else getattr(user, 'id')

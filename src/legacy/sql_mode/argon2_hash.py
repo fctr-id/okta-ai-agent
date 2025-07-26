@@ -1,7 +1,7 @@
 from argon2 import PasswordHasher, Type
 from argon2.exceptions import VerifyMismatchError, InvalidHash
 from datetime import datetime, timedelta, timezone
-from utils.logging import logger
+from src.utils.logging import logger
 
 # Configure Argon2 hasher with enhanced security parameters
 ph = PasswordHasher(

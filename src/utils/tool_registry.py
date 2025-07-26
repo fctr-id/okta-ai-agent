@@ -10,7 +10,7 @@ This module provides:
 import importlib
 from typing import List, Dict, Optional, Any, Callable, Union
 import logging
-from utils.logging import get_logger
+from src.utils.logging import get_logger
 
 # Configure logging
 logger = get_logger(__name__)

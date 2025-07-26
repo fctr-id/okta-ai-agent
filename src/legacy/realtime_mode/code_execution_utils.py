@@ -19,17 +19,17 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Import our new error handling
-from utils.error_handling import (
+from src.utils.error_handling import (
     BaseError, SecurityError, ExecutionError, ConfigurationError, 
     ValidationError, safe_execute, safe_execute_async, format_error_for_user, ErrorSeverity
 )
-from utils.logging import logger
-from legacy.realtime_mode.tools.datetime_tools import (
+from src.utils.logging import logger
+from src.legacy.realtime_mode.tools.datetime_tools import (
     get_current_time, parse_relative_time, format_date_for_query
 )
-from legacy.realtime_mode.tools.logevents_tools import format_event_logs
+from src.legacy.realtime_mode.tools.logevents_tools import format_event_logs
 # Import security controls from centralized config
-from utils.security_config import (
+from src.utils.security_config import (
     is_code_safe
 )
 # Error status constants

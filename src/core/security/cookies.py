@@ -1,5 +1,5 @@
 from fastapi import Response, Request
-from config.settings import settings
+from src.config.settings import settings
 import time
 from typing import Optional
 

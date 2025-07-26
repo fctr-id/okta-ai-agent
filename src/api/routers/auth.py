@@ -7,13 +7,13 @@ from datetime import datetime, timedelta
 import re
 import time
 
-from core.security.dependencies import get_db_session, get_current_user
-from core.security.jwt import create_access_token, decode_access_token
-from core.okta.sync.operations import DatabaseOperations
-from core.okta.sync.models import AuthUser, UserRole
-from utils.logging import logger
-from config.settings import settings
-from core.security.cookies import set_auth_cookie, clear_auth_cookie, get_auth_cookie
+from src.core.security.dependencies import get_db_session, get_current_user
+from src.core.security.jwt import create_access_token, decode_access_token
+from src.core.okta.sync.operations import DatabaseOperations
+from src.core.okta.sync.models import AuthUser, UserRole
+from src.utils.logging import logger
+from src.config.settings import settings
+from src.core.security.cookies import set_auth_cookie, clear_auth_cookie, get_auth_cookie
 
 
 router = APIRouter(

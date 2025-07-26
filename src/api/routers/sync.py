@@ -17,17 +17,17 @@ import signal
 from datetime import datetime
 import logging
 
-from config.settings import settings
-from core.security.dependencies import get_current_user
-from core.okta.sync.models import SyncHistory, SyncStatus
-from core.okta.sync.operations import DatabaseOperations
-from core.okta.client.client import OktaClientWrapper
+from src.config.settings import settings
+from src.core.security.dependencies import get_current_user
+from src.core.okta.sync.models import SyncHistory, SyncStatus
+from src.core.okta.sync.operations import DatabaseOperations
+from src.core.okta.client.client import OktaClientWrapper
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.security.dependencies import get_db_session
+from src.core.security.dependencies import get_db_session
 from sqlalchemy import func, select, and_
 from datetime import timezone, datetime
 from asyncio import CancelledError
-from utils.logging import get_logger
+from src.utils.logging import get_logger
 
 # Create a logger instance for this module
 sync_logger = get_logger(__name__)

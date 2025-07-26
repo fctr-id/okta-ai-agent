@@ -4,12 +4,12 @@ from datetime import datetime
 import pytz
 import asyncio
 from sqlalchemy import text
-from legacy.sql_mode.okta_pre_reasoning_agent import expand_query
-from legacy.sql_mode.okta_generate_sql import sql_agent, extract_json_from_text
-from core.okta.sync.operations import DatabaseOperations
-from utils.logging import logger
+from src.legacy.sql_mode.okta_pre_reasoning_agent import expand_query
+from src.legacy.sql_mode.okta_generate_sql import sql_agent, extract_json_from_text
+from src.core.okta.sync.operations import DatabaseOperations
+from src.utils.logging import logger
 from datetime import timezone, datetime, timedelta
-from config.settings import settings 
+from src.config.settings import settings 
 
 class SQLExecutor:
     def __init__(self):

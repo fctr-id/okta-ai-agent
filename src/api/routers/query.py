@@ -3,10 +3,10 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from typing import Dict, AsyncGenerator, Tuple, List, Any
 import json
 import re
-from utils.logging import logger
-from api.services.ai_service import AIService
+from src.utils.logging import logger
+from src.api.services.ai_service import AIService
 from html_sanitizer import Sanitizer
-from core.security.dependencies import get_current_user, get_db_session
+from src.core.security.dependencies import get_current_user, get_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
 import sys
 
