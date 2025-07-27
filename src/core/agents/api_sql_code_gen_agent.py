@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel
 from pydantic_ai import Agent
 
@@ -85,14 +85,26 @@ class ApiSqlCodeGenAgent:
         from src.data.schemas.shared_schema import get_okta_database_schema
         return get_okta_database_schema()
     
-    async def process_api_data(self, api_data: List[Dict[str, Any]], 
+    async def process_api_data(self, api_data: Union[List[Dict[str, Any]], Dict[str, Any]], 
                               processing_context: str, 
                               correlation_id: str,
                               use_temp_table: bool = False,
                               all_step_contexts: Optional[Dict[str, Any]] = None) -> Any:
         """Process API data with internal capabilities and enhanced context awareness"""
         
-        logger.info(f"[{correlation_id}] API-SQL Agent processing {len(api_data)} records")
+        # Normalize api_data to always be a list for consistent processing
+        if isinstance(api_data, dict):
+            # Single dictionary result - convert to list
+            normalized_api_data = [api_data]
+        elif isinstance(api_data, list):
+            # Already a list
+            normalized_api_data = api_data
+        else:
+            # Fallback for other types
+            normalized_api_data = []
+            logger.warning(f"[{correlation_id}] Unexpected api_data type: {type(api_data)}, using empty list")
+        
+        logger.info(f"[{correlation_id}] API-SQL Agent processing {len(normalized_api_data)} records")
         logger.debug(f"[{correlation_id}] Processing context: {processing_context}")
         logger.debug(f"[{correlation_id}] Temp table mode: {use_temp_table}")
         
@@ -101,12 +113,12 @@ class ApiSqlCodeGenAgent:
             logger.debug(f"[{correlation_id}] Enhanced context provided with {len(all_step_contexts)} previous steps")
         
         # Sample for LLM context
-        sample_data = api_data[:5] if api_data else []
+        sample_data = normalized_api_data[:5] if normalized_api_data else []
         
         # Create dependencies
         deps = ApiSqlDependencies(
             api_data_sample=sample_data,
-            api_data_count=len(api_data),
+            api_data_count=len(normalized_api_data),
             processing_context=processing_context,
             temp_table_mode=use_temp_table,
             flow_id=correlation_id

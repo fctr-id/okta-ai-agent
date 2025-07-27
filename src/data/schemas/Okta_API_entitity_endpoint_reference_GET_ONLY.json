@@ -1,0 +1,2314 @@
+{
+  "entity_summary": {
+    "application": {
+      "aliases": [
+        "app",
+        "integration",
+        "client"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "application_assignment": {
+      "aliases": [
+        "app assignment",
+        "user app assignment",
+        "group app assignment"
+      ],
+      "operations": [
+        "list_group_assignments",
+        "get_group_assignment",
+        "list_user_assignments",
+        "get_user_assignment"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 4
+    },
+    "application_connection": {
+      "aliases": [
+        "provisioning connection"
+      ],
+      "operations": [
+        "get_default",
+        "get_jwks"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "application_credential": {
+      "aliases": [
+        "app credential",
+        "key",
+        "secret",
+        "certificate",
+        "csr",
+        "jwk"
+      ],
+      "operations": [
+        "list_csrs",
+        "get_csr",
+        "list_keys",
+        "get_key",
+        "list_jwks",
+        "get_jwk",
+        "list_secrets",
+        "get_secret"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 8
+    },
+    "application_feature": {
+      "aliases": [
+        "app feature",
+        "provisioning feature"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "application_federated_claim": {
+      "aliases": [
+        "federated claim",
+        "token claim"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "application_grant": {
+      "aliases": [
+        "app grant",
+        "consent grant"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "application_sso": {
+      "aliases": [
+        "sso settings",
+        "saml metadata"
+      ],
+      "operations": [
+        "get_saml_metadata"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 1
+    },
+    "application_token": {
+      "aliases": [
+        "app token",
+        "refresh token"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "authenticator": {
+      "aliases": [
+        "mfa",
+        "factor"
+      ],
+      "operations": [
+        "get_well_known_config",
+        "list",
+        "get",
+        "list_methods",
+        "get_method"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 5
+    },
+    "behavior_rule": {
+      "aliases": [
+        "behavior detection rule"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "custom_role": {
+      "aliases": [
+        "iam role"
+      ],
+      "operations": [
+        "list",
+        "get",
+        "list_permissions",
+        "get_permission"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 4
+    },
+    "device": {
+      "aliases": [
+        "devices",
+        "endpoint"
+      ],
+      "operations": [
+        "list",
+        "get",
+        "list_users"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 3
+    },
+    "device_assurance_policy": {
+      "aliases": [
+        "device trust policy"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "device_integration": {
+      "aliases": [
+        "mdm integration"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "device_posture_check": {
+      "aliases": [
+        "device check"
+      ],
+      "operations": [
+        "list",
+        "list_defaults",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 3
+    },
+    "group": {
+      "aliases": [
+        "groups"
+      ],
+      "operations": [
+        "list",
+        "get",
+        "list_assigned_apps",
+        "list_members"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 4
+    },
+    "group_owner": {
+      "aliases": [
+        "group ownership"
+      ],
+      "operations": [
+        "list"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 1
+    },
+    "group_rule": {
+      "aliases": [
+        "dynamic group"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "log_stream": {
+      "aliases": [
+        "log streaming"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "network_zone": {
+      "aliases": [
+        "zone",
+        "ip zone"
+      ],
+      "operations": [
+        "list",
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 2
+    },
+    "okta_application_settings": {
+      "aliases": [
+        "first party app settings"
+      ],
+      "operations": [
+        "get"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 1
+    },
+    "policy": {
+      "aliases": [
+        "policies",
+        "sign on policy",
+        "password policy",
+        "mfa policy"
+      ],
+      "operations": [
+        "list",
+        "get",
+        "list_apps",
+        "list_resources",
+        "get_resource_mapping",
+        "list_rules",
+        "get_rule"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 7
+    },
+    "resource_set": {
+      "aliases": [
+        "iam resource set"
+      ],
+      "operations": [
+        "list",
+        "get",
+        "list_resources",
+        "get_resource",
+        "list_bindings",
+        "get_binding",
+        "list_binding_members",
+        "get_binding_member"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 8
+    },
+    "role_assignment": {
+      "aliases": [
+        "roles",
+        "permissions",
+        "admin role"
+      ],
+      "operations": [
+        "list_users_with_roles",
+        "list_by_user",
+        "get_for_user",
+        "list_governance_sources_for_user_role",
+        "get_governance_source_for_user_role",
+        "list_governance_source_resources_for_user_role",
+        "list_app_targets_for_user_role",
+        "list_group_targets_for_user_role",
+        "get_role_targets_by_assignment_type",
+        "list_by_group",
+        "get_for_group",
+        "list_by_client",
+        "get_for_client",
+        "list_app_targets_for_group_role",
+        "list_group_targets_for_group_role",
+        "list_app_targets_for_client_role",
+        "list_group_targets_for_client_role"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 17
+    },
+    "system_log": {
+      "aliases": [
+        "logs",
+        "events",
+        "audit trail"
+      ],
+      "operations": [
+        "list_events"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 1
+    },
+    "user": {
+      "aliases": [
+        "users",
+        "person",
+        "account",
+        "people"
+      ],
+      "operations": [
+        "list",
+        "get",
+        "list_blocks",
+        "list_app_links",
+        "list_groups",
+        "list_clients",
+        "list_devices"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 7
+    },
+    "user_authenticator": {
+      "aliases": [
+        "user factor",
+        "mfa enrollment"
+      ],
+      "operations": [
+        "list_enrollments",
+        "get_enrollment",
+        "list_yubikey_tokens",
+        "get_yubikey_token",
+        "list_factors",
+        "list_supported_factors",
+        "list_supported_security_questions",
+        "get_factor",
+        "get_factor_transaction_status"
+      ],
+      "methods": [
+        "GET"
+      ],
+      "endpoint_count": 9
+    }
+  },
+  "endpoints": [
+    {
+      "id": "list-applications",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps",
+      "name": "List all applications",
+      "entity": "application",
+      "operation": "list",
+      "description": "Lists all apps in the org with pagination. A subset of apps can be returned that match a supported filter expression or query. The results are [paginated](/#pagination) according to the `limit` parameter. If there are multiple pages of results, the header contains a `next` link. Treat the link as an opaque value (follow it, don't parse it).\n\n> **Note:** To list all of a member's assigned app links, use the [List all assigned app links endpoint in the User Resources API](/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listAppLinks).",
+      "folder_path": "Applications",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "q",
+          "after",
+          "useOptimization",
+          "limit",
+          "filter",
+          "expand",
+          "includeNonDeleted"
+        ]
+      }
+    },
+    {
+      "id": "get-application",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId",
+      "name": "Retrieve an application",
+      "entity": "application",
+      "operation": "get",
+      "description": "Retrieves an application from your Okta organization by `id`",
+      "folder_path": "Applications",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-default-application-connection",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/connections/default",
+      "name": "Retrieve the default provisioning connection",
+      "entity": "application_connection",
+      "operation": "get_default",
+      "description": "Retrieves the default provisioning connection for an app",
+      "folder_path": "Application Connections",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-application-connection-jwks",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/connections/default/jwks",
+      "name": "Retrieve a JSON Web Key Set (JWKS) for the default provisioning connection",
+      "entity": "application_connection",
+      "operation": "get_jwks",
+      "description": "Retrieves a JWKS for the default provisioning connection.  This can be used by the OAuth 2.0 app's `jwk_uri` property in the target org.",
+      "folder_path": "Application Connections",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-features",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/features",
+      "name": "List all features",
+      "entity": "application_feature",
+      "operation": "list",
+      "description": "Lists all features for an app\n> **Note:** This request returns an error if provisioning isn't enabled for the app.\n> To set up provisioning, see [Update the default provisioning connection](/openapi/okta-management/management/tag/ApplicationConnections/#tag/ApplicationConnections/operation/updateDefaultProvisioningConnectionForApplication).\n",
+      "folder_path": "Application Features",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-application-feature",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/features/:featureName",
+      "name": "Retrieve a feature",
+      "entity": "application_feature",
+      "operation": "get",
+      "description": "Retrieves a Feature object for an app",
+      "folder_path": "Application Features",
+      "parameters": {
+        "required": [
+          "appId",
+          "featureName"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-grants",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/grants",
+      "name": "List all app grants",
+      "entity": "application_grant",
+      "operation": "list",
+      "description": "Lists all scope consent Grants for the app",
+      "folder_path": "Application Grants",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-application-grant",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/grants/:grantId",
+      "name": "Retrieve an app grant",
+      "entity": "application_grant",
+      "operation": "get",
+      "description": "Retrieves a single scope consent Grant object for the app",
+      "folder_path": "Application Grants",
+      "parameters": {
+        "required": [
+          "appId",
+          "grantId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "list-application-group-assignments",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/groups",
+      "name": "List all application groups",
+      "entity": "application_assignment",
+      "operation": "list_group_assignments",
+      "description": "Lists all app group assignments",
+      "folder_path": "Application Groups",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": [
+          "q",
+          "after",
+          "limit",
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-application-group-assignment",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/groups/:groupId",
+      "name": "Retrieve an application group",
+      "entity": "application_assignment",
+      "operation": "get_group_assignment",
+      "description": "Retrieves an app group assignment",
+      "folder_path": "Application Groups",
+      "parameters": {
+        "required": [
+          "appId",
+          "groupId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-application-saml-metadata",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/sso/saml/metadata",
+      "name": "Preview the application SAML metadata",
+      "entity": "application_sso",
+      "operation": "get_saml_metadata",
+      "description": "Previews the SSO SAML metadata for an application",
+      "folder_path": "Application SSO",
+      "parameters": {
+        "required": [
+          "appId",
+          "kid"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-csrs",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/csrs",
+      "name": "List all certificate signing requests",
+      "entity": "application_credential",
+      "operation": "list_csrs",
+      "description": "Lists all Certificate Signing Requests for an application",
+      "folder_path": "Application Key Credentials",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-application-csr",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/csrs/:csrId",
+      "name": "Retrieve a certificate signing request",
+      "entity": "application_credential",
+      "operation": "get_csr",
+      "description": "Retrieves a Certificate Signing Request (CSR) for the app by `csrId`.\n\nReturns a Base64-encoded CSR in DER format if the `Accept` media type is `application/pkcs10` or a CSR object if the `Accept` media type is `application/json`.",
+      "folder_path": "Application Key Credentials",
+      "parameters": {
+        "required": [
+          "appId",
+          "csrId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-keys",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/keys",
+      "name": "List all key credentials",
+      "entity": "application_credential",
+      "operation": "list_keys",
+      "description": "Lists all key credentials for an app",
+      "folder_path": "Application Key Credentials",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-application-key",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/keys/:keyId",
+      "name": "Retrieve a key credential",
+      "entity": "application_credential",
+      "operation": "get_key",
+      "description": "Retrieves a specific Application Key Credential by `kid`",
+      "folder_path": "Application Key Credentials",
+      "parameters": {
+        "required": [
+          "appId",
+          "keyId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-jwks",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/jwks",
+      "name": "List all the OAuth 2.0 client JSON Web Keys",
+      "entity": "application_credential",
+      "operation": "list_jwks",
+      "description": "Lists all JSON Web Keys for an OAuth 2.0 client app",
+      "folder_path": "Application Client Auth Credentials",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-application-jwk",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/jwks/:keyId",
+      "name": "Retrieve an OAuth 2.0 client JSON Web Key",
+      "entity": "application_credential",
+      "operation": "get_jwk",
+      "description": "Retrieves an OAuth 2.0 Client JSON Web Key by `keyId`.",
+      "folder_path": "Application Client Auth Credentials",
+      "parameters": {
+        "required": [
+          "appId",
+          "keyId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-secrets",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/secrets",
+      "name": "List all OAuth 2.0 client secrets",
+      "entity": "application_credential",
+      "operation": "list_secrets",
+      "description": "Lists all client secrets for an OAuth 2.0 client app",
+      "folder_path": "Application Client Auth Credentials",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-application-secret",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/credentials/secrets/:secretId",
+      "name": "Retrieve an OAuth 2.0 client secret",
+      "entity": "application_credential",
+      "operation": "get_secret",
+      "description": "Retrieves an OAuth 2.0 Client Secret by `secretId`",
+      "folder_path": "Application Client Auth Credentials",
+      "parameters": {
+        "required": [
+          "appId",
+          "secretId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-federated-claims",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/federated-claims",
+      "name": "List all configured federated claims",
+      "entity": "application_federated_claim",
+      "operation": "list",
+      "description": "Lists all federated claims for your app",
+      "folder_path": "Application Federated Claims",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-application-federated-claim",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/federated-claims/:claimId",
+      "name": "Retrieve a federated claim",
+      "entity": "application_federated_claim",
+      "operation": "get",
+      "description": "Retrieves a federated claim by `claimId`",
+      "folder_path": "Application Federated Claims",
+      "parameters": {
+        "required": [
+          "appId",
+          "claimId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-application-tokens",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/tokens",
+      "name": "List all application refresh tokens",
+      "entity": "application_token",
+      "operation": "list",
+      "description": "Lists all refresh tokens for an app\n\n> **Note:** The results are [paginated](/#pagination) according to the `limit` parameter.\n> If there are multiple pages of results, the Link header contains a `next` link that you need to use as an opaque value (follow it, don't parse it).\n",
+      "folder_path": "Application Tokens",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": [
+          "expand",
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "get-application-token",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/tokens/:tokenId",
+      "name": "Retrieve an application token",
+      "entity": "application_token",
+      "operation": "get",
+      "description": "Retrieves a refresh token for the specified app",
+      "folder_path": "Application Tokens",
+      "parameters": {
+        "required": [
+          "appId",
+          "tokenId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "list-application-user-assignments",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/users",
+      "name": "List all application users",
+      "entity": "application_assignment",
+      "operation": "list_user_assignments",
+      "description": "Lists all assigned users for an app",
+      "folder_path": "Application Users",
+      "parameters": {
+        "required": [
+          "appId"
+        ],
+        "optional": [
+          "after",
+          "limit",
+          "q",
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-application-user-assignment",
+      "method": "GET",
+      "url_pattern": "/api/v1/apps/:appId/users/:userId",
+      "name": "Retrieve an application user",
+      "entity": "application_assignment",
+      "operation": "get_user_assignment",
+      "description": "Retrieves a specific user assignment for a specific app",
+      "folder_path": "Application Users",
+      "parameters": {
+        "required": [
+          "appId",
+          "userId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-authenticator-well-known-config",
+      "method": "GET",
+      "url_pattern": "/.well-known/app-authenticator-configuration",
+      "name": "Retrieve the well-known app authenticator configuration",
+      "entity": "authenticator",
+      "operation": "get_well_known_config",
+      "description": "Retrieves the well-known app authenticator configuration. Includes an app authenticator's settings, supported methods, and other details.",
+      "folder_path": "Authenticators",
+      "parameters": {
+        "required": [
+          "oauthClientId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-authenticators",
+      "method": "GET",
+      "url_pattern": "/api/v1/authenticators",
+      "name": "List all authenticators",
+      "entity": "authenticator",
+      "operation": "list",
+      "description": "Lists all authenticators",
+      "folder_path": "Authenticators",
+      "parameters": {
+        "required": [],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-authenticator",
+      "method": "GET",
+      "url_pattern": "/api/v1/authenticators/:authenticatorId",
+      "name": "Retrieve an authenticator",
+      "entity": "authenticator",
+      "operation": "get",
+      "description": "Retrieves an authenticator from your Okta organization by `authenticatorId`",
+      "folder_path": "Authenticators",
+      "parameters": {
+        "required": [
+          "authenticatorId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-authenticator-methods",
+      "method": "GET",
+      "url_pattern": "/api/v1/authenticators/:authenticatorId/methods",
+      "name": "List all methods of an authenticator",
+      "entity": "authenticator",
+      "operation": "list_methods",
+      "description": "Lists all methods of an authenticator identified by `authenticatorId`",
+      "folder_path": "Authenticators",
+      "parameters": {
+        "required": [
+          "authenticatorId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-authenticator-method",
+      "method": "GET",
+      "url_pattern": "/api/v1/authenticators/:authenticatorId/methods/:methodType",
+      "name": "Retrieve an authenticator method",
+      "entity": "authenticator",
+      "operation": "get_method",
+      "description": "Retrieves a method identified by `methodType` of an authenticator identified by `authenticatorId`",
+      "folder_path": "Authenticators",
+      "parameters": {
+        "required": [
+          "authenticatorId",
+          "methodType"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-behavior-rules",
+      "method": "GET",
+      "url_pattern": "/api/v1/behaviors",
+      "name": "List all behavior detection rules",
+      "entity": "behavior_rule",
+      "operation": "list",
+      "description": "Lists all behavior detection rules with pagination support",
+      "folder_path": "Behavior Rules",
+      "parameters": {
+        "required": [],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-behavior-rule",
+      "method": "GET",
+      "url_pattern": "/api/v1/behaviors/:behaviorId",
+      "name": "Retrieve a behavior detection rule",
+      "entity": "behavior_rule",
+      "operation": "get",
+      "description": "Retrieves a Behavior Detection Rule by `behaviorId`",
+      "folder_path": "Behavior Rules",
+      "parameters": {
+        "required": [
+          "behaviorId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-devices",
+      "method": "GET",
+      "url_pattern": "/api/v1/devices",
+      "name": "List all devices",
+      "entity": "device",
+      "operation": "list",
+      "description": "Lists all devices with pagination support.\n\n>**Note:** To list all devices enrolled by a user, use the [List all devices endpoint in the User Resources API](/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listUserDevices).\n\nYou can return a subset of devices that match a supported search criteria using the `search` query parameter.\nSearches for devices based on the properties specified in the `search` parameter conforming SCIM filter specifications (case-insensitive). This data is eventually consistent. The API returns different results depending on specified queries in the request. Empty list is returned if no objects match `search` request.\n> **Note:** Listing devices with `search` should not be used as a part of any critical flow, such as authentication or updates, to prevent potential data loss. `search` results may not reflect the latest information, as this endpoint uses a search index which may not be up-to-date with recent updates to the object.\n\nDon't use search results directly for record updates, as the data might be stale and therefore overwrite newer data, resulting in data loss. \n\nUse an `id` lookup for records that you update to ensure your results contain the latest data.\n\nThis operation requires [URL encoding](https://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1). For example, `search=profile.displayName eq \"Bob\"` is encoded as `search=profile.displayName%20eq%20%22Bob%22`.",
+      "folder_path": "Devices",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "after",
+          "limit",
+          "search",
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-device",
+      "method": "GET",
+      "url_pattern": "/api/v1/devices/:deviceId",
+      "name": "Retrieve a device",
+      "entity": "device",
+      "operation": "get",
+      "description": "Retrieves a device by `deviceId`",
+      "folder_path": "Devices",
+      "parameters": {
+        "required": [
+          "deviceId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-users-for-device",
+      "method": "GET",
+      "url_pattern": "/api/v1/devices/:deviceId/users",
+      "name": "List all users for a device",
+      "entity": "device",
+      "operation": "list_users",
+      "description": "Lists all Users for a device by `deviceId`",
+      "folder_path": "Devices",
+      "parameters": {
+        "required": [
+          "deviceId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-device-assurance-policies",
+      "method": "GET",
+      "url_pattern": "/api/v1/device-assurances",
+      "name": "List all device assurance policies",
+      "entity": "device_assurance_policy",
+      "operation": "list",
+      "description": "Lists all device assurance policies",
+      "folder_path": "Device Assurance Policies",
+      "parameters": {
+        "required": [],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-device-assurance-policy",
+      "method": "GET",
+      "url_pattern": "/api/v1/device-assurances/:deviceAssuranceId",
+      "name": "Retrieve a device assurance policy",
+      "entity": "device_assurance_policy",
+      "operation": "get",
+      "description": "Retrieves a device assurance policy by `deviceAssuranceId`",
+      "folder_path": "Device Assurance Policies",
+      "parameters": {
+        "required": [
+          "deviceAssuranceId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-device-integrations",
+      "method": "GET",
+      "url_pattern": "/api/v1/device-integrations",
+      "name": "List all device integrations",
+      "entity": "device_integration",
+      "operation": "list",
+      "description": "Lists all device integrations for your org. Examples include Device Posture Provider, Windows Security Center, Chrome Device Trust, OSQuery, and Android Device Trust.",
+      "folder_path": "Device Integrations",
+      "parameters": {
+        "required": [],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-device-integration",
+      "method": "GET",
+      "url_pattern": "/api/v1/device-integrations/:deviceIntegrationId",
+      "name": "Retrieve a device integration",
+      "entity": "device_integration",
+      "operation": "get",
+      "description": "Retrieves a device integration by `deviceIntegrationId`",
+      "folder_path": "Device Integrations",
+      "parameters": {
+        "required": [
+          "deviceIntegrationId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-device-posture-checks",
+      "method": "GET",
+      "url_pattern": "/api/v1/device-posture-checks",
+      "name": "List all device posture checks",
+      "entity": "device_posture_check",
+      "operation": "list",
+      "description": "Lists all device posture checks",
+      "folder_path": "Device Posture Checks",
+      "parameters": {
+        "required": [],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-default-device-posture-checks",
+      "method": "GET",
+      "url_pattern": "/api/v1/device-posture-checks/default",
+      "name": "List all default device posture checks",
+      "entity": "device_posture_check",
+      "operation": "list_defaults",
+      "description": "Lists all default device posture checks. Default device posture checks are defined by Okta. Their type will always be `BUILTIN`.",
+      "folder_path": "Device Posture Checks",
+      "parameters": {
+        "required": [],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-device-posture-check",
+      "method": "GET",
+      "url_pattern": "/api/v1/device-posture-checks/:postureCheckId",
+      "name": "Retrieve a device posture check",
+      "entity": "device_posture_check",
+      "operation": "get",
+      "description": "Retrieves a device posture check by `postureCheckId`",
+      "folder_path": "Device Posture Checks",
+      "parameters": {
+        "required": [
+          "postureCheckId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-groups",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups",
+      "name": "List all groups",
+      "entity": "group",
+      "operation": "list",
+      "description": "Lists all groups with pagination support.\n\n> **Note:** To list all groups belonging to a member, use the [List all groups endpoint in the User Resources API](/openapi/okta-management/management/tag/UserResources/#tag/UserResources/operation/listUserGroups).\n\nThe number of groups returned depends on the specified [`limit`](/openapi/okta-management/management/tag/Group/#tag/Group/operation/listGroups!in=query&path=limit&t=request), if you have a search, filter, and/or query parameter set, and if that parameter is not null. We recommend using a limit less than or equal to 200.\n\nA subset of groups can be returned that match a supported filter expression, query, or search criteria.\n\n> **Note:** Results from the filter or query parameter are driven from an eventually consistent datasource. The synchronization lag is typically less than one second.",
+      "folder_path": "Groups",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "search",
+          "filter",
+          "q",
+          "after",
+          "limit",
+          "expand",
+          "sortBy",
+          "sortOrder"
+        ]
+      }
+    },
+    {
+      "id": "get-group",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId",
+      "name": "Retrieve a group",
+      "entity": "group",
+      "operation": "get",
+      "description": "Retrieves a specific group by `id` from your org",
+      "folder_path": "Groups",
+      "parameters": {
+        "required": [
+          "groupId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-assigned-apps-for-group",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId/apps",
+      "name": "List all assigned apps",
+      "entity": "group",
+      "operation": "list_assigned_apps",
+      "description": "Lists all apps that are assigned to a group. See [Application Groups API](/openapi/okta-management/management/tag/ApplicationGroups/).",
+      "folder_path": "Groups",
+      "parameters": {
+        "required": [
+          "groupId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-group-members",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId/users",
+      "name": "List all member users",
+      "entity": "group",
+      "operation": "list_members",
+      "description": "Lists all users that are a member of a group.\nThe default user limit is set to a very high number due to historical reasons that are no longer valid for most orgs. This will change in a future version of this API. The recommended page limit is now `limit=200`.",
+      "folder_path": "Groups",
+      "parameters": {
+        "required": [
+          "groupId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-group-owners",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId/owners",
+      "name": "List all group owners",
+      "entity": "group_owner",
+      "operation": "list",
+      "description": "Lists all owners for a specific group",
+      "folder_path": "Group Owners",
+      "parameters": {
+        "required": [
+          "groupId"
+        ],
+        "optional": [
+          "search",
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-group-rules",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/rules",
+      "name": "List all group rules",
+      "entity": "group_rule",
+      "operation": "list",
+      "description": "Lists all group rules for your org",
+      "folder_path": "Group Rules",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "limit",
+          "after",
+          "search",
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-group-rule",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/rules/:groupRuleId",
+      "name": "Retrieve a group rule",
+      "entity": "group_rule",
+      "operation": "get",
+      "description": "Retrieves a specific group rule by ID from your org",
+      "folder_path": "Group Rules",
+      "parameters": {
+        "required": [
+          "groupRuleId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "list-log-streams",
+      "method": "GET",
+      "url_pattern": "/api/v1/logStreams",
+      "name": "List all log streams",
+      "entity": "log_stream",
+      "operation": "list",
+      "description": "Lists all log stream objects in your org. You can request a paginated list or a subset of log streams that match a supported filter expression.",
+      "folder_path": "Log Streaming",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "after",
+          "limit",
+          "filter"
+        ]
+      }
+    },
+    {
+      "id": "get-log-stream",
+      "method": "GET",
+      "url_pattern": "/api/v1/logStreams/:logStreamId",
+      "name": "Retrieve a log stream",
+      "entity": "log_stream",
+      "operation": "get",
+      "description": "Retrieves a log stream object by ID",
+      "folder_path": "Log Streaming",
+      "parameters": {
+        "required": [
+          "logStreamId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-network-zones",
+      "method": "GET",
+      "url_pattern": "/api/v1/zones",
+      "name": "List all network zones",
+      "entity": "network_zone",
+      "operation": "list",
+      "description": "Lists all Network Zones with pagination. A subset of zones can be returned that match a supported filter expression or query.\n\nThis operation requires URL encoding. For example, `filter=(id eq \"nzoul0wf9jyb8xwZm0g3\" or id eq \"nzoul1MxmGN18NDQT0g3\")` is encoded as `filter=%28id+eq+%22nzoul0wf9jyb8xwZm0g3%22+or+id+eq+%22nzoul1MxmGN18NDQT0g3%22%29`.\n\nOkta supports filtering on the `id`, `usage`, and `system` properties. See [Filter](https://developer.okta.com/docs/api/#filter) for more information on the expressions that are used in filtering.",
+      "folder_path": "Network Zones",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "after",
+          "limit",
+          "filter"
+        ]
+      }
+    },
+    {
+      "id": "get-network-zone",
+      "method": "GET",
+      "url_pattern": "/api/v1/zones/:zoneId",
+      "name": "Retrieve a network zone",
+      "entity": "network_zone",
+      "operation": "get",
+      "description": "Retrieves a Network Zone by `zoneId`",
+      "folder_path": "Network Zones",
+      "parameters": {
+        "required": [
+          "zoneId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-okta-application-settings",
+      "method": "GET",
+      "url_pattern": "/api/v1/first-party-app-settings/:appName",
+      "name": "Retrieve the Okta application settings",
+      "entity": "okta_application_settings",
+      "operation": "get",
+      "description": "Retrieves the settings for an Okta app (also known as an Okta first-party app)",
+      "folder_path": "Okta Application Settings",
+      "parameters": {
+        "required": [
+          "appName"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-policies",
+      "method": "GET",
+      "url_pattern": "/api/v1/policies",
+      "name": "List all policies",
+      "entity": "policy",
+      "operation": "list",
+      "description": "Lists all policies with the specified type",
+      "folder_path": "Policies",
+      "parameters": {
+        "required": [
+          "type"
+        ],
+        "optional": [
+          "status",
+          "q",
+          "expand",
+          "sortBy",
+          "limit",
+          "resourceId",
+          "after"
+        ]
+      }
+    },
+    {
+      "id": "get-policy",
+      "method": "GET",
+      "url_pattern": "/api/v1/policies/:policyId",
+      "name": "Retrieve a policy",
+      "entity": "policy",
+      "operation": "get",
+      "description": "Retrieves a policy",
+      "folder_path": "Policies",
+      "parameters": {
+        "required": [
+          "policyId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "list-apps-for-policy",
+      "method": "GET",
+      "url_pattern": "/api/v1/policies/:policyId/app",
+      "name": "List all apps mapped to a policy",
+      "entity": "policy",
+      "operation": "list_apps",
+      "description": "Lists all applications mapped to a policy identified by `policyId`\n\n> **Note:** Use [List all resources mapped to a Policy](https://developer.okta.com/docs/api/openapi/okta-management/management/tag/Policy/#tag/Policy/operation/listPolicyMappings) to list all applications mapped to a policy.",
+      "folder_path": "Policies",
+      "parameters": {
+        "required": [
+          "policyId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-policy-resource-mappings",
+      "method": "GET",
+      "url_pattern": "/api/v1/policies/:policyId/mappings",
+      "name": "List all resources mapped to a policy",
+      "entity": "policy",
+      "operation": "list_resources",
+      "description": "Lists all resources mapped to a policy identified by `policyId`",
+      "folder_path": "Policies",
+      "parameters": {
+        "required": [
+          "policyId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-policy-resource-mapping",
+      "method": "GET",
+      "url_pattern": "/api/v1/policies/:policyId/mappings/:mappingId",
+      "name": "Retrieve a policy resource mapping",
+      "entity": "policy",
+      "operation": "get_resource_mapping",
+      "description": "Retrieves a resource mapping for a policy identified by `policyId` and `mappingId`",
+      "folder_path": "Policies",
+      "parameters": {
+        "required": [
+          "policyId",
+          "mappingId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-policy-rules",
+      "method": "GET",
+      "url_pattern": "/api/v1/policies/:policyId/rules",
+      "name": "List all policy rules",
+      "entity": "policy",
+      "operation": "list_rules",
+      "description": "Lists all policy rules",
+      "folder_path": "Policies",
+      "parameters": {
+        "required": [
+          "policyId"
+        ],
+        "optional": [
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "get-policy-rule",
+      "method": "GET",
+      "url_pattern": "/api/v1/policies/:policyId/rules/:ruleId",
+      "name": "Retrieve a policy rule",
+      "entity": "policy",
+      "operation": "get_rule",
+      "description": "Retrieves a policy rule",
+      "folder_path": "Policies",
+      "parameters": {
+        "required": [
+          "policyId",
+          "ruleId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-users-with-roles",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/assignees/users",
+      "name": "List all users with role assignments",
+      "entity": "role_assignment",
+      "operation": "list_users_with_roles",
+      "description": "Lists all users with role assignments",
+      "folder_path": "User Role Assignments",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-user-roles",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles",
+      "name": "List all user role assignments",
+      "entity": "role_assignment",
+      "operation": "list_by_user",
+      "description": "Lists all roles assigned to a user (identified by `userId`)",
+      "folder_path": "User Role Assignments",
+      "parameters": {
+        "required": [
+          "userId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-user-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles/:roleAssignmentId",
+      "name": "Retrieve a user role assignment",
+      "entity": "role_assignment",
+      "operation": "get_for_user",
+      "description": "Retrieves a role assigned to a user (identified by `userId`). The `roleAssignmentId` parameter is the unique identifier for either a standard role assignment object or a custom role resource set binding object.",
+      "folder_path": "User Role Assignments",
+      "parameters": {
+        "required": [
+          "userId",
+          "roleAssignmentId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-governance-sources-for-user-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles/:roleAssignmentId/governance",
+      "name": "Retrieve all user role governance sources",
+      "entity": "role_assignment",
+      "operation": "list_governance_sources_for_user_role",
+      "description": "Retrieves the governance sources of a role (identified by `roleAssignmentId`) that's assigned to a user (identified by `userId`)",
+      "folder_path": "User Role Assignments",
+      "parameters": {
+        "required": [
+          "userId",
+          "roleAssignmentId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-governance-source-for-user-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles/:roleAssignmentId/governance/:grantId",
+      "name": "Retrieve a user role governance source",
+      "entity": "role_assignment",
+      "operation": "get_governance_source_for_user_role",
+      "description": "Retrieves a governance source (identified by `grantId`) for a role (identified by `roleAssignmentId`) that's assigned to a user (identified by `userId`)",
+      "folder_path": "User Role Assignments",
+      "parameters": {
+        "required": [
+          "userId",
+          "roleAssignmentId",
+          "grantId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-governance-source-resources-for-user-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles/:roleAssignmentId/governance/:grantId/resources",
+      "name": "Retrieve the user role governance source resources",
+      "entity": "role_assignment",
+      "operation": "list_governance_source_resources_for_user_role",
+      "description": "Retrieves the resources of a governance source (identified by `grantId`) for a role (identified by `roleAssignmentId`) that's assigned to a user (identified by `userId`)",
+      "folder_path": "User Role Assignments",
+      "parameters": {
+        "required": [
+          "userId",
+          "roleAssignmentId",
+          "grantId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-app-targets-for-user-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles/:roleAssignmentId/targets/catalog/apps",
+      "name": "List all admin role app targets",
+      "entity": "role_assignment",
+      "operation": "list_app_targets_for_user_role",
+      "description": "Lists all app targets for an `APP_ADMIN` role assigned to a user. The response is a list that includes OIN-cataloged apps or app instances. The response payload for an app instance contains the `id` property, but an OIN-cataloged app payload doesn't.",
+      "folder_path": "User Role Targets",
+      "parameters": {
+        "required": [
+          "userId",
+          "roleAssignmentId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-group-targets-for-user-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles/:roleAssignmentId/targets/groups",
+      "name": "List all admin role group targets",
+      "entity": "role_assignment",
+      "operation": "list_group_targets_for_user_role",
+      "description": "Lists all group targets for a `USER_ADMIN`, `HELP_DESK_ADMIN`, or `GROUP_MEMBERSHIP_ADMIN` role assignment to an admin user.\nIf the role isn't scoped to specific group targets, an empty array `[]` is returned.\n",
+      "folder_path": "User Role Targets",
+      "parameters": {
+        "required": [
+          "userId",
+          "roleAssignmentId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "get-role-targets-by-assignment-type",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/roles/:roleIdOrEncodedRoleId/targets",
+      "name": "Retrieve a role target by assignment type",
+      "entity": "role_assignment",
+      "operation": "get_role_targets_by_assignment_type",
+      "description": "Retrieves all role targets for an `APP_ADMIN`, `USER_ADMIN`, `HELP_DESK_ADMIN`, or `GROUP_MEMBERSHIP_ADMIN` role assignment to an admin user by user or group assignment type.\nIf the role isn't scoped to specific group targets or any app targets, an empty array `[]` is returned.\n",
+      "folder_path": "User Role Targets",
+      "parameters": {
+        "required": [
+          "userId",
+          "roleIdOrEncodedRoleId",
+          "assignmentType"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-group-roles",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId/roles",
+      "name": "List all group role assignments",
+      "entity": "role_assignment",
+      "operation": "list_by_group",
+      "description": "Lists all assigned roles of a group by `groupId`",
+      "folder_path": "Group Role Assignments",
+      "parameters": {
+        "required": [
+          "groupId"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-group-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId/roles/:roleAssignmentId",
+      "name": "Retrieve a group role assignment",
+      "entity": "role_assignment",
+      "operation": "get_for_group",
+      "description": "Retrieves a role assigned to a group (identified by the `groupId`). The `roleAssignmentId` is the unique identifier for either a standard role group assignment object or a custom role resource set binding object.",
+      "folder_path": "Group Role Assignments",
+      "parameters": {
+        "required": [
+          "groupId",
+          "roleAssignmentId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-client-roles",
+      "method": "GET",
+      "url_pattern": "/oauth2/v1/clients/:clientId/roles",
+      "name": "List all client role assignments",
+      "entity": "role_assignment",
+      "operation": "list_by_client",
+      "description": "Lists all roles assigned to a client app identified by `clientId`",
+      "folder_path": "Client Role Assignments",
+      "parameters": {
+        "required": [
+          "clientId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-client-role",
+      "method": "GET",
+      "url_pattern": "/oauth2/v1/clients/:clientId/roles/:roleAssignmentId",
+      "name": "Retrieve a client role",
+      "entity": "role_assignment",
+      "operation": "get_for_client",
+      "description": "Retrieves a role assignment (identified by `roleAssignmentId`) for a client app (identified by `clientId`)",
+      "folder_path": "Client Role Assignments",
+      "parameters": {
+        "required": [
+          "clientId",
+          "roleAssignmentId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-app-targets-for-group-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId/roles/:roleAssignmentId/targets/catalog/apps",
+      "name": "List all group role app targets",
+      "entity": "role_assignment",
+      "operation": "list_app_targets_for_group_role",
+      "description": "Lists all app targets for an `APP_ADMIN` role assignment to a group. The response includes a list of OIN-cataloged apps or app instances. The response payload for an app instance contains the `id` property, but an OIN-cataloged app doesn't.",
+      "folder_path": "Group Role Targets",
+      "parameters": {
+        "required": [
+          "groupId",
+          "roleAssignmentId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-group-targets-for-group-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/groups/:groupId/roles/:roleAssignmentId/targets/groups",
+      "name": "List all group role group targets",
+      "entity": "role_assignment",
+      "operation": "list_group_targets_for_group_role",
+      "description": "Lists all group targets for a [`USER_ADMIN`](/openapi/okta-management/guides/roles/#standard-roles), `HELP_DESK_ADMIN`, or `GROUP_MEMBERSHIP_ADMIN` role assignment to a group.\nIf the role isn't scoped to specific group targets, Okta returns an empty array `[]`.",
+      "folder_path": "Group Role Targets",
+      "parameters": {
+        "required": [
+          "groupId",
+          "roleAssignmentId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-app-targets-for-client-role",
+      "method": "GET",
+      "url_pattern": "/oauth2/v1/clients/:clientId/roles/:roleAssignmentId/targets/catalog/apps",
+      "name": "List all client role app targets",
+      "entity": "role_assignment",
+      "operation": "list_app_targets_for_client_role",
+      "description": "Lists all OIN app targets for an `APP_ADMIN` role that's assigned to a client (by `clientId`).",
+      "folder_path": "Client Role Targets",
+      "parameters": {
+        "required": [
+          "clientId",
+          "roleAssignmentId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-group-targets-for-client-role",
+      "method": "GET",
+      "url_pattern": "/oauth2/v1/clients/:clientId/roles/:roleAssignmentId/targets/groups",
+      "name": "List all client role group targets",
+      "entity": "role_assignment",
+      "operation": "list_group_targets_for_client_role",
+      "description": "Lists all group targets for a [`USER_ADMIN`](/openapi/okta-management/guides/roles/#standard-roles), `HELP_DESK_ADMIN`, or `GROUP_MEMBERSHIP_ADMIN` role assignment to a client. If the role isn't scoped to specific group targets, Okta returns an empty array `[]`.",
+      "folder_path": "Client Role Targets",
+      "parameters": {
+        "required": [
+          "clientId",
+          "roleAssignmentId"
+        ],
+        "optional": [
+          "after",
+          "limit"
+        ]
+      }
+    },
+    {
+      "id": "list-resource-sets",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets",
+      "name": "List all resource sets",
+      "entity": "resource_set",
+      "operation": "list",
+      "description": "Lists all resource sets with pagination support",
+      "folder_path": "Resource Sets",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "after"
+        ]
+      }
+    },
+    {
+      "id": "get-resource-set",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets/:resourceSetIdOrLabel",
+      "name": "Retrieve a resource set",
+      "entity": "resource_set",
+      "operation": "get",
+      "description": "Retrieves a resource set by `resourceSetIdOrLabel`",
+      "folder_path": "Resource Sets",
+      "parameters": {
+        "required": [
+          "resourceSetIdOrLabel"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-resource-set-resources",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets/:resourceSetIdOrLabel/resources",
+      "name": "List all resource set resources",
+      "entity": "resource_set",
+      "operation": "list_resources",
+      "description": "Lists all resources for the resource set",
+      "folder_path": "Resource Set Resources",
+      "parameters": {
+        "required": [
+          "resourceSetIdOrLabel"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-resource-set-resource",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets/:resourceSetIdOrLabel/resources/:resourceId",
+      "name": "Retrieve a resource set resource",
+      "entity": "resource_set",
+      "operation": "get_resource",
+      "description": "Retrieves a resource identified by `resourceId` in a resource set",
+      "folder_path": "Resource Set Resources",
+      "parameters": {
+        "required": [
+          "resourceSetIdOrLabel",
+          "resourceId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-resource-set-bindings",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets/:resourceSetIdOrLabel/bindings",
+      "name": "List all role resource set bindings",
+      "entity": "resource_set",
+      "operation": "list_bindings",
+      "description": "Lists all bindings for a resource set with pagination support.\n\nThe returned `roles` array contains the roles for each binding associated with the specified resource set. If there are more than 100 bindings for the specified resource set, `links.next` provides the resource with pagination for the next list of bindings.",
+      "folder_path": "Role Resource Set Bindings",
+      "parameters": {
+        "required": [
+          "resourceSetIdOrLabel"
+        ],
+        "optional": [
+          "after"
+        ]
+      }
+    },
+    {
+      "id": "get-resource-set-binding",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets/:resourceSetIdOrLabel/bindings/:roleIdOrLabel",
+      "name": "Retrieve a role resource set binding",
+      "entity": "resource_set",
+      "operation": "get_binding",
+      "description": "Retrieves the binding of a role (identified by `roleIdOrLabel`) for a resource set (identified by `resourceSetIdOrLabel`)",
+      "folder_path": "Role Resource Set Bindings",
+      "parameters": {
+        "required": [
+          "resourceSetIdOrLabel",
+          "roleIdOrLabel"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-resource-set-binding-members",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets/:resourceSetIdOrLabel/bindings/:roleIdOrLabel/members",
+      "name": "List all role resource set binding members",
+      "entity": "resource_set",
+      "operation": "list_binding_members",
+      "description": "Lists all members of a role resource set binding with pagination support",
+      "folder_path": "Role Resource Set Binding Members",
+      "parameters": {
+        "required": [
+          "resourceSetIdOrLabel",
+          "roleIdOrLabel"
+        ],
+        "optional": [
+          "after"
+        ]
+      }
+    },
+    {
+      "id": "get-resource-set-binding-member",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/resource-sets/:resourceSetIdOrLabel/bindings/:roleIdOrLabel/members/:memberId",
+      "name": "Retrieve a role resource set binding member",
+      "entity": "resource_set",
+      "operation": "get_binding_member",
+      "description": "Retrieves a member (identified by `memberId`) that belongs to a role resource set binding",
+      "folder_path": "Role Resource Set Binding Members",
+      "parameters": {
+        "required": [
+          "resourceSetIdOrLabel",
+          "roleIdOrLabel",
+          "memberId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-custom-roles",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/roles",
+      "name": "List all custom roles",
+      "entity": "custom_role",
+      "operation": "list",
+      "description": "Lists all custom roles with pagination support",
+      "folder_path": "Custom Roles",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "after"
+        ]
+      }
+    },
+    {
+      "id": "get-custom-role",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/roles/:roleIdOrLabel",
+      "name": "Retrieve a role",
+      "entity": "custom_role",
+      "operation": "get",
+      "description": "Retrieves a role by `roleIdOrLabel`",
+      "folder_path": "Custom Roles",
+      "parameters": {
+        "required": [
+          "roleIdOrLabel"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-custom-role-permissions",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/roles/:roleIdOrLabel/permissions",
+      "name": "List all custom role permissions",
+      "entity": "custom_role",
+      "operation": "list_permissions",
+      "description": "Lists all permissions for a custom role by `roleIdOrLabel`",
+      "folder_path": "Custom Role Permissions",
+      "parameters": {
+        "required": [
+          "roleIdOrLabel"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-custom-role-permission",
+      "method": "GET",
+      "url_pattern": "/api/v1/iam/roles/:roleIdOrLabel/permissions/:permissionType",
+      "name": "Retrieve a custom role permission",
+      "entity": "custom_role",
+      "operation": "get_permission",
+      "description": "Retrieves a permission (identified by `permissionType`) for a custom role",
+      "folder_path": "Custom Role Permissions",
+      "parameters": {
+        "required": [
+          "roleIdOrLabel",
+          "permissionType"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-system-log-events",
+      "method": "GET",
+      "url_pattern": "/api/v1/logs",
+      "name": "List all System Log events",
+      "entity": "system_log",
+      "operation": "list_events",
+      "description": "## Critical Parameters\n*   **`filter`** (String - A SCIM-like filter expression):\n    *   This is the most powerful parameter for narrowing down results. Always use it to specify the `eventType`.\n    *   **Syntax**: The filter value itself is a string where event type values must be enclosed in double quotes. Example: `eventType eq \"user.session.start\"`.\n    *   **Combining filters**: Use `and` or `or` for complex queries. For example: `eventType eq \"user.session.start\" or eventType eq \"user.mfa.factor.activate\"`\n\n*   **`since`** & **`until`** (String - ISO 8601 timestamp):\n    *   Used to define a time window for the query.\n    *   Example: `since=2024-07-25T00:00:00.000Z&until=2024-07-26T00:00:00.000Z`\n\n## Common `eventType` Filters\n*   **User Login & Session**:\n    *   `eventType eq \"user.session.start\"` (Successful user login)\n    *   `eventType eq \"user.authentication.sso\"` (User accessing an app via SSO)\n    *   `eventType eq \"user.authentication.auth_via_mfa\"` (User successfully completed an MFA challenge)\n    *   `eventType eq \"user.session.end\"` (User logged out)\n\n*   **User Account Activity**:\n    *   `eventType eq \"user.lifecycle.create\"` (User account created)\n    *   `eventType eq \"user.lifecycle.activate\"` (User account activated)\n    *   `eventType eq \"user.lifecycle.deactivate\"` (User account deactivated)\n    *   `eventType eq \"user.account.privilege.grant\"` (Admin privileges granted to a user)\n\n*   **MFA & Password Events**:\n    *   `eventType eq \"user.mfa.factor.update\"` (User changed MFA factors)\n    *   `eventType eq \"system.mfa.factor.deactivate\"` (An admin disabled an MFA factor)\n    *   `eventType eq \"user.account.reset_password\"` (User password reset by an admin)\n\n## Example Query\nTo find all successful logins and SSO events within a specific time window, the query parameters would look like this:\n`?since=2024-07-26T12:00:00.000Z&limit=1000&filter=(eventType eq \"user.session.start\" or eventType eq \"user.authentication.sso\")`",
+      "folder_path": "System Log",
+      "parameters": {
+        "required": [
+          "limit"
+        ],
+        "optional": [
+          "since",
+          "until",
+          "after",
+          "filter",
+          "q",
+          "sortOrder"
+        ]
+      }
+    },
+    {
+      "id": "list-users",
+      "method": "GET",
+      "url_pattern": "/api/v1/users",
+      "name": "List all users",
+      "entity": "user",
+      "operation": "list",
+      "description": "Lists users in your org, with pagination in most cases.\n\nA subset of users can be returned that match a supported filter expression or search criteria. Different results are returned depending on specified queries in the request.\n\n> **Note:** This operation omits users that have a status of `DEPROVISIONED` in the response. To return all users, use a filter or search query instead.",
+      "folder_path": "Users",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "search",
+          "filter",
+          "q",
+          "after",
+          "limit",
+          "sortBy",
+          "sortOrder",
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "get-user",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:id",
+      "name": "Retrieve a user",
+      "entity": "user",
+      "operation": "get",
+      "description": "Retrieves a user from your Okta org.\n\nYou can substitute `me` for the `id` to fetch the current user linked to an API token or session cookie.\n * The request returns the user linked to the API token that is specified in the Authorization header, not the user linked to the active session. Details of the admin user who granted the API token is returned.\n * When the end user has an active Okta session, it is typically a CORS request from the browser. Therefore, it's possible to retrieve the current user without the Authorization header.\n\nWhen fetching a user by `login` or `login shortname`, [URL encode](https://developer.mozilla.org/en-US/docs/Glossary/Percent-encoding) the request parameter to ensure that special characters are escaped properly. Logins with a `/` character can only be fetched by `id` due to URL issues with escaping the `/` character. If you don't know a user's ID, you can use the [List all users](/openapi/okta-management/management/tag/User/#tag/User/operation/listUsers) endpoint to find it.\n\n> **Note:** Some browsers block third-party cookies by default, which disrupts Okta functionality in certain flows. See [Mitigate the impact of third-party cookie deprecation](https://help.okta.com/okta_help.htm?type=oie&id=ext-third-party-cookies).",
+      "folder_path": "Users",
+      "parameters": {
+        "required": [
+          "id"
+        ],
+        "optional": [
+          "expand"
+        ]
+      }
+    },
+    {
+      "id": "list-user-blocks",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:id/blocks",
+      "name": "List all user blocks",
+      "entity": "user",
+      "operation": "list_blocks",
+      "description": "Lists information about how the user is blocked from accessing their account",
+      "folder_path": "Users",
+      "parameters": {
+        "required": [
+          "id"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-user-authenticator-enrollments",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/authenticator-enrollments",
+      "name": "List all authenticator enrollments",
+      "entity": "user_authenticator",
+      "operation": "list_enrollments",
+      "description": "Lists all authenticator enrollments of the specified user",
+      "folder_path": "User Authenticator Enrollments",
+      "parameters": {
+        "required": [
+          "userId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-authenticator-enrollment",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/authenticator-enrollments/:enrollmentId",
+      "name": "Retrieve an authenticator enrollment",
+      "entity": "user_authenticator",
+      "operation": "get_enrollment",
+      "description": "Retrieves a user's authenticator enrollment by `enrollmentId`",
+      "folder_path": "User Authenticator Enrollments",
+      "parameters": {
+        "required": [
+          "userId",
+          "enrollmentId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-yubikey-tokens",
+      "method": "GET",
+      "url_pattern": "/api/v1/org/factors/yubikey_token/tokens",
+      "name": "List all YubiKey OTP tokens",
+      "entity": "user_authenticator",
+      "operation": "list_yubikey_tokens",
+      "description": "Lists all YubiKey OTP tokens",
+      "folder_path": "User Factors",
+      "parameters": {
+        "required": [],
+        "optional": [
+          "after",
+          "expand",
+          "filter",
+          "forDownload",
+          "limit",
+          "sortBy",
+          "sortOrder"
+        ]
+      }
+    },
+    {
+      "id": "get-yubikey-token",
+      "method": "GET",
+      "url_pattern": "/api/v1/org/factors/yubikey_token/tokens/:tokenId",
+      "name": "Retrieve a YubiKey OTP token",
+      "entity": "user_authenticator",
+      "operation": "get_yubikey_token",
+      "description": "Retrieves the specified YubiKey OTP token by `id`",
+      "folder_path": "User Factors",
+      "parameters": {
+        "required": [
+          "tokenId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-user-factors",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/factors",
+      "name": "List all enrolled factors",
+      "entity": "user_authenticator",
+      "operation": "list_factors",
+      "description": "Lists all enrolled factors for the specified user that are included in the highest priority [authenticator enrollment policy](https://developer.okta.com/docs/api/openapi/okta-management/management/tag/Policy/) that applies to the user.\n\nOnly enrolled factors that are `REQUIRED` or `OPTIONAL` in the highest priority authenticator enrollment policy can be returned.\n\n> **Note:** When admins use this endpoint for other users, the authenticator enrollment policy that's evaluated can vary depending on how client-specific conditions are configured in the rules of an authenticator enrollment policy. The client-specific conditions of the admin's client are used during policy evaluation instead of the client-specific conditions of the user. This can affect which authenticator enrollment policy is evaluated and which factors are returned.\n>\n> For example, an admin in Europe lists all enrolled factors for a user in North America. The network zone of the admin's client (in Europe) is used during policy evaluation instead of the network zone of the user (in North America).",
+      "folder_path": "User Factors",
+      "parameters": {
+        "required": [
+          "userId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-supported-factors",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/factors/catalog",
+      "name": "List all supported factors",
+      "entity": "user_authenticator",
+      "operation": "list_supported_factors",
+      "description": "Lists all the supported factors that can be enrolled for the specified user that are included in the highest priority [authenticator enrollment policy](https://developer.okta.com/docs/api/openapi/okta-management/management/tag/Policy/) that applies to the user.\n\nOnly factors that are `REQUIRED` or `OPTIONAL` in the highest priority authenticator enrollment policy can be returned.\n\n> **Note:** When admins use this endpoint for other users, the authenticator enrollment policy that's evaluated can vary depending on how client-specific conditions are configured in the rules of an authenticator enrollment policy. The client-specific conditions of the admin's client are used during policy evaluation instead of the client-specific conditions of the user. This can affect which authenticator enrollment policy is evaluated and which factors are returned.\n>\n> For example, an admin in Europe lists all supported factors for a user in North America. The network zone of the admin's client (in Europe) is used during policy evaluation instead of the network zone of the user (in North America).",
+      "folder_path": "User Factors",
+      "parameters": {
+        "required": [
+          "userId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-supported-security-questions",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/factors/questions",
+      "name": "List all supported security questions",
+      "entity": "user_authenticator",
+      "operation": "list_supported_security_questions",
+      "description": "Lists all available security questions for the specified user",
+      "folder_path": "User Factors",
+      "parameters": {
+        "required": [
+          "userId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-user-factor",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/factors/:factorId",
+      "name": "Retrieve a factor",
+      "entity": "user_authenticator",
+      "operation": "get_factor",
+      "description": "Retrieves an existing factor for the specified user",
+      "folder_path": "User Factors",
+      "parameters": {
+        "required": [
+          "userId",
+          "factorId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "get-factor-transaction-status",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/factors/:factorId/transactions/:transactionId",
+      "name": "Retrieve a factor transaction status",
+      "entity": "user_authenticator",
+      "operation": "get_factor_transaction_status",
+      "description": "Retrieves the status of a `push` factor verification transaction\n\n > **Note:**\n > The response body for a number matching push challenge to an Okta Verify `push` factor enrollment is different from the response body of a standard push challenge. \n > The number matching push challenge [response body](https://developer.okta.com/docs/api/openapi/okta-management/management/tag/UserFactor/#tag/UserFactor/operation/getFactorTransactionStatus!c=200&path=1/_embedded&t=response) contains the correct answer for the challenge.\n > Use [Verify a factor](/openapi/okta-management/management/tag/UserFactor/#tag/UserFactor/operation/verifyFactor) to configure which challenge is sent.",
+      "folder_path": "User Factors",
+      "parameters": {
+        "required": [
+          "userId",
+          "factorId",
+          "transactionId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-user-app-links",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:id/appLinks",
+      "name": "List all assigned app links",
+      "entity": "user",
+      "operation": "list_app_links",
+      "description": "Lists all app links for all direct or indirect (through group membership) assigned apps.\n\n> **Note:** To list all apps in an org, use the [List all applications endpoint in the Applications API](/openapi/okta-management/management/tag/Application/#tag/Application/operation/listApplications).",
+      "folder_path": "User Resources",
+      "parameters": {
+        "required": [
+          "id"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-user-groups",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:id/groups",
+      "name": "List all groups",
+      "entity": "user",
+      "operation": "list_groups",
+      "description": "Lists all groups of which the user is a member.\n> **Note:** To list all groups in your org, use the [List all groups endpoints in the Groups API](/openapi/okta-management/management/tag/Group/#tag/Group/operation/listGroups).",
+      "folder_path": "User Resources",
+      "parameters": {
+        "required": [
+          "id"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-user-clients",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/clients",
+      "name": "List all clients",
+      "entity": "user",
+      "operation": "list_clients",
+      "description": "Lists all client resources for which the specified user has grants or tokens.\n\n> **Note:** To list all client resources for which a specified authorization server has tokens, use the [List all client resources for an authorization server in the Authorization Servers API](/openapi/okta-management/management/tag/AuthorizationServerClients/#tag/AuthorizationServerClients/operation/listOAuth2ClientsForAuthorizationServer).",
+      "folder_path": "User Resources",
+      "parameters": {
+        "required": [
+          "userId"
+        ],
+        "optional": []
+      }
+    },
+    {
+      "id": "list-user-devices",
+      "method": "GET",
+      "url_pattern": "/api/v1/users/:userId/devices",
+      "name": "List all devices",
+      "entity": "user",
+      "operation": "list_devices",
+      "description": "Lists all devices enrolled by a user.\n\n> **Note:** To list all devices registered to an org, use the [List all devices endpoint in the Devices API](/openapi/okta-management/management/tag/Device/#tag/Device/operation/listDevices).",
+      "folder_path": "User Resources",
+      "parameters": {
+        "required": [
+          "userId"
+        ],
+        "optional": []
+      }
+    }
+  ]
+}

@@ -52,6 +52,16 @@ from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, plannin
 from src.core.agents.results_formatter_agent import process_results_structured
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 
+# Import security validation
+from src.core.security import (
+    validate_generated_code, 
+    validate_http_method, 
+    validate_api_endpoint,
+    validate_url,
+    validate_polars_operation,
+    get_security_headers
+)
+
 # Import logging
 from src.utils.logging import get_logger, get_default_log_dir
 
@@ -159,7 +169,7 @@ class ModernExecutionManager:
         # Load simple reference format
         project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
         self.simple_ref_path = os.path.join(project_root, "src", "data", "schemas", "lightweight_api_reference.json")
-        self.full_api_path = os.path.join(project_root, "src", "data", "schemas", "Okta_API_entitity_endpoint_reference.json")
+        self.full_api_path = os.path.join(project_root, "src", "data", "schemas", "Okta_API_entitity_endpoint_reference_GET_ONLY.json")
         
         # Load simple reference for planning
         self.simple_ref_data = self._load_simple_reference()
@@ -502,7 +512,12 @@ class ModernExecutionManager:
         
         for endpoint in self.endpoints:
             if self._is_precise_match(endpoint, entity, operations, methods):
-                matches.append(endpoint)
+                # SECURITY VALIDATION: Validate endpoint before including
+                security_result = validate_api_endpoint(endpoint)
+                if security_result.is_valid:
+                    matches.append(endpoint)
+                else:
+                    logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
         
         return matches
     
@@ -1283,6 +1298,39 @@ class ModernExecutionManager:
         import shutil
         
         try:
+            # SECURITY VALIDATION: Validate generated code before execution
+            logger.info(f"[{correlation_id}] Security validation: Checking generated code for safety")
+            security_result = validate_generated_code(python_code)
+            
+            if not security_result.is_valid:
+                error_msg = f"Security violation in generated code: {'; '.join(security_result.violations)}"
+                logger.error(f"[{correlation_id}] {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'security_violations': security_result.violations,
+                    'risk_level': security_result.risk_level
+                }
+            
+            # POLARS SECURITY VALIDATION: Check for Polars operations
+            if 'polars' in python_code.lower() or 'pl.' in python_code:
+                logger.info(f"[{correlation_id}] Polars usage detected - performing additional validation")
+                polars_result = validate_polars_operation(python_code)
+                
+                if not polars_result.is_valid:
+                    error_msg = f"Polars security violation: {'; '.join(polars_result.violations)}"
+                    logger.error(f"[{correlation_id}] {error_msg}")
+                    return {
+                        'success': False,
+                        'error': error_msg,
+                        'security_violations': polars_result.violations,
+                        'risk_level': polars_result.risk_level
+                    }
+                
+                logger.info(f"[{correlation_id}] Polars security validation passed")
+            
+            logger.info(f"[{correlation_id}] Security validation passed - code is safe to execute")
+            
             # Create a temporary directory for execution
             with tempfile.TemporaryDirectory() as temp_dir:
                 # Copy the base API client to the temp directory

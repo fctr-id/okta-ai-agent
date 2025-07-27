@@ -79,3 +79,5 @@ src/data/COMPLETE_RESTRUCTURE_PLAN.md
 src/data/COMPLETE_RESTRUCTURE_PLAN_v1.md
 MIGRATION_IMPLEMENTATION_PLAN.md
 src/core/orchestration/results/*
+src/data/testing/*
+src/data/SECURITY_IMPLEMENTATION_PLAN.md
