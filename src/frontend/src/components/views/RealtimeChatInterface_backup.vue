@@ -73,14 +73,6 @@
               </div>
             </div>
             
-            <!-- Sample query suggestions -->
-            <div class="suggestions-grid">
-              <v-btn v-for="(suggestion, i) in suggestions" :key="i" class="suggestion-btn"
-                variant="outlined" @click="selectSuggestion(suggestion)" size="small">
-                {{ suggestion }}
-              </v-btn>
-            </div>
-            
             <div class="tools-button-container">
               <v-btn
                 color="primary"
@@ -300,18 +292,6 @@ const exampleQueries = ref([
   'Show groups for user test.user@example.com',
 ]);
 
-// Comprehensive query suggestions for users (copied from ChatInterfaceV2.vue)
-const suggestions = ref([
-  'List all users along with their creation dates',
-  'Show users with PUSH factor registered', 
-  'Find users with SMS registered with phone number ending with 2364',
-  'Show me all users who are in locked status',
-  'List all groups and their descriptions',
-  'Show applications assigned to user dan@fctr.io',
-  'Find users in Engineering group with admin roles',
-  'How many users were created last month?'
-]);
-
 const canSubmitQuery = computed(() => userInput.value.trim().length > 0 && !isProcessing.value);
 const canCancelQuery = computed(() => isProcessing.value && rtProcessId.value && !isCancelling.value && rtExecutionStatus.value !== 'completed' && rtExecutionStatus.value !== 'error' && rtExecutionStatus.value !== 'cancelled');
 
@@ -383,26 +363,6 @@ const handleKeyDown = (e) => {
       userInput.value = historyIndex.value === -1 ? '' : messageHistory.value[historyIndex.value];
     }
   }
-};
-
-// Handle suggestion selection
-const selectSuggestion = (suggestion) => {
-  userInput.value = suggestion;
-  handleQuerySubmit();
-};
-
-// Map backend tool names to user-friendly display names (matching backend implementation)
-const getStepDisplayName = (toolName, entity) => {
-  if (!entity && toolName) {
-    return toolName;
-  }
-  
-  const displayMapping = {
-    "api": entity,  // "users", "groups", "system_log", etc.
-    "sql": `sql_${entity}`,  // "sql_users", "sql_groups", etc.
-  };
-  
-  return displayMapping[toolName] || toolName;
 };
 
 const handleQuerySubmit = async () => {
@@ -549,7 +509,7 @@ const progressSteps = computed(() => {
 
       items.push({
         id: `plan_step_${step.id || index}`,
-        title: getStepDisplayName(step.tool_name, step.query_context?.entity) || step.tool_name || `Action ${index + 1}`,
+        title: step.tool_name || `Action ${index + 1}`,
         status: itemStatus,
       });
     });

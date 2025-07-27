@@ -81,3 +81,4 @@ MIGRATION_IMPLEMENTATION_PLAN.md
 src/core/orchestration/results/*
 src/data/testing/*
 src/data/SECURITY_IMPLEMENTATION_PLAN.md
+src/data/documentation/*
