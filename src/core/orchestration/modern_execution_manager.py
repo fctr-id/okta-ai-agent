@@ -195,6 +195,184 @@ class ModernExecutionManager:
         
         logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, {len(self.sql_tables)} SQL tables, {len(self.endpoints)} endpoints")
     
+    # DATABASE HEALTH CHECK METHODS
+    
+    def _check_database_health(self) -> bool:
+        """
+        Check if the SQLite database exists and is populated with users.
+        
+        Returns:
+            bool: True if database exists and has users (>= 1), False otherwise
+        """
+        try:
+            # Get database path from settings or default location
+            from src.config.settings import Settings
+            settings = Settings()
+            
+            # Try multiple possible database locations
+            possible_db_paths = [
+                getattr(settings, 'database_path', None),
+                os.path.join(os.getcwd(), 'sqlite_db', 'okta_sync.db'),
+                os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db'),
+                'sqlite_db/okta_sync.db'
+            ]
+            
+            db_path = None
+            for path in possible_db_paths:
+                if path and os.path.exists(path):
+                    db_path = path
+                    break
+            
+            if not db_path:
+                logger.warning("Database file not found in any expected location")
+                return False
+            
+            # Check if database is accessible and has users
+            with sqlite3.connect(db_path, timeout=5) as conn:
+                cursor = conn.cursor()
+                
+                # Check if users table exists
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+                if not cursor.fetchone():
+                    logger.warning("Users table not found in database")
+                    return False
+                
+                # Check if users table has at least 1 record
+                cursor.execute("SELECT COUNT(*) FROM users")
+                user_count = cursor.fetchone()[0]
+                
+                logger.info(f"Database health check: Found {user_count} users in database")
+                return user_count >= 1
+                
+        except Exception as e:
+            logger.warning(f"Database health check failed: {e}")
+            return False
+    
+    def _should_force_api_only_mode(self, query: str, force_api_only: bool = False) -> tuple[bool, str]:
+        """
+        Determine if query should use API-only mode and modify query if needed.
+        
+        Args:
+            query: Original user query
+            force_api_only: Flag from frontend to force API-only mode
+            
+        Returns:
+            tuple: (should_use_api_only, modified_query)
+        """
+        # Check for explicit API-only requests in query
+        api_only_phrases = [
+            "do not use sql",
+            "don't use sql", 
+            "no sql",
+            "api only",
+            "apis only",
+            "api calls only",
+            "without using sql"
+        ]
+        
+        query_lower = query.lower()
+        explicit_api_only = any(phrase in query_lower for phrase in api_only_phrases)
+        
+        # Check database health
+        db_healthy = self._check_database_health()
+        
+        # Decision logic
+        should_force_api = force_api_only or explicit_api_only or not db_healthy
+        
+        # Modify query if forcing API-only mode
+        modified_query = query
+        if should_force_api and not explicit_api_only:
+            # Add API-only instruction to query
+            modified_query = f"{query}. Do NOT use SQL and only use APIs"
+            
+        # Log decision
+        if should_force_api:
+            reasons = []
+            if force_api_only:
+                reasons.append("frontend flag")
+            if explicit_api_only:
+                reasons.append("explicit user request")
+            if not db_healthy:
+                reasons.append("database unavailable/empty")
+            
+            logger.info(f"API-only mode activated: {', '.join(reasons)}")
+            if modified_query != query:
+                logger.info(f"Modified query: {modified_query}")
+        else:
+            logger.info("SQL and API modes both available")
+            
+        return should_force_api, modified_query
+    
+    def is_database_healthy(self) -> Dict[str, Any]:
+        """
+        Public method to check database health status.
+        
+        Returns:
+            Dict with database health information for API endpoints/frontend
+        """
+        try:
+            is_healthy = self._check_database_health()
+            
+            # Get additional database info
+            from src.config.settings import Settings
+            settings = Settings()
+            
+            # Try to get database path and stats
+            possible_db_paths = [
+                getattr(settings, 'database_path', None),
+                os.path.join(os.getcwd(), 'sqlite_db', 'okta_sync.db'),
+                os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db'),
+                'sqlite_db/okta_sync.db'
+            ]
+            
+            db_path = None
+            db_size = 0
+            user_count = 0
+            table_count = 0
+            
+            for path in possible_db_paths:
+                if path and os.path.exists(path):
+                    db_path = path
+                    db_size = os.path.getsize(path)
+                    break
+            
+            if db_path and is_healthy:
+                try:
+                    with sqlite3.connect(db_path, timeout=5) as conn:
+                        cursor = conn.cursor()
+                        
+                        # Get user count
+                        cursor.execute("SELECT COUNT(*) FROM users")
+                        user_count = cursor.fetchone()[0]
+                        
+                        # Get table count
+                        cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
+                        table_count = cursor.fetchone()[0]
+                        
+                except Exception as e:
+                    logger.warning(f"Failed to get database stats: {e}")
+            
+            return {
+                "healthy": is_healthy,
+                "database_path": db_path,
+                "database_size_bytes": db_size,
+                "user_count": user_count,
+                "table_count": table_count,
+                "sql_available": is_healthy,
+                "api_available": True,  # API is always available
+                "recommendation": "SQL and API modes available" if is_healthy else "API-only mode recommended"
+            }
+            
+        except Exception as e:
+            logger.error(f"Database health check failed: {e}")
+            return {
+                "healthy": False,
+                "error": str(e),
+                "sql_available": False,
+                "api_available": True,
+                "recommendation": "API-only mode required"
+            }
+    
     # REPEATABLE DATA FLOW METHODS - Scale with any number of tools/steps
     
     def _store_step_data(self, step_number: int, step_type: str, data: Any, metadata: Dict[str, Any] = None, step_context: str = None) -> str:
@@ -582,18 +760,20 @@ class ModernExecutionManager:
                 return True
         return False
     
-    async def execute_query(self, query: str) -> Dict[str, Any]:
+    async def execute_query(self, query: str, force_api_only: bool = False) -> Dict[str, Any]:
         """
         Main execution method for complex multi-step query processing.
         
         Flow:
         1. Generate/use existing correlation ID
-        2. Use Planning Agent to generate execution plan
-        3. Execute steps using Modern Execution Manager
-        4. Return structured results
+        2. Check database health and API-only mode requirements
+        3. Use Planning Agent to generate execution plan
+        4. Execute steps using Modern Execution Manager
+        5. Return structured results
         
         Args:
             query: Natural language query to execute
+            force_api_only: Flag to force API-only mode (from frontend)
             
         Returns:
             Dict with success status, results, and correlation_id
@@ -618,6 +798,14 @@ class ModernExecutionManager:
             ai_provider = os.getenv('AI_PROVIDER', 'not_set')
             logger.info(f"[{correlation_id}] AI_PROVIDER: {ai_provider}")
             
+            # NEW: Check database health and API-only mode requirements
+            should_use_api_only, modified_query = self._should_force_api_only_mode(query, force_api_only)
+            
+            if should_use_api_only:
+                logger.info(f"[{correlation_id}] Query will be executed in API-only mode")
+            else:
+                logger.info(f"[{correlation_id}] Query will use both SQL and API modes as planned")
+            
             # Phase 1: Use Planning Agent to generate execution plan
             logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
             
@@ -630,8 +818,8 @@ class ModernExecutionManager:
                 flow_id=correlation_id
             )
             
-            # Execute Planning Agent with dependencies - trust the agent to handle validation
-            planning_result = await planning_agent.run(query, deps=planning_deps)
+            # Execute Planning Agent with dependencies - use modified query if needed
+            planning_result = await planning_agent.run(modified_query, deps=planning_deps)
             
             # Trust the agent - just extract the plan
             execution_plan = planning_result.output.plan
