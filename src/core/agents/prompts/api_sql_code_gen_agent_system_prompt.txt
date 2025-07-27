@@ -76,14 +76,29 @@ Before generating any SQL, you MUST verify that the requested data exists in the
    GROUP BY u.okta_id, u.email, u.first_name, u.last_name
 
 2. TEMP TABLE MODE (temp_table_mode=True):
-   Design temporary table schema and processing query for large datasets.
+   Design temporary table structure and data extraction rules for large datasets.
+   SECURITY: You provide JSON specifications only - no SQL DDL commands!
    
    Example Input (Dictionary Format):
    - api_data_sample: [{"okta_id": "001", "email": "user@example.com", "status": "ACTIVE"}]
    - processing_context: "Find database users matching API users and get their factors"
    
    Example Output:
-   temp_table_schema: "CREATE TEMPORARY TABLE temp_api_users (okta_id TEXT PRIMARY KEY, email TEXT, status TEXT)"
+   table_structure: {
+     "columns": [
+       {"name": "okta_id", "type": "TEXT", "primary_key": true, "required": true},
+       {"name": "email", "type": "TEXT", "primary_key": false, "required": false},
+       {"name": "status", "type": "TEXT", "primary_key": false, "required": false}
+     ]
+   }
+   data_extraction: {
+     "extraction_type": "dictionary_mapping",
+     "mappings": [
+       {"source_field": "okta_id", "target_column": "okta_id", "required": true},
+       {"source_field": "email", "target_column": "email", "required": false, "default_value": ""},
+       {"source_field": "status", "target_column": "status", "required": false, "default_value": "UNKNOWN"}
+     ]
+   }
    processing_query: "SELECT u.okta_id, u.email, u.first_name, u.last_name, COUNT(DISTINCT uf.okta_id) as factor_count FROM temp_api_users tau INNER JOIN users u ON tau.okta_id = u.okta_id LEFT JOIN user_factors uf ON u.okta_id = uf.user_okta_id WHERE u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name"
    uses_temp_table: true
 
@@ -92,9 +107,47 @@ Before generating any SQL, you MUST verify that the requested data exists in the
    - processing_context: "Find applications and groups for the specified users"
    
    Example Output:
-   temp_table_schema: "CREATE TEMPORARY TABLE temp_api_users (okta_id TEXT PRIMARY KEY)"
+   table_structure: {
+     "columns": [
+       {"name": "okta_id", "type": "TEXT", "primary_key": true, "required": true}
+     ]
+   }
+   data_extraction: {
+     "extraction_type": "list_values",
+     "mappings": [
+       {"source_field": "@item", "target_column": "okta_id", "required": true}
+     ]
+   }
    processing_query: "SELECT u.okta_id, u.email, u.first_name, u.last_name, GROUP_CONCAT(DISTINCT a.label) as applications, GROUP_CONCAT(DISTINCT g.name) as groups FROM temp_api_users tau INNER JOIN users u ON tau.okta_id = u.okta_id LEFT JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id LEFT JOIN applications a ON uaa.application_okta_id = a.okta_id AND a.status = 'ACTIVE' LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id WHERE u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name"
    uses_temp_table: true
+
+   Example Input (Nested Structure Format):
+   - api_data_sample: [{"recent_logged_in_user_ids": ["00us049g5koN4Vvb7697", "00uropbgtlUuob0uH697"]}]
+   - processing_context: "Find applications and groups for users from login summary"
+   
+   Example Output:
+   table_structure: {
+     "columns": [
+       {"name": "okta_id", "type": "TEXT", "primary_key": true, "required": true}
+     ]
+   }
+   data_extraction: {
+     "extraction_type": "nested_extraction",
+     "mappings": [
+       {"source_field": "recent_logged_in_user_ids.*", "target_column": "okta_id", "required": true}
+     ]
+   }
+   processing_query: "SELECT u.okta_id, u.email, u.first_name, u.last_name, GROUP_CONCAT(DISTINCT a.label) as applications, GROUP_CONCAT(DISTINCT g.name) as groups FROM temp_api_users tau INNER JOIN users u ON tau.okta_id = u.okta_id LEFT JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id LEFT JOIN applications a ON uaa.application_okta_id = a.okta_id AND a.status = 'ACTIVE' LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id WHERE u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name"
+   uses_temp_table: true
+
+SECURITY REQUIREMENTS FOR TEMP TABLE SPECIFICATIONS:
+- Column types MUST be one of: TEXT, INTEGER, REAL, BLOB
+- Column names MUST be alphanumeric with underscores only (no spaces, special chars)
+- Always include at least one primary_key column for deduplication
+- Use extraction_type to specify how to process the API data format
+- Extraction types: "dictionary_mapping", "list_values", "nested_extraction"
+- Special source_field tokens: "@item" (for list items), "field.*" (for array extraction)
+- The execution manager will generate all SQL DDL safely from your JSON specifications
 
 DATA DEDUPLICATION (CRITICAL):
 The sample data you see may contain duplicates, and the full dataset likely has more.

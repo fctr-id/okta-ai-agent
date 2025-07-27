@@ -40,13 +40,44 @@ class ApiSqlDependencies(BaseModel):
     flow_id: str
     tenant_id: str = "main"
 
+from pydantic import BaseModel, Field
+from typing import List, Dict, Any, Optional
+import os
+import logging
+
+logger = logging.getLogger(__name__)
+
+class TableColumn(BaseModel):
+    """Definition of a temp table column"""
+    name: str = Field(..., description="Column name (alphanumeric + underscore only)")
+    type: str = Field(..., description="Column type (TEXT, INTEGER, REAL, BLOB only)")
+    primary_key: bool = Field(False, description="Whether this column is the primary key")
+    required: bool = Field(True, description="Whether this column is required")
+
+class TableStructure(BaseModel):
+    """Definition of temp table structure"""
+    columns: List[TableColumn] = Field(..., description="List of table columns")
+
+class DataMapping(BaseModel):
+    """Definition of how to map API data to table columns"""
+    source_field: str = Field(..., description="Field name in API data (or special tokens like '@item')")
+    target_column: str = Field(..., description="Target column name in temp table")
+    required: bool = Field(True, description="Whether this mapping is required")
+    default_value: Optional[str] = Field(None, description="Default value if source field is missing")
+
+class DataExtraction(BaseModel):
+    """Definition of how to extract data from API response"""
+    extraction_type: str = Field(..., description="Type of extraction: 'dictionary_mapping', 'list_values', 'nested_extraction'")
+    mappings: List[DataMapping] = Field(..., description="List of data mappings")
+
 class ApiSqlOutput(BaseModel):
     """Output from internal API-SQL agent"""
-    temp_table_schema: Optional[str] = None
-    processing_query: str
-    explanation: str
-    estimated_records: int
-    uses_temp_table: bool = False
+    table_structure: Optional[TableStructure] = Field(None, description="Structure for temporary table if needed")
+    data_extraction: Optional[DataExtraction] = Field(None, description="Instructions for extracting API data")
+    processing_query: str = Field(..., description="SQL query to process the data")
+    explanation: str = Field(..., description="Context about what this query accomplishes")
+    estimated_records: int = Field(0, description="Estimated number of records")
+    uses_temp_table: bool = Field(False, description="Whether this query uses a temporary table")
 
 def load_api_sql_code_gen_agent_system_prompt() -> str:
     """Load system prompt from external file"""
@@ -151,21 +182,34 @@ class ApiSqlCodeGenAgent:
                 logger.debug(f"[{correlation_id}] Rejected SQL: {result.output.processing_query}")
                 raise ValueError(f"Generated SQL failed security validation: {error_msg}")
         
-        # Validate temp table schema if present
-        if result.output.temp_table_schema:
-            is_valid, error_msg = validate_internal_sql(result.output.temp_table_schema, correlation_id)
-            if not is_valid:
-                logger.error(f"[{correlation_id}] API-SQL Agent generated invalid temp table schema: {error_msg}")
-                logger.debug(f"[{correlation_id}] Rejected schema: {result.output.temp_table_schema}")
-                raise ValueError(f"Generated temp table schema failed security validation: {error_msg}")
+        # Validate table structure if present (new secure approach)
+        if result.output.uses_temp_table and result.output.table_structure:
+            logger.debug(f"[{correlation_id}] Validating table structure specification")
+            try:
+                # Basic validation of table structure
+                columns = result.output.table_structure.columns
+                if not columns:
+                    raise ValueError("Table structure must have at least one column")
+                
+                # Validate column types
+                allowed_types = {'TEXT', 'INTEGER', 'REAL', 'BLOB'}
+                for col in columns:
+                    if col.type.upper() not in allowed_types:
+                        raise ValueError(f"Invalid column type: {col.type}")
+                        
+                logger.debug(f"[{correlation_id}] Table structure validation passed: {len(columns)} columns")
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Table structure validation failed: {e}")
+                raise ValueError(f"Invalid table structure: {e}")
         
         logger.info(f"[{correlation_id}] API-SQL generation completed")
         logger.debug(f"[{correlation_id}] Generated query type: {'TEMP_TABLE' if result.output.uses_temp_table else 'DIRECT'}")
         logger.debug(f"[{correlation_id}] Estimated records: {result.output.estimated_records}")
         
         # Log the complete generated query for debugging
-        if result.output.uses_temp_table and result.output.temp_table_schema:
-            logger.debug(f"[{correlation_id}] TEMP TABLE SCHEMA:\n{result.output.temp_table_schema}")
+        if result.output.uses_temp_table and result.output.table_structure:
+            logger.debug(f"[{correlation_id}] TABLE STRUCTURE: {len(result.output.table_structure.columns)} columns")
+            logger.debug(f"[{correlation_id}] DATA EXTRACTION: {result.output.data_extraction.extraction_type}")
         logger.debug(f"[{correlation_id}] PROCESSING QUERY:\n{result.output.processing_query}")
         logger.debug(f"[{correlation_id}] EXPLANATION: {result.output.explanation}")
         

@@ -149,8 +149,8 @@ AVAILABLE API ENDPOINTS WITH COMPLETE DOCUMENTATION:
    - Use the exact HTTP method specified ('method' field)
    - GET for retrieving data, POST for creating, PUT for updating, DELETE for removing
    
-4. **DESCRIPTION ADHERENCE**:
-   - Read the 'description' field carefully for API-specific guidance
+4. **NOTES ADHERENCE**:
+   - Read the 'notes' field carefully for API-specific guidance
    - Follow any special notes, limitations, or requirements mentioned
    - Pay attention to default values, pagination, and rate limits
    
@@ -408,7 +408,7 @@ async def execute_api_code_generation_legacy_wrapper(
                 'url_pattern': ep.get('url_pattern', ''),
                 'entity': ep.get('entity', ''),
                 'operation': ep.get('operation', ''),
-                'description': ep.get('description', ''),
+                'notes': ep.get('notes', ''),
                 'folder_path': ep.get('folder_path', ''),
                 'parameters': ep.get('parameters', {})
             }

@@ -67,6 +67,7 @@ class MethodWhitelistValidator:
         'range', 'enumerate', 'zip', 'sorted', 'reversed', 'sum', 'min', 'max',
         'abs', 'round', 'isinstance', 'issubclass', 'type', 'id', 'hash',
         'repr', 'format', 'print',  # Allow print for debugging
+        'any', 'all',  # Boolean aggregation functions (any=at least one True, all=every element True)
         
         # Essential function calls that should be allowed
         'OktaAPIClient',  # Our API client class
@@ -78,6 +79,20 @@ class MethodWhitelistValidator:
         'dumps',          # json.dumps  
         'loads',          # json.loads
         'next',           # Iterator function (needed for some operations)
+    }
+    
+    # Common user-defined function patterns that LLMs generate
+    ALLOWED_USER_FUNCTION_PATTERNS = {
+        # Data processing functions (using wildcards)
+        'fetch_*', 'get_*', 'extract_*', 'process_*', 'parse_*', 'format_*',
+        'collect_*', 'aggregate_*', 'combine_*', 'merge_*', 'filter_*',
+        
+        # Helper functions
+        'handle_*', 'create_*', 'build_*', 'setup_*', 'init_*',
+        'calculate_*', 'validate_*', 'check_*', 'verify_*',
+        
+        # Main execution functions
+        'main', 'run_*', 'execute_*', 'start_*'
     }
     
     # Allowed Python methods for HTTP API calls and data processing
@@ -124,6 +139,104 @@ class MethodWhitelistValidator:
         """Initialize the validator"""
         self.compiled_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.BLOCKED_PATTERNS]
     
+    def _is_allowed_user_function(self, func_name: str) -> bool:
+        """
+        Check if a function name matches allowed user-defined function patterns
+        
+        Args:
+            func_name: Name of the function to check
+            
+        Returns:
+            True if function name matches allowed patterns
+        """
+        for pattern in self.ALLOWED_USER_FUNCTION_PATTERNS:
+            if pattern.endswith('*'):
+                # Wildcard pattern - check if function name starts with the prefix
+                prefix = pattern[:-1]  # Remove the *
+                if func_name.startswith(prefix):
+                    return True
+            else:
+                # Exact match
+                if func_name == pattern:
+                    return True
+        return False
+    
+    def _validate_function_body(self, func_node: ast.FunctionDef) -> List[str]:
+        """
+        Validate the body of a user-defined function for security violations
+        
+        Args:
+            func_node: AST node representing the function definition
+            
+        Returns:
+            List of security violations found in the function body
+        """
+        violations = []
+        
+        # Check all nodes within the function body
+        for node in ast.walk(func_node):
+            # Skip the function definition itself
+            if node == func_node:
+                continue
+                
+            # Check for dangerous patterns in function calls
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Attribute):
+                    method_name = node.func.attr
+                    # Block dangerous methods even in user functions
+                    if method_name not in self.ALLOWED_PYTHON_METHODS and method_name not in self.ALLOWED_BUILTINS:
+                        violations.append(f"Function '{func_node.name}' contains unauthorized method call: {method_name}")
+                elif isinstance(node.func, ast.Name):
+                    func_call_name = node.func.id
+                    # Allow calls to other user functions but block dangerous builtins
+                    if func_call_name not in self.ALLOWED_BUILTINS and not self._is_safe_user_function_call(func_call_name):
+                        violations.append(f"Function '{func_node.name}' contains unauthorized function call: {func_call_name}")
+            
+            # Check for dangerous imports within functions
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        module_name = alias.name.split('.')[0]
+                        if module_name not in self.ALLOWED_MODULES:
+                            violations.append(f"Function '{func_node.name}' contains unauthorized import: {alias.name}")
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    module_name = node.module.split('.')[0]
+                    if module_name not in self.ALLOWED_MODULES:
+                        violations.append(f"Function '{func_node.name}' contains unauthorized import from: {node.module}")
+        
+        return violations
+    
+    def _is_safe_user_function_call(self, func_name: str) -> bool:
+        """
+        Check if a function call is safe (either matches patterns or is user-defined)
+        This is a more permissive check for function calls within user functions
+        
+        Args:
+            func_name: Name of the function being called
+            
+        Returns:
+            True if the function call is considered safe
+        """
+        # Allow common safe function name patterns
+        safe_patterns = [
+            'fetch_', 'get_', 'extract_', 'process_', 'parse_', 'format_',
+            'collect_', 'aggregate_', 'combine_', 'merge_', 'filter_',
+            'handle_', 'create_', 'build_', 'setup_', 'init_',
+            'calculate_', 'validate_', 'check_', 'verify_',
+            'run_', 'execute_', 'start_', 'stop_', 'end_'
+        ]
+        
+        # Check if function starts with any safe pattern
+        for pattern in safe_patterns:
+            if func_name.startswith(pattern):
+                return True
+        
+        # Allow single word function names (likely user-defined)
+        if '_' not in func_name and func_name.islower() and len(func_name) > 2:
+            return True
+            
+        return False
+    
     def validate_python_code(self, code: str) -> SecurityValidationResult:
         """
         Validate Python code against security policies
@@ -148,6 +261,19 @@ class MethodWhitelistValidator:
         # Check for dangerous imports and method calls
         try:
             tree = ast.parse(code)
+            
+            # First pass: collect user-defined function names and validate their bodies
+            user_defined_functions = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    user_defined_functions.add(node.name)
+                    # Validate the function body for security violations
+                    func_violations = self._validate_function_body(node)
+                    if func_violations:
+                        violations.extend(func_violations)
+                        risk_level = 'HIGH'
+            
+            # Second pass: validate imports and function calls
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
                     for alias in node.names:
@@ -163,20 +289,35 @@ class MethodWhitelistValidator:
                             violations.append(f"Unauthorized import from: {node.module}")
                             risk_level = 'HIGH'
                 
-                # Check method calls against whitelist
+                # Check method calls against whitelist (only at module level, not within functions)
                 elif isinstance(node, ast.Call):
-                    if isinstance(node.func, ast.Attribute):
-                        method_name = node.func.attr
-                        # Check if method is in allowed Python methods
-                        if method_name not in self.ALLOWED_PYTHON_METHODS and method_name not in self.ALLOWED_BUILTINS:
-                            violations.append(f"Unauthorized method call: {method_name}")
-                            risk_level = 'HIGH'
-                    elif isinstance(node.func, ast.Name):
-                        func_name = node.func.id
-                        # Check if function is in allowed builtins
-                        if func_name not in self.ALLOWED_BUILTINS:
-                            violations.append(f"Unauthorized function call: {func_name}")
-                            risk_level = 'HIGH'
+                    # Skip validation if this call is inside a function (already validated in function body)
+                    parent_function = None
+                    for parent in ast.walk(tree):
+                        if isinstance(parent, ast.FunctionDef):
+                            if any(child_node == node for child_node in ast.walk(parent)):
+                                parent_function = parent
+                                break
+                    
+                    if parent_function is None:  # This is a module-level call
+                        if isinstance(node.func, ast.Attribute):
+                            method_name = node.func.attr
+                            # Check if method is in allowed Python methods
+                            if method_name not in self.ALLOWED_PYTHON_METHODS and method_name not in self.ALLOWED_BUILTINS:
+                                violations.append(f"Unauthorized method call: {method_name}")
+                                risk_level = 'HIGH'
+                        elif isinstance(node.func, ast.Name):
+                            func_name = node.func.id
+                            # Allow calls to user-defined functions
+                            if func_name in user_defined_functions:
+                                continue
+                            # Allow calls to safe user function patterns
+                            if self._is_safe_user_function_call(func_name):
+                                continue
+                            # Check if function is in allowed builtins
+                            if func_name not in self.ALLOWED_BUILTINS:
+                                violations.append(f"Unauthorized function call: {func_name}")
+                                risk_level = 'HIGH'
                             
         except SyntaxError as e:
             violations.append(f"Syntax error in code: {e}")

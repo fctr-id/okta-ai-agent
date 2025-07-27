@@ -481,7 +481,7 @@ class ModernExecutionManager:
 
     
     def _get_entity_endpoints_for_step(self, step: ExecutionStep) -> List[Dict[str, Any]]:
-        """Get filtered endpoints for a specific API step"""
+        """Get filtered endpoints for a specific API step, including depends_on endpoints"""
         # Use the entity field from the new format
         entity_name = step.entity
         if not entity_name:
@@ -496,6 +496,18 @@ class ModernExecutionManager:
         # Get matches with precise filtering
         matches = self._get_entity_operation_matches(entity, operations, methods)
         
+        # NEW: Include depends_on endpoints for each matched endpoint
+        depends_on_endpoints = self._get_depends_on_endpoints(matches)
+        
+        # Combine primary matches with dependency endpoints, removing duplicates
+        all_endpoints = matches + depends_on_endpoints
+        seen_ids = set()
+        unique_endpoints = []
+        for ep in all_endpoints:
+            if ep.get('id') not in seen_ids:
+                unique_endpoints.append(ep)
+                seen_ids.add(ep.get('id'))
+        
         # Log detailed info if no matches found for debugging
         if not matches:
             available_for_entity = [ep for ep in self.endpoints if ep.get('entity', '').lower() == entity]
@@ -504,7 +516,7 @@ class ModernExecutionManager:
             if available_for_entity:
                 logger.error(f"First available endpoint for '{entity}': {available_for_entity[0]}")
         
-        return matches
+        return unique_endpoints
     
     def _get_entity_operation_matches(self, entity: str, operations: List[str], methods: List[str]) -> List[Dict]:
         """Get endpoints matching entity + operation + method (copied from old executor)"""
@@ -520,6 +532,28 @@ class ModernExecutionManager:
                     logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
         
         return matches
+    
+    def _get_depends_on_endpoints(self, matched_endpoints: List[Dict]) -> List[Dict]:
+        """Get endpoints that the matched endpoints depend on"""
+        depends_on_endpoints = []
+        
+        for endpoint in matched_endpoints:
+            depends_on_ids = endpoint.get('depends_on', [])
+            if depends_on_ids:
+                for dep_id in depends_on_ids:
+                    # Find the dependency endpoint by ID
+                    dep_endpoint = next((ep for ep in self.endpoints if ep.get('id') == dep_id), None)
+                    if dep_endpoint:
+                        # Validate security for dependency endpoint as well
+                        security_result = validate_api_endpoint(dep_endpoint)
+                        if security_result.is_valid:
+                            depends_on_endpoints.append(dep_endpoint)
+                        else:
+                            logger.warning(f"Dependency endpoint filtered for security: {dep_id} - {'; '.join(security_result.violations)}")
+                    else:
+                        logger.warning(f"Dependency endpoint not found: {dep_id}")
+        
+        return depends_on_endpoints
     
     def _is_precise_match(self, endpoint: Dict, target_entity: str, operations: List[str], methods: List[str]) -> bool:
         """Check if endpoint matches entity + operation + method criteria (copied from old executor)"""
@@ -1023,7 +1057,16 @@ class ModernExecutionManager:
         # ENHANCED PATTERN: Get context and samples from ALL previous steps
         all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
         
-        data_count = len(full_data) if isinstance(full_data, list) else 0
+        # DON'T PROCESS DATA - Just pass it through as-is, let LLM handle it
+        # Only fix the data count calculation for logging
+        if isinstance(full_data, list):
+            data_count = len(full_data)
+        elif isinstance(full_data, dict):
+            # For dict responses, try to estimate records for logging only
+            data_count = full_data.get('total_active_users', 1) if 'total_active_users' in full_data else 1
+        else:
+            data_count = 1 if full_data else 0
+            
         logger.info(f"[{correlation_id}] Processing API data with Internal API-SQL Agent: {data_count} full records")
         logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
         
@@ -1033,9 +1076,9 @@ class ModernExecutionManager:
         logger.debug(f"[{correlation_id}] Using temp table mode for all API-SQL operations")
         
         # Call Internal API-SQL Agent - IT handles all the complexity
-        # Use full data for processing, not just samples
+        # Pass raw data through as-is - let LLM handle any processing needed
         result = await api_sql_code_gen_agent.process_api_data(
-            api_data=full_data,  # REPEATABLE PATTERN: Use full data for processing
+            api_data=full_data,  # REPEATABLE PATTERN: Pass raw data through as-is
             processing_context=step.query_context,
             correlation_id=correlation_id,
             use_temp_table=use_temp_table,
@@ -1044,13 +1087,19 @@ class ModernExecutionManager:
         
         # The Internal API-SQL Agent generates the complete SQL query
         # For temp table mode, we need to create table and insert data first
-        if result.output.uses_temp_table and result.output.temp_table_schema:
+        if result.output.uses_temp_table and hasattr(result.output, 'table_structure') and result.output.table_structure:
             logger.info(f"[{correlation_id}] Creating temporary table and inserting {data_count} API records")
             
             try:
+                # Debug output structure
+                logger.debug(f"[{correlation_id}] Output fields available: {dir(result.output)}")
+                logger.debug(f"[{correlation_id}] Table structure type: {type(result.output.table_structure)}")
+                logger.debug(f"[{correlation_id}] Data extraction type: {type(result.output.data_extraction)}")
+                
                 # Execute temp table operations in a single connection session
                 db_data = await self._execute_temp_table_workflow(
-                    temp_table_schema=result.output.temp_table_schema,
+                    table_structure=result.output.table_structure.dict() if hasattr(result.output.table_structure, 'dict') else result.output.table_structure,
+                    data_extraction=result.output.data_extraction.dict() if hasattr(result.output.data_extraction, 'dict') else result.output.data_extraction,
                     processing_query=result.output.processing_query,
                     api_data=full_data,
                     correlation_id=correlation_id
@@ -1143,7 +1192,13 @@ class ModernExecutionManager:
             # Call API Code Gen Agent with enhanced logging using wrapper function
             logger.debug(f"[{correlation_id}] Calling API Code Gen Agent with context: {step.query_context}")
             logger.debug(f"[{correlation_id}] Available endpoints being passed to API agent: {len(available_endpoints)} endpoints")
-            logger.debug(f"[{correlation_id}] First endpoint structure: {available_endpoints[0] if available_endpoints else 'None'}")
+            if available_endpoints:
+                logger.debug(f"[{correlation_id}] First endpoint structure: {available_endpoints[0]}")
+                # DEBUG: Log all endpoint names being passed
+                endpoint_names = [ep.get('name', 'Unknown') for ep in available_endpoints]
+                logger.debug(f"[{correlation_id}] Endpoint names: {endpoint_names}")
+            else:
+                logger.debug(f"[{correlation_id}] No endpoints available!")
             
             # Use the entity field from the new format
             entity_name = step.entity or "users"
@@ -1170,6 +1225,13 @@ class ModernExecutionManager:
             # Phase 5: Execute the generated API code to get actual data
             logger.info(f"[{correlation_id}] Phase 5: Executing generated API code")
             logger.debug(f"[{correlation_id}] Generated {len(api_result_dict.get('code', ''))} characters of API code")
+            
+            # DEBUG: Log the actual generated code if debug level is enabled
+            generated_code = api_result_dict.get('code', '')
+            if generated_code:
+                logger.debug(f"[{correlation_id}] Generated API Code:\n{'-'*50}\n{generated_code}\n{'-'*50}")
+            else:
+                logger.warning(f"[{correlation_id}] No API code was generated!")
             
             execution_result = self._execute_generated_code(
                 api_result_dict.get('code', ''), 
@@ -1546,14 +1608,15 @@ except Exception as e:
             logger.error(f"[{correlation_id}] Database query failed: {e}")
             return []
 
-    async def _execute_temp_table_workflow(self, temp_table_schema: str, processing_query: str, 
-                                          api_data: List[Any], correlation_id: str) -> List[Dict[str, Any]]:
+    async def _execute_temp_table_workflow(self, table_structure: Dict[str, Any], data_extraction: Dict[str, Any], 
+                                          processing_query: str, api_data: List[Any], correlation_id: str) -> List[Dict[str, Any]]:
         """
-        Execute the complete temp table workflow in a single database connection session.
-        This ensures the TEMPORARY table remains available throughout the entire operation.
+        Execute the complete temp table workflow using LLM-provided specifications.
+        Creates temp table from structure spec, extracts data using extraction spec, and runs query.
         
         Args:
-            temp_table_schema: SQL schema to create the temporary table
+            table_structure: JSON specification of table columns and types
+            data_extraction: JSON specification of how to extract API data
             processing_query: Main SQL query that uses the temporary table
             api_data: Data to insert into the temporary table
             correlation_id: Correlation ID for logging
@@ -1564,6 +1627,111 @@ except Exception as e:
         # Execute in thread pool to avoid blocking event loop
         import asyncio
         import concurrent.futures
+        
+        def _generate_safe_table_schema(table_structure: Dict[str, Any], table_name: str) -> str:
+            """Generate safe SQL DDL from JSON table structure specification"""
+            # Whitelist of allowed column types
+            ALLOWED_TYPES = {'TEXT', 'INTEGER', 'REAL', 'BLOB'}
+            
+            columns = table_structure.get('columns', [])
+            if not columns:
+                raise ValueError("Table structure must have at least one column")
+            
+            column_definitions = []
+            primary_keys = []
+            
+            for col in columns:
+                # Validate column name (alphanumeric + underscore only)
+                name = col.get('name', '').strip()
+                if not name or not name.replace('_', '').replace('-', '').isalnum():
+                    raise ValueError(f"Invalid column name: {name}")
+                
+                # Validate column type
+                col_type = col.get('type', '').upper()
+                if col_type not in ALLOWED_TYPES:
+                    raise ValueError(f"Invalid column type: {col_type}. Allowed: {ALLOWED_TYPES}")
+                
+                # Build column definition
+                col_def = f"{name} {col_type}"
+                
+                if col.get('primary_key', False):
+                    primary_keys.append(name)
+                
+                column_definitions.append(col_def)
+            
+            # Add primary key constraint if specified
+            if primary_keys:
+                pk_constraint = f"PRIMARY KEY ({', '.join(primary_keys)})"
+                column_definitions.append(pk_constraint)
+            
+            return f"CREATE TEMPORARY TABLE {table_name} ({', '.join(column_definitions)})"
+        
+        def _extract_data_from_api_response(api_data: List[Any], data_extraction: Dict[str, Any]) -> List[tuple]:
+            """Extract data from API response using extraction specification"""
+            extraction_type = data_extraction.get('extraction_type', '')
+            mappings = data_extraction.get('mappings', [])
+            
+            extracted_rows = []
+            
+            for record in api_data:
+                row_values = []
+                
+                for mapping in mappings:
+                    source_field = mapping.get('source_field', '')
+                    required = mapping.get('required', True)
+                    default_value = mapping.get('default_value', '')
+                    
+                    try:
+                        if extraction_type == 'dictionary_mapping':
+                            # Extract from dictionary
+                            if isinstance(record, dict):
+                                value = record.get(source_field, default_value if not required else None)
+                            else:
+                                value = default_value if not required else None
+                                
+                        elif extraction_type == 'list_values':
+                            # Extract the item itself (for string lists)
+                            if source_field == '@item':
+                                value = record
+                            else:
+                                value = default_value if not required else None
+                                
+                        elif extraction_type == 'nested_extraction':
+                            # Extract from nested structures
+                            if source_field.endswith('.*'):
+                                # Array extraction
+                                field_name = source_field.replace('.*', '')
+                                if isinstance(record, dict) and field_name in record:
+                                    # This will create multiple rows for array items
+                                    array_data = record[field_name]
+                                    if isinstance(array_data, list):
+                                        for item in array_data:
+                                            extracted_rows.append((item,))
+                                        continue
+                                value = default_value if not required else None
+                            else:
+                                value = default_value if not required else None
+                        else:
+                            value = default_value if not required else None
+                        
+                        if value is None and required:
+                            logger.warning(f"Required field {source_field} not found in record: {record}")
+                            continue
+                            
+                        row_values.append(value)
+                        
+                    except Exception as e:
+                        if required:
+                            logger.error(f"Error extracting {source_field}: {e}")
+                            continue
+                        else:
+                            row_values.append(default_value)
+                
+                # Only add row if we have the expected number of values
+                if row_values and len(row_values) == len(mappings):
+                    extracted_rows.append(tuple(row_values))
+            
+            return extracted_rows
         
         def _sync_temp_table_workflow():
             try:
@@ -1583,96 +1751,65 @@ except Exception as e:
                     
                     cursor = conn.cursor()
                     
-                    # Step 1: Create temporary table
+                    # Generate secure table name
+                    table_name = f"temp_api_users_{correlation_id.replace('-', '_')}"
+                    
+                    # Step 1: Generate and execute safe table schema
+                    temp_table_schema = _generate_safe_table_schema(table_structure, table_name)
                     logger.debug(f"[{correlation_id}] Creating temporary table with schema: {temp_table_schema}")
                     cursor.execute(temp_table_schema)
                     
-                    # Step 2: Insert API data
+                    # Step 2: Extract and insert API data using LLM specifications
                     if api_data:
-                        # Get the first record to determine the structure
-                        first_record = api_data[0]
+                        extracted_data = _extract_data_from_api_response(api_data, data_extraction)
                         
-                        # Handle different API data formats intelligently  
-                        if isinstance(first_record, str):
-                            # Simple string list (user IDs from step 1) - direct okta_id insertion
-                            columns = ['okta_id']
-                            insert_sql = f"INSERT OR IGNORE INTO temp_api_users (okta_id) VALUES (?)"
-                            logger.debug(f"[{correlation_id}] Converting string list to okta_id format for temp table")
-                        elif isinstance(first_record, dict):
-                            # Dictionary format - need to extract okta_id equivalent 
-                            if 'user_id' in first_record:
-                                # Role assignment format: {"user_id": "...", "roles": [...]}
-                                columns = ['okta_id']  # temp table expects okta_id
-                                insert_sql = f"INSERT OR IGNORE INTO temp_api_users (okta_id) VALUES (?)"
-                                logger.debug(f"[{correlation_id}] Converting role assignment dict to okta_id format for temp table")
-                            else:
-                                # Complex API data (like login events) - extract user ID intelligently
-                                # Always use okta_id schema to match LLM-generated temp table
-                                columns = ['okta_id']
-                                insert_sql = f"INSERT OR IGNORE INTO temp_api_users (okta_id) VALUES (?)"
-                                logger.debug(f"[{correlation_id}] Using okta_id extraction for complex API data")
+                        if extracted_data:
+                            # Build parameterized insert query
+                            columns = [col['name'] for col in table_structure.get('columns', [])]
+                            placeholders = ', '.join(['?' for _ in columns])
+                            insert_sql = f"INSERT OR IGNORE INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
+                            
+                            logger.debug(f"[{correlation_id}] Inserting {len(extracted_data)} rows into temp table")
+                            cursor.executemany(insert_sql, extracted_data)
+                            
+                            rows_inserted = cursor.rowcount
+                            logger.debug(f"[{correlation_id}] Successfully inserted {rows_inserted} rows into temp table")
                         else:
-                            logger.warning(f"[{correlation_id}] Unknown API data format: {type(first_record)}")
-                            return []
-                        
-                        logger.debug(f"[{correlation_id}] Inserting {len(api_data)} records into temp table")
-                        logger.debug(f"[{correlation_id}] Insert SQL: {insert_sql}")
-                        
-                        # Insert all records with intelligent value extraction
-                        for record in api_data:
-                            if isinstance(record, str):
-                                # Handle string records (user IDs) - direct okta_id value
-                                values = [record]
-                            elif isinstance(record, dict):
-                                if 'user_id' in record:
-                                    # Role assignment format - extract user_id as okta_id
-                                    values = [record['user_id']]  
-                                elif 'actor' in record and 'id' in record.get('actor', {}):
-                                    # Login event format - extract actor.id as okta_id
-                                    values = [record['actor']['id']]
-                                elif 'id' in record:
-                                    # Standard user record - extract id as okta_id
-                                    values = [record['id']]
-                                else:
-                                    # Cannot extract user ID - skip record
-                                    logger.warning(f"[{correlation_id}] Cannot extract user ID from record keys: {list(record.keys())[:5]}")
-                                    continue
-                            else:
-                                logger.warning(f"[{correlation_id}] Skipping unknown record type: {type(record)}")
-                                continue
-                                
-                            cursor.execute(insert_sql, values)
-                        
-                        conn.commit()
-                        logger.info(f"[{correlation_id}] Successfully inserted {len(api_data)} records into temp table")
+                            logger.warning(f"[{correlation_id}] No data extracted from API response")
+                    else:
+                        logger.warning(f"[{correlation_id}] No API data provided for temp table")
                     
-                    # Step 3: Execute main processing query
-                    logger.debug(f"[{correlation_id}] Executing processing query: {processing_query}")
-                    cursor.execute(processing_query, [self.tenant_id])  # Add tenant_id parameter
+                    # Step 3: Execute the main processing query
+                    # Replace temp_api_users with actual table name in query
+                    actual_query = processing_query.replace('temp_api_users', table_name)
+                    logger.debug(f"[{correlation_id}] Executing processing query: {actual_query}")
                     
-                    # Fetch all results
+                    cursor.execute(actual_query, (self.tenant_id,))
                     columns = [description[0] for description in cursor.description]
-                    rows = cursor.fetchall()
+                    results = cursor.fetchall()
                     
                     # Convert to list of dictionaries
-                    results = []
-                    for row in rows:
-                        results.append(dict(zip(columns, row)))
+                    result_dicts = []
+                    for row in results:
+                        result_dict = dict(zip(columns, row))
+                        result_dicts.append(result_dict)
                     
-                    logger.debug(f"[{correlation_id}] Processing query returned {len(results)} results")
+                    logger.debug(f"[{correlation_id}] Query returned {len(result_dicts)} results")
                     
-                    # Step 4: Temp table cleanup happens automatically when connection closes
-                    cursor.close()
+                    # Step 4: Cleanup - drop temp table
+                    cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    logger.debug(f"[{correlation_id}] Cleaned up temporary table: {table_name}")
                     
-                    return results
-                    
+                    return result_dicts
+                
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Error in temp table workflow: {e}")
+                    raise
                 finally:
-                    # Ensure connection is closed (temp table auto-drops)
                     conn.close()
-                    logger.debug(f"[{correlation_id}] Temporary table automatically cleaned up")
                     
             except Exception as e:
-                logger.error(f"[{correlation_id}] Temp table workflow failed: {e}")
+                logger.error(f"[{correlation_id}] Failed to execute temp table workflow: {e}")
                 raise
         
         try:
