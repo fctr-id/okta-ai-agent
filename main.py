@@ -161,34 +161,31 @@ async def main():
         # Print welcome message
         print_welcome()
         
-        # Import the hybrid agent (will be created next)
-        from src.core.agents.hybrid_agent import HybridAgent
+        # The modern architecture uses the web API and Modern Execution Manager
+        # Start the web server instead of the deprecated hybrid agent
+        print("🚀 Starting Okta AI Agent Web Server...")
+        print("📝 Access the web interface at: http://localhost:8001")
+        print("🔄 Use Ctrl+C to stop the server")
         
-        # Initialize the hybrid agent
-        hybrid_agent = HybridAgent()
+        # Import and start the FastAPI server
+        import uvicorn
+        from src.api.main import app
         
-        # Process query or start interactive mode
-        if args.query:
-            # Single query mode
-            logger.info(f"Processing single query in {args.mode} mode")
-            await hybrid_agent.process_query(
-                query=args.query,
-                mode=args.mode,
-                output_format=args.output_format
-            )
-        elif args.interactive:
-            # Interactive mode
-            logger.info("Starting interactive mode")
-            await hybrid_agent.run_interactive()
-        else:
-            # No query provided, start interactive mode by default
-            logger.info("No query provided, starting interactive mode")
-            await hybrid_agent.run_interactive()
+        # Start the server
+        config = uvicorn.Config(
+            app=app,
+            host="0.0.0.0",
+            port=8001,
+            log_level="info",
+            reload=args.debug  # Enable reload in debug mode
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
             
-        logger.info("Tako session completed successfully")
+        logger.info("Okta AI Agent session completed successfully")
         
     except KeyboardInterrupt:
-        print("\n\n👋 Goodbye! Thanks for using Tako!")
+        print("\n\n👋 Goodbye! Thanks for using the Okta AI Agent!")
         logger.info("User interrupted session")
     except Exception as e:
         error_msg = format_error_for_user(e)
