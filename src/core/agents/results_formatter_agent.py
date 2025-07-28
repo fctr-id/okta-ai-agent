@@ -176,7 +176,7 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
     else:
         sample_size = min(50, total_records)  # Sample 50 records for large datasets
     
-    print(f"📊 Creating samples: {sample_size} records from {total_records} total")
+    print(f"[STATS] Creating samples: {sample_size} records from {total_records} total")
     
     sampled_results = {}
     
@@ -223,7 +223,7 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
                         'sampled_records': len(sampled_sql['data']),
                         'sampling_strategy': 'first_middle_last'
                     }
-                print(f"   📊 SQL data: {len(sampled_sql.get('data', []))} samples from {len(sql_exec.get('data', []))} records")
+                print(f"   [STATS] SQL data: {len(sampled_sql.get('data', []))} samples from {len(sql_exec.get('data', []))} records")
             
             sampled_raw['sql_execution'] = sampled_sql
         
@@ -253,7 +253,7 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
                             'sampled_records': len(sampled_step['data']),
                             'sampling_strategy': 'random'
                         }
-                    print(f"   📊 {step.get('step_type', 'Unknown')} step: {len(sampled_step.get('data', []))} samples from {len(step.get('data', []))} records")
+                    print(f"   [STATS] {step.get('step_type', 'Unknown')} step: {len(sampled_step.get('data', []))} samples from {len(step.get('data', []))} records")
                 
                 sampled_steps.append(sampled_step)
             
