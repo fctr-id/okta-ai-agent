@@ -82,3 +82,7 @@ src/core/orchestration/results/*
 src/data/testing/*
 src/data/SECURITY_IMPLEMENTATION_PLAN.md
 src/data/documentation/*
+src/data/entity_analysis.txt
+src/data/test_entities.py
+src/data/test_no_legacy_tools.py
+src/data/test_unified_logging.py
