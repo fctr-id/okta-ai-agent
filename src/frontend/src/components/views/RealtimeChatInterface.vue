@@ -448,9 +448,9 @@ const getFailedStepName = () => {
 
 const hasStepperExpanded = computed(() => {
   // Expand the stepper container when:
-  // 1. Plan has been generated AND
-  // 2. There are plan steps available
-  return rtPlanGenerated.value && rtSteps.value?.length > 0;
+  // 1. We have received execution steps from step_plan_info (more than just the 2 bookend steps)
+  // 2. OR we have an error condition
+  return (rtSteps.value?.length > 2) || rtExecutionStatus.value === 'error';
 });
 
 const resetInterface = async () => {
@@ -500,83 +500,60 @@ const handleScroll = () => {
   }
 };
 
-const PREPARE_PLAN_ID = 'prepare_plan';
-const FINALIZE_RESULTS_ID = 'finalize_results';
+// Stepper management using the managed step flow from useRealtimeStream
 
 const progressSteps = computed(() => {
-  const items = [];
-
-  // PHASE 1: Initial query submission - Show only planning + finalizing
-  if (!rtPlanGenerated.value) {
-    // Planning step - show blue indicator while planning
-    items.push({
-      id: PREPARE_PLAN_ID,
-      title: 'planning',
-      status: rtExecutionStatus.value === 'planning' ? 'active' : 'pending',
-    });
-
-    // Finalizing step - always pending initially
-    items.push({
-      id: FINALIZE_RESULTS_ID,
-      title: 'finalizing_results',
-      status: 'pending',
-    });
-
-    return items;
-  }
-
-  // PHASE 2: Plan is ready - Show actual execution steps
-  if (rtPlanGenerated.value && rtSteps.value?.length > 0) {
-    // Add each actual plan step
-    rtSteps.value.forEach((step, index) => {
-      let itemStatus;
-
-      // Map statuses directly from the backend
-      if (step.status === 'completed') {
-        itemStatus = 'completed';
-      } else if (step.status === 'error') {
-        itemStatus = 'error';
-      } else if (step.status === 'active' || step.status === 'in_progress' || step.status === 'running') {
-        // Show blue indicator for currently running step
-        itemStatus = 'active';
-      } else {
-        itemStatus = 'pending';
-      }
-
-      items.push({
-        id: `plan_step_${step.id || index}`,
-        title: step.tool_name || `Action ${index + 1}`,
-        status: itemStatus,
-      });
-    });
-
-    // Final step - show based on overall execution status
-    items.push({
-      id: FINALIZE_RESULTS_ID,
-      title: 'finalizing_results',
-      status: rtExecutionStatus.value === 'processing_final_results' ? 'active' :
-        (['completed', 'error', 'cancelled'].includes(rtExecutionStatus.value) ? 'completed' : 'pending'),
-    });
-  }
-
-  return items;
+  // Use the managed step flow from useRealtimeStream directly
+  // This avoids Vue readonly warnings and ensures consistent state
+  return rtSteps.value.map((step, index) => {
+    let title;
+    
+    // Build step title based on the data structure from backend
+    if (step.tool_name === 'api' && step.operation) {
+      // For API steps: "api_operation" format (e.g., "api_list_by_user")
+      title = `api_${step.operation}`;
+    }
+    else if (step.tool_name === 'sql' && step.entity) {
+      // For SQL steps: "sql_entity" format (e.g., "sql_users")
+      title = `sql_${step.entity}`;
+    }
+    // Handle bookend steps
+    else if (step.tool_name === 'generate_plan') {
+      title = 'generate plan';
+    }
+    else if (step.tool_name === 'finalizing_results') {
+      title = 'finalizing results';
+    }
+    // Fallback for any other step types
+    else {
+      title = step.tool_name || step.name || `Step ${index + 1}`;
+    }
+    
+    return {
+      id: step.id || `step_${index}`,
+      title: title,
+      status: step.status || 'pending'
+    };
+  });
 });
 
 const currentProgressStepId = computed(() => {
-  const activeItem = progressSteps.value.find(item => item.status === 'active');
-  if (activeItem) return activeItem.id;
-
-  if (rtExecutionStatus.value === 'planning' && !rtPlanGenerated.value) return PREPARE_PLAN_ID;
-  if (rtExecutionStatus.value === 'planning' && rtPlanGenerated.value && rtSteps.value?.length > 0) return `plan_step_${rtSteps.value[0].id || 0}`;
-  if (rtExecutionStatus.value === 'executing' && rtSteps.value?.[rtCurrentStepIndexVal.value]) return `plan_step_${rtSteps.value[rtCurrentStepIndexVal.value].id || rtCurrentStepIndexVal.value}`;
-  if (rtExecutionStatus.value === 'processing_final_results') return FINALIZE_RESULTS_ID;
-  if (rtExecutionStatus.value === 'completed' || rtExecutionStatus.value === 'error' || rtExecutionStatus.value === 'cancelled') {
-    for (let i = progressSteps.value.length - 1; i >= 0; i--) {
-      if (progressSteps.value[i].status !== 'pending') return progressSteps.value[i].id;
-    }
-    return FINALIZE_RESULTS_ID;
+  // Find the currently active step from the managed step flow
+  const activeStep = rtSteps.value.find(step => step.status === 'active');
+  if (activeStep) {
+    return activeStep.id || 'active_step';
   }
-  return PREPARE_PLAN_ID;
+  
+  // If no active step, find the last non-pending step
+  for (let i = rtSteps.value.length - 1; i >= 0; i--) {
+    const step = rtSteps.value[i];
+    if (step.status !== 'pending') {
+      return step.id || `step_${i}`;
+    }
+  }
+  
+  // Default to first step if all are pending
+  return rtSteps.value.length > 0 ? (rtSteps.value[0].id || 'step_0') : 'default_step';
 });
 
 const showProgressDisplayArea = computed(() =>

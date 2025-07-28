@@ -42,14 +42,26 @@ export function useRealtimeStream() {
         error.value = null;
         execution.status = "planning";
         execution.planGenerated = false;
-        execution.steps = [];
         execution.currentStepIndex = -1;
         execution.results = null;
 
-        //console.log('Starting realtime process with query:', query)
+        // Initialize with only the two bookend steps
+        execution.steps = [
+            {
+                id: 'generate_plan',
+                tool_name: 'generate_plan',
+                reason: 'Analyzing query and generating execution plan',
+                status: 'active', // Start with planning step active
+            },
+            {
+                id: 'finalizing_results',
+                tool_name: 'finalizing_results', 
+                reason: 'Processing and formatting final results',
+                status: 'pending',
+            }
+        ];
 
         try {
-            //console.log('Sending request to /api/realtime/start-process')
             const response = await fetch("/api/realtime/start-process", {
                 method: "POST",
                 headers: {
@@ -59,12 +71,9 @@ export function useRealtimeStream() {
                 body: JSON.stringify({ query: query.trim() }),
             });
 
-            //console.log('Response status:', response.status)
-
             // Handle non-OK responses more explicitly
             if (!response.ok) {
                 const errorText = await response.text();
-                //console.error('Error response body:', errorText)
 
                 // Add explicit handling for 401 status
                 if (response.status === 401) {
@@ -88,18 +97,11 @@ export function useRealtimeStream() {
 
             // Parse successful response
             const data = await response.json();
-            //console.log('Process started successfully:', data)
             processId.value = data.process_id;
 
             if (data.plan) {
-                //console.log('Plan received with initial response')
-                // Initialize execution state with the plan
+                // Don't override our bookend steps here - let step_plan_info handle the insertion
                 execution.planGenerated = true;
-                execution.steps = data.plan.steps.map((step, index) => ({
-                    ...step,
-                    id: index,
-                    status: "pending",
-                }));
             }
 
             return data.process_id;
@@ -135,7 +137,6 @@ export function useRealtimeStream() {
 
             // Create new EventSource connection
             const eventSourceUrl = `/api/realtime/stream-updates/${id}`;
-            //console.log('Connecting to EventSource:', eventSourceUrl)
 
             // Create EventSource - cookies will be sent automatically
             const eventSource = new EventSource(eventSourceUrl, {
@@ -144,53 +145,42 @@ export function useRealtimeStream() {
             activeEventSource.value = eventSource;
             isStreaming.value = true;
 
-            //console.log('EventSource connection created')
-
             // Handle connection open event
             eventSource.onopen = () => {
-                //console.log('EventSource connection opened')
                 execution.status = execution.planGenerated ? "executing" : "planning";
             };
 
             // Set up event handlers for different event types
             eventSource.addEventListener("plan_status", (event) => {
-                //console.log('Received plan_status event:', event.data)
                 handlePlanStatusEvent(event);
             });
 
             eventSource.addEventListener("phase_update", (event) => {
-                //console.log('Received phase_update event:', event.data)
                 handlePhaseUpdateEvent(event);
             });
 
             eventSource.addEventListener("step_status_update", (event) => {
-                //console.log('Received step_status_update event:', event.data)
                 handleStepStatusEvent(event);
             });
 
             eventSource.addEventListener("step_plan_info", (event) => {
-                //console.log('Received step_plan_info event:', event.data)
                 handleStepPlanInfoEvent(event);
             });
 
             eventSource.addEventListener("final_result", (event) => {
-                //console.log('Received final_result event:', event.data)
                 handleFinalResultEvent(event);
             });
 
             eventSource.addEventListener("plan_error", (event) => {
-                //console.log('Received plan_error event:', event.data)
                 handleErrorEvent(event);
             });
 
             eventSource.addEventListener("plan_cancelled", (event) => {
-                //console.log('Received plan_cancelled event:', event.data)
                 handleCancelledEvent(event);
             });
 
             // Handle general messages (some backends send untyped messages)
             eventSource.onmessage = (event) => {
-                //console.log('Received generic message event:', event.data)
                 try {
                     const data = JSON.parse(event.data);
                     // Handle based on message content structure
@@ -228,8 +218,6 @@ export function useRealtimeStream() {
         try {
             const data = JSON.parse(event.data);
 
-            //console.log('Processing plan status event:', data)
-
             // Handle rich plan details when available
             if (data.plan_details) {
                 execution.planGenerated = true;
@@ -264,8 +252,49 @@ export function useRealtimeStream() {
     const handleStepStatusEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            //console.log('Processing step status update:', data);
 
+            // Handle Modern Execution Manager format (new)
+            if (data.step_number !== undefined && data.step_name && data.status) {
+                // Map step numbers to our inserted steps (accounting for generate_plan at index 0)
+                // Backend step 1 -> frontend index 1 (after generate_plan)
+                const stepIndex = data.step_number; // Keep 1-based since generate_plan is at index 0
+                
+                if (stepIndex >= 1 && stepIndex < execution.steps.length - 1) { // Exclude finalizing_results (last step)
+                    // Map backend status to frontend status
+                    const statusMap = {
+                        'running': 'active',
+                        'completed': 'completed', 
+                        'error': 'error'
+                    };
+                    
+                    const frontendStatus = statusMap[data.status] || data.status;
+                    execution.steps[stepIndex].status = frontendStatus;
+                    
+                    // Update current step index if step is running
+                    if (data.status === 'running') {
+                        execution.currentStepIndex = stepIndex;
+                        execution.status = "executing";
+                    }
+                    
+                    // Check if all execution steps are completed (excluding bookends)
+                    if (data.status === 'completed') {
+                        const executionSteps = execution.steps.slice(1, -1); // Exclude generate_plan and finalizing_results
+                        const allExecutionStepsCompleted = executionSteps.every(step => step.status === 'completed');
+                        
+                        if (allExecutionStepsCompleted) {
+                            // All execution steps are done, activate finalizing_results
+                            const finalizingStepIndex = execution.steps.length - 1;
+                            if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
+                                execution.steps[finalizingStepIndex].status = 'active';
+                                execution.currentStepIndex = finalizingStepIndex;
+                            }
+                        }
+                    }
+                }
+                return;
+            }
+
+            // Handle legacy format (existing)
             const stepIndex = data.step_index;
 
             // First check if this is an error status update
@@ -299,7 +328,6 @@ export function useRealtimeStream() {
                 } else if (data.status === "completed") {
                     // Handle completion status outside the 'running' condition
                     setTimeout(() => {
-                        //console.log(`Completing step ${stepIndex} after delay`);
                         execution.steps[stepIndex].status = "completed";
                         if (data.result_summary) {
                             execution.steps[stepIndex].result_summary = data.result_summary;
@@ -321,24 +349,60 @@ export function useRealtimeStream() {
     };
 
     /**
-     * Handle step plan info events
+     * Handle step plan info events - INSERT steps between generate_plan and finalizing_results
      */
     const handleStepPlanInfoEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            console.log('Processing step plan info event:', data);
+            console.log('🟣 RECEIVED step_plan_info event:', data);
 
             if (data.steps && Array.isArray(data.steps)) {
+                console.log('🟣 Processing steps from backend:', data.steps);
+                
                 execution.planGenerated = true;
-                execution.steps = data.steps.map((step) => ({
-                    id: step.id,
-                    tool_name: step.tool_name,
-                    reason: step.query_context || 'Processing data',
-                    status: step.status || "pending",
-                    critical: step.critical
-                }));
+                
+                // Complete the generate_plan step
+                if (execution.steps[0] && execution.steps[0].id === 'generate_plan') {
+                    execution.steps[0].status = 'completed';
+                }
+
+                // Create the new execution steps from the plan
+                const newExecutionSteps = data.steps.map((step, index) => {
+                    console.log(`🟣 Creating step ${index + 1}:`, {
+                        tool_name: step.tool_name,
+                        operation: step.operation,
+                        entity: step.entity,
+                        query_context: step.query_context
+                    });
+                    
+                    return {
+                        id: `step_${index + 1}`,
+                        tool_name: step.tool_name,
+                        operation: step.operation,
+                        entity: step.entity,
+                        reason: step.query_context || 'Processing data',
+                        status: "pending",
+                        critical: step.critical
+                    };
+                });
+
+                console.log('🟣 Created execution steps:', newExecutionSteps);
+
+                // Insert the new steps between generate_plan (index 0) and finalizing_results (last)
+                // Keep generate_plan, insert new steps, keep finalizing_results
+                const generatePlanStep = execution.steps[0];
+                const finalizingResultsStep = execution.steps[execution.steps.length - 1];
+                
+                execution.steps = [
+                    generatePlanStep,
+                    ...newExecutionSteps,
+                    finalizingResultsStep
+                ];
+
+                console.log('🟣 Final steps array:', execution.steps);
                 execution.status = "executing";
-                console.log('Updated execution steps:', execution.steps);
+            } else {
+                console.warn('🟣 No steps array found in step_plan_info data:', data);
             }
         } catch (err) {
             console.error("Error processing step plan info event:", err);
@@ -346,34 +410,49 @@ export function useRealtimeStream() {
     };
 
     /**
-     * Handle final result events
+     * Handle final result events - Activate finalizing_results step and then complete
      */
     const handleFinalResultEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
             
-            // The Results Formatter output is in data.formatted_response
-            const formattedResponse = data.formatted_response || {};
-
-            const agentDisplayMetadata = formattedResponse.metadata || data.metadata || data.display_hints || {};
-
-            // Format the result to the expected shape for the frontend
-            execution.results = {
-                content: formattedResponse.content || data.content || data.result_content || "", // Try formatted_response first
-                display_type: formattedResponse.display_type || data.display_type || "markdown",
-                metadata: agentDisplayMetadata, // This will now correctly pass headers, totalItems, etc.
-            };
-
-            execution.status = data.status || "completed"; // Use status from data if available
-            isProcessing.value = false;
-            isStreaming.value = false; // Ensure streaming is also marked as false
-
-            // Close the connection
+            // Immediately close the EventSource to prevent server-side closure error
             if (activeEventSource.value) {
-                //console.log('Closing EventSource after receiving final result');
                 activeEventSource.value.close();
                 activeEventSource.value = null;
             }
+            
+            // First, activate the finalizing_results step (last step)
+            const finalizingStepIndex = execution.steps.length - 1;
+            if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
+                execution.steps[finalizingStepIndex].status = 'active';
+                execution.currentStepIndex = finalizingStepIndex;
+            }
+            
+            // Small delay to show the finalizing step as active, then complete it
+            setTimeout(() => {
+                // Complete the finalizing_results step
+                if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
+                    execution.steps[finalizingStepIndex].status = 'completed';
+                }
+                
+                // The Results Formatter output is in data.formatted_response
+                const formattedResponse = data.formatted_response || {};
+
+                const agentDisplayMetadata = formattedResponse.metadata || data.metadata || data.display_hints || {};
+
+                // Format the result to the expected shape for the frontend
+                execution.results = {
+                    content: formattedResponse.content || data.content || data.result_content || "", // Try formatted_response first
+                    display_type: formattedResponse.display_type || data.display_type || "markdown",
+                    metadata: agentDisplayMetadata, // This will now correctly pass headers, totalItems, etc.
+                };
+
+                execution.status = data.status || "completed"; // Use status from data if available
+                isProcessing.value = false;
+                isStreaming.value = false; // Ensure streaming is also marked as false
+            }, 500); // Show finalizing step as active for 500ms
+            
         } catch (err) {
             console.error("Error processing final result event:", err);
             // Optionally, set an error state in the execution object
@@ -389,12 +468,28 @@ export function useRealtimeStream() {
     };
 
     /**
-     * Handle phase update events
+     * Handle phase update events - Detect results formatter phase
      */
     const handlePhaseUpdateEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            execution.status = data.phase || execution.status;
+            
+            const newPhase = data.phase || execution.status;
+            
+            // Check if this indicates the start of results formatting
+            if (newPhase.toLowerCase().includes('results') || 
+                newPhase.toLowerCase().includes('formatting') ||
+                newPhase.toLowerCase().includes('finalizing')) {
+                
+                // Activate the finalizing_results step
+                const finalizingStepIndex = execution.steps.length - 1;
+                if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
+                    execution.steps[finalizingStepIndex].status = 'active';
+                    execution.currentStepIndex = finalizingStepIndex;
+                }
+            }
+            
+            execution.status = newPhase;
         } catch (err) {
             console.error("Error processing phase update event:", err);
         }
@@ -413,7 +508,6 @@ export function useRealtimeStream() {
 
             // Close the connection
             if (activeEventSource.value) {
-                //console.log('Closing EventSource after error event')
                 activeEventSource.value.close();
                 activeEventSource.value = null;
             }
@@ -432,7 +526,6 @@ export function useRealtimeStream() {
 
         // Close the connection
         if (activeEventSource.value) {
-            //console.log('Closing EventSource after cancellation')
             activeEventSource.value.close();
             activeEventSource.value = null;
         }
@@ -444,12 +537,31 @@ export function useRealtimeStream() {
     const handleConnectionError = (e, eventSource) => {
         console.error("Connection error in EventSource:", e);
 
-        if (execution.status !== "completed" && execution.status !== "error") {
-            error.value = "Connection to server lost. Please try your query again.";
-            execution.status = "error";
-            isProcessing.value = false;
-            isStreaming.value = false;
+        // If we're already completed, cancelled, or have an error, this is expected connection closure
+        // Also check if we have results (final processing phase) or finalizing_results step is active
+        const finalizingStepIndex = execution.steps.length - 1;
+        const isFinalizingActive = execution.steps[finalizingStepIndex]?.status === 'active' && 
+                                   execution.steps[finalizingStepIndex]?.id === 'finalizing_results';
+        
+        if (execution.status === "completed" || 
+            execution.status === "cancelled" || 
+            execution.status === "error" ||
+            execution.results !== null ||
+            isFinalizingActive ||
+            activeEventSource.value === null) { // Already closed by us
+            console.log("Connection closed after process completion - this is expected");
+            if (eventSource && activeEventSource.value) {
+                eventSource.close();
+                activeEventSource.value = null;
+            }
+            return;
         }
+
+        // Only treat as error if we're still processing
+        error.value = "Connection to server lost. Please try your query again.";
+        execution.status = "error";
+        isProcessing.value = false;
+        isStreaming.value = false;
 
         // Close the connection
         if (eventSource) {
@@ -469,7 +581,6 @@ export function useRealtimeStream() {
         }
 
         try {
-            //console.log('Cancelling process:', processId.value)
 
             const response = await fetch(`/api/realtime/cancel/${processId.value}`, {
                 method: "POST",
@@ -477,9 +588,7 @@ export function useRealtimeStream() {
             });
 
             if (!response.ok) {
-                //console.error('Failed to cancel process:', response.statusText)
-            } else {
-                //console.log('Process cancelled successfully')
+                // Silent fail for cancel requests
             }
 
             execution.status = "cancelled";
@@ -488,12 +597,11 @@ export function useRealtimeStream() {
 
             // Close the connection
             if (activeEventSource.value) {
-                //console.log('Closing EventSource after cancellation')
                 activeEventSource.value.close();
                 activeEventSource.value = null;
             }
         } catch (err) {
-            //console.error('Error cancelling process:', err)
+            // Silent fail for cancel errors
         }
     };
 
@@ -581,7 +689,6 @@ export function useRealtimeStream() {
      */
     const cleanup = () => {
         if (activeEventSource.value) {
-            //console.log('Cleaning up EventSource connection')
             activeEventSource.value.close();
             activeEventSource.value = null;
         }
@@ -593,7 +700,6 @@ export function useRealtimeStream() {
         () => processId.value,
         (newVal) => {
             if (!newVal && activeEventSource.value) {
-                //console.log('Process ID reset, cleaning up EventSource')
                 cleanup();
             }
         }
