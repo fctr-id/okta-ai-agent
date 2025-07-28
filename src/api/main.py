@@ -1,15 +1,38 @@
 import os
+import asyncio
+import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
-from .routers import query, auth, sync, realtime
+from .routers import query, auth, sync, realtime_hybrid
 from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import AuthUser
 from sqlalchemy import inspect, create_engine
+
+# Suppress specific Windows socket cleanup errors in asyncio
+class WindowsSocketErrorFilter(logging.Filter):
+    def filter(self, record):
+        # Filter out Windows socket cleanup errors that are harmless
+        if record.name == "asyncio":
+            message = str(record.getMessage()) if hasattr(record, 'getMessage') else str(record.msg)
+            # Filter various connection reset scenarios
+            error_patterns = [
+                "ConnectionResetError",
+                "An existing connection was forcibly closed by the remote host",
+                "_call_connection_lost",
+                "WinError 10054"
+            ]
+            if any(pattern in message for pattern in error_patterns):
+                return False
+        return True
+
+# Apply the filter to the asyncio logger
+asyncio_logger = logging.getLogger("asyncio")
+asyncio_logger.addFilter(WindowsSocketErrorFilter())
 
 # Security Headers Middleware
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -67,8 +90,12 @@ async def lifespan(app: FastAPI):
     else:
         logger.debug("Auth users table already exists. Do not have to create a new one")
     
+    # Modern Execution Manager handles process lifecycle automatically
+    logger.info("Using Modern Execution Manager - no background cleanup needed")
+    
     yield
     
+    # Shutdown code - Modern Execution Manager handles cleanup automatically
     logger.info("Shutting down Okta AI Agent API")
 
 # Create FastAPI app with lifespan manager
@@ -100,7 +127,7 @@ app.add_middleware(
 app.include_router(query.router, prefix="/api")
 app.include_router(auth.router) 
 app.include_router(sync.router, prefix="/api")
-app.include_router(realtime.router, prefix="/api/realtime")
+app.include_router(realtime_hybrid.router, prefix="/api/realtime")
 
 # Mount static files
 app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")
