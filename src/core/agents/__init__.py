@@ -1,8 +1,9 @@
 """
 Agents package for Tako v1.0.0-beta
-Contains the hybrid agent and related components
+Contains core AI agents for the Okta AI Agent system
 """
 
-from .hybrid_agent import HybridAgent
+# Currently using Modern Execution Manager directly
+# No hybrid agent wrapper needed
 
-__all__ = ["HybridAgent"]
+__all__ = []
