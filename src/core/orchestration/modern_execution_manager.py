@@ -66,7 +66,8 @@ from src.core.security import (
 from src.utils.logging import get_logger, get_default_log_dir
 
 # Configure logging
-logger = get_logger(__name__, log_dir=get_default_log_dir())
+# Using main "okta_ai_agent" namespace for unified logging across all agents
+logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
 
 # ================================================================
 # TIMEOUT CONFIGURATION - EASY TO MODIFY
@@ -112,12 +113,22 @@ class StepResult(BaseModel):
     error: Optional[str] = None
 
 
-class MockSQLResult:
-    """Mock SQL result object for consistent step result structure"""
+class SQLExecutionResult:
+    """SQL execution result object with query details and data"""
     def __init__(self, sql_text: str, explanation: str, data: List[Dict[str, Any]]):
         self.sql = sql_text
         self.explanation = explanation
         self.data = data
+
+
+class APIExecutionResult:
+    """API execution result object with code details and data"""
+    def __init__(self, code: str, explanation: str, data: Any, executed: bool = True, error: str = None):
+        self.code = code
+        self.explanation = explanation
+        self.data = data
+        self.executed = executed
+        self.error = error
 
 
 class ExecutionResults(BaseModel):
@@ -128,6 +139,7 @@ class ExecutionResults(BaseModel):
     total_steps: int
     successful_steps: int
     failed_steps: int
+    formatted_response: Optional[Dict[str, Any]] = None
 
 
 class BasicErrorHandler:
@@ -189,6 +201,11 @@ class ModernExecutionManager:
         # Based on proven old executor approach - scales with any number of tools/steps
         self.data_variables = {}      # Full datasets: {"sql_data_step_1": [all_records], "api_data_step_2": response}
         self.step_metadata = {}       # Step tracking: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query"}}
+        
+        # EXECUTION PLAN ACCESS: Store current execution plan for external access (minimal for realtime interface)
+        self.current_execution_plan = None
+        self.plan_ready_callback = None  # Optional callback for when plan is ready
+        self.step_status_callback = None  # Optional callback for step status updates (step_number, step_type, status)
         
         # MINIMAL CANCELLATION SYSTEM: Aggressive termination on user request
         self.cancelled_queries = set()  # Just store correlation_ids that are cancelled
@@ -824,6 +841,13 @@ class ModernExecutionManager:
             # Trust the agent - just extract the plan
             execution_plan = planning_result.output.plan
             
+            # Store current execution plan for external access (minimal addition for realtime interface)
+            self.current_execution_plan = execution_plan
+            
+            # Notify callback if plan is ready (minimal addition for realtime interface)
+            if self.plan_ready_callback:
+                await self.plan_ready_callback(execution_plan)
+            
             # Pretty print the execution plan for debugging
             import json
             logger.info(f"[{correlation_id}] Generated execution plan:\n{json.dumps(execution_plan.model_dump(), indent=2)}")
@@ -1033,6 +1057,13 @@ class ModernExecutionManager:
             
             logger.info(f"[{correlation_id}] Executing step {step_num}/{len(plan.steps)}: {step.tool_name}")
             
+            # Notify step status callback - step starting
+            if self.step_status_callback:
+                try:
+                    await self.step_status_callback(step_num, step.tool_name, "running")
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
+            
             try:
                 # Execute step based on type
                 if step.tool_name == "sql":
@@ -1057,6 +1088,13 @@ class ModernExecutionManager:
                     successful_steps += 1
                     logger.info(f"[{correlation_id}] Step {step_num} completed successfully")
                     
+                    # Notify step status callback - step completed
+                    if self.step_status_callback:
+                        try:
+                            await self.step_status_callback(step_num, step.tool_name, "completed")
+                        except Exception as callback_error:
+                            logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
+                    
                     # Data storage is handled automatically in step execution methods
                     # Log current data state
                     total_variables = len(self.data_variables)
@@ -1065,6 +1103,13 @@ class ModernExecutionManager:
                 else:
                     failed_steps += 1
                     logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
+                    
+                    # Notify step status callback - step failed
+                    if self.step_status_callback:
+                        try:
+                            await self.step_status_callback(step_num, step.tool_name, "error")
+                        except Exception as callback_error:
+                            logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
                     
                     # CRITICAL ERROR HANDLING: Stop execution on step failure
                     logger.error(f"[{correlation_id}] Stopping execution due to step {step_num} failure")
@@ -1079,7 +1124,15 @@ class ModernExecutionManager:
                 error_result = self.error_handler.handle_step_error(step, e, correlation_id, step_num)
                 step_results.append(error_result)
                 failed_steps += 1
-                previous_sample = None
+                
+                # Notify step status callback - step failed with exception
+                if self.step_status_callback:
+                    try:
+                        await self.step_status_callback(step_num, step.tool_name, "error")
+                    except Exception as callback_error:
+                        logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
+                
+                break  # Stop execution on exception
         
         # Create final results
         final_result = step_results[-1].result if step_results and step_results[-1].success else None
@@ -1214,7 +1267,7 @@ class ModernExecutionManager:
                 logger.warning(f"[{correlation_id}] SQL step marked as FAILED: SQL generation or execution failed")
         
         # Create result with SQL execution data
-        result_data = MockSQLResult(sql_dict['sql'], sql_dict['explanation'], db_data)
+        result_data = SQLExecutionResult(sql_dict['sql'], sql_dict['explanation'], db_data)
         
         return StepResult(
             step_number=step_number,
@@ -1323,7 +1376,7 @@ class ModernExecutionManager:
         logger.info(f"[{correlation_id}] API-SQL step completed: {len(db_data)} records stored as {variable_name}")
         
         # Create result object that matches expected structure
-        result_data = MockSQLResult(result.output.processing_query, result.output.explanation, db_data)
+        result_data = SQLExecutionResult(result.output.processing_query, result.output.explanation, db_data)
         
         return StepResult(
             step_number=step_number,
@@ -1441,13 +1494,12 @@ class ModernExecutionManager:
                 else:
                     logger.debug(f"[{correlation_id}] API execution returned no data")
                 
-                result_data = {
-                    'code': api_result_dict['code'],
-                    'explanation': api_result_dict['explanation'],
-                    'requirements': api_result_dict.get('requirements', []),
-                    'execution_output': actual_data,
-                    'executed': True
-                }
+                result_data = APIExecutionResult(
+                    code=api_result_dict['code'],
+                    explanation=api_result_dict['explanation'],
+                    data=actual_data,
+                    executed=True
+                )
                 
                 # REPEATABLE PATTERN: Store full API results for next step access
                 variable_name = self._store_step_data(
@@ -1466,14 +1518,13 @@ class ModernExecutionManager:
             else:
                 logger.error(f"[{correlation_id}] API code execution failed: {execution_result.get('error', 'Unknown error')}")
                 # Fall back to code generation result without execution
-                result_data = {
-                    'code': api_result_dict['code'],
-                    'explanation': api_result_dict['explanation'],
-                    'requirements': api_result_dict.get('requirements', []),
-                    'execution_output': [],
-                    'executed': False,
-                    'execution_error': execution_result.get('error', 'Unknown error')
-                }
+                result_data = APIExecutionResult(
+                    code=api_result_dict['code'],
+                    explanation=api_result_dict['explanation'],
+                    data=[],
+                    executed=False,
+                    error=execution_result.get('error', 'Unknown error')
+                )
                 
                 # REPEATABLE PATTERN: Store empty results for failed API execution
                 variable_name = self._store_step_data(
@@ -1493,10 +1544,19 @@ class ModernExecutionManager:
             has_meaningful_data = False
             execution_successful = False
             
-            if isinstance(result_data, list) and len(result_data) > 0:
-                has_meaningful_data = True
-            elif isinstance(result_data, dict) and result_data:
-                has_meaningful_data = True
+            # Check if the APIExecutionResult has meaningful data
+            if hasattr(result_data, 'data'):
+                # result_data is an APIExecutionResult object
+                if isinstance(result_data.data, list) and len(result_data.data) > 0:
+                    has_meaningful_data = True
+                elif isinstance(result_data.data, dict) and result_data.data:
+                    has_meaningful_data = True
+            else:
+                # Fallback for raw data (shouldn't happen with current code)
+                if isinstance(result_data, list) and len(result_data) > 0:
+                    has_meaningful_data = True
+                elif isinstance(result_data, dict) and result_data:
+                    has_meaningful_data = True
             
             # Check if code executed without critical errors
             if execution_result.get('error'):
