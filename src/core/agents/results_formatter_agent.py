@@ -26,10 +26,9 @@ from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLim
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
 
-# Setup centralized logging with file output
-logger = get_logger("okta_ai_agent.results_formatter", log_dir=get_default_log_dir())
-
-# Configuration
+# Setup centralized logging with file output  
+# Using main "okta_ai_agent" namespace for unified logging across all agents
+logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())# Configuration
 config = {
     'enable_token_reporting': True
 }
@@ -38,7 +37,7 @@ config = {
 class FormattedOutput(BaseModel):
     """Structured output model ensuring consistent response format"""
     display_type: str = Field(description="Display format: 'table' or 'markdown'")
-    content: Dict[str, Any] = Field(description="Formatted content for display")
+    content: Any = Field(description="Formatted content for display - string for markdown, array for table")
     metadata: Dict[str, Any] = Field(description="Execution summary and processing info")
     processing_code: Optional[str] = Field(default=None, description="Python code for processing large datasets")
 
@@ -117,9 +116,10 @@ def _parse_raw_llm_response(raw_response: str, flow_id: str) -> Dict[str, Any]:
         logger.debug(f"[{flow_id}] Successfully parsed JSON: {list(parsed.keys())}")
         
         # Ensure required fields exist with defaults
+        # CRITICAL: Don't wrap content - frontend expects direct values
         result = {
             'display_type': parsed.get('display_type', 'markdown'),
-            'content': parsed.get('content', {'text': 'Processing completed'}),
+            'content': parsed.get('content', 'Processing completed'),
             'metadata': parsed.get('metadata', {'status': 'completed'}),
             'processing_code': parsed.get('processing_code', None)
         }
@@ -130,10 +130,10 @@ def _parse_raw_llm_response(raw_response: str, flow_id: str) -> Dict[str, Any]:
         logger.error(f"[{flow_id}] Failed to parse raw LLM response: {e}")
         logger.error(f"[{flow_id}] Raw response was: {raw_response}")
         
-        # Return a minimal fallback structure
+        # Return a minimal fallback structure compatible with frontend
         return {
             'display_type': 'markdown',
-            'content': {'text': f'**Raw Response**: {raw_response}'},
+            'content': f'**Processing Error**: {raw_response}',
             'metadata': {'status': 'parsing_failed', 'error': str(e)},
             'processing_code': None
         }
