@@ -73,7 +73,7 @@ export default defineConfig({
   },
   // Configure build output to be served by FastAPI
   build: {
-    outDir: '../backend/app/static',
+    outDir: '../api/static',
     emptyOutDir: true,
     assetsDir: 'assets',
     minify: 'terser',
