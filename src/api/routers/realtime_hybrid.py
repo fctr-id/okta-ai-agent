@@ -7,21 +7,50 @@ while maintaining full SSE streaming compatibility and API contracts.
 Key Features:
 - Modern Execution Manager integration for robust execution
 - SSE (Server-Sent Events) streaming for real-time updates
-- User-friendly step display names
 - Enhanced error handling and database health checking
-- Full API contract preservation for frontend compatibility
+- Full API contract preservat    # Create a better placeholder plan for immediate UI response (actual steps will be sent during execution)
+    placeholder_plan = ApiPlan(
+        original_query=sanitized_query,
+        reasoning="Generating execution plan with Modern Execution Manager",
+        confidence=None,
+        steps=[
+            ApiStep(
+                id=0,
+                tool_name="list_events",
+                query_context={"description": "Retrieving system events and activity data"},
+                reason="Collect system event data from Okta",
+                critical=True,
+                status="pending"
+            ),
+            ApiStep(
+                id=1,
+                tool_name="sql_users",
+                query_context={"description": "Querying user database for relevant information"},
+                reason="Query local database for user details",
+                critical=True,
+                status="pending"
+            ),
+            ApiStep(
+                id=2,
+                tool_name="list_by_user",
+                query_context={"description": "Combining and processing user-specific data"},
+                reason="Process and correlate user data",
+                critical=False,
+                status="pending"
+            )
+        ]
+    ) compatibility
 """
 
 import asyncio
-import os
 import uuid
 import json
 import re
 import time
 from enum import Enum
-from typing import Dict, Any, AsyncGenerator, List, Optional, Callable, Tuple, Union
+from typing import Dict, Any, AsyncGenerator, List, Optional, Tuple
 
-from fastapi import APIRouter, HTTPException, Request, Depends, Body, status
+from fastapi import APIRouter, HTTPException, Request, Depends, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
@@ -29,18 +58,16 @@ from html_sanitizer import Sanitizer
 
 # --- Modern Execution Manager Imports ---
 from src.core.orchestration.modern_execution_manager import ModernExecutionManager
-from src.core.agents.planning_agent import planning_agent, PlanningDependencies, ExecutionPlan, ExecutionStep
 
 # --- Project-specific Imports ---
-from src.core.security.dependencies import get_current_user, get_db_session
-from src.core.okta.sync.models import AuthUser, UserRole
-from sqlalchemy.ext.asyncio import AsyncSession
+from src.core.security.dependencies import get_current_user
+from src.core.okta.sync.models import AuthUser
 
 from src.utils.error_handling import BaseError, format_error_for_user
 from src.utils.logging import get_logger, set_correlation_id
-from src.utils.tool_registry import build_tools_documentation
 
-logger = get_logger(__name__)
+# Using main "okta_ai_agent" namespace for unified logging across all components
+logger = get_logger("okta_ai_agent")
 
 # --- Query sanitization (same as legacy) ---
 custom_sanitizer = Sanitizer({
@@ -135,142 +162,76 @@ class RealtimeQueryRequest(BaseModel):
 router = APIRouter()
 
 active_processes: Dict[str, Any] = {}
-MAX_PROCESS_AGE_SECONDS = 3600  # 1 hour
 
 # Global modern execution manager instance
 modern_executor = ModernExecutionManager()
 
-async def cleanup_old_processes():
-    """Periodically cleans up old process data."""
-    while True:
-        await asyncio.sleep(600)  # Run every 10 minutes
-        now = time.time()
-        expired_keys = [
-            pid for pid, data in list(active_processes.items()) # Iterate over a copy
-            if now - data.get("timestamp", 0) > MAX_PROCESS_AGE_SECONDS
-        ]
-        for key in expired_keys:
-            logger.info(f"Cleaning up expired process data for process_id: {key}")
-            active_processes.pop(key, None)
 
-@router.on_event("startup")
-async def startup_event():
-    asyncio.create_task(cleanup_old_processes())
-
-def get_step_display_name(tool_name: str, entity: Optional[str] = None) -> str:
-    """
-    Map backend tool names to user-friendly display names.
-    
-    Args:
-        tool_name: The backend tool name (e.g., "api", "sql")
-        entity: The entity being operated on (e.g., "users", "groups")
-    
-    Returns:
-        User-friendly display name for the frontend
-    """
-    if not entity:
-        return tool_name
-        
-    display_mapping = {
-        "api": entity,  # "users", "groups", "system_log", etc.
-        "sql": f"sql_{entity}",  # "sql_users", "sql_groups", etc.
-    }
-    
-    return display_mapping.get(tool_name, tool_name)
-
-def _map_modern_step_to_api_step(modern_step: ExecutionStep, index: int) -> ApiStep:
-    """Map Modern Execution Manager step to API step format"""
-    # Extract entity from query_context if available
-    entity = None
-    if hasattr(modern_step, 'entity'):
-        entity = modern_step.entity
-    elif hasattr(modern_step, 'query_context') and isinstance(modern_step.query_context, dict):
-        entity = modern_step.query_context.get('entity')
-    
-    # Get user-friendly display name
-    display_name = get_step_display_name(modern_step.tool_name, entity)
-    
-    # Handle query_context properly
-    api_query_context_for_model: Dict[str, Any] = {}
-    if hasattr(modern_step, 'query_context'):
-        raw_query_context = modern_step.query_context
-        if isinstance(raw_query_context, dict):
-            api_query_context_for_model = raw_query_context
-        elif raw_query_context is not None:
-            logger.warning(
-                f"Step {index} ('{display_name}'): "
-                f"query_context is of type '{type(raw_query_context)}' (value: '{raw_query_context}'), "
-                f"but ApiStep.query_context expects a dictionary. Using empty dictionary."
-            )
-    
-    return ApiStep(
-        id=index,
-        tool_name=display_name,  # Use display name instead of raw tool name
-        query_context=api_query_context_for_model,
-        reason=getattr(modern_step, 'reason', ''),
-        critical=getattr(modern_step, 'critical', False),
-        status="pending"
-    )
-
-async def generate_plan_with_modern_manager(query: str, process_id: str, user: AuthUser | None) -> tuple[ApiPlan, ExecutionPlan]:
-    """Generate execution plan using Modern Execution Manager's planning agent"""
-    logger.info(f"[{process_id}] Generating plan with Modern Execution Manager for query: \"{query}\"")
-    set_correlation_id(process_id)
-
+async def get_last_sync_info_for_realtime() -> Dict[str, Any]:
+    """Get sync timestamp for the most recent successful sync (realtime version)"""
     try:
-        # Check database health before planning
-        if not modern_executor._check_database_health():
-            raise ValueError("Database connectivity issues detected. Please try again later.")
+        from src.core.okta.sync.operations import DatabaseOperations
+        from src.config.settings import settings
+        from sqlalchemy import text
         
-        # Create planning dependencies
-        planning_deps = PlanningDependencies(
-            available_entities=modern_executor.available_entities,
-            entity_summary=modern_executor.entity_summary,
-            sql_tables=modern_executor.sql_tables
-        )
+        db = DatabaseOperations()
         
-        # Use the modern planning agent
-        agent_response = await planning_agent.run(query, deps=planning_deps)
-        execution_plan = agent_response.data
+        # Simple query that just gets the timestamp
+        query = """
+        SELECT 
+            end_time
+        FROM sync_history
+        WHERE tenant_id = :tenant_id
+        AND success = 1
+        ORDER BY start_time DESC
+        LIMIT 1
+        """
         
-        if not execution_plan or not hasattr(execution_plan, 'steps') or not execution_plan.steps:
-            logger.error(f"[{process_id}] Planning agent returned invalid plan structure: {execution_plan}")
-            raise ValueError("Execution plan structure from planning agent is invalid or empty.")
-
-        # Map to API format for frontend compatibility
-        api_steps = []
-        for i, step in enumerate(execution_plan.steps):
-            api_steps.append(_map_modern_step_to_api_step(step, i))
-
-        api_plan = ApiPlan(
-            original_query=query,
-            reasoning=execution_plan.reasoning,
-            confidence=getattr(execution_plan, 'confidence', None),
-            steps=api_steps
-        )
+        # Execute query with parameters
+        params = {"tenant_id": settings.tenant_id}
         
-        return api_plan, execution_plan
-
+        # Use session to execute query
+        async with db.get_session() as session:
+            sql_text = text(query)
+            result = await session.execute(sql_text, params)
+            row = result.fetchone()
+            
+            # Default response if no data
+            if not row or not row[0]:
+                return {"last_sync": "No data"}
+            
+            # Get timestamp as string from result
+            timestamp_str = row[0]
+            
+            # Return the timestamp as-is - frontend will handle formatting
+            return {"last_sync": timestamp_str}
+        
     except Exception as e:
-        logger.error(f"[{process_id}] Failed to generate plan with Modern Execution Manager: {e}", exc_info=True)
-        user_message = format_error_for_user(e) if isinstance(e, BaseError) else "Failed to generate execution plan due to an internal error."
-        raise HTTPException(status_code=500, detail=user_message)
+        # Keep error logging (always important)
+        logger.error(f"Error retrieving sync timestamp for realtime: {str(e)}")
+        return {"last_sync": "Error"}
+
+
+
+
 
 async def execute_plan_and_stream(
     process_id: str,
     query: str,
-    execution_plan: ExecutionPlan,
     user: AuthUser | None
 ) -> AsyncGenerator[Dict[str, str], None]:
     """
-    Execute plan using Modern Execution Manager and stream SSE events.
+    Execute query using Modern Execution Manager exactly like test_query_1.py.
     
-    This function wraps the Modern Execution Manager's execute_steps method
-    and converts its results to SSE events that the frontend expects.
+    Uses execute_query() for complete end-to-end execution with:
+    - Single correlation ID (process_id) for isolation between users
+    - Single planning execution (no duplicates)
+    - Built-in Results Formatter processing
+    - Comprehensive logging and error handling
     """
     global active_processes
     set_correlation_id(process_id)
-    logger.info(f"[{process_id}] Starting Modern Execution Manager execution for query: \"{query}\"")
+    logger.info(f"[{process_id}] Starting Modern Execution Manager execution (test_query_1.py pattern) for query: \"{query}\"")
 
     def check_cancellation() -> bool:
         """Check if the process has been cancelled"""
@@ -302,47 +263,166 @@ async def execute_plan_and_stream(
             "data": json.dumps({
                 'process_id': process_id,
                 'status': ProcessStatus.RUNNING_EXECUTION.value,
-                'message': 'Execution starting with Modern Execution Manager'
+                'message': 'Executing with Modern Execution Manager (test_query_1.py pattern)'
             })
         }
         await asyncio.sleep(0.01)
 
-        # Execute the plan using Modern Execution Manager
-        logger.info(f"[{process_id}] Calling Modern Execution Manager execute_steps")
-        execution_results = await modern_executor.execute_steps(execution_plan, process_id)
+        # Store step info to yield when plan is ready
+        step_info_ready = asyncio.Event()
+        step_info_data = None
         
-        # Check for cancellation after execution
-        if check_cancellation():
-            active_processes[process_id]["status"] = ProcessStatus.CANCELLED
+        # Event queue for step status updates
+        step_status_queue = asyncio.Queue()
+
+        # Set up callback to capture step info when plan is ready (before execution starts)
+        async def on_plan_ready(execution_plan):
+            nonlocal step_info_data
+            step_info_data = [
+                {
+                    'id': i,
+                    'tool_name': step.tool_name,
+                    'operation': getattr(step, 'operation', None),
+                    'entity': getattr(step, 'entity', None),
+                    'query_context': step.query_context,
+                    'critical': step.critical,
+                    'status': 'pending'  # Steps start as pending
+                }
+                for i, step in enumerate(execution_plan.steps)
+            ]
+            step_info_ready.set()
+
+        async def on_step_status(step_number, step_type, status):
+            """Callback when step status changes - send real-time step updates"""
+            try:
+                step_status_data = {
+                    'process_id': process_id,
+                    'step_number': step_number,
+                    'step_name': step_type,  # Use actual step type from execution manager
+                    'status': status  # running, completed, error
+                }
+                
+                # Queue the step status event
+                await step_status_queue.put({
+                    "event": "step_status_update",
+                    "data": json.dumps(step_status_data)
+                })
+            except Exception as e:
+                logger.warning(f"[{process_id}] Step status callback error: {e}")
+
+        # Set the callbacks before executing
+        modern_executor.plan_ready_callback = on_plan_ready
+        modern_executor.step_status_callback = on_step_status
+
+        # Execute using EXACT same pattern as test_query_1.py - ONE call only!
+        logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
+        
+        # Start execution in background task to get plan info early
+        execution_task = asyncio.create_task(modern_executor.execute_query(query))
+        
+        # Wait for plan to be ready and send step info
+        await step_info_ready.wait()
+        if step_info_data:
             yield {
-                "event": "plan_cancelled",
-                "data": json.dumps({'process_id': process_id, 'status': ProcessStatus.CANCELLED.value, 'message': 'Execution cancelled.'})
+                "event": "step_plan_info",
+                "data": json.dumps({'process_id': process_id, 'steps': step_info_data})
             }
             await asyncio.sleep(0.01)
-            return
-
+        
+        # Process step status updates while execution is running
+        execution_complete = False
+        result = None
+        
+        while not execution_complete:
+            try:
+                # Check if execution is complete
+                if execution_task.done():
+                    result = await execution_task
+                    execution_complete = True
+                    break
+                
+                # Try to get step status update with short timeout
+                try:
+                    step_event = await asyncio.wait_for(step_status_queue.get(), timeout=0.1)
+                    yield step_event
+                    await asyncio.sleep(0.01)
+                except asyncio.TimeoutError:
+                    # No step status update, continue checking execution
+                    await asyncio.sleep(0.05)
+                    
+            except Exception as e:
+                logger.error(f"[{process_id}] Error processing step status updates: {e}")
+                break
+        
+        # Process any remaining step status events after execution completes
+        while not step_status_queue.empty():
+            try:
+                step_event = step_status_queue.get_nowait()
+                yield step_event
+                await asyncio.sleep(0.01)
+            except asyncio.QueueEmpty:
+                break
+        
+        # Clear the callbacks after execution
+        modern_executor.plan_ready_callback = None
+        modern_executor.step_status_callback = None
+        
+        # Log comprehensive execution results (exact same as test_query_1.py)
+        logger.info(f"[{process_id}] EXECUTION RESULTS:")
+        logger.info(f"[{process_id}] Overall Success: {result.get('success', False)}")
+        logger.info(f"[{process_id}] Correlation ID: {result.get('correlation_id', process_id)}")
+        logger.info(f"[{process_id}] Total Steps: {result.get('total_steps', 0)}")
+        logger.info(f"[{process_id}] Successful Steps: {result.get('successful_steps', 0)}")
+        logger.info(f"[{process_id}] Failed Steps: {result.get('failed_steps', 0)}")
+        
+        # Get step results for logging and status updates (exact same as test_query_1.py)
+        step_results = result.get('step_results', [])
+        
+        # Log step details (exact same as test_query_1.py)
+        if step_results:
+            logger.info(f"[{process_id}] STEP EXECUTION DETAILS:")
+            for i, step_result in enumerate(step_results, 1):
+                success = step_result.get('success', False)
+                step_type = step_result.get('step_type', 'unknown')
+                status = "SUCCESS" if success else "FAILED"
+                logger.info(f"[{process_id}]    {status} Step {i} ({step_type})")
+                if step_result.get('error'):
+                    logger.info(f"[{process_id}]       Error: {step_result['error']}")
+                elif step_result.get('result_type'):
+                    logger.info(f"[{process_id}]       Result: {step_result['result_type']}")
+        
+        # Get formatted response (execute_query already handles Results Formatter)
+        formatted_response = result.get('processed_summary', {})
+        
+        # Extract execution statistics from result
+        failed_steps = result.get('failed_steps', 0)
+        successful_steps = result.get('successful_steps', 0)
+        total_steps = result.get('total_steps', 0)
+        
         # Process execution results and send appropriate SSE events
-        if execution_results.failed_steps > 0:
+        logger.info(f"[{process_id}] Modern Execution Manager completed - processing results for streaming")
+        
+        if failed_steps > 0:
             # Some steps failed
             active_processes[process_id]["status"] = ProcessStatus.COMPLETED_WITH_ERRORS
             
             # Send step status updates for failed steps
-            for step_result in execution_results.steps:
-                if not step_result.success:
+            for i, step_result in enumerate(step_results):
+                if not step_result.get('success', True):
                     yield {
                         "event": "step_status_update",
                         "data": json.dumps({
                             'process_id': process_id,
-                            'step_index': step_result.step_number - 1,  # Convert to 0-based index
+                            'step_index': i,  # 0-based index
                             'status': 'error',
                             'operation_status': 'error',
-                            'error_message': step_result.error or 'Step execution failed'
+                            'error_message': step_result.get('error', 'Step execution failed')
                         })
                     }
                     await asyncio.sleep(0.01)
             
             # Send error event
-            error_message = f"Execution completed with {execution_results.failed_steps} failed steps"
+            error_message = f"Execution completed with {failed_steps} failed steps"
             yield {
                 "event": "plan_error",
                 "data": json.dumps({
@@ -358,27 +438,105 @@ async def execute_plan_and_stream(
             active_processes[process_id]["status"] = ProcessStatus.COMPLETED
             
             # Send step completion updates
-            for step_result in execution_results.steps:
+            for i, step_result in enumerate(step_results):
                 yield {
                     "event": "step_status_update",
                     "data": json.dumps({
                         'process_id': process_id,
-                        'step_index': step_result.step_number - 1,  # Convert to 0-based index
+                        'step_index': i,  # 0-based index
                         'status': 'completed',
                         'operation_status': 'completed',
-                        'result_summary': f'Step {step_result.step_number} completed successfully'
+                        'result_summary': f'Step {i+1} completed successfully'
                     })
                 }
                 await asyncio.sleep(0.01)
             
-            # Send final result
+            # Handle final result with formatted response from Results Formatter
+            final_result_content = "Execution completed successfully"
+            display_type = 'markdown'  # Default display type
+            
+            # Check if we have a formatted response from the results formatter
+            if formatted_response:
+                display_type = formatted_response.get('display_type', 'markdown')
+                
+                # Extract content based on display type
+                content = formatted_response.get('content', {})
+                if display_type == 'vuetify_table' and content:
+                    # For Vuetify table, use the entire content structure
+                    final_result_content = content
+                elif display_type == 'markdown' and isinstance(content, dict) and content.get('text'):
+                    final_result_content = content['text']
+                elif isinstance(content, str):
+                    final_result_content = content
+                else:
+                    # Fallback to showing summary
+                    if isinstance(content, dict):
+                        final_result_content = f"Results available in {display_type} format"
+                    else:
+                        final_result_content = str(content) if content else "Results processed successfully"
+            elif result.get('final_result'):
+                # Fallback to handling final_result if no formatted response
+                final_result = result['final_result']
+                if hasattr(final_result, 'sql') and hasattr(final_result, 'explanation'):
+                    # It's a SQLExecutionResult - extract the data and explanation
+                    sql_result = final_result
+                    record_count = len(sql_result.data) if sql_result.data else 0
+                    final_result_content = f"Query executed successfully. Found {record_count} records.\n\n**Query Details:**\n{sql_result.explanation}"
+                elif hasattr(final_result, 'code') and hasattr(final_result, 'explanation'):
+                    # It's an APIExecutionResult - handle API responses
+                    api_result = final_result
+                    if api_result.executed:
+                        if isinstance(api_result.data, list):
+                            record_count = len(api_result.data)
+                            final_result_content = f"API call executed successfully. Found {record_count} records."
+                        else:
+                            final_result_content = "API call executed successfully."
+                        final_result_content += f"\n\n**API Details:**\n{api_result.explanation}"
+                    else:
+                        final_result_content = f"API call failed: {api_result.error or 'Unknown error'}\n\n**API Details:**\n{api_result.explanation}"
+                else:
+                    # Try to convert to string for other result types
+                    try:
+                        final_result_content = str(final_result)
+                    except:
+                        final_result_content = "Execution completed successfully"
+            
+            # Check if any step was SQL and get last sync info
+            has_sql_step = any(step_result.get('step_type', '').lower() == 'sql' for step_result in step_results)
+            last_sync_metadata = {}
+            
+            if has_sql_step:
+                try:
+                    # Get last sync info similar to AIService
+                    last_sync_metadata = await get_last_sync_info_for_realtime()
+                    logger.info(f"[{process_id}] Retrieved last sync info for SQL results: {last_sync_metadata}")
+                except Exception as e:
+                    logger.warning(f"[{process_id}] Failed to get last sync info: {e}")
+                    last_sync_metadata = {"last_sync": "Error"}
+            
+            # Send final result with proper display type from Results Formatter
             final_result_data = {
                 'process_id': process_id,
                 'status': ProcessStatus.COMPLETED.value,
-                'result_content': execution_results.final_result or "Execution completed successfully",
-                'display_type': 'markdown',  # Default display type
-                'message': f'Successfully executed {execution_results.successful_steps}/{execution_results.total_steps} steps'
+                'result_content': final_result_content,
+                'display_type': display_type,  # Use display type from Results Formatter
+                'message': f'Successfully executed {successful_steps}/{total_steps} steps'
             }
+            
+            # Add formatted response metadata if available
+            if formatted_response:
+                final_result_data['formatted_response'] = formatted_response
+                
+                # Add last_sync to formatted_response metadata if we have SQL step
+                if has_sql_step and last_sync_metadata:
+                    if 'metadata' not in final_result_data['formatted_response']:
+                        final_result_data['formatted_response']['metadata'] = {}
+                    final_result_data['formatted_response']['metadata'].update(last_sync_metadata)
+            elif has_sql_step and last_sync_metadata:
+                # If no formatted_response but we have SQL with last_sync, create metadata structure
+                final_result_data['formatted_response'] = {
+                    'metadata': last_sync_metadata
+                }
             
             # Store final result in process data
             active_processes[process_id]["final_result_data"] = final_result_data
@@ -433,16 +591,29 @@ async def start_realtime_process_endpoint(
         client_ip = request.client.host if request.client else "unknown"
         logger.warning(f"Security warnings for query from user {current_user.id} (IP {client_ip}): {', '.join(warnings)}")
 
-    # Generate plan using Modern Execution Manager
-    api_plan_response, execution_plan = await generate_plan_with_modern_manager(sanitized_query, process_id, current_user)
+    # Create a simple placeholder plan for immediate UI response (actual plan will be sent during execution)
+    placeholder_plan = ApiPlan(
+        original_query=sanitized_query,
+        reasoning="Analyzing query and generating execution plan",
+        confidence=None,
+        steps=[
+            ApiStep(
+                id=0,
+                tool_name="planning",
+                query_context={"description": "Analyzing query and determining optimal execution strategy"},
+                reason="Planning execution approach",
+                critical=True,
+                status="pending"
+            )
+        ]
+    )
 
-    # Store process data
+    # Store process data (no execution_plan needed - execute_query handles everything)
     active_processes[process_id] = {
         "process_id": process_id,
         "query": sanitized_query,
         "user_id": username,
-        "api_plan_for_initial_response": api_plan_response.model_dump(),
-        "execution_plan": execution_plan,  # Store the Modern Execution Manager plan
+        "api_plan_for_initial_response": placeholder_plan.model_dump(),
         "status": ProcessStatus.PLAN_GENERATED,
         "cancelled": False,
         "timestamp": time.time(),
@@ -450,8 +621,8 @@ async def start_realtime_process_endpoint(
         "final_result_data": None
     }
 
-    logger.info(f"[{process_id}] [/start-process] Plan generated with Modern Execution Manager")
-    return StartProcessResponse(process_id=process_id, plan=api_plan_response)
+    logger.info(f"[{process_id}] [/start-process] Process created - ready for execution")
+    return StartProcessResponse(process_id=process_id, plan=placeholder_plan)
 
 @router.get("/stream-updates/{process_id}")
 async def stream_realtime_updates_endpoint(
@@ -559,26 +730,12 @@ async def stream_realtime_updates_endpoint(
     # Start execution with Modern Execution Manager
     logger.info(f"[{process_id}] Starting Modern Execution Manager execution stream")
 
-    execution_plan = process_info.get("execution_plan")
     query = process_info.get("query", "N/A")
-
-    if not execution_plan:
-        logger.error(f"[{process_id}] No execution plan found for Modern Execution Manager")
-        active_processes[process_id]["status"] = ProcessStatus.ERROR
-        active_processes[process_id]["error_message"] = 'Internal error: Execution plan not found.'
-        async def plan_error_generator():
-            yield {
-                "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': active_processes[process_id]["error_message"]})
-            }
-            await asyncio.sleep(0.01)
-        return EventSourceResponse(plan_error_generator())
 
     # Create the event generator
     event_generator = execute_plan_and_stream(
         process_id,
         query,
-        execution_plan,
         current_user
     )
     return EventSourceResponse(event_generator)
@@ -619,18 +776,231 @@ async def cancel_realtime_process_endpoint(
 
     return {"message": f"Cancellation signal sent for process {process_id} using Modern Execution Manager"}
 
-@router.get("/available-tools")
-async def get_available_tools(
+@router.post("/execute-query")
+async def execute_query_endpoint(
+    request: Request,
+    payload: RealtimeQueryRequest,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Execute query with Modern Execution Manager - Direct Query Execution
+    
+    This endpoint replicates the functionality from test_query_1.py, providing
+    complete end-to-end execution with comprehensive results including:
+    - Planning → Execution → Results formatting
+    - Success rates and step details
+    - Final formatted results
+    - Correlation ID tracking
+    
+    This is similar to the test file's modern_executor.execute_query(query) method.
+    """
+    correlation_id = str(uuid.uuid4())
+    username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
+    set_correlation_id(correlation_id)
+
+    logger.info(f"[{correlation_id}] [/execute-query] Direct Modern Execution Manager request for query: \"{payload.query}\" by user: {username}")
+
+    # Sanitize query
+    sanitized_query, warnings = sanitize_query(payload.query)
+    
+    # Log security warnings
+    if warnings:
+        client_ip = request.client.host if request.client else "unknown"
+        logger.warning(f"Security warnings for query from user {current_user.id} (IP {client_ip}): {', '.join(warnings)}")
+
+    try:
+        # Execute the query using Modern Execution Manager's complete execute_query method
+        # This replicates what test_query_1.py does: result = await modern_executor.execute_query(query)
+        logger.info(f"[{correlation_id}] Executing with Modern Execution Manager's execute_query method...")
+        result = await modern_executor.execute_query(sanitized_query)
+        
+        # Log comprehensive execution results (like the test does)
+        logger.info(f"[{correlation_id}] EXECUTION RESULTS:")
+        logger.info(f"[{correlation_id}] Overall Success: {result.get('success', False)}")
+        logger.info(f"[{correlation_id}] Correlation ID: {result.get('correlation_id', 'N/A')}")
+        logger.info(f"[{correlation_id}] Total Steps: {result.get('total_steps', 0)}")
+        logger.info(f"[{correlation_id}] Successful Steps: {result.get('successful_steps', 0)}")
+        logger.info(f"[{correlation_id}] Failed Steps: {result.get('failed_steps', 0)}")
+        
+        # Log step details (like the test does)
+        step_results = result.get('step_results', [])
+        if step_results:
+            logger.info(f"[{correlation_id}] STEP EXECUTION DETAILS:")
+            for i, step_result in enumerate(step_results, 1):
+                success = step_result.get('success', False)
+                step_type = step_result.get('step_type', 'unknown')
+                status = "SUCCESS" if success else "FAILED"
+                logger.info(f"[{correlation_id}]    {status} Step {i} ({step_type})")
+                if step_result.get('error'):
+                    logger.info(f"[{correlation_id}]       Error: {step_result['error']}")
+                elif step_result.get('result_type'):
+                    logger.info(f"[{correlation_id}]       Result: {step_result['result_type']}")
+        
+        # Log final result (like the test does)
+        final_result = result.get('final_result')
+        if final_result:
+            logger.info(f"[{correlation_id}] FINAL RESULT:")
+            logger.info(f"[{correlation_id}]    Type: {type(final_result).__name__}")
+            logger.info(f"[{correlation_id}]    Available: YES")
+        else:
+            logger.info(f"[{correlation_id}] NO FINAL RESULT")
+        
+        # Assess success (like the test does)
+        overall_success = result.get('success', False)
+        success_rate = result.get('success_rate', 0)
+        
+        logger.info(f"[{correlation_id}] EXECUTION ASSESSMENT:")
+        if overall_success and success_rate >= 1.0:
+            logger.info(f"[{correlation_id}] QUERY EXECUTION - COMPLETE SUCCESS!")
+            logger.info(f"[{correlation_id}]    All steps executed successfully")
+        elif overall_success and success_rate >= 0.5:
+            logger.info(f"[{correlation_id}] QUERY EXECUTION - SUCCESS!")
+            logger.info(f"[{correlation_id}]    Success rate: {success_rate:.1%}")
+        else:
+            logger.info(f"[{correlation_id}] QUERY EXECUTION - FAILED")
+            logger.info(f"[{correlation_id}]    Success rate: {success_rate:.1%}")
+        
+        # Return comprehensive results that match test expectations
+        return {
+            "success": overall_success,
+            "correlation_id": result.get('correlation_id'),
+            "query": sanitized_query,
+            "execution_results": {
+                "total_steps": result.get('total_steps', 0),
+                "successful_steps": result.get('successful_steps', 0),
+                "failed_steps": result.get('failed_steps', 0),
+                "success_rate": success_rate,
+                "step_details": step_results
+            },
+            "final_result": {
+                "available": final_result is not None,
+                "type": type(final_result).__name__ if final_result else None,
+                "data": final_result
+            },
+            "formatted_response": result.get('processed_summary', {}),
+            "execution_method": "Modern Execution Manager execute_query",
+            "message": f"Query executed via Modern Execution Manager with {success_rate:.1%} success rate"
+        }
+
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Error during Modern Execution Manager execute_query: {e}", exc_info=True)
+        error_detail = format_error_for_user(e) if isinstance(e, BaseError) else f"Query execution failed: {str(e)}"
+        
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "error": error_detail,
+                "correlation_id": correlation_id,
+                "execution_method": "Modern Execution Manager execute_query",
+                "success": False
+            }
+        )
+
+@router.get("/okta-entities")
+async def get_okta_entities(
     current_user: AuthUser = Depends(get_current_user) 
 ):
-    """Retrieve all available tools from the Modern Execution Manager."""
-    tools_json_str = build_tools_documentation()
-    tools_list = json.loads(tools_json_str)
+    """Retrieve all available Okta API categories organized by functional areas."""
+    import json
+    import os
+    from pathlib import Path
     
-    tools_list.sort(key=lambda x: (x.get("category", ""), x["tool_name"]))
-    
-    return {
-        "tools_count": len(tools_list),
-        "tools": tools_list,
-        "execution_engine": "Modern Execution Manager"
-    }
+    try:
+        # Read entities from the API reference file
+        api_reference_path = Path("src/data/schemas/Okta_API_entitity_endpoint_reference.json")
+        
+        if not api_reference_path.exists():
+            logger.warning("API reference file not found, falling back to Modern Execution Manager")
+            # Fallback to Modern Execution Manager instead of legacy tool registry
+            
+            entities_list = []
+            for entity in modern_executor.available_entities:
+                entities_list.append({
+                    "entity_name": entity,
+                    "display_name": entity.replace('_', ' ').title(),
+                    "description": f"Okta {entity.replace('_', ' ').title()} operations and management via Modern Execution Manager",
+                    "source": "Modern Execution Manager"
+                })
+                    
+            entities_list.sort(key=lambda x: x["display_name"])
+            return {
+                "entities_count": len(entities_list),
+                "entities": entities_list,
+                "source": "Modern Execution Manager (Fallback)"
+            }
+        
+        # Read and parse the API reference
+        with open(api_reference_path, 'r', encoding='utf-8') as f:
+            api_data = json.load(f)
+        
+        # Extract unique folder paths and count GET endpoints per folder
+        get_folder_counts = {}
+        folder_descriptions = {}
+        
+        for endpoint in api_data.get('endpoints', []):
+            # Only include folders that have GET endpoints
+            if endpoint.get('method') == 'GET':
+                folder_path = endpoint.get('folder_path')
+                if folder_path:
+                    # Count GET endpoints per folder
+                    get_folder_counts[folder_path] = get_folder_counts.get(folder_path, 0) + 1
+                    
+                    # Store a description (use the first description we find for each folder)
+                    if folder_path not in folder_descriptions:
+                        name = endpoint.get('name', '')
+                        entity = endpoint.get('entity', '')
+                        if name and entity:
+                            folder_descriptions[folder_path] = f"{folder_path}: {name.lower()}"
+                        else:
+                            folder_descriptions[folder_path] = f"{folder_path} operations and management"
+        
+        # Create simple entities list using folder paths
+        entities_list = []
+        for folder_path, get_endpoint_count in get_folder_counts.items():
+            description = folder_descriptions.get(folder_path, f"{folder_path} operations")
+            entity_name = folder_path.lower().replace(' ', '_').replace('-', '_')
+            
+            entities_list.append({
+                "entity_name": entity_name,
+                "display_name": folder_path,
+                "description": description,
+                "get_endpoint_count": get_endpoint_count
+            })
+        
+        # Sort entities alphabetically by display name
+        entities_list.sort(key=lambda x: x["display_name"])
+        
+        return {
+            "entities_count": len(entities_list),
+            "entities": entities_list,
+            "source": "Okta API Reference (Folder Paths)"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error reading API reference: {e}")
+        
+        # Fallback to Modern Execution Manager on error instead of legacy tool registry
+        try:
+            entities_list = []
+            for entity in modern_executor.available_entities:
+                entities_list.append({
+                    "entity_name": entity,
+                    "display_name": entity.replace('_', ' ').title(),
+                    "description": f"Okta {entity.replace('_', ' ').title()} operations and management via Modern Execution Manager",
+                    "source": "Modern Execution Manager"
+                })
+            
+            entities_list.sort(key=lambda x: x["display_name"])
+            return {
+                "entities_count": len(entities_list),
+                "entities": entities_list,
+                "source": "Modern Execution Manager (Error Fallback)"
+            }
+        except Exception as fallback_error:
+            logger.error(f"Error using Modern Execution Manager fallback: {fallback_error}")
+            # Ultimate fallback - empty list
+            return {
+                "entities_count": 0,
+                "entities": [],
+                "source": "Empty Fallback"
+            }
