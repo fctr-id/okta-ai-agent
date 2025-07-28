@@ -164,6 +164,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8001, help="Port to bind to")
     parser.add_argument("--no-https", action="store_true", help="Run without HTTPS (not recommended)")
     parser.add_argument("--log-level", default="info", help="Logging level")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
     args = parser.parse_args()
     
     # Run the FastAPI server
@@ -171,7 +172,8 @@ if __name__ == "__main__":
     
     if args.no_https:
         print("WARNING: Running without HTTPS. This is not recommended for production use.")
-        command = f"venv\\Scripts\\python -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level}"
+        reload_flag = " --reload" if args.reload else ""
+        command = f"venv\\Scripts\\python -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level}{reload_flag}"
         run_command(command)
     else:
         # Generate certificates if needed
@@ -179,9 +181,10 @@ if __name__ == "__main__":
         print(f"Starting secure server on https://{args.host}:{args.port}")
         
         # Run with HTTPS
+        reload_flag = " --reload" if args.reload else ""
         command = (
             f"venv\\Scripts\\python -m uvicorn src.api.main:app --host {args.host} "
             f"--port {args.port} --log-level {args.log_level} "
-            f"--ssl-keyfile {key_path} --ssl-certfile {cert_path}"
+            f"--ssl-keyfile {key_path} --ssl-certfile {cert_path}{reload_flag}"
         )
         run_command(command)
