@@ -29,7 +29,8 @@
 
                                     <div class="sync-info">
                                         <v-icon class="sync-icon" size="small">mdi-update</v-icon>
-                                        <span v-if="isRealtimeMode">Realtime Mode</span>
+                                        <span v-if="hasLastSyncTimestamp">Last Updated: {{ getLastSyncTime }}</span>
+                                        <span v-else-if="isRealtimeMode">Realtime Mode</span>
                                         <span v-else>Last Updated: {{ getLastSyncTime }}</span>
                                     </div>
                                 </div>
@@ -134,11 +135,6 @@ const isTextData = computed(() =>
 )
 
 const displayedItems = computed(() => {
-    //console.log('Computing displayedItems:', {
-    //    type: props.type,
-    //    content: props.content
-    //});
-
     if (props.type === MessageType.STREAM || props.type === MessageType.BATCH || props.type === MessageType.TABLE) {
         return Array.isArray(props.content) ? props.content : [];
     }
@@ -225,6 +221,42 @@ const getLastSyncTime = computed(() => {
     }
 
     return timestampStr;
+});
+
+// Check if we have a valid last sync timestamp in metadata
+const hasLastSyncTimestamp = computed(() => {
+    try {
+        // Ensure props and metadata exist
+        if (!props || !props.metadata) {
+            return false;
+        }
+        
+        // Check for last_sync data in metadata
+        if (props.metadata.last_sync) {
+            const lastSync = props.metadata.last_sync;
+            
+            // Check if it's a valid timestamp (not error states)
+            if (typeof lastSync === 'object' && lastSync && lastSync.last_sync) {
+                const timestampValue = lastSync.last_sync;
+                const result = timestampValue && 
+                       timestampValue !== 'Never' && 
+                       timestampValue !== 'Error' && 
+                       timestampValue !== 'No data';
+                return result;
+            } else if (typeof lastSync === 'string') {
+                const result = lastSync && 
+                       lastSync !== 'Never' && 
+                       lastSync !== 'Error' && 
+                       lastSync !== 'No data';
+                return result;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.warn('Error in hasLastSyncTimestamp computed:', error);
+        return false;
+    }
 });
 
 // Helper function to format timestamps consistently

@@ -168,6 +168,11 @@ export function useRealtimeStream() {
                 handleStepStatusEvent(event);
             });
 
+            eventSource.addEventListener("step_plan_info", (event) => {
+                //console.log('Received step_plan_info event:', event.data)
+                handleStepPlanInfoEvent(event);
+            });
+
             eventSource.addEventListener("final_result", (event) => {
                 //console.log('Received final_result event:', event.data)
                 handleFinalResultEvent(event);
@@ -316,19 +321,46 @@ export function useRealtimeStream() {
     };
 
     /**
+     * Handle step plan info events
+     */
+    const handleStepPlanInfoEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            console.log('Processing step plan info event:', data);
+
+            if (data.steps && Array.isArray(data.steps)) {
+                execution.planGenerated = true;
+                execution.steps = data.steps.map((step) => ({
+                    id: step.id,
+                    tool_name: step.tool_name,
+                    reason: step.query_context || 'Processing data',
+                    status: step.status || "pending",
+                    critical: step.critical
+                }));
+                execution.status = "executing";
+                console.log('Updated execution steps:', execution.steps);
+            }
+        } catch (err) {
+            console.error("Error processing step plan info event:", err);
+        }
+    };
+
+    /**
      * Handle final result events
      */
     const handleFinalResultEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            //console.log('Processing final result:', data);
+            
+            // The Results Formatter output is in data.formatted_response
+            const formattedResponse = data.formatted_response || {};
 
-            const agentDisplayMetadata = data.display_hints || {};
+            const agentDisplayMetadata = formattedResponse.metadata || data.metadata || data.display_hints || {};
 
             // Format the result to the expected shape for the frontend
             execution.results = {
-                content: data.result_content || data.content || "", // data.result_content should hold the items array for tables
-                display_type: data.display_type || "markdown",
+                content: formattedResponse.content || data.content || data.result_content || "", // Try formatted_response first
+                display_type: formattedResponse.display_type || data.display_type || "markdown",
                 metadata: agentDisplayMetadata, // This will now correctly pass headers, totalItems, etc.
             };
 
