@@ -29,7 +29,8 @@ from src.utils.logging import get_logger, generate_correlation_id, set_correlati
 load_dotenv()
 
 # Setup centralized logging with file output
-logger = get_logger("okta_ai_agent.api_code_gen_agent", log_dir=get_default_log_dir())
+# Using main "okta_ai_agent" namespace for unified logging across all agents
+logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
 
 # Use the model picker approach for consistent model configuration
 try:

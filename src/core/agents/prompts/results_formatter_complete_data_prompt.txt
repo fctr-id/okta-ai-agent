@@ -44,14 +44,49 @@ KEY OKTA ENTITIES AND RELATIONSHIPS:
 OUTPUT FORMAT (FormattedOutput structure):
 {
   "display_type": "markdown" | "table",
-  "content": "formatted content that directly answers the user's query",
+  "content": "CONTENT STRUCTURE VARIES BY TYPE - SEE DETAILS BELOW",
   "metadata": {
     "execution_summary": "comprehensive technical summary",
-    "confidence_level": "High/Medium/Low",
+    "confidence_level": "High/Medium/Low", 
     "data_sources": ["sql", "api", "hybrid"],
     "total_records": number,
     "processing_time": "actual processing time",
     "limitations": "any data limitations or caveats"
+  }
+}
+
+CRITICAL: CONTENT STRUCTURE BY DISPLAY TYPE:
+
+FOR MARKDOWN (display_type: "markdown"):
+- content: STRING - Direct markdown text that answers the user's query
+- Use <br> for line breaks (Vue.js compatibility)
+- Include headers, lists, and formatting as needed
+- Example: 
+{
+  "display_type": "markdown",
+  "content": "# User Information<br><br>Found 2 active users:<br><br>**Dan G** (dan@fctr.io)<br>- Created: May 22, 2025<br>- Status: ACTIVE<br><br>**Aiden Garcia** (aiden.garcia@fctr.io)<br>- Created: June 3, 2025<br>- Status: ACTIVE",
+  "metadata": {...}
+}
+
+FOR TABLE (display_type: "table"):
+- content: ARRAY of data objects (the actual rows)
+- metadata.headers: ARRAY of column definitions for Vuetify table
+- CRITICAL: Each header MUST have "value" (property key) and "text" (display name)
+- Example:
+{
+  "display_type": "table", 
+  "content": [
+    {"user_id": "00ur...", "email": "dan@fctr.io", "created_at": "2025-05-22 17:03:22"},
+    {"user_id": "00us...", "email": "aiden.garcia@fctr.io", "created_at": "2025-06-03 10:13:03"}
+  ],
+  "metadata": {
+    "headers": [
+      {"value": "user_id", "text": "User ID", "sortable": true},
+      {"value": "email", "text": "Email Address", "sortable": true},
+      {"value": "created_at", "text": "Created Date", "sortable": true}
+    ],
+    "execution_summary": "...",
+    "total_records": 2
   }
 }
 
@@ -63,26 +98,28 @@ USE MARKDOWN WHEN:
 - Data involves complex relationships requiring explanation
 - Query asks "can user access X?" or "what permissions does Y have?" (explain with reasoning)
 - Presenting summaries, insights, or recommendations
-- Fewer than 5 items that need detailed explanation
+- Fewer than 3 items that need detailed explanation
 - Access control questions that depend on policies, rules, factors (use "It depends..." explanations)
 
 USE TABLE WHEN:
-- User asks for lists of entities (users, groups, applications, logs)
+- User asks for lists of entities (users, groups, applications, logs, factors)
 - Data has consistent structure across multiple items
-- More than 5 similar records to display
+- More than 3 similar records to display
 - Query asks "list all X" or "show me Y"
 - Comparative data analysis
 - ANY dataset where tabular presentation improves readability
+- MFA factors, authentication methods, or security settings
 
 CONTENT FORMATTING GUIDELINES:
 
 FOR MARKDOWN:
-- Use clear headers and structure
-- Provide comprehensive explanations
-- Include all relevant details from the complete dataset
+- Use clear, concise headers and structure
+- Be brief and to the point - avoid excessive detail
+- Include essential information from the complete dataset
 - Use <br> for line breaks (not \n)
-- For access control questions, provide detailed reasoning
-- Include data insights and patterns found in the complete dataset
+- For access control questions, provide concise reasoning
+- Focus on key insights rather than exhaustive details
+- Use bullet points and short paragraphs for readability
 
 FOR TABLE:
 - Include ALL records from the complete dataset

@@ -58,9 +58,40 @@ OUTPUT FORMAT (FormattedOutput structure):
     "processing_time": "estimated for full dataset",
     "limitations": "sample-based limitations",
     "performance_recommendation": "Polars for enterprise-scale processing",
-    "sampling_info": "details about sampling strategy"
+    "sampling_info": "details about sampling strategy",
+    "headers": [
+      {"value": "column_key", "text": "Column Display Name", "sortable": true},
+      {"value": "another_key", "text": "Another Column", "sortable": false}
+    ]
   },
   "processing_code": "Python code for processing the complete dataset using Polars"
+}
+
+CRITICAL: CONTENT STRUCTURE FOR FRONTEND COMPATIBILITY:
+
+FOR TABLE OUTPUT (primary use case):
+- content: Preview array or descriptive text about expected output structure
+- metadata.headers: ARRAY of Vuetify-compatible column definitions
+- Each header MUST have: "value" (data property key) and "text" (display name)
+- Optional header properties: "sortable" (boolean), "align" ("start"|"center"|"end")
+- processing_code: Complete Python code that will generate the final table data
+
+EXAMPLE COMPLETE OUTPUT:
+{
+  "display_type": "table",
+  "content": "Generated code will process all user records and group memberships",
+  "metadata": {
+    "execution_summary": "Sample shows user-group relationships, generating code for complete aggregation",
+    "confidence_level": "High",
+    "total_records": 1500,
+    "headers": [
+      {"value": "email", "text": "Email Address", "sortable": true},
+      {"value": "full_name", "text": "Full Name", "sortable": true},  
+      {"value": "groups", "text": "Group Memberships", "sortable": false},
+      {"value": "created_at", "text": "Created Date", "sortable": true}
+    ]
+  },
+  "processing_code": "# Process complete dataset code here..."
 }
 
 PROCESSING CODE REQUIREMENTS:

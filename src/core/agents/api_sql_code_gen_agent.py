@@ -16,7 +16,8 @@ sys.path.insert(0, str(project_root))
 
 from src.utils.logging import get_logger
 
-logger = get_logger(__name__)
+# Using main "okta_ai_agent" namespace for unified logging across all agents
+logger = get_logger("okta_ai_agent")
 
 # Use the model picker approach from the working version
 try:
@@ -45,7 +46,7 @@ from typing import List, Dict, Any, Optional
 import os
 import logging
 
-logger = logging.getLogger(__name__)
+# Note: logger already defined above with unified "okta_ai_agent" namespace
 
 class TableColumn(BaseModel):
     """Definition of a temp table column"""
