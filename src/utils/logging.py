@@ -17,11 +17,11 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# Default log levels - Use standard LOG_LEVEL variable with fallbacks
+# Default log levels - Use standard LOG_LEVEL variable for all logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-DEFAULT_CONSOLE_LEVEL = os.getenv("RLTIME_CONSOLE_LOG_LEVEL", LOG_LEVEL).upper()
+DEFAULT_CONSOLE_LEVEL = LOG_LEVEL
 # Default file log level - Always DEBUG for file logging unless explicitly overridden
-DEFAULT_FILE_LEVEL = os.getenv("RLTIME_FILE_LOG_LEVEL", "DEBUG").upper()
+DEFAULT_FILE_LEVEL = os.getenv("FILE_LOG_LEVEL", "DEBUG").upper()
 
 # Store correlation ID (simple global variable approach)
 _CORRELATION_ID = None
