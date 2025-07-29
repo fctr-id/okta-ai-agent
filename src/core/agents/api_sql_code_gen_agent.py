@@ -40,6 +40,7 @@ class ApiSqlDependencies(BaseModel):
     system_mode: bool = True
     flow_id: str
     tenant_id: str = "main"
+    sql_tables: Dict[str, Any] = {}  # Dynamic schema from okta_schema.json
 
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
@@ -48,81 +49,64 @@ import logging
 
 # Note: logger already defined above with unified "okta_ai_agent" namespace
 
-class TableColumn(BaseModel):
-    """Definition of a temp table column"""
-    name: str = Field(..., description="Column name (alphanumeric + underscore only)")
-    type: str = Field(..., description="Column type (TEXT, INTEGER, REAL, BLOB only)")
-    primary_key: bool = Field(False, description="Whether this column is the primary key")
-    required: bool = Field(True, description="Whether this column is required")
-
-class TableStructure(BaseModel):
-    """Definition of temp table structure"""
-    columns: List[TableColumn] = Field(..., description="List of table columns")
-
-class DataMapping(BaseModel):
-    """Definition of how to map API data to table columns"""
-    source_field: str = Field(..., description="Field name in API data (or special tokens like '@item')")
-    target_column: str = Field(..., description="Target column name in temp table")
-    required: bool = Field(True, description="Whether this mapping is required")
-    default_value: Optional[str] = Field(None, description="Default value if source field is missing")
-
-class DataExtraction(BaseModel):
-    """Definition of how to extract data from API response"""
-    extraction_type: str = Field(..., description="Type of extraction: 'dictionary_mapping', 'list_values', 'nested_extraction'")
-    mappings: List[DataMapping] = Field(..., description="List of data mappings")
-
-class ApiSqlOutput(BaseModel):
-    """Output from internal API-SQL agent"""
-    table_structure: Optional[TableStructure] = Field(None, description="Structure for temporary table if needed")
-    data_extraction: Optional[DataExtraction] = Field(None, description="Instructions for extracting API data")
-    processing_query: str = Field(..., description="SQL query to process the data")
-    explanation: str = Field(..., description="Context about what this query accomplishes")
+class SqlStatementsOutput(BaseModel):
+    """Output from SQL generation agent"""
+    sql_statements: List[str] = Field(..., description="Complete SQL statements: CREATE, INSERT, SELECT")
+    explanation: str = Field(..., description="Context about what the SQL accomplishes")
     estimated_records: int = Field(0, description="Estimated number of records")
-    uses_temp_table: bool = Field(False, description="Whether this query uses a temporary table")
+    extraction_summary: str = Field(..., description="Summary of data extraction approach")
 
-def load_api_sql_code_gen_agent_system_prompt() -> str:
-    """Load system prompt from external file"""
+def load_api_sql_system_prompt() -> str:
+    """Load API-SQL system prompt from external file"""
     try:
         prompt_file = os.path.join(os.path.dirname(__file__), 'prompts', 'api_sql_code_gen_agent_system_prompt.txt')
         with open(prompt_file, 'r', encoding='utf-8') as f:
             return f.read().strip()
     except FileNotFoundError:
-        logger.error(f"System prompt file not found: {prompt_file}")
-        raise FileNotFoundError(f"Could not load API SQL code generation agent system prompt from {prompt_file}")
+        logger.error(f"API-SQL system prompt file not found: {prompt_file}")
+        raise
 
 class ApiSqlCodeGenAgent:
-    """Internal SQL code generation agent for API data processing - NOT exposed to users"""
+    """Internal SQL code generation agent for API data processing"""
     
     def __init__(self):
-        self.system_prompt = load_api_sql_code_gen_agent_system_prompt()
+        self.system_prompt = load_api_sql_system_prompt()
+        
+        # Get tenant_id from settings and add it dynamically to the prompt
+        from src.config.settings import settings
+        actual_tenant_id = settings.tenant_id
+        
+        # Add tenant_id as a dynamic variable at the end of the system prompt
+        self.system_prompt += f"\n\n## DYNAMIC SQL VARIABLES\n\nSQL_TENANT_ID = '{actual_tenant_id}'\n\nWhen generating SQL queries, use the SQL_TENANT_ID value above for any tenant_id conditions.\nExample: WHERE u.tenant_id = '{actual_tenant_id}' AND u.is_deleted = 0"
+        
         self.agent = Agent(
             model=model,
-            output_type=ApiSqlOutput,
+            output_type=SqlStatementsOutput,
             deps_type=ApiSqlDependencies,
             system_prompt=self.system_prompt,
             retries=0
         )
         
-        # Add system prompt function for schema access
+        # Add dynamic schema access tool (same pattern as SQL agent)
         @self.agent.system_prompt
-        async def database_schema_access(ctx) -> str:
-            """Provide database schema to the internal API-SQL agent"""
-            return self.get_database_schema()
+        async def okta_database_schema(ctx) -> str:
+            """Access the complete okta database schema to answer user questions"""
+            from src.data.schemas.shared_schema import get_okta_database_schema
+            return get_okta_database_schema()
         
-        logger.info("Internal API-SQL Agent initialized")
+        # Import SQL security validation
+        from src.utils.security_config import validate_sql_for_execution
+        self.validate_sql = validate_sql_for_execution
+        
+        logger.info(f"API-SQL Agent initialized with tenant_id: {actual_tenant_id}")
 
-    @staticmethod
-    def get_database_schema() -> str:
-        """Get the database schema for the API SQL agent"""
-        from src.data.schemas.shared_schema import get_okta_database_schema
-        return get_okta_database_schema()
-    
     async def process_api_data(self, api_data: Union[List[Dict[str, Any]], Dict[str, Any]], 
                               processing_context: str, 
                               correlation_id: str,
                               use_temp_table: bool = False,
-                              all_step_contexts: Optional[Dict[str, Any]] = None) -> Any:
-        """Process API data with internal capabilities and enhanced context awareness"""
+                              all_step_contexts: Optional[Dict[str, Any]] = None,
+                              sql_tables: Optional[Dict[str, Any]] = None) -> Any:
+        """Process API data using direct SQL generation - creates temp table and JOINs with existing database"""
         
         # Normalize api_data to always be a list for consistent processing
         if isinstance(api_data, dict):
@@ -138,11 +122,14 @@ class ApiSqlCodeGenAgent:
         
         logger.info(f"[{correlation_id}] API-SQL Agent processing {len(normalized_api_data)} records")
         logger.debug(f"[{correlation_id}] Processing context: {processing_context}")
-        logger.debug(f"[{correlation_id}] Temp table mode: {use_temp_table}")
         
         # Enhanced context logging
         if all_step_contexts:
             logger.debug(f"[{correlation_id}] Enhanced context provided with {len(all_step_contexts)} previous steps")
+        
+        # Get tenant ID for SQL replacement
+        from src.config.settings import settings
+        tenant_id = settings.tenant_id
         
         # Sample for LLM context
         sample_data = normalized_api_data[:5] if normalized_api_data else []
@@ -152,69 +139,95 @@ class ApiSqlCodeGenAgent:
             api_data_sample=sample_data,
             api_data_count=len(normalized_api_data),
             processing_context=processing_context,
-            temp_table_mode=use_temp_table,
-            flow_id=correlation_id
+            temp_table_mode=True,  # Always use temp tables for database JOINs
+            flow_id=correlation_id,
+            tenant_id=tenant_id,
+            sql_tables=sql_tables or {}  # Pass dynamic schema information
         )
         
-        # Build enhanced user message with previous step contexts
-        user_message = processing_context
+        # Build user message with actual API data
+        user_message = f"""
+## USER QUERY
+{processing_context}
+
+## API DATA TO CONVERT TO SQL
+Records found: {len(normalized_api_data)}
+Tenant ID: {tenant_id}
+
+ACTUAL API DATA TO ANALYZE:
+{json.dumps(sample_data, indent=2)}
+
+## TASK
+Generate complete SQL statements (CREATE TEMPORARY TABLE, INSERT statements, SELECT query) 
+to process this API data and answer the user's query.
+
+Remember:
+- Use tenant_id = 'TENANT_PLACEHOLDER' in WHERE clauses
+- Include all relationship identifiers for proper data linking
+- Generate one INSERT per API record
+- Ensure SQL security compliance
+- JOIN with existing database tables to find related data (groups, applications, etc.)
+"""
+        
         if all_step_contexts:
             user_message += "\n\nPREVIOUS STEP CONTEXTS:\n"
             for step_key, step_data in all_step_contexts.items():
                 if isinstance(step_data, dict):
                     context = step_data.get('context', 'No context available')
-                    sample = step_data.get('sample', 'No sample available')
                     user_message += f"\n{step_key}_context: {context}"
-                    user_message += f"\n{step_key}_sample: {sample}"
                 else:
                     user_message += f"\n{step_key}: {step_data}"
         
-        # Execute internal agent with enhanced context
-        result = await self.agent.run(user_message, deps=deps)
+        # Execute SQL generation agent
+        try:
+            result = await self.agent.run(user_message, deps=deps)
+        except Exception as e:
+            logger.error(f"[{correlation_id}] SQL Agent execution failed: {str(e)}")
+            raise RuntimeError(f"SQL generation failed: {str(e)}")
         
-        # Validate generated SQL for security
-        from core.security.sql_security_validator import validate_internal_sql
+        # Validate that we got sql_statements
+        if not hasattr(result.output, 'sql_statements') or not result.output.sql_statements:
+            raise ValueError("SQL agent failed to generate sql_statements")
         
-        # Validate the main processing query
-        if result.output.processing_query:
-            is_valid, error_msg = validate_internal_sql(result.output.processing_query, correlation_id)
-            if not is_valid:
-                logger.error(f"[{correlation_id}] API-SQL Agent generated invalid SQL: {error_msg}")
-                logger.debug(f"[{correlation_id}] Rejected SQL: {result.output.processing_query}")
-                raise ValueError(f"Generated SQL failed security validation: {error_msg}")
+        # Replace tenant placeholder with actual tenant ID
+        processed_statements = []
+        for stmt in result.output.sql_statements:
+            processed_stmt = stmt.replace('TENANT_PLACEHOLDER', tenant_id)
+            processed_statements.append(processed_stmt)
         
-        # Validate table structure if present (new secure approach)
-        if result.output.uses_temp_table and result.output.table_structure:
-            logger.debug(f"[{correlation_id}] Validating table structure specification")
-            try:
-                # Basic validation of table structure
-                columns = result.output.table_structure.columns
-                if not columns:
-                    raise ValueError("Table structure must have at least one column")
+        # Validate SQL security
+        is_valid, error_msg = self.validate_sql(processed_statements)
+        if not is_valid:
+            logger.error(f"[{correlation_id}] SQL Agent generated invalid SQL: {error_msg}")
+            logger.debug(f"[{correlation_id}] Rejected SQL statements: {processed_statements}")
+            raise ValueError(f"Generated SQL failed security validation: {error_msg}")
+        
+        logger.info(f"[{correlation_id}] SQL generation completed with {len(processed_statements)} statements")
+        logger.debug(f"[{correlation_id}] SQL security validation passed")
+        
+        # Create compatible result object for existing execution manager
+        class SqlResult:
+            def __init__(self, sql_statements, explanation, estimated_records, extraction_summary):
+                self.sql_statements = sql_statements
+                self.explanation = explanation
+                self.estimated_records = estimated_records
+                self.extraction_summary = extraction_summary
                 
-                # Validate column types
-                allowed_types = {'TEXT', 'INTEGER', 'REAL', 'BLOB'}
-                for col in columns:
-                    if col.type.upper() not in allowed_types:
-                        raise ValueError(f"Invalid column type: {col.type}")
-                        
-                logger.debug(f"[{correlation_id}] Table structure validation passed: {len(columns)} columns")
-            except Exception as e:
-                logger.error(f"[{correlation_id}] Table structure validation failed: {e}")
-                raise ValueError(f"Invalid table structure: {e}")
+                # Create a fake output object for compatibility
+                self.output = type('obj', (object,), {
+                    'processing_query': sql_statements[-1] if sql_statements else '',  # Last statement is typically SELECT
+                    'explanation': explanation,
+                    'estimated_records': estimated_records,
+                    'uses_temp_table': True,
+                    'sql_statements': sql_statements
+                })()
         
-        logger.info(f"[{correlation_id}] API-SQL generation completed")
-        logger.debug(f"[{correlation_id}] Generated query type: {'TEMP_TABLE' if result.output.uses_temp_table else 'DIRECT'}")
-        logger.debug(f"[{correlation_id}] Estimated records: {result.output.estimated_records}")
-        
-        # Log the complete generated query for debugging
-        if result.output.uses_temp_table and result.output.table_structure:
-            logger.debug(f"[{correlation_id}] TABLE STRUCTURE: {len(result.output.table_structure.columns)} columns")
-            logger.debug(f"[{correlation_id}] DATA EXTRACTION: {result.output.data_extraction.extraction_type}")
-        logger.debug(f"[{correlation_id}] PROCESSING QUERY:\n{result.output.processing_query}")
-        logger.debug(f"[{correlation_id}] EXPLANATION: {result.output.explanation}")
-        
-        return result
+        return SqlResult(
+            processed_statements,
+            result.output.explanation,
+            int(result.output.estimated_records) if str(result.output.estimated_records).isdigit() else len(normalized_api_data),
+            result.output.extraction_summary
+        )
 
 # Create global instance
 api_sql_code_gen_agent = ApiSqlCodeGenAgent()

@@ -1204,7 +1204,7 @@ class ModernExecutionManager:
         
         sql_result_dict = await generate_sql_query_with_logging(
             question=step.query_context,
-            tenant_id=self.tenant_id,  # Use actual tenant_id from settings
+            tenant_id=self.tenant_id,  # Keep this for SQL agent (different from API-SQL agent)
             include_deleted=False,
             flow_id=correlation_id,
             all_step_contexts=all_step_contexts  # NEW: Enhanced context from all previous steps
@@ -1323,13 +1323,29 @@ class ModernExecutionManager:
             processing_context=step.query_context,
             correlation_id=correlation_id,
             use_temp_table=use_temp_table,
-            all_step_contexts=all_step_contexts  # NEW: Enhanced context from all previous steps
+            all_step_contexts=all_step_contexts,  # NEW: Enhanced context from all previous steps
+            sql_tables=self.sql_tables  # NEW: Pass dynamic schema information
         )
         
-        # The Internal API-SQL Agent generates the complete SQL query
-        # For temp table mode, we need to create table and insert data first
-        if result.output.uses_temp_table and hasattr(result.output, 'table_structure') and result.output.table_structure:
-            logger.info(f"[{correlation_id}] Creating temporary table and inserting {data_count} API records")
+        # Check if enhanced API-SQL agent returned sql_statements (new format)
+        if hasattr(result.output, 'sql_statements') and result.output.sql_statements:
+            logger.info(f"[{correlation_id}] Executing enhanced SQL statements: {len(result.output.sql_statements)} statements")
+            
+            try:
+                # Execute all SQL statements in sequence
+                db_data = await self._execute_sql_statements_sequence(
+                    sql_statements=result.output.sql_statements,
+                    correlation_id=correlation_id
+                )
+                logger.info(f"[{correlation_id}] Enhanced API-SQL processing completed: {len(db_data)} results")
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] SQL statements execution failed: {e}")
+                db_data = []
+                
+        # Legacy temp table workflow (for backward compatibility)
+        elif result.output.uses_temp_table and hasattr(result.output, 'table_structure') and result.output.table_structure:
+            logger.info(f"[{correlation_id}] Creating temporary table and inserting {data_count} API records (legacy mode)")
             
             try:
                 # Debug output structure
@@ -1365,10 +1381,11 @@ class ModernExecutionManager:
             step_type="api_sql",
             data=db_data,
             metadata={
-                "sql_query": result.output.processing_query,
+                "sql_query": result.output.sql_statements[-1] if hasattr(result.output, 'sql_statements') and result.output.sql_statements else result.output.processing_query,
                 "explanation": result.output.explanation,
                 "input_record_count": data_count,
-                "use_temp_table": use_temp_table
+                "use_temp_table": use_temp_table,
+                "sql_statements_count": len(result.output.sql_statements) if hasattr(result.output, 'sql_statements') else 1
             },
             step_context=step.query_context  # NEW: Store step context
         )
@@ -1376,7 +1393,8 @@ class ModernExecutionManager:
         logger.info(f"[{correlation_id}] API-SQL step completed: {len(db_data)} records stored as {variable_name}")
         
         # Create result object that matches expected structure
-        result_data = SQLExecutionResult(result.output.processing_query, result.output.explanation, db_data)
+        sql_query = result.output.sql_statements[-1] if hasattr(result.output, 'sql_statements') and result.output.sql_statements else result.output.processing_query
+        result_data = SQLExecutionResult(sql_query, result.output.explanation, db_data)
         
         return StepResult(
             step_number=step_number,
@@ -1856,6 +1874,105 @@ except Exception as e:
             logger.error(f"[{correlation_id}] Database query failed: {e}")
             return []
 
+    async def _execute_sql_statements_sequence(self, sql_statements: List[str], correlation_id: str) -> List[Dict[str, Any]]:
+        """
+        Execute a sequence of SQL statements and return results from the final SELECT.
+        This is for the enhanced API-SQL agent that generates complete SQL solutions.
+        
+        Args:
+            sql_statements: List of SQL statements (CREATE, INSERT, SELECT)
+            correlation_id: Correlation ID for logging
+            
+        Returns:
+            List of query results from the final SELECT statement
+        """
+        logger.debug(f"[{correlation_id}] Executing {len(sql_statements)} SQL statements in sequence")
+        
+        # Import security validation
+        from src.utils.security_config import validate_sql_for_execution
+        
+        # Validate all SQL statements first
+        is_valid, error_msg = validate_sql_for_execution(sql_statements)
+        if not is_valid:
+            logger.error(f"[{correlation_id}] SQL statements failed security validation: {error_msg}")
+            return []
+        
+        logger.info(f"[{correlation_id}] All {len(sql_statements)} SQL statements passed security validation")
+        
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _sync_sql_sequence_execute():
+            """Synchronous SQL sequence execution in thread pool"""
+            try:
+                import sqlite3
+                from src.config.settings import settings
+                
+                # Connect to database using same pattern as other methods
+                import os
+                
+                # Derive database path using same logic as other methods
+                database_paths = [
+                    os.path.join(os.getcwd(), "sqlite_db", "okta_sync.db"),
+                    os.path.join(os.path.dirname(__file__), "..", "..", "..", "sqlite_db", "okta_sync.db"),
+                    "sqlite_db/okta_sync.db"
+                ]
+                
+                db_path = None
+                for path in database_paths:
+                    if os.path.exists(path):
+                        db_path = path
+                        break
+                
+                if not db_path:
+                    logger.error(f"[{correlation_id}] Database file not found in any expected location")
+                    return []
+                
+                conn = sqlite3.connect(db_path)
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                
+                results = []
+                
+                # Execute all statements in sequence
+                for i, sql_stmt in enumerate(sql_statements):
+                    logger.debug(f"[{correlation_id}] Executing statement {i+1}: {sql_stmt[:100]}...")
+                    
+                    cursor.execute(sql_stmt)
+                    
+                    # Only collect results from SELECT statements
+                    if sql_stmt.strip().upper().startswith('SELECT'):
+                        rows = cursor.fetchall()
+                        statement_results = [dict(row) for row in rows]
+                        results.extend(statement_results)
+                        logger.debug(f"[{correlation_id}] SELECT statement {i+1} returned {len(statement_results)} rows")
+                    else:
+                        logger.debug(f"[{correlation_id}] Non-SELECT statement {i+1} executed successfully")
+                
+                # Commit all changes
+                conn.commit()
+                conn.close()
+                
+                logger.info(f"[{correlation_id}] SQL sequence execution completed: {len(results)} total results")
+                return results
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] SQL sequence execution failed: {e}")
+                return []
+        
+        try:
+            # Run SQL sequence in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                data = await loop.run_in_executor(executor, _sync_sql_sequence_execute)
+            
+            return data
+            
+        except Exception as e:
+            logger.error(f"[{correlation_id}] SQL sequence execution failed: {e}")
+            return []
+
     async def _execute_temp_table_workflow(self, table_structure: Dict[str, Any], data_extraction: Dict[str, Any], 
                                           processing_query: str, api_data: List[Any], correlation_id: str) -> List[Dict[str, Any]]:
         """
@@ -1921,8 +2038,32 @@ except Exception as e:
             
             extracted_rows = []
             
+            # Special handling for nested_extraction with array patterns
+            if extraction_type == 'nested_extraction':
+                for mapping in mappings:
+                    source_field = mapping.get('source_field', '')
+                    if source_field.endswith('.*'):
+                        # Array extraction - process differently
+                        field_name = source_field.replace('.*', '')
+                        logger.debug(f"Processing array extraction for field: {field_name}")
+                        
+                        for record in api_data:
+                            if isinstance(record, dict) and field_name in record:
+                                array_data = record[field_name]
+                                if isinstance(array_data, list):
+                                    logger.debug(f"Extracting {len(array_data)} items from {field_name}")
+                                    for item in array_data:
+                                        extracted_rows.append((item,))
+                                else:
+                                    logger.warning(f"Field {field_name} is not a list: {type(array_data)}")
+                            else:
+                                logger.debug(f"Record missing field {field_name} or not a dict: {type(record)}")
+                        return extracted_rows
+            
+            # Standard extraction for other types
             for record in api_data:
                 row_values = []
+                record_processed = False
                 
                 for mapping in mappings:
                     source_field = mapping.get('source_field', '')
@@ -1945,18 +2086,17 @@ except Exception as e:
                                 value = default_value if not required else None
                                 
                         elif extraction_type == 'nested_extraction':
-                            # Extract from nested structures
-                            if source_field.endswith('.*'):
-                                # Array extraction
-                                field_name = source_field.replace('.*', '')
-                                if isinstance(record, dict) and field_name in record:
-                                    # This will create multiple rows for array items
-                                    array_data = record[field_name]
-                                    if isinstance(array_data, list):
-                                        for item in array_data:
-                                            extracted_rows.append((item,))
-                                        continue
-                                value = default_value if not required else None
+                            # Handle non-array nested extraction
+                            if '.' in source_field and not source_field.endswith('.*'):
+                                # Navigate nested object paths like "users.id"
+                                parts = source_field.split('.')
+                                value = record
+                                for part in parts:
+                                    if isinstance(value, dict) and part in value:
+                                        value = value[part]
+                                    else:
+                                        value = default_value if not required else None
+                                        break
                             else:
                                 value = default_value if not required else None
                         else:
@@ -1964,19 +2104,21 @@ except Exception as e:
                         
                         if value is None and required:
                             logger.warning(f"Required field {source_field} not found in record: {record}")
-                            continue
+                            record_processed = True
+                            break
                             
                         row_values.append(value)
                         
                     except Exception as e:
                         if required:
                             logger.error(f"Error extracting {source_field}: {e}")
-                            continue
+                            record_processed = True
+                            break
                         else:
                             row_values.append(default_value)
                 
-                # Only add row if we have the expected number of values
-                if row_values and len(row_values) == len(mappings):
+                # Only add row if we have the expected number of values and no errors
+                if not record_processed and row_values and len(row_values) == len(mappings):
                     extracted_rows.append(tuple(row_values))
             
             return extracted_rows
@@ -2009,7 +2151,20 @@ except Exception as e:
                     
                     # Step 2: Extract and insert API data using LLM specifications
                     if api_data:
+                        # DEBUG: Show the actual API data structure before extraction
+                        logger.debug(f"[{correlation_id}] Raw API data structure: {type(api_data)}")
+                        if isinstance(api_data, list) and api_data:
+                            logger.debug(f"[{correlation_id}] First API record: {api_data[0]}")
+                            logger.debug(f"[{correlation_id}] API data sample: {api_data[:2]}")
+                        elif isinstance(api_data, dict):
+                            logger.debug(f"[{correlation_id}] API data keys: {list(api_data.keys())}")
+                            logger.debug(f"[{correlation_id}] API data structure: {api_data}")
+                        
                         extracted_data = _extract_data_from_api_response(api_data, data_extraction)
+                        
+                        # DEBUG: Show what was extracted
+                        logger.debug(f"[{correlation_id}] Data extraction spec: {data_extraction}")
+                        logger.debug(f"[{correlation_id}] Extracted data: {extracted_data}")
                         
                         if extracted_data:
                             # Build parameterized insert query
@@ -2032,7 +2187,13 @@ except Exception as e:
                     actual_query = processing_query.replace('temp_api_users', table_name)
                     logger.debug(f"[{correlation_id}] Executing processing query: {actual_query}")
                     
-                    cursor.execute(actual_query, (self.tenant_id,))
+                    # DEBUG: Show what user IDs are in the temp table for debugging
+                    cursor.execute(f"SELECT okta_id FROM {table_name}")
+                    temp_user_ids = [row[0] for row in cursor.fetchall()]
+                    logger.debug(f"[{correlation_id}] Temp table contains user IDs: {temp_user_ids}")
+                    
+                    # Execute query without parameters since tenant_id is now injected directly into the query
+                    cursor.execute(actual_query)
                     columns = [description[0] for description in cursor.description]
                     results = cursor.fetchall()
                     

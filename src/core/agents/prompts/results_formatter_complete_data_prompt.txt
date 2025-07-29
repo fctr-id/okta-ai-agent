@@ -120,6 +120,7 @@ FOR MARKDOWN:
 - For access control questions, provide concise reasoning
 - Focus on key insights rather than exhaustive details
 - Use bullet points and short paragraphs for readability
+- DO NOT MARK text with huge headers as it looks big and bad on the ui screen
 
 FOR TABLE:
 - Include ALL records from the complete dataset

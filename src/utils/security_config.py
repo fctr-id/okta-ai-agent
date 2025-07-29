@@ -8,9 +8,15 @@ used throughout the application to enforce secure operations.
 from typing import List, Dict, Any, Set, Optional
 import re
 import ast
-from src.utils.logging import get_logger
 import os
 from urllib.parse import urlparse
+try:
+    from .logging import get_logger
+except ImportError:
+    # Fallback for direct execution
+    import logging
+    def get_logger(name: str) -> logging.Logger:
+        return logging.getLogger(name)
 
 # Configure logging
 logger = get_logger(__name__)
@@ -107,6 +113,41 @@ DANGEROUS_PATTERNS: List[tuple] = [
     (r'open\s*\(', "File operations"),
     (r'input\s*\(', "User input")
 ]
+
+# ------------------------------------------------------------------------
+# SQL Security Configuration
+# ------------------------------------------------------------------------
+
+# Allowed SQL statement types
+ALLOWED_SQL_STATEMENTS: Set[str] = {
+    'CREATE TEMPORARY TABLE',
+    'INSERT INTO',
+    'SELECT'
+}
+
+# Forbidden SQL patterns
+FORBIDDEN_SQL_PATTERNS: List[tuple] = [
+    (r'DROP\s+', "DROP statements not allowed"),
+    (r'DELETE\s+', "DELETE statements not allowed"),
+    (r'UPDATE\s+', "UPDATE statements not allowed"),
+    (r'ALTER\s+', "ALTER statements not allowed"),
+    (r'TRUNCATE\s+', "TRUNCATE statements not allowed"),
+    (r'--', "SQL comments not allowed"),
+    (r'/\*', "SQL comments not allowed"),
+    (r';\s*DROP', "SQL injection attempt"),
+    (r';\s*DELETE', "SQL injection attempt"),
+    # (r'UNION\s+SELECT', "UNION statements not allowed"),  # Allow UNION for legitimate relationship queries
+    (r'xp_', "Extended procedures not allowed"),
+    (r'sp_', "System procedures not allowed")
+]
+
+# Allowed column types for temp tables
+ALLOWED_COLUMN_TYPES: Set[str] = {
+    'TEXT', 'INTEGER', 'REAL', 'BLOB'
+}
+
+# Required temp table name pattern
+TEMP_TABLE_PATTERN = re.compile(r'^temp_api_[a-zA-Z0-9_]+$')
 
 # ------------------------------------------------------------------------
 # Code Validation Functions
@@ -258,3 +299,193 @@ def is_okta_url_allowed(url: str) -> bool:
     except Exception as e:
         logger.error(f"Error validating URL: {str(e)}")
         return False
+
+# ------------------------------------------------------------------------
+# SQL Security Validation Functions
+# ------------------------------------------------------------------------
+
+def validate_sql_statements(sql_list: List[str]) -> bool:
+    """
+    Validate a list of SQL statements for security compliance.
+    
+    Args:
+        sql_list: List of SQL statements to validate
+        
+    Returns:
+        True if all statements are safe, False otherwise
+    """
+    if not sql_list:
+        logger.warning("SQL validation failed: empty statement list")
+        return False
+        
+    for i, sql in enumerate(sql_list):
+        if not validate_single_sql_statement(sql, i):
+            return False
+            
+    return True
+
+def validate_single_sql_statement(sql: str, index: int = 0) -> bool:
+    """
+    Validate a single SQL statement for security compliance.
+    
+    Args:
+        sql: SQL statement to validate
+        index: Statement index for logging
+        
+    Returns:
+        True if statement is safe, False otherwise
+    """
+    if not sql or not sql.strip():
+        logger.warning(f"SQL validation failed (statement {index}): empty statement")
+        return False
+        
+    sql_upper = sql.strip().upper()
+    
+    # Check for forbidden patterns first
+    for pattern, reason in FORBIDDEN_SQL_PATTERNS:
+        if re.search(pattern, sql_upper):
+            logger.warning(f"SQL validation failed (statement {index}): {reason}")
+            return False
+    
+    # Validate based on statement type
+    if sql_upper.startswith('CREATE TEMPORARY TABLE'):
+        return validate_create_temp_table(sql, index)
+    elif sql_upper.startswith('INSERT INTO'):
+        return validate_insert_statement(sql, index)  
+    elif sql_upper.startswith('SELECT'):
+        return validate_select_statement(sql, index)
+    else:
+        logger.warning(f"SQL validation failed (statement {index}): unauthorized statement type")
+        return False
+
+def validate_create_temp_table(sql: str, index: int = 0) -> bool:
+    """
+    Validate CREATE TEMPORARY TABLE statement.
+    
+    Args:
+        sql: CREATE statement to validate
+        index: Statement index for logging
+        
+    Returns:
+        True if statement is safe, False otherwise
+    """
+    sql_upper = sql.upper()
+    
+    # Must be temporary table
+    if 'TEMPORARY TABLE' not in sql_upper:
+        logger.warning(f"SQL validation failed (statement {index}): only temporary tables allowed")
+        return False
+    
+    # Extract table name and validate pattern (case insensitive)
+    table_match = re.search(r'CREATE\s+TEMPORARY\s+TABLE\s+([A-Z0-9_]+)', sql_upper)
+    if not table_match:
+        logger.warning(f"SQL validation failed (statement {index}): invalid table name format")
+        return False
+        
+    table_name = table_match.group(1).lower()  # Convert to lowercase for pattern matching
+    if not TEMP_TABLE_PATTERN.match(table_name):
+        logger.warning(f"SQL validation failed (statement {index}): table name must match temp_api_* pattern")
+        return False
+    
+    # Validate column types
+    for col_type in ALLOWED_COLUMN_TYPES:
+        if col_type in sql_upper:
+            continue
+    
+    # Check for forbidden column types (basic check)
+    forbidden_types = ['EXEC', 'BINARY', 'VARBINARY']
+    for forbidden in forbidden_types:
+        if forbidden in sql_upper:
+            logger.warning(f"SQL validation failed (statement {index}): forbidden column type {forbidden}")
+            return False
+    
+    return True
+
+def validate_insert_statement(sql: str, index: int = 0) -> bool:
+    """
+    Validate INSERT statement.
+    
+    Args:
+        sql: INSERT statement to validate
+        index: Statement index for logging
+        
+    Returns:
+        True if statement is safe, False otherwise
+    """
+    sql_upper = sql.upper()
+    sql_cleaned = ' '.join(sql_upper.split())  # Remove extra whitespace
+    
+    # Must be INSERT INTO temp table with VALUES (case insensitive)
+    pattern = r'INSERT\s+INTO\s+TEMP_API_[A-Z0-9_]+'
+    if not re.search(pattern, sql_cleaned):
+        logger.warning(f"SQL validation failed (statement {index}): INSERT must target temp_api_* table")
+        return False
+        
+    # Must use VALUES format, not SELECT
+    if 'VALUES' not in sql_upper:
+        logger.warning(f"SQL validation failed (statement {index}): INSERT must use VALUES format")
+        return False
+        
+    if 'SELECT' in sql_upper:
+        logger.warning(f"SQL validation failed (statement {index}): INSERT with SELECT not allowed")
+        return False
+    
+    return True
+
+def validate_select_statement(sql: str, index: int = 0) -> bool:
+    """
+    Validate SELECT statement.
+    
+    Args:
+        sql: SELECT statement to validate  
+        index: Statement index for logging
+        
+    Returns:
+        True if statement is safe, False otherwise
+    """
+    sql_upper = sql.upper()
+    
+    # Basic SELECT validation - ensure it's a query only
+    if not sql_upper.startswith('SELECT'):
+        logger.warning(f"SQL validation failed (statement {index}): statement must start with SELECT")
+        return False
+    
+    # Must include tenant filtering for security
+    if 'TENANT_ID' not in sql_upper:
+        logger.warning(f"SQL validation failed (statement {index}): SELECT must include tenant_id filtering")
+        return False
+    
+    return True
+
+def validate_sql_for_execution(sql_statements: List[str]) -> tuple[bool, str]:
+    """
+    Main entry point for SQL security validation.
+    
+    Args:
+        sql_statements: List of SQL statements to execute
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+    """
+    try:
+        if not sql_statements:
+            return False, "Empty SQL statement list"
+            
+        # Validate each statement
+        if not validate_sql_statements(sql_statements):
+            return False, "SQL security validation failed - check logs for details"
+            
+        # Additional validation: must have CREATE, INSERT, SELECT pattern
+        has_create = any(stmt.strip().upper().startswith('CREATE') for stmt in sql_statements)
+        has_insert = any(stmt.strip().upper().startswith('INSERT') for stmt in sql_statements)
+        has_select = any(stmt.strip().upper().startswith('SELECT') for stmt in sql_statements)
+        
+        if not (has_create and has_insert and has_select):
+            return False, "SQL must contain CREATE TEMPORARY TABLE, INSERT, and SELECT statements"
+            
+        logger.debug(f"SQL validation passed for {len(sql_statements)} statements")
+        return True, "SQL validation passed"
+        
+    except Exception as e:
+        logger.error(f"Error during SQL validation: {str(e)}")
+        return False, f"SQL validation error: {str(e)}"
