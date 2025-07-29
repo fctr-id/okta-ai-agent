@@ -160,6 +160,10 @@ for entity_id in unique_entity_ids:
 - **NO INVENTION**: Never use parameters not documented in the API specification
 - **EXACT ENDPOINTS**: Use the exact endpoint paths provided in documentation
 
+### Entity Status Filtering
+- **DO NOT FILTER BY STATUS**: Do NOT filter by status for any entity (users, groups, applications, etc.) unless specifically requested in the user query
+- **INCLUDE ALL STATUSES**: Return all entities regardless of status (ACTIVE, INACTIVE, SUSPENDED, etc.) unless the query explicitly asks for filtering
+
 ### Time-Based Filtering (Critical for Logs/Events)
 - **ISO 8601 FORMAT**: Use 'since' and 'until' parameters with ISO 8601 timestamps ending in 'Z'
 - **NO PUBLISHED**: NEVER use 'published' parameter for system logs - use 'since'/'until' instead

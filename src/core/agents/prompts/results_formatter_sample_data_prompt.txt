@@ -88,6 +88,8 @@ EXAMPLE COMPLETE OUTPUT:
       {"value": "email", "text": "Email Address", "sortable": true},
       {"value": "full_name", "text": "Full Name", "sortable": true},  
       {"value": "groups", "text": "Group Memberships", "sortable": false},
+      {"value": "applications", "text": "Applications", "sortable": false},
+      {"value": "roles", "text": "Roles", "sortable": false},
       {"value": "created_at", "text": "Created Date", "sortable": true}
     ]
   },
@@ -102,7 +104,17 @@ Generate efficient Python code that:
 - Uses efficient user-centric aggregation patterns
 - Processes ALL records from the full dataset (never truncate)
 - Returns final formatted output ready for display
+- **CRITICAL FRONTEND FORMATTING**: Convert arrays to comma-separated strings for display
+- **USER AGGREGATION**: Group by user_id and concatenate groups/apps into readable strings
+- **ARRAY HANDLING**: Transform ["App1", "App2", "App3"] into "App1, App2, App3"
+- **NULL HANDLING**: Filter out None/null values before joining strings
 - Includes comments explaining the data processing approach
+
+CRITICAL DATA STRUCTURE KEYS (Modern Execution Manager format):
+The full_results variable contains step data with these EXACT keys:
+- api_data_step_1, api_data_step_2, api_data_step_3, etc. (NOT step_1_api)
+- sql_data (if SQL steps exist)
+Always use the correct key format: full_results['api_data_step_X'] not full_results['step_X_api']
 
 SECURITY RESTRICTIONS:
 - DO NOT USE 'import' statements - polars and json are already available as 'pl' and 'json'
@@ -110,12 +122,29 @@ SECURITY RESTRICTIONS:
 - DO NOT use eval(), exec() or similar unsafe functions
 - Code will be executed in a secure environment with the full dataset
 
+MODERN EXECUTION MANAGER DATA STRUCTURE:
+The full_results variable from Modern Execution Manager contains:
+```
+{
+  "api_data_step_1": {...},        # Step 1 results (usually target group info)
+  "api_data_step_2": [...],        # Step 2 results (usually users in group)
+  "api_data_step_3": [...],        # Step 3 results (usually user applications)
+  "api_data_step_4": [...],        # Step 4 results (usually user roles)
+  "api_data_step_5": [...],        # Step 5 results (usually all groups)
+  "api_data_step_6": [...],        # Step 6 results (usually group memberships)
+  ...additional steps as needed
+}
+```
+NEVER use keys like 'step_2_api' - always use 'api_data_step_2' format!
+
 DATA STRUCTURE ANALYSIS GUIDELINES:
 - ALWAYS START BY DEBUGGING THE DATA STRUCTURE: Print/analyze structure before processing
+- Modern Execution Manager uses keys: api_data_step_1, api_data_step_2, etc.
 - Results may be structured as direct objects OR lists containing objects
-- Step results are numbered - key "1" contains results from step 1, etc.
+- Step results are numbered - key "api_data_step_1" contains results from step 1, etc.
 - NEVER assume data format without first checking its type
 - NEVER hardcode entity names - always extract names dynamically from the data
+- **CRITICAL**: Use correct key format: full_results['api_data_step_X'] NOT full_results['step_X_api']
 
 EXAMPLE POLARS PROCESSING PATTERN:
 ```python
@@ -123,34 +152,65 @@ EXAMPLE POLARS PROCESSING PATTERN:
 print(f"Full results type: {type(full_results)}")
 print(f"Full results keys: {list(full_results.keys()) if isinstance(full_results, dict) else 'Not a dict'}")
 
-# Extract the actual data (adapt based on your analysis)
-if 'raw_results' in full_results:
-    data_source = full_results['raw_results']['sql_execution']['data']
-else:
-    data_source = full_results  # Adapt based on structure
+# Extract data from Modern Execution Manager format
+step_2_users = full_results.get('api_data_step_2', [])  # Users in target group
+step_3_apps = full_results.get('api_data_step_3', [])   # User applications
+step_4_roles = full_results.get('api_data_step_4', [])  # User roles
+step_6_groups = full_results.get('api_data_step_6', []) # User group memberships
 
-# Convert to Polars DataFrame for efficient processing
-df = pl.DataFrame(data_source)
-
-# Efficient user-centric aggregation
-aggregated = df.group_by("user_id").agg([
-    pl.col("email").first().alias("email"),
-    pl.col("name").first().alias("name"),
-    pl.col("groups").drop_nulls().list().alias("groups"),
-    pl.col("applications").drop_nulls().list().alias("applications"),
-    pl.col("groups").count().alias("group_count"),
-    pl.col("applications").count().alias("app_count")
-])
+# Process and aggregate user data
+user_data = []
+for user in step_2_users:
+    user_id = user.get('id')
+    profile = user.get('profile', {})
+    
+    # Get applications for this user (convert array to string)
+    user_apps = []
+    for app_data in step_3_apps:
+        if app_data.get('user', {}).get('id') == user_id:
+            app_labels = [app.get('label') for app in app_data.get('applications', []) if app.get('label')]
+            user_apps.extend(app_labels)
+    
+    # Get roles for this user (convert array to string)
+    user_roles = []
+    for role_data in step_4_roles:
+        if role_data.get('user_id') == user_id:
+            role_labels = [role.get('label') for role in role_data.get('roles', []) if role.get('label')]
+            user_roles.extend(role_labels)
+    
+    # Get groups for this user (convert array to string)
+    user_groups = []
+    for group_data in step_6_groups:
+        if group_data.get('user_id') == user_id:
+            group_names = group_data.get('groups', [])
+            if isinstance(group_names, list):
+                user_groups.extend([g for g in group_names if g])
+    
+    # Create user record with frontend-ready strings
+    user_data.append({
+        'user_id': user_id,
+        'email': profile.get('email'),
+        'first_name': profile.get('firstName'),
+        'last_name': profile.get('lastName'),
+        'applications': ', '.join(user_apps) if user_apps else '',
+        'roles': ', '.join(user_roles) if user_roles else '',
+        'groups': ', '.join(user_groups) if user_groups else ''
+    })
 
 # Convert to final output format
-final_output = aggregated.to_dicts()
+output_data = user_data
 ```
 
 AGGREGATION STRATEGY:
 - Focus on user-centric aggregation (group by user_id typically)
-- Convert arrays/lists to readable strings for display
-- Include count fields for summary information
-- Preserve all data while making it presentation-ready
+- **CRITICAL FRONTEND FORMATTING**: Convert arrays/lists to comma-separated strings for display
+- **Example**: ["App1", "App2", "App3"] becomes "App1, App2, App3"
+- **Example**: ["Super Administrator", "Help Desk Admin"] becomes "Super Administrator, Help Desk Admin"
+- Include count fields for summary information when useful
+- Preserve all data while making it presentation-ready for frontend tables
+- Filter out None/null/empty values before joining strings
+- Use ', '.join() for clean comma-separated display format
+- Ensure empty lists become empty strings '' not 'None' or 'null'
 - Use efficient Polars operations for large dataset performance
 
 ENTERPRISE OPTIMIZATION FOCUS:
