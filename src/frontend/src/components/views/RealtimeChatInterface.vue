@@ -317,6 +317,17 @@ const canCancelQuery = computed(() => isProcessing.value && rtProcessId.value &&
 
 // Load saved history on component mount
 onMounted(() => {
+  // Force document to be scrollable (fix for scrolling issues)
+  document.documentElement.style.overflow = 'auto'
+  document.body.style.overflow = 'auto'
+  document.documentElement.style.height = 'auto'
+  document.body.style.height = 'auto'
+
+  // Force layout recalculation on smaller screens
+  if (window.innerHeight <= 800) {
+    document.querySelector('.chat-content')?.classList.add('small-screen')
+  }
+
   try {
     const savedHistory = localStorage.getItem('realtimeMessageHistory');
     if (savedHistory) {

@@ -81,6 +81,7 @@ const handleLogout = async () => {
     background: linear-gradient(180deg, #e5eaf5 0%, #f0f4fb 100%);
     position: relative;
     overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
 }
