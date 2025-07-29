@@ -302,11 +302,17 @@ async def execute_plan_and_stream(
                     'status': status  # running, completed, error
                 }
                 
+                # Log error status for debugging
+                if status == 'error':
+                    logger.error(f"[{process_id}] 🔴 SENDING ERROR STATUS - Step {step_number} ({step_type}) failed")
+                
                 # Queue the step status event
                 await step_status_queue.put({
                     "event": "step_status_update",
                     "data": json.dumps(step_status_data)
                 })
+                
+                logger.info(f"[{process_id}] Step status sent: {step_number} - {step_type} - {status}")
             except Exception as e:
                 logger.warning(f"[{process_id}] Step status callback error: {e}")
 
