@@ -130,7 +130,6 @@ export function useRealtimeStream() {
         try {
             // Close any existing connection
             if (activeEventSource.value) {
-                console.log("Closing existing EventSource connection");
                 activeEventSource.value.close();
                 activeEventSource.value = null;
             }
@@ -270,6 +269,31 @@ export function useRealtimeStream() {
                     const frontendStatus = statusMap[data.status] || data.status;
                     execution.steps[stepIndex].status = frontendStatus;
                     
+                    // Handle ERROR status - immediately stop execution and show error
+                    if (data.status === 'error') {
+                        console.error('🔴 Step failed:', data);
+                        execution.status = "error";
+                        execution.currentStepIndex = stepIndex;
+                        
+                        // Set error message for user display
+                        const stepName = execution.steps[stepIndex].tool_name || `Step ${stepIndex}`;
+                        error.value = `Execution failed at ${stepName}. The system encountered an error and cannot continue.`;
+                        
+                        // Mark remaining steps as disabled
+                        for (let i = stepIndex + 1; i < execution.steps.length; i++) {
+                            if (execution.steps[i].status === "pending" || execution.steps[i].status === "active") {
+                                execution.steps[i].status = "pending";
+                                execution.steps[i].disabled = true;
+                            }
+                        }
+                        
+                        // Stop processing
+                        isProcessing.value = false;
+                        isStreaming.value = false;
+                        
+                        return;
+                    }
+                    
                     // Update current step index if step is running
                     if (data.status === 'running') {
                         execution.currentStepIndex = stepIndex;
@@ -301,12 +325,18 @@ export function useRealtimeStream() {
             if (data.operation_status === "error") {
                 // Mark the step as error immediately
                 if (stepIndex >= 0 && stepIndex < execution.steps.length) {
+                    console.error('🔴 Legacy operation failed:', data);
                     execution.steps[stepIndex].status = "error";
                     execution.steps[stepIndex].error = true; // Explicitly set error flag for v-stepper-item
                     execution.steps[stepIndex].error_message = data.error_message;
 
                     // Also update execution status to prevent finalizing steps from going green
                     execution.status = "error";
+                    execution.currentStepIndex = stepIndex;
+                    
+                    // Set error message for user display
+                    const stepName = execution.steps[stepIndex].tool_name || `Step ${stepIndex}`;
+                    error.value = `Execution failed at ${stepName}. The system encountered an error and cannot continue.`;
 
                     // Mark any remaining future steps as cancelled/disabled
                     for (let i = stepIndex + 1; i < execution.steps.length; i++) {
@@ -315,6 +345,10 @@ export function useRealtimeStream() {
                             execution.steps[i].disabled = true;
                         }
                     }
+                    
+                    // Stop processing
+                    isProcessing.value = false;
+                    isStreaming.value = false;
                 }
                 return;
             }
@@ -354,11 +388,8 @@ export function useRealtimeStream() {
     const handleStepPlanInfoEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            console.log('🟣 RECEIVED step_plan_info event:', data);
 
             if (data.steps && Array.isArray(data.steps)) {
-                console.log('🟣 Processing steps from backend:', data.steps);
-                
                 execution.planGenerated = true;
                 
                 // Complete the generate_plan step
@@ -368,13 +399,6 @@ export function useRealtimeStream() {
 
                 // Create the new execution steps from the plan
                 const newExecutionSteps = data.steps.map((step, index) => {
-                    console.log(`🟣 Creating step ${index + 1}:`, {
-                        tool_name: step.tool_name,
-                        operation: step.operation,
-                        entity: step.entity,
-                        query_context: step.query_context
-                    });
-                    
                     return {
                         id: `step_${index + 1}`,
                         tool_name: step.tool_name,
@@ -385,8 +409,6 @@ export function useRealtimeStream() {
                         critical: step.critical
                     };
                 });
-
-                console.log('🟣 Created execution steps:', newExecutionSteps);
 
                 // Insert the new steps between generate_plan (index 0) and finalizing_results (last)
                 // Keep generate_plan, insert new steps, keep finalizing_results
@@ -399,10 +421,7 @@ export function useRealtimeStream() {
                     finalizingResultsStep
                 ];
 
-                console.log('🟣 Final steps array:', execution.steps);
                 execution.status = "executing";
-            } else {
-                console.warn('🟣 No steps array found in step_plan_info data:', data);
             }
         } catch (err) {
             console.error("Error processing step plan info event:", err);
@@ -549,7 +568,6 @@ export function useRealtimeStream() {
             execution.results !== null ||
             isFinalizingActive ||
             activeEventSource.value === null) { // Already closed by us
-            console.log("Connection closed after process completion - this is expected");
             if (eventSource && activeEventSource.value) {
                 eventSource.close();
                 activeEventSource.value = null;
@@ -606,85 +624,6 @@ export function useRealtimeStream() {
     };
 
     /**
-     * Mock implementation for testing UI when backend is not available
-     * @param {string} query - The natural language query to process
-     * @returns {Promise<string>} - A mock process ID
-     */
-    const mockProcess = async (query) => {
-        isLoading.value = true;
-        isProcessing.value = true;
-        error.value = null;
-        execution.status = "planning";
-
-        try {
-            // Simulate API delay
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-
-            // Generate mock process ID
-            const mockId = "mock-" + Math.random().toString(36).substring(2, 10);
-            processId.value = mockId;
-
-            // Simulate plan generation
-            execution.planGenerated = true;
-            execution.status = "executing";
-            execution.steps = [
-                { id: 0, tool_name: "Search users", status: "pending", reason: "Find user information" },
-                { id: 1, tool_name: "Get group memberships", status: "pending", reason: "Check group associations" },
-                { id: 2, tool_name: "Analyze permissions", status: "pending", reason: "Review access rights" },
-            ];
-
-            // Simulate step execution
-            setTimeout(() => {
-                execution.steps[0].status = "in_progress";
-                execution.currentStepIndex = 0;
-            }, 1000);
-
-            setTimeout(() => {
-                execution.steps[0].status = "completed";
-                execution.steps[0].result_summary = "Found 5 matching users";
-            }, 3000);
-
-            setTimeout(() => {
-                execution.steps[1].status = "in_progress";
-                execution.currentStepIndex = 1;
-            }, 3500);
-
-            setTimeout(() => {
-                execution.steps[1].status = "completed";
-                execution.steps[1].result_summary = "Retrieved group memberships";
-            }, 5500);
-
-            setTimeout(() => {
-                execution.steps[2].status = "in_progress";
-                execution.currentStepIndex = 2;
-            }, 6000);
-
-            setTimeout(() => {
-                execution.steps[2].status = "completed";
-                execution.steps[2].result_summary = "Analysis complete";
-
-                // Simulate final result
-                execution.results = {
-                    content: `# Results for "${query}"\n\n* Found 5 users matching criteria\n* Users belong to 3 groups\n* Admin permissions: 2 users`,
-                    display_type: "markdown",
-                    metadata: { total_users: 5 },
-                };
-                execution.status = "completed";
-                isProcessing.value = false;
-            }, 8000);
-
-            return mockId;
-        } catch (err) {
-            error.value = err.message || "Failed to start mock process";
-            execution.status = "error";
-            isProcessing.value = false;
-            return null;
-        } finally {
-            isLoading.value = false;
-        }
-    };
-
-    /**
      * Clean up resources when component unmounts
      */
     const cleanup = () => {
@@ -718,7 +657,6 @@ export function useRealtimeStream() {
         startProcess,
         connectToStream,
         cancelProcess,
-        mockProcess,
         cleanup,
     };
 }
