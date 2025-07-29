@@ -15,6 +15,7 @@ Based on the provided AVAILABLE DATA SOURCES, understand what queries can be ans
 ** DECISION PROCESS:**
 1. **ANALYZE THE QUERY**: What specific data does the user need?
 2. **CHECK SQL FIRST**: Look at the sql_tables in AVAILABLE DATA SOURCES - do the tables contain the data needed?
+NOTE .. FOR MOST cases it is SQL first, especially if it's reated to users, groups, applications, devices or factors
 3. **GROUP MEMBERSHIP EXAMPLE**: 
    - Query: "users in sso-super-admins group"
    - Check: Do I see `groups`, `users`, and `user_group_memberships` tables? → YES → Use SQL
