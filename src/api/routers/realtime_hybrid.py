@@ -906,25 +906,24 @@ async def execute_query_endpoint(
 async def get_okta_entities(
     current_user: AuthUser = Depends(get_current_user) 
 ):
-    """Retrieve all available Okta API categories organized by functional areas."""
+    """Retrieve all available Okta API entities organized by functional areas using entity-grouped format."""
     import json
-    import os
     from pathlib import Path
     
     try:
-        # Read entities from the API reference file
-        api_reference_path = Path("src/data/schemas/Okta_API_entitity_endpoint_reference.json")
+        # Read entities from the new lightweight API reference (entity-grouped format)
+        lightweight_api_path = Path("src/data/schemas/lightweight_api_reference.json")
         
-        if not api_reference_path.exists():
-            logger.warning("API reference file not found, falling back to Modern Execution Manager")
-            # Fallback to Modern Execution Manager instead of legacy tool registry
-            
+        if not lightweight_api_path.exists():
+            logger.warning("Lightweight API reference file not found, falling back to Modern Execution Manager")
+            # Fallback to Modern Execution Manager
             entities_list = []
             for entity in modern_executor.available_entities:
                 entities_list.append({
                     "entity_name": entity,
                     "display_name": entity.replace('_', ' ').title(),
-                    "description": f"Okta {entity.replace('_', ' ').title()} operations and management via Modern Execution Manager",
+                    "description": f"Okta {entity.replace('_', ' ').title()} operations and management",
+                    "operations_count": 0,  # Unknown without reference file
                     "source": "Modern Execution Manager"
                 })
                     
@@ -935,42 +934,31 @@ async def get_okta_entities(
                 "source": "Modern Execution Manager (Fallback)"
             }
         
-        # Read and parse the API reference
-        with open(api_reference_path, 'r', encoding='utf-8') as f:
+        # Read and parse the entity-grouped API reference
+        with open(lightweight_api_path, 'r', encoding='utf-8') as f:
             api_data = json.load(f)
         
-        # Extract unique folder paths and count GET endpoints per folder
-        get_folder_counts = {}
-        folder_descriptions = {}
+        # Extract entities from the new entity-grouped format
+        entities_dict = api_data.get('entities', {})
         
-        for endpoint in api_data.get('endpoints', []):
-            # Only include folders that have GET endpoints
-            if endpoint.get('method') == 'GET':
-                folder_path = endpoint.get('folder_path')
-                if folder_path:
-                    # Count GET endpoints per folder
-                    get_folder_counts[folder_path] = get_folder_counts.get(folder_path, 0) + 1
-                    
-                    # Store a description (use the first description we find for each folder)
-                    if folder_path not in folder_descriptions:
-                        name = endpoint.get('name', '')
-                        entity = endpoint.get('entity', '')
-                        if name and entity:
-                            folder_descriptions[folder_path] = f"{folder_path}: {name.lower()}"
-                        else:
-                            folder_descriptions[folder_path] = f"{folder_path} operations and management"
-        
-        # Create simple entities list using folder paths
         entities_list = []
-        for folder_path, get_endpoint_count in get_folder_counts.items():
-            description = folder_descriptions.get(folder_path, f"{folder_path} operations")
-            entity_name = folder_path.lower().replace(' ', '_').replace('-', '_')
+        for entity_name, entity_data in entities_dict.items():
+            operations = entity_data.get('operations', [])
+            operations_count = len(operations)
+            
+            # Create display name by replacing underscores with spaces and title casing
+            display_name = entity_name.replace('_', ' ').title()
+            
+            # Create description based on entity name
+            description = f"Okta {display_name} operations and management ({operations_count} operations available)"
             
             entities_list.append({
                 "entity_name": entity_name,
-                "display_name": folder_path,
+                "display_name": display_name,
                 "description": description,
-                "get_endpoint_count": get_endpoint_count
+                "operations_count": operations_count,
+                "operations": operations[:5] if operations_count > 5 else operations,  # Show first 5 operations
+                "source": "Lightweight API Reference"
             })
         
         # Sort entities alphabetically by display name
@@ -979,20 +967,22 @@ async def get_okta_entities(
         return {
             "entities_count": len(entities_list),
             "entities": entities_list,
-            "source": "Okta API Reference (Folder Paths)"
+            "source": "Entity-Grouped Format (lightweight_api_reference.json)",
+            "format_version": "entity_grouped"
         }
         
     except Exception as e:
-        logger.error(f"Error reading API reference: {e}")
+        logger.error(f"Error reading lightweight API reference: {e}")
         
-        # Fallback to Modern Execution Manager on error instead of legacy tool registry
+        # Fallback to Modern Execution Manager on error
         try:
             entities_list = []
             for entity in modern_executor.available_entities:
                 entities_list.append({
                     "entity_name": entity,
                     "display_name": entity.replace('_', ' ').title(),
-                    "description": f"Okta {entity.replace('_', ' ').title()} operations and management via Modern Execution Manager",
+                    "description": f"Okta {entity.replace('_', ' ').title()} operations and management",
+                    "operations_count": 0,  # Unknown in fallback
                     "source": "Modern Execution Manager"
                 })
             
