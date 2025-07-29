@@ -36,7 +36,7 @@ class MethodWhitelistValidator:
         r'__import__\s*\(',
         r'open\s*\(',
         r'input\s*\(',
-        r'file\s*\(',
+        r'\bfile\s*\(',  # Word boundary to avoid matching "profile("
         r'execfile\s*\(',
         r'compile\s*\(',
         r'globals\s*\(',
