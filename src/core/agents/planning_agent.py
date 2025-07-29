@@ -52,6 +52,7 @@ class PlanningDependencies:
     entity_summary: Dict[str, Any]
     sql_tables: Dict[str, Any]
     flow_id: str = ""  # Correlation ID for flow tracking
+    entities: Optional[Dict[str, Any]] = None  # New entity-grouped format
 
 class ExecutionStep(BaseModel):
     """Individual execution step in the plan"""
@@ -204,29 +205,50 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
     """Dynamic instructions that include current context as clean JSON"""
     deps = ctx.deps
     
-    # Build entity operations in clean JSON format
-    api_entities = {}
-    for entity, details in deps.entity_summary.items():
-        operations = details.get('operations', [])
-        
-        # Filter to most relevant operations for planning (max 8 per entity)
-        key_operations = []
-        
-        # Priority operations based on common query patterns
-        priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
-        
-        # Add priority operations first
-        for op in priority_ops:
-            if op in operations:
-                key_operations.append(op)
-        
-        # Add other operations up to limit
-        for op in operations:
-            if op not in key_operations and len(key_operations) < 8:
-                key_operations.append(op)
-        
-        # Simple clean format - just the operations list
-        api_entities[entity] = key_operations
+    # NEW: Handle entity-grouped format with entity-first naming
+    # Check if we have the new entities format
+    if hasattr(deps, 'entities') and deps.entities:
+        # New format: entity-grouped with entity-first operations
+        api_entities = deps.entities
+    elif hasattr(deps, 'available_operations') and deps.available_operations:
+        # Legacy operations list format - convert to entity-grouped
+        api_entities = {}
+        for op in deps.available_operations:
+            if '_' in op:
+                parts = op.split('_', 1)
+                if len(parts) == 2:
+                    entity, operation = parts
+                    if entity not in api_entities:
+                        api_entities[entity] = {"operations": []}
+                    api_entities[entity]["operations"].append(op)
+    else:
+        # Fallback: build from entity_summary (legacy format)
+        api_entities = {}
+        for entity, details in deps.entity_summary.items():
+            operations = details.get('operations', [])
+            
+            # Filter to most relevant operations for planning (max 8 per entity)
+            key_operations = []
+            
+            # Priority operations based on common query patterns
+            priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
+            
+            # Add priority operations first
+            for op in priority_ops:
+                if op in operations:
+                    key_operations.append(op)
+            
+            # Add other operations up to limit
+            for op in operations:
+                if op not in key_operations and len(key_operations) < 8:
+                    key_operations.append(op)
+            
+            # Convert to entity-first format: entity_operation
+            entity_operations = []
+            for op in key_operations:
+                entity_operations.append(f"{entity}_{op}")
+            
+            api_entities[entity] = {"operations": entity_operations}
     
     # Build SQL tables in clean JSON format
     sql_tables = {}
@@ -251,7 +273,7 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
         # Simple clean format - just the columns list
         sql_tables[table_name] = key_columns
     
-    # Create minimal JSON context with SQL first (prioritized data source)
+    # Create context data with API entities and SQL tables
     context_data = {
         "sql_tables": sql_tables,
         "api_entities": api_entities
@@ -284,96 +306,6 @@ AVAILABLE DATA SOURCES (JSON Format):
 {format_json_compact_arrays(context_data)}
 ```
 """
-
-
-def _get_dynamic_instructions_direct(deps: PlanningDependencies) -> str:
-    """
-    Helper function to generate dynamic instructions for debugging without RunContext.
-    This duplicates the logic from get_dynamic_instructions() for debugging purposes.
-    """
-    # Build entity operations in clean JSON format
-    api_entities = {}
-    for entity, details in deps.entity_summary.items():
-        operations = details.get('operations', [])
-        
-        # Filter to most relevant operations for planning (max 8 per entity)
-        key_operations = []
-        
-        # Priority operations based on common query patterns
-        priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
-        
-        # Add priority operations first
-        for op in priority_ops:
-            if op in operations:
-                key_operations.append(op)
-        
-        # Add other operations up to limit
-        for op in operations:
-            if op not in key_operations and len(key_operations) < 8:
-                key_operations.append(op)
-        
-        # Simple clean format - just the operations list
-        api_entities[entity] = key_operations
-    
-    # Build SQL tables in clean JSON format
-    sql_tables = {}
-    for table_name, table_info in deps.sql_tables.items():
-        columns = table_info.get('columns', [])
-        
-        # Show key columns for planning
-        key_columns = []
-        priority_cols = ['id', 'okta_id', 'name', 'email', 'login', 'status', 'user_okta_id', 'group_okta_id', 'application_okta_id']
-        
-        for col in columns:
-            col_name = col['name'] if isinstance(col, dict) else str(col)
-            if col_name in priority_cols or 'okta_id' in col_name.lower():
-                key_columns.append(col_name)
-        
-        # Add other important columns
-        for col in columns:
-            col_name = col['name'] if isinstance(col, dict) else str(col)
-            if col_name not in key_columns:
-                key_columns.append(col_name)
-        
-        # Simple clean format - just the columns list
-        sql_tables[table_name] = key_columns
-    
-    # Build formatted context data (match original function format)
-    context_data = {
-        "sql_tables": sql_tables,
-        "api_entities": api_entities
-    }
-    
-    # Use the same formatting logic as the main function
-    def format_json_compact_arrays(data):
-        result = "{\n"
-        for i, (key, value) in enumerate(data.items()):
-            result += f'  "{key}": {{\n'
-            if isinstance(value, dict):
-                for j, (sub_key, sub_value) in enumerate(value.items()):
-                    if isinstance(sub_value, list):
-                        items_str = ', '.join(f'"{item}"' for item in sub_value)
-                        result += f'    "{sub_key}": [{items_str}]'
-                    else:
-                        result += f'    "{sub_key}": {json.dumps(sub_value)}'
-                    if j < len(value) - 1:
-                        result += ","
-                    result += "\n"
-            result += "  }"
-            if i < len(data) - 1:
-                result += ","
-            result += "\n"
-        result += "}"
-        return result
-    
-    # Return JSON context with balanced formatting - readable structure but compact arrays
-    return f"""
-AVAILABLE DATA SOURCES (JSON Format):
-```json
-{format_json_compact_arrays(context_data)}
-```
-"""
-
 
 async def generate_execution_plan(
     query: str,
@@ -418,8 +350,13 @@ async def generate_execution_plan(
             # Get the static base prompt
             static_prompt = load_base_system_prompt()
             
-            # Get the dynamic instructions by calling the function logic directly
-            dynamic_instructions = _get_dynamic_instructions_direct(deps)
+            # Get the dynamic instructions by creating a mock context
+            class MockContext:
+                def __init__(self, deps):
+                    self.deps = deps
+            
+            mock_ctx = MockContext(deps)
+            dynamic_instructions = get_dynamic_instructions(mock_ctx)
             
             # Log the complete prompt
             logger.info(f"[{flow_id}] === COMPLETE SYSTEM PROMPT START ===")

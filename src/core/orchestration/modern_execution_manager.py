@@ -189,12 +189,23 @@ class ModernExecutionManager:
         # Load full API data for endpoint filtering during execution
         self.full_api_data = self._load_api_data()
         
-        # Extract planning dependencies from simple reference
-        self.available_entities = [entity['entity'] for entity in self.simple_ref_data.get('entities', [])]
-        self.entity_summary = {entity['entity']: {'operations': entity['operations'], 'methods': []} 
-                              for entity in self.simple_ref_data.get('entities', [])}
+        # Extract planning dependencies from simple reference (new entity-grouped format)
+        entities_dict = self.simple_ref_data.get('entities', {})
+        self.available_entities = list(entities_dict.keys())
+        self.entity_summary = {entity_name: {'operations': entity_data['operations'], 'methods': []} 
+                              for entity_name, entity_data in entities_dict.items()}
         self.sql_tables = {table['name']: {'columns': table['columns']} 
                           for table in self.simple_ref_data.get('sql_tables', [])}
+        self.endpoints = self.full_api_data.get('endpoints', [])  # Load endpoints for filtering
+        
+        # Legacy operation mapping for backwards compatibility (generate from entities)
+        self.operation_mapping = {}
+        for entity_name, entity_data in entities_dict.items():
+            for operation in entity_data['operations']:
+                # Extract base operation from entity-first format (e.g., "user_list" -> "list")
+                if '_' in operation and operation.startswith(entity_name + '_'):
+                    base_operation = operation[len(entity_name) + 1:]
+                    self.operation_mapping[operation] = {'entity': entity_name, 'operation': base_operation}
         self.endpoints = self.full_api_data.get('endpoints', [])  # Load endpoints for filtering
         
         # REPEATABLE DATA FLOW PATTERN: Variable-based data management
@@ -586,16 +597,23 @@ class ModernExecutionManager:
             if not sql_tables:
                 raise ValueError(f"No SQL tables found in schema file: {schema_path}")
             
-            # Convert entity summary to lightweight format
-            entities = []
+            # Convert entity summary to entity-grouped format with entity-first naming
+            entities = {}
             for entity_name, entity_data in entity_summary.items():
-                entities.append({
-                    "entity": entity_name,
-                    "operations": entity_data.get('operations', [])
-                })
-            
-            # Sort entities alphabetically for consistency
-            entities.sort(key=lambda x: x['entity'])
+                operations = entity_data.get('operations', [])
+                
+                # Convert operations to entity-first format: entity_operation
+                entity_operations = []
+                for operation in operations:
+                    entity_operation = f"{entity_name}_{operation}"
+                    entity_operations.append(entity_operation)
+                
+                # Sort operations for consistency
+                entity_operations.sort()
+                
+                entities[entity_name] = {
+                    "operations": entity_operations
+                }
             
             lightweight_data = {
                 "entities": entities,
@@ -635,7 +653,9 @@ class ModernExecutionManager:
                 # Write the formatted JSON
                 f.write(json_str)
             
-            logger.info(f"Generated lightweight API reference with {len(entities)} entities and {len(sql_tables)} SQL tables")
+            # Count total operations across all entities
+            total_operations = sum(len(entity_data["operations"]) for entity_data in entities.values())
+            logger.info(f"Generated lightweight API reference with {total_operations} operations across {len(entities)} entities and {len(sql_tables)} SQL tables")
             return lightweight_data
             
         except FileNotFoundError as e:
@@ -684,8 +704,19 @@ class ModernExecutionManager:
             return []
         
         entity = entity_name.lower()
-        operation = getattr(step, 'operation', None) or 'list'  # Default to list
-        operations = [operation.lower()]
+        raw_operation = getattr(step, 'operation', None) or 'list'  # Default to list
+        
+        # Parse entity_operation format (e.g., "group_list" -> entity="group", operation="list")
+        if raw_operation and '_' in raw_operation and raw_operation in self.operation_mapping:
+            # Use operation mapping to get the actual entity and operation
+            mapping = self.operation_mapping[raw_operation]
+            entity = mapping['entity'].lower()
+            operation = mapping['operation'].lower()
+            logger.debug(f"Mapped entity_operation '{raw_operation}' to entity='{entity}', operation='{operation}'")
+        else:
+            operation = raw_operation.lower()
+        
+        operations = [operation]
         methods = ['GET']  # Default to GET for most operations
         
         # Get matches with precise filtering
@@ -828,11 +859,17 @@ class ModernExecutionManager:
             
             # Create dependencies for Planning Agent (same as old executor)
             from src.core.agents.planning_agent import PlanningDependencies
+            
+            # Get the lightweight reference for new entities format
+            lightweight_ref = self.simple_ref_data  # Use already loaded reference data
+            entities = lightweight_ref.get('entities', {})
+            
             planning_deps = PlanningDependencies(
                 available_entities=self.available_entities,
                 entity_summary=self.entity_summary,
                 sql_tables=self.sql_tables,
-                flow_id=correlation_id
+                flow_id=correlation_id,
+                entities=entities  # Pass the new entity-grouped format
             )
             
             # Execute Planning Agent with dependencies - use modified query if needed
@@ -1016,9 +1053,10 @@ class ModernExecutionManager:
         
         # Update internal data structures
         self.simple_ref_data = new_reference
-        self.available_entities = [entity['entity'] for entity in new_reference.get('entities', [])]
-        self.entity_summary = {entity['entity']: {'operations': entity['operations'], 'methods': []} 
-                              for entity in new_reference.get('entities', [])}
+        entities_dict = new_reference.get('entities', {})
+        self.available_entities = list(entities_dict.keys())
+        self.entity_summary = {entity_name: {'operations': entity_data['operations'], 'methods': []} 
+                              for entity_name, entity_data in entities_dict.items()}
         self.sql_tables = {table['name']: {'columns': table['columns']} 
                           for table in new_reference.get('sql_tables', [])}
         
