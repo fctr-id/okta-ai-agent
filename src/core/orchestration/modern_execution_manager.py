@@ -1758,7 +1758,7 @@ class ModernExecutionManager:
                 indented_code = '\n'.join('    ' + line for line in python_code.split('\n'))
                 
                 # Wrap the code with data injection and error handling
-                wrapped_code = f"""
+                wrapped_code = f"""# -*- coding: utf-8 -*-
 import sys
 import json
 {data_injection_code}
@@ -1768,7 +1768,7 @@ except Exception as e:
     print(json.dumps({{"status": "error", "error": str(e)}}))
 """
                 
-                with open(temp_file_path, 'w') as temp_file:
+                with open(temp_file_path, 'w', encoding='utf-8') as temp_file:
                     temp_file.write(wrapped_code)
             
                 # Execute the code with appropriate timeout based on entity type
@@ -1808,6 +1808,8 @@ except Exception as e:
                     [sys.executable, temp_file_path],
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=execution_timeout,
                     cwd=temp_dir  # Set working directory to temp dir so imports work
                 )
