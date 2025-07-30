@@ -27,13 +27,13 @@ Usage:
         logger.error(f"Polars operation blocked: {result.violations}")
 """
 
-# Import main validation functions
-from .method_whitelist import (
+# Import main validation functions from consolidated security_config
+from ...utils.security_config import (
     validate_generated_code,
     validate_http_method,
     validate_api_endpoint,
-    MethodWhitelistValidator,
-    SecurityValidationResult
+    SecurityValidationResult,
+    EnhancedSecurityValidator
 )
 
 from .network_security import (
@@ -53,11 +53,11 @@ from .polars_security import (
 )
 
 __all__ = [
-    # Method whitelisting
+    # Method whitelisting (consolidated into security_config)
     'validate_generated_code',
     'validate_http_method', 
     'validate_api_endpoint',
-    'MethodWhitelistValidator',
+    'EnhancedSecurityValidator',
     'SecurityValidationResult',
     
     # Network security

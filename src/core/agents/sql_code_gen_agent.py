@@ -130,7 +130,7 @@ def extract_json_from_text(text: str) -> dict:
 
 def is_safe_sql(sql_query: str, flow_id: str = "") -> bool:
     """Enhanced SQL safety check using comprehensive security validator"""
-    from core.security.sql_security_validator import validate_user_sql
+    from src.core.security.sql_security_validator import validate_user_sql
     
     is_valid, error_msg = validate_user_sql(sql_query, flow_id)
     
