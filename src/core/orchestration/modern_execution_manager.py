@@ -980,6 +980,35 @@ class ModernExecutionManager:
                 logger.info(f"[{correlation_id}] Results formatting completed with {formatted_response.get('display_type', 'unknown')} format")
                 logger.debug(f"[{correlation_id}] Formatted response keys: {list(formatted_response.keys())}")
                 
+                # CHECK FOR PROCESSING CODE: If Results Formatter generated processing code, execute it (same pattern as API/SQL agents)
+                if formatted_response.get('processing_code') and formatted_response['processing_code'].strip():
+                    logger.info(f"[{correlation_id}] Results Formatter generated processing code - executing with security validation")
+                    
+                    # Execute the processing code with same security validation as API/SQL code
+                    processing_execution_result = self._execute_generated_code(
+                        formatted_response['processing_code'], 
+                        correlation_id, 
+                        step=None,  # No specific step for results processing
+                        current_step_number=len(execution_results.steps) + 1  # After all steps
+                    )
+                    
+                    if processing_execution_result.get('success', False):
+                        # Replace placeholder content with actual processed data
+                        processed_data = processing_execution_result.get('output', [])
+                        logger.info(f"[{correlation_id}] Processing code execution successful - updating formatted response with actual data")
+                        formatted_response['content'] = processed_data
+                        
+                        # Update metadata to reflect successful processing
+                        if 'metadata' in formatted_response:
+                            formatted_response['metadata']['processing_executed'] = True
+                            formatted_response['metadata']['actual_results'] = len(processed_data) if isinstance(processed_data, list) else 'processed'
+                    else:
+                        logger.warning(f"[{correlation_id}] Processing code execution failed: {processing_execution_result.get('error', 'Unknown error')}")
+                        # Keep original placeholder content but add error info to metadata
+                        if 'metadata' in formatted_response:
+                            formatted_response['metadata']['processing_executed'] = False
+                            formatted_response['metadata']['execution_error'] = processing_execution_result.get('error', 'Unknown error')
+                
                 # Save results to file
                 await self._save_results_to_file(query, formatted_response, step_results_for_processing, correlation_id)
                 
@@ -1544,9 +1573,13 @@ class ModernExecutionManager:
                 
                 # Log only one sample element to avoid log spam
                 if isinstance(actual_data, list) and actual_data:
-                    logger.debug(f"[{correlation_id}] Sample API result (1 of {len(actual_data)}): {actual_data[0]}")
+                    sample_str = str(actual_data[0])
+                    truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
+                    logger.debug(f"[{correlation_id}] Sample API result (1 of {len(actual_data)}): {truncated_sample}")
                 elif actual_data:
-                    logger.debug(f"[{correlation_id}] API result sample: {actual_data}")
+                    sample_str = str(actual_data)
+                    truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
+                    logger.debug(f"[{correlation_id}] API result sample: {truncated_sample}")
                 else:
                     logger.debug(f"[{correlation_id}] API execution returned no data")
                 
@@ -1664,26 +1697,12 @@ class ModernExecutionManager:
         import shutil
         
         try:
-            # SECURITY VALIDATION: Validate generated code before execution
-            logger.info(f"[{correlation_id}] Security validation: Checking generated code for safety")
-            security_result = validate_generated_code(python_code)
-            
-            if not security_result.is_valid:
-                error_msg = f"Security violation in generated code: {'; '.join(security_result.violations)}"
-                logger.error(f"[{correlation_id}] {error_msg}")
-                return {
-                    'success': False,
-                    'error': error_msg,
-                    'security_violations': security_result.violations,
-                    'risk_level': security_result.risk_level
-                }
-            
-            # POLARS SECURITY VALIDATION: Check for Polars operations
+            # POLARS-FIRST SECURITY VALIDATION: For Polars code, use specialized validation first
             if 'polars' in python_code.lower() or 'pl.' in python_code:
-                logger.info(f"[{correlation_id}] Polars usage detected - performing additional validation")
+                logger.info(f"[{correlation_id}] Polars usage detected - using specialized Polars security validation")
                 polars_result = validate_polars_operation(python_code)
                 
-                if not polars_result.is_valid:
+                if not polars_result.is_allowed:
                     error_msg = f"Polars security violation: {'; '.join(polars_result.violations)}"
                     logger.error(f"[{correlation_id}] {error_msg}")
                     return {
@@ -1694,6 +1713,26 @@ class ModernExecutionManager:
                     }
                 
                 logger.info(f"[{correlation_id}] Polars security validation passed")
+                
+                # For Polars code, skip general method validation (it's redundant and conflicts)
+                logger.info(f"[{correlation_id}] Skipping general method validation for Polars code")
+                
+            else:
+                # GENERAL SECURITY VALIDATION: For non-Polars code, use general validation
+                logger.info(f"[{correlation_id}] Security validation: Checking generated code for safety")
+                security_result = validate_generated_code(python_code)
+                
+                if not security_result.is_valid:
+                    error_msg = f"Security violation in generated code: {'; '.join(security_result.violations)}"
+                    logger.error(f"[{correlation_id}] {error_msg}")
+                    return {
+                        'success': False,
+                        'error': error_msg,
+                        'security_violations': security_result.violations,
+                        'risk_level': security_result.risk_level
+                    }
+                
+                logger.info(f"[{correlation_id}] General security validation passed")
             
             logger.info(f"[{correlation_id}] Security validation passed - code is safe to execute")
             

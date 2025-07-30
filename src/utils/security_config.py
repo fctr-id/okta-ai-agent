@@ -77,9 +77,9 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
     # Data conversion methods
     'to_dict', 'as_dict', 'dict', 'json',
     
-    # Common list operations
+    # Common list/set operations
     'append', 'extend', 'insert', 'add', 'remove', 'pop', 'clear', 
-    'index', 'count', 'sort', 'reverse',
+    'index', 'count', 'sort', 'reverse', 'update',  # Added 'update' for set.update()
     
     # String methods
     'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',

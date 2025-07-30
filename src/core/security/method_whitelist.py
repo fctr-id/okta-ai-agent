@@ -54,6 +54,7 @@ class MethodWhitelistValidator:
         'asyncio', 'json', 'datetime', 'time', 'aiohttp', 'sys', 'pathlib',
         'logging', 're', 'typing', 'dataclasses', 'pydantic', 'urllib.parse',
         'base64', 'hashlib', 'hmac', 'uuid', 'collections', 'itertools',
+        'polars',  # Polars data processing library
         'utils.pagination_limits',  # From security_config.py
         'base_okta_api_client'      # Our API client module
     }
@@ -132,7 +133,19 @@ class MethodWhitelistValidator:
         'timedelta', 'date', 'time', 'datetime',
         
         # Async operations
-        'await', 'async', 'create_task', 'gather', 'sleep'
+        'await', 'async', 'create_task', 'gather', 'sleep',
+        
+        # Polars DataFrame operations for Results Formatter
+        'DataFrame', 'read_json', 'read_csv', 'from_dict', 'from_records',
+        'select', 'with_columns', 'filter', 'sort', 'groupby', 'group_by', 'agg',
+        'join', 'concat', 'union', 'explode', 'unnest', 'pivot', 'melt',
+        'head', 'tail', 'slice', 'sample', 'unique', 'drop_duplicates',
+        'fill_null', 'drop_nulls', 'cast', 'alias', 'rename', 'implode',
+        'to_dict', 'to_pandas', 'to_json', 'write_json', 'write_csv',
+        'col', 'lit', 'when', 'otherwise', 'coalesce', 'concat_str',
+        'count', 'sum', 'mean', 'median', 'std', 'var', 'min', 'max',
+        'first', 'last', 'n_unique', 'null_count', 'list', 'struct', 'apply',
+        'Utf8', 'Int64', 'Float64', 'Boolean', 'Date', 'Datetime', 'List', 'Struct'
     }
     
     def __init__(self):

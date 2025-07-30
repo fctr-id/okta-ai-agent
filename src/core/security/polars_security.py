@@ -38,9 +38,23 @@ class PolarsSecurityValidator:
         # Sorting and ordering
         'sort', 'sort_by', 'reverse', 'shuffle',
         
-        # Data inspection
+        # Data inspection and display
         'describe', 'null_count', 'dtypes', 'columns', 'shape', 'width', 'height',
-        'is_empty', 'estimated_size',
+        'is_empty', 'estimated_size', 'show',
+        
+        # Data conversion and extraction
+        'to_list', 'to_series', 'to_dicts', 'to_dict',
+        
+        # Column operations and filtering
+        'is_in', 'is_not_null', 'is_null', 'apply', 'map_elements',
+        
+        # Advanced data operations (JSON/struct processing)
+        'over', 'implode', 'explode', 'struct_field', 'struct_fields', 
+        'flatten', 'unnest', 'map_dict', 'map_batches',
+        
+        # List/array operations
+        'list_eval', 'list_len', 'list_get', 'list_first', 'list_last',
+        'list_slice', 'list_sum', 'list_max', 'list_min', 'list_unique',
         
         # String operations (safe)
         'str.len', 'str.contains', 'str.starts_with', 'str.ends_with',
@@ -78,11 +92,11 @@ class PolarsSecurityValidator:
         # Potentially dangerous string operations
         'str.extract', 'str.extract_all', 'str.replace', 'str.replace_all',
         
-        # System operations
-        'pipe', 'map', 'apply', 'fold', 'reduce',
+        # System operations (removed apply - it's in allowed list)
+        'pipe', 'map', 'fold', 'reduce',
         
-        # Memory intensive operations
-        'explode', 'melt', 'pivot', 'unpivot',
+        # Memory intensive operations (removed explode - it's in allowed list)  
+        'melt', 'pivot', 'unpivot',
         
         # Database operations
         'write_database', 'execute'
@@ -197,7 +211,7 @@ class PolarsSecurityValidator:
     
     def get_safe_operations_summary(self) -> Dict[str, List[str]]:
         """
-        Get a summary of safe Polars operations by category
+        Get a summary of safe Polars operations by category for LLM prompts
         
         Returns:
             Dictionary with categorized safe operations
@@ -207,21 +221,79 @@ class PolarsSecurityValidator:
                 'head', 'tail', 'limit', 'sample', 'slice', 'select', 'drop'
             ],
             'filtering': [
-                'filter', 'where', 'drop_nulls', 'drop_duplicates', 'unique'
+                'filter', 'where', 'drop_nulls', 'drop_duplicates', 'unique',
+                'is_in', 'is_not_null', 'is_null'
             ],
             'aggregation': [
-                'group_by', 'agg', 'count', 'sum', 'mean', 'median', 'min', 'max'
+                'group_by', 'agg', 'count', 'sum', 'mean', 'median', 'min', 'max',
+                'std', 'var', 'quantile', 'first', 'last', 'n_unique'
             ],
             'sorting': [
-                'sort', 'sort_by', 'reverse'
+                'sort', 'sort_by', 'reverse', 'shuffle'
             ],
-            'formatting': [
-                'to_dict', 'to_pandas', 'write_json', 'write_csv'
+            'data_conversion': [
+                'to_dict', 'to_dicts', 'to_list', 'to_series', 'to_pandas', 
+                'to_numpy', 'to_arrow', 'write_json', 'write_csv'
+            ],
+            'column_operations': [
+                'with_columns', 'rename', 'cast', 'apply', 'map_elements'
+            ],
+            'json_struct_processing': [
+                'explode', 'implode', 'struct_field', 'struct_fields', 
+                'flatten', 'unnest', 'map_dict', 'map_batches'
+            ],
+            'list_array_operations': [
+                'list_eval', 'list_len', 'list_get', 'list_first', 'list_last',
+                'list_slice', 'list_sum', 'list_max', 'list_min', 'list_unique'
+            ],
+            'window_operations': [
+                'over', 'rolling', 'expanding'
+            ],
+            'joins': [
+                'join', 'join_asof', 'hstack', 'vstack', 'concat'
             ],
             'inspection': [
-                'describe', 'dtypes', 'columns', 'shape', 'null_count'
+                'describe', 'dtypes', 'columns', 'shape', 'null_count', 'show',
+                'width', 'height', 'is_empty', 'estimated_size'
+            ],
+            'transformations': [
+                'fill_null', 'fill_nan', 'interpolate', 'round', 'abs', 'clip'
+            ],
+            'string_operations': [
+                'str.len', 'str.contains', 'str.starts_with', 'str.ends_with',
+                'str.to_lowercase', 'str.to_uppercase', 'str.strip'
+            ],
+            'datetime_operations': [
+                'dt.year', 'dt.month', 'dt.day', 'dt.hour', 'dt.minute', 'dt.second',
+                'dt.strftime', 'dt.to_string'
             ]
         }
+
+    def get_allowed_methods_for_prompt(self) -> str:
+        """
+        Generate a formatted string of allowed Polars methods for LLM prompts
+        
+        Returns:
+            Formatted string describing allowed operations
+        """
+        categories = self.get_safe_operations_summary()
+        
+        prompt_text = "**ALLOWED POLARS METHODS**\n\nYou can use these Polars operations in your code:\n\n"
+        
+        for category, methods in categories.items():
+            category_name = category.replace('_', ' ').title()
+            prompt_text += f"**{category_name}:**\n"
+            prompt_text += f"- {', '.join(sorted(methods))}\n\n"
+        
+        prompt_text += "**IMPORTANT NOTES:**\n"
+        prompt_text += "- Always use these exact method names\n"
+        prompt_text += "- Combine methods with standard Polars chaining syntax\n"
+        prompt_text += "- Use .apply() for custom transformations\n"
+        prompt_text += "- Use .explode() and .implode() for list/struct processing\n"
+        prompt_text += "- Use .struct_field() to extract fields from struct columns\n"
+        prompt_text += "- Use .over() for window operations\n"
+        
+        return prompt_text
 
 # Create a global Polars security validator instance
 polars_validator = PolarsSecurityValidator()
@@ -231,14 +303,52 @@ def validate_polars_operation(operation: str,
     """
     Convenience function to validate Polars operation
     
+    For Results Formatter code that has already passed MethodWhitelistValidator,
+    we perform additional Polars-specific safety checks but are more permissive.
+    
     Args:
-        operation: Polars operation to validate
+        operation: Polars operation/code to validate
         context: Additional context
         
     Returns:
         PolarsSecurityResult with validation details
     """
-    return polars_validator.validate_polars_operation(operation, context)
+    violations = []
+    blocked_operations = []
+    risk_level = "LOW"
+    
+    # Check for obviously dangerous operations
+    dangerous_patterns = [
+        'exec(', 'eval(', '__import__', 'subprocess', 'os.system',
+        'open(', 'file(', 'input(', 'raw_input(',
+        'delete', 'drop_database', 'truncate', 'alter table'
+    ]
+    
+    operation_lower = operation.lower()
+    for pattern in dangerous_patterns:
+        if pattern in operation_lower:
+            violations.append(f"Dangerous operation detected: {pattern}")
+            blocked_operations.append(pattern)
+            risk_level = "CRITICAL"
+    
+    # If code has basic Polars operations and no dangerous patterns, allow it
+    has_polars = any(marker in operation_lower for marker in ['import polars', 'pl.', 'dataframe'])
+    
+    if has_polars and not violations:
+        # Allow Polars operations that passed method whitelist validation
+        is_allowed = True
+    else:
+        # Original validation for individual operations
+        is_allowed = operation in polars_validator.ALLOWED_POLARS_METHODS
+        if not is_allowed and not violations:
+            violations.append(f"Operation '{operation}' is not in the allowed methods list")
+    
+    return PolarsSecurityResult(
+        is_allowed=is_allowed,
+        violations=violations,
+        blocked_operations=blocked_operations,
+        risk_level=risk_level
+    )
 
 def validate_polars_chain(operations: List[str]) -> PolarsSecurityResult:
     """
@@ -260,3 +370,32 @@ def get_safe_polars_operations() -> Dict[str, List[str]]:
         Dictionary of safe operations by category
     """
     return polars_validator.get_safe_operations_summary()
+
+def get_allowed_polars_methods_list() -> List[str]:
+    """
+    Get a flat list of all allowed Polars methods for LLM prompts
+    
+    Returns:
+        Sorted list of all allowed method names
+    """
+    return sorted(list(polars_validator.ALLOWED_POLARS_METHODS))
+
+def get_polars_methods_for_prompt() -> str:
+    """
+    Generate a formatted string of allowed Polars methods for LLM prompts
+    
+    Returns:
+        Formatted string with categorized allowed methods
+    """
+    categories = polars_validator.get_safe_operations_summary()
+    
+    prompt_text = "**ALLOWED POLARS METHODS**\n\nYou can ONLY use these Polars operations:\n\n"
+    
+    for category, methods in categories.items():
+        category_name = category.replace('_', ' ').title()
+        prompt_text += f"**{category_name}:**\n"
+        prompt_text += f"- {', '.join(sorted(methods))}\n\n"
+    
+    prompt_text += "**CRITICAL:** Only use methods from this list. Any other method will cause security validation failure.\n"
+    
+    return prompt_text

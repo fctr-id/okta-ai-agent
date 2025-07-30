@@ -28,7 +28,21 @@ from src.utils.logging import get_logger, generate_correlation_id, set_correlati
 
 # Setup centralized logging with file output  
 # Using main "okta_ai_agent" namespace for unified logging across all agents
-logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())# Configuration
+logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
+
+# Use the model picker approach for consistent model configuration
+try:
+    from src.core.models.model_picker import ModelConfig, ModelType
+    model = ModelConfig.get_model(ModelType.REASONING)
+except ImportError:
+    # Fallback to simple model configuration
+    def get_simple_model():
+        """Simple model configuration without complex imports"""
+        model_name = os.getenv('LLM_MODEL', 'openai:gpt-4o')
+        return model_name
+    model = get_simple_model()
+
+# Configuration
 config = {
     'enable_token_reporting': True
 }
@@ -41,13 +55,26 @@ class FormattedOutput(BaseModel):
     metadata: Dict[str, Any] = Field(description="Execution summary and processing info")
     processing_code: Optional[str] = Field(default=None, description="Python code for processing large datasets")
 
-# Load the system prompts
+# Import Polars security for dynamic method injection
+from src.core.security.polars_security import get_polars_methods_for_prompt
+
+# Load the system prompts with dynamic Polars method injection
 def _load_complete_data_prompt() -> str:
-    """Load system prompt for complete data processing"""
+    """Load system prompt for complete data processing with dynamic Polars methods"""
     try:
         prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_complete_data_prompt.txt")
         with open(prompt_file, 'r', encoding='utf-8') as f:
-            return f.read()
+            base_prompt = f.read()
+        
+        # Inject dynamic Polars methods (like Planning Agent injects entities)
+        polars_methods_section = get_polars_methods_for_prompt()
+        
+        # Add the Polars methods section to the prompt
+        enhanced_prompt = base_prompt + f"\n\n{polars_methods_section}"
+        
+        logger.debug("Enhanced complete data prompt with dynamic Polars methods")
+        return enhanced_prompt
+        
     except FileNotFoundError:
         logger.warning("Complete data prompt file not found, using fallback")
         return """You are a Results Formatter Agent that processes complete datasets.
@@ -56,11 +83,21 @@ For user queries: Group by user_id and concatenate groups/apps into comma-separa
 Create comprehensive, user-friendly data presentations with all records included."""
 
 def _load_sample_data_prompt() -> str:
-    """Load system prompt for sample data processing and code generation"""
+    """Load system prompt for sample data processing and code generation with dynamic Polars methods"""
     try:
         prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_sample_data_prompt.txt")
         with open(prompt_file, 'r', encoding='utf-8') as f:
-            return f.read()
+            base_prompt = f.read()
+        
+        # Inject dynamic Polars methods (like Planning Agent injects entities)
+        polars_methods_section = get_polars_methods_for_prompt()
+        
+        # Add the Polars methods section to the prompt
+        enhanced_prompt = base_prompt + f"\n\n{polars_methods_section}"
+        
+        logger.debug("Enhanced sample data prompt with dynamic Polars methods")
+        return enhanced_prompt
+        
     except FileNotFoundError:
         logger.warning("Sample data prompt file not found, using fallback")
         return """You are a Results Formatter Agent that processes sample data and generates processing code.
@@ -69,14 +106,14 @@ Analyze samples and create efficient code for processing complete datasets."""
 # Create Results Formatter Agents with PydanticAI (2 specialized agents)
 # Create PydanticAI agents with string output to avoid validation issues
 complete_data_formatter = Agent(
-    'openai:gpt-4o',
+    model,
     system_prompt=_load_complete_data_prompt(),
     # No output_type - will return raw string which we can parse manually
     retries=0  # No retries to avoid wasting money on failed attempts
 )
 
 sample_data_formatter = Agent(
-    'openai:gpt-4o', 
+    model, 
     system_prompt=_load_sample_data_prompt(),
     # No output_type - will return raw string which we can parse manually
     retries=0  # No retries to avoid wasting money on failed attempts
