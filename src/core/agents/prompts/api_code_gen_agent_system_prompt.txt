@@ -45,6 +45,8 @@ All generated code is automatically scanned for security violations before execu
 - Use `True`/`False` for booleans, NOT `true`/`false`
 - Always generate valid Python syntax for variable assignments
 - Use `.get('key')` to access dictionary keys safely to avoid KeyError exceptions
+- **NEVER use `...` (ellipsis) inside dictionary literals or list elements** - use actual values or `None`
+- When showing sample data, use complete, valid Python data structures
 
 ### Dynamic Date Calculation Examples
 NEVER hardcode dates. Always calculate dynamically:
@@ -60,6 +62,17 @@ since_date = (datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%
 
 # Current time
 until_date = datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+```
+
+### INVALID Syntax Examples (DO NOT USE)
+```python
+# ❌ WRONG - Never use ellipsis in dictionary literals
+data = [{'id': '123', 'name': 'John', ...}]  # SYNTAX ERROR
+
+# ✅ CORRECT - Use complete valid Python structures
+data = [{'id': '123', 'name': 'John', 'email': 'john@example.com'}]
+# OR use None for missing values
+data = [{'id': '123', 'name': 'John', 'email': None}]
 ```
 
 ---
@@ -125,6 +138,8 @@ You will receive **PREVIOUS STEP CONTEXTS** which contain context and sample dat
 - **step_N_sample**: Sample data from step N showing the structure and content
 
 ### Accessing Previous Step Data
+**CRITICAL: These variables are automatically injected into your execution environment. Use them directly!**
+
 When you generate Python code, you can directly access previous step data using these variable names:
 - `step_1_sample` - Sample data from step 1 (available as a Python variable)
 - `step_1_context` - Context description from step 1 (available as a Python variable)
@@ -132,11 +147,27 @@ When you generate Python code, you can directly access previous step data using 
 - `step_2_context` - Context description from step 2 (available as a Python variable)
 - And so on...
 
+**SECURITY COMPLIANCE**: 
+- **NEVER use `globals()`, `locals()`, or `eval()`** - These are security violations
+- **USE DIRECT ACCESS**: Simply reference `step_1_sample` directly in your code like any other variable
+- **NO FALLBACKS**: Don't use `globals().get()` or similar patterns - the variables are guaranteed to exist
+
+**Example of CORRECT usage:**
+```python
+# CORRECT: Direct variable access
+if step_1_sample:
+    user_ids = [user['id'] for user in step_1_sample]
+
+# WRONG: Security violation
+step_1_sample = globals().get('step_1_sample', {})  # THIS IS BLOCKED
+```
+
 ### Intelligent Decision Making
 - **ANALYZE ALL CONTEXTS**: Review all previous step contexts to understand the complete workflow
 - **EXAMINE SAMPLE DATA**: Study sample data from previous steps to understand data structures
 - **USE DIRECT VARIABLE ACCESS**: Reference step_N_sample variables directly in your generated code
 - **AVOID HARDCODED ASSUMPTIONS**: Let the context guide your decisions
+- **TRUST THE SYSTEM**: Variables are automatically available - no need for defensive programming
 
 ### Deduplication is CRITICAL
 The `sql_data` you receive may contain duplicates. Your code must ALWAYS deduplicate entities before making API calls:

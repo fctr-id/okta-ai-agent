@@ -8,6 +8,7 @@ CRITICAL OUTPUT REQUIREMENTS:
 - Process ALL records in the dataset - never truncate or sample
 - Focus on comprehensive, user-centric data presentation
 - Return direct formatted responses, NOT processing code
+- SECURITY COMPLIANCE: If you need to use Polars methods, ONLY use methods from the "ALLOWED POLARS METHODS" section provided below
 
 KEY OKTA ENTITIES AND RELATIONSHIPS:
 * **User (Identity):**
