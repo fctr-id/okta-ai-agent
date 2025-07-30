@@ -454,15 +454,89 @@ class OktaAPIClient:
         # Success case
         try:
             data = await response.json()
+            # Normalize the data structure to ensure consistent format
+            normalized_data = self._normalize_okta_response(data)
             return {
                 "status": "success", 
-                "data": data
+                "data": normalized_data
             }
         except Exception as e:
             return {
                 "status": "error",
                 "error": f"Failed to parse response JSON: {str(e)}"
             }
+
+    def _normalize_okta_response(self, data):
+        """
+        Normalize Okta API responses to a consistent format.
+        
+        Inspired by Okta SDK's OktaAPIResponse class but handles multiple 
+        API response wrapper patterns found in different Okta endpoints.
+        
+        Common Okta response patterns:
+        - Direct array: [{...}, {...}]
+        - IAM/SCIM: {"value": [...], "totalResults": N}
+        - Search: {"results": [...], "count": N}  
+        - Paginated: {"items": [...], "totalCount": N}
+        - Collections: {"data": [...]}
+        - Embedded: {"_embedded": {"items": [...]}}
+        - Single resource: {...}
+        """
+        # Handle null/empty responses
+        if data is None:
+            return []
+        
+        # Direct array - most common case
+        if isinstance(data, list):
+            return data
+        
+        # Non-dict responses (primitives, etc.)
+        if not isinstance(data, dict):
+            return data
+        
+        # Known wrapper patterns (ordered by frequency in Okta APIs)
+        wrapper_keys = [
+            'value',    # IAM/SCIM endpoints
+            'results',  # Search endpoints  
+            'items',    # Paginated endpoints
+            'data'      # Collection endpoints
+        ]
+        
+        for key in wrapper_keys:
+            if key in data and isinstance(data[key], list):
+                self.logger.debug(f"Normalized response with '{key}' wrapper")
+                return data[key]
+        
+        # Check for embedded resources pattern
+        if "_embedded" in data and isinstance(data["_embedded"], dict):
+            for key, value in data["_embedded"].items():
+                if isinstance(value, list):
+                    self.logger.debug(f"Normalized embedded response '_embedded.{key}'")
+                    return value
+        
+        # Dynamic wrapper detection (fallback for custom endpoints)
+        for key, value in data.items():
+            if (isinstance(value, list) and len(value) > 0 and 
+                key not in ['_links', 'meta', 'metadata', 'pagination']):
+                self.logger.debug(f"Normalized response with dynamic '{key}' wrapper")
+                return value
+        
+        # Single resource detection
+        if isinstance(data, dict):
+            resource_indicators = ['id', 'okta_id', 'userId', 'groupId', 'appId', 'name', 'login', 'email']
+            if any(key in data for key in resource_indicators):
+                self.logger.debug("Normalized single resource to list format")
+                return [data]
+            
+            # Metadata-only response
+            metadata_keys = {'_links', 'meta', 'metadata', 'totalCount', 'totalResults', 'count', 'size', 'limit', 'after', 'cursor'}
+            if all(key in metadata_keys for key in data.keys()):
+                self.logger.debug("Metadata-only response, returning empty list")
+                return []
+        
+        # Fallback: return as-is (similar to Okta SDK approach)
+        self.logger.debug(f"Response format not recognized, returning as-is: {type(data)}")
+        return data
 
 
 
