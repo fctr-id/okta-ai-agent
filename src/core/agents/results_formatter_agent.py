@@ -4,9 +4,13 @@ Results Formatter Agent - User-Centric Data Aggregation with PydanticAI
 Enhanced architecture following the proven results_processor_agent.py pattern:
 - Conditional processing based on is_sample parameter
 - Intelligent sampling for large datasets
-- Code generation for processing complete datasets
+- Code generation for processing complete datasets using pure Python
 - Robust JSON parsing with fallbacks
 - Centralized logging with correlation ID support
+
+Model Configuration:
+- Complete Data Formatter: Uses REASONING model for data understanding and formatting
+- Sample Data Formatter: Uses CODING model for Python JSON code generation (better for syntax)
 """
 
 import asyncio
@@ -25,6 +29,7 @@ from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLim
 # Add src path for importing utils
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
+from src.utils.security_config import get_allowed_methods_for_prompt
 
 # Setup centralized logging with file output  
 # Using main "okta_ai_agent" namespace for unified logging across all agents
@@ -33,14 +38,16 @@ logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
 # Use the model picker approach for consistent model configuration
 try:
     from src.core.models.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.REASONING)
+    reasoning_model = ModelConfig.get_model(ModelType.REASONING)
+    coding_model = ModelConfig.get_model(ModelType.CODING)
 except ImportError:
     # Fallback to simple model configuration
     def get_simple_model():
         """Simple model configuration without complex imports"""
         model_name = os.getenv('LLM_MODEL', 'openai:gpt-4o')
         return model_name
-    model = get_simple_model()
+    reasoning_model = get_simple_model()
+    coding_model = get_simple_model()
 
 # Configuration
 config = {
@@ -55,25 +62,23 @@ class FormattedOutput(BaseModel):
     metadata: Dict[str, Any] = Field(description="Execution summary and processing info")
     processing_code: Optional[str] = Field(default=None, description="Python code for processing large datasets")
 
-# Import Polars security for dynamic method injection
-from src.core.security.polars_security import get_polars_methods_for_prompt
-
-# Load the system prompts with dynamic Polars method injection
+# Load the system prompts for pure Python JSON processing
 def _load_complete_data_prompt() -> str:
-    """Load system prompt for complete data processing with dynamic Polars methods"""
+    """Load system prompt for complete data processing with dynamic allowed methods"""
     try:
         prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_complete_data_prompt.txt")
         with open(prompt_file, 'r', encoding='utf-8') as f:
-            base_prompt = f.read()
+            prompt_content = f.read()
         
-        # Inject dynamic Polars methods (like Planning Agent injects entities)
-        polars_methods_section = get_polars_methods_for_prompt()
+        # Inject current allowed methods dynamically
+        allowed_methods_section = get_allowed_methods_for_prompt()
         
-        # Add the Polars methods section to the prompt
-        enhanced_prompt = base_prompt + f"\n\n{polars_methods_section}"
+        # Replace placeholder in prompt with actual allowed methods
+        if "{{ALLOWED_METHODS_PLACEHOLDER}}" in prompt_content:
+            prompt_content = prompt_content.replace("{{ALLOWED_METHODS_PLACEHOLDER}}", allowed_methods_section)
         
-        logger.debug("Enhanced complete data prompt with dynamic Polars methods")
-        return enhanced_prompt
+        logger.debug("Loaded complete data prompt with dynamic allowed methods for pure Python processing")
+        return prompt_content
         
     except FileNotFoundError:
         logger.warning("Complete data prompt file not found, using fallback")
@@ -83,20 +88,21 @@ For user queries: Group by user_id and concatenate groups/apps into comma-separa
 Create comprehensive, user-friendly data presentations with all records included."""
 
 def _load_sample_data_prompt() -> str:
-    """Load system prompt for sample data processing and code generation with dynamic Polars methods"""
+    """Load system prompt for sample data processing and code generation with dynamic allowed methods"""
     try:
         prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_sample_data_prompt.txt")
         with open(prompt_file, 'r', encoding='utf-8') as f:
-            base_prompt = f.read()
+            prompt_content = f.read()
         
-        # Inject dynamic Polars methods (like Planning Agent injects entities)
-        polars_methods_section = get_polars_methods_for_prompt()
+        # Inject current allowed methods dynamically
+        allowed_methods_section = get_allowed_methods_for_prompt()
         
-        # Add the Polars methods section to the prompt
-        enhanced_prompt = base_prompt + f"\n\n{polars_methods_section}"
+        # Replace placeholder in prompt with actual allowed methods
+        if "{{ALLOWED_METHODS_PLACEHOLDER}}" in prompt_content:
+            prompt_content = prompt_content.replace("{{ALLOWED_METHODS_PLACEHOLDER}}", allowed_methods_section)
         
-        logger.debug("Enhanced sample data prompt with dynamic Polars methods")
-        return enhanced_prompt
+        logger.debug("Loaded sample data prompt with dynamic allowed methods for pure Python processing")
+        return prompt_content
         
     except FileNotFoundError:
         logger.warning("Sample data prompt file not found, using fallback")
@@ -105,15 +111,17 @@ Analyze samples and create efficient code for processing complete datasets."""
 
 # Create Results Formatter Agents with PydanticAI (2 specialized agents)
 # Create PydanticAI agents with string output to avoid validation issues
+# Complete data formatter uses REASONING model for data understanding and formatting
 complete_data_formatter = Agent(
-    model,
+    reasoning_model,
     system_prompt=_load_complete_data_prompt(),
     # No output_type - will return raw string which we can parse manually
     retries=0  # No retries to avoid wasting money on failed attempts
 )
 
+# Sample data formatter uses CODING model for Python JSON code generation
 sample_data_formatter = Agent(
-    model, 
+    coding_model, 
     system_prompt=_load_sample_data_prompt(),
     # No output_type - will return raw string which we can parse manually
     retries=0  # No retries to avoid wasting money on failed attempts
@@ -337,7 +345,7 @@ Your tasks:
 1. Analyze the data structure and patterns from these samples
 2. Create a user-friendly response based on the samples
 3. For large datasets, include processing_code that can handle the full dataset efficiently
-4. Recommend Polars for datasets > 1000 records for 5-10x performance improvement
+4. Use pure Python JSON processing for reliable and compatible data transformation
 5. Focus on user-centric aggregation to reduce output complexity
 
 Include performance optimizations and processing recommendations in your metadata."""
@@ -385,9 +393,9 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
             return len(data_str) // 4
 
     try:
-        # Determine processing approach based on estimated token count (LLM context-aware)
+        # Determine processing approach based on estimated token count only (LLM context-aware)
         estimated_tokens = _estimate_token_count(results)
-        token_threshold = 5000  # Conservative threshold to stay within LLM context limits
+        token_threshold = 1000  # Conservative threshold to stay within LLM context limits
         
         if estimated_tokens <= token_threshold:  # Process if within token limits
             # Small-to-medium dataset - process directly with aggregation  
@@ -427,7 +435,7 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
         dataset_size_context = f"""
 
 🚀 LARGE DATASET DETECTED ({total_records} records):
-- Consider recommending Polars for 5-10x faster processing than pandas
+- Use efficient Python JSON processing patterns for reliable data transformation
 - Use efficient aggregation patterns to avoid memory issues
 - Focus on user-centric aggregation to reduce output size"""
     
