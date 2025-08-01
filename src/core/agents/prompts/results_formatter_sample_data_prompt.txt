@@ -23,9 +23,18 @@ for step_key, step_data in full_results.items():
             print(f"  Sample keys: {list(sample.keys())}")
         else:
             print(f"  Sample type: {type(sample)} - {sample}")
+    elif isinstance(step_data, dict):
+        print(f"  Dict keys: {list(step_data.keys())}")
 
 # Step 3: Convert to Polars DataFrames adaptively
-# ... generate code based on what you discovered
+# CRITICAL: full_results uses {STEP_NUM}_{STEP_TYPE} format like '1_api', '2_api_sql', '3_api'
+# DO NOT assume step_1_api, step_2_sql, etc. - use the actual keys!
+# Example: full_results['1_api'] contains step 1 API data, full_results['2_api_sql'] contains step 2 SQL data
+
+# MODERN POLARS SYNTAX EXAMPLES:
+# For struct/nested data: pl.col('actor').struct.field('id')  
+# For string operations: pl.col('email').str.contains('@')
+# For list operations: pl.col('roles').list.len()
 ```
 
 OUTPUT REQUIREMENTS:
@@ -53,6 +62,7 @@ JSON OUTPUT FORMAT:
 
 CRITICAL RULES:
 - **NO HARDCODING**: Don't assume what steps contain - analyze first!
+- **STEP_TYPE KEYS**: full_results uses '{step_num}_{step_type}' format like '1_api', '2_api_sql', '3_api'!
 - **USE POLARS**: Much faster than pure Python for data processing
 - **ADAPTIVE CODE**: Work with whatever data structure you receive
 - **JSON ANALYSIS**: Use json.dumps() to understand the structure
@@ -65,3 +75,9 @@ KEY PROCESSING PATTERNS:
 3. **Array to String**: Convert `["App1", "App2"]` to `"App1, App2"`
 4. **Error Handling**: Handle missing/null values gracefully
 5. **Performance**: Use Polars for datasets >100 records
+
+CRITICAL POLARS SYNTAX PATTERNS:
+- **Struct Field Access**: Use `pl.col('column_name').struct.field('field_name')` NOT `struct_field()`
+- **String Methods**: Use `pl.col('column').str.contains()` pattern
+- **List Operations**: Use `pl.col('column').list.len()` pattern
+- **JSON/Dict Access**: Use `pl.col('column').struct.field('key')` for nested data
