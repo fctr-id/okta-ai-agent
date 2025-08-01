@@ -520,7 +520,7 @@ export function useRealtimeStream() {
     const handleErrorEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            error.value = data.error || "An error occurred during execution";
+            error.value = data.error || data.message || "An error occurred during execution";
             execution.status = "error";
             isProcessing.value = false;
             isStreaming.value = false;

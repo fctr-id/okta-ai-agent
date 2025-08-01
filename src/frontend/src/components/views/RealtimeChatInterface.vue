@@ -471,6 +471,10 @@ const resetInterface = async () => {
   messages.value = [];
   userInput.value = '';
   cleanup();
+  
+  // Clear the error state from previous runs
+  rtError.value = null;
+  
   isCancelling.value = false;
   autoScroll.value = true;
   // Don't clear history when resetting interface
