@@ -36,13 +36,18 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
     - **All Status Requests:** If the user asks for "all users", "users of all statuses", "including inactive/suspended users", or similar phrasing, do NOT apply any status filter.
     - **Specific Status Requests:** If the user asks for specific statuses (e.g., "only inactive users"), filter for those specific statuses only.
 4.  **CRITICAL - ALWAYS Include Unique OKTA IDs:** For ANY entity type, you MUST ALWAYS include the unique id column for future API operations:
-    *   **Users:** ALWAYS include `okta_id`, `email`, `login`, `first_name`, `last_name`, `status`. Sort by `last_name`, `first_name`.
-    *   **Groups:** ALWAYS include `okta_id`, `name`, `description`. Sort by `name`.
-    *   **Applications:** ALWAYS include `okta_id`, `label`, `name`, `status`. Sort by `label`.
+    *   **Users:** ALWAYS include `okta_id`, `email`, `login`, `first_name`, `last_name`, `status`. 
+    *   **Groups:** ALWAYS include `okta_id`, `name`, `description`.
+    *   **Applications:** ALWAYS include `okta_id`, `label`, `name`, `status`.
     *   **ANY Other Entity:** ALWAYS include its unique `okta_id` or primary key identifier.
-5.  **Operator Choice:** Use `LIKE '%value%'` for free-text searches (names, labels), `IN ('val1', 'val2')` for lists, and `=` for exact matches (IDs, emails, status).
-6.  **Custom Attributes:** For fields not in the standard schema, use `JSON_EXTRACT(custom_attributes, '$.fieldName')`.
-7.  **JOINs:** Join tables ONLY on their `okta_id` relationships (e.g., `ON u.okta_id = ugm.user_okta_id`).
+5.  **Default Sorting Rules:** 
+    *   **Users (default):** `ORDER BY last_name, first_name`
+    *   **Groups (default):** `ORDER BY name`  
+    *   **Applications (default):** `ORDER BY label`
+    *   **Complex queries:** Use context-appropriate sorting (e.g., for user+group+app queries: `ORDER BY last_name, first_name, group_name, application_label`)
+6.  **Operator Choice:** Use `LIKE '%value%'` for free-text searches (names, labels), `IN ('val1', 'val2')` for lists, and `=` for exact matches (IDs, emails, status).
+7.  **Custom Attributes:** For fields not in the standard schema, use `JSON_EXTRACT(custom_attributes, '$.fieldName')`.
+8.  **JOINs:** Join tables ONLY on their `okta_id` relationships (e.g., `ON u.okta_id = ugm.user_okta_id`).
 
 ### 2.5. SQLITE SYNTAX RULES (CRITICAL)
 1.  **GROUP_CONCAT Syntax:** 
@@ -56,9 +61,12 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
 ### 3. QUERY PATTERNS
 
 **Pattern 1: User Groups & Applications (Most Important)**
-*   To get a complete view of a user's groups and all applications (both direct and group-based), you MUST use the following `UNION` pattern. This ensures all groups are listed, even if they have no associated apps.
+*   ⚠️ **CRITICAL UNION RULE**: NEVER wrap UNION queries in outer SELECT statements. This creates alias scope errors.
+*   ✅ **CORRECT**: Direct UNION with ORDER BY at the end
+*   ❌ **WRONG**: `SELECT u.okta_id FROM (SELECT ... UNION SELECT ...) ORDER BY ...`
 
     ```sql
+    -- ✅ CORRECT PATTERN: Direct UNION structure
     -- Get all groups and any group-based apps
     SELECT u.okta_id, u.email, u.first_name, u.last_name, g.okta_id as group_okta_id, g.name as group_name, a.okta_id as app_okta_id, a.label as application_label, 'Group' as assignment_type, g.name as assignment_source
     FROM users u
@@ -74,7 +82,7 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
     JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id
     JOIN applications a ON uaa.application_okta_id = a.okta_id
     WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE' AND a.status = 'ACTIVE'
-    ORDER BY email, group_name, application_label
+    ORDER BY last_name, first_name, group_name, application_label
     ```
 
 **Pattern 2: API Context Integration**
@@ -87,10 +95,17 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
 **Pattern 4: Timestamp Handling**
 *   If a user asks for a timestamp, format it for local time: `strftime('%Y-%m-%d %H:%M:%S', datetime(column_name, 'localtime')) AS column_name`.
 
-**Pattern 5: Simple Entity Queries**
-*   **Users in Group:** `SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status FROM users u JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id JOIN groups g ON ugm.group_okta_id = g.okta_id WHERE g.name = 'group_name' AND u.status = 'ACTIVE'`
-*   **Group Members:** `SELECT g.okta_id, g.name, g.description FROM groups g WHERE g.name LIKE '%search_term%'`
-*   **Applications:** `SELECT a.okta_id, a.label, a.name, a.status FROM applications a WHERE a.status = 'ACTIVE'`
+**Pattern 5: Simple Entity Queries (Quick Reference)**
+*   **Users in Group:** `SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status FROM users u JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id JOIN groups g ON ugm.group_okta_id = g.okta_id WHERE g.name = 'group_name' AND u.status = 'ACTIVE' ORDER BY last_name, first_name`
+*   **Find Groups:** `SELECT g.okta_id, g.name, g.description FROM groups g WHERE g.name LIKE '%search_term%' ORDER BY name`
+*   **Find Applications:** `SELECT a.okta_id, a.label, a.name, a.status FROM applications a WHERE a.status = 'ACTIVE' ORDER BY label`
+
+### 4. CRITICAL UNION GUIDELINES
+1. **NEVER wrap UNION queries** in outer SELECT statements - this breaks alias scoping
+2. **Column names must match exactly** in both parts of the UNION
+3. **Use consistent column aliases** (e.g., `group_okta_id`, `app_okta_id`) 
+4. **ORDER BY goes at the very end** of the complete UNION statement
+5. **Each UNION part must be complete** - don't rely on outer queries to add columns
 
 ##### DATABASE SCHEMA (Source of Truth) #####
 # CRITICAL: Always reference this schema to determine if a field is a standard column or a custom attribute.
