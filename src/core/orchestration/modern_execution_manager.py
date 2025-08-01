@@ -275,6 +275,71 @@ class ModernExecutionManager:
             logger.warning(f"Database health check failed: {e}")
             return False
     
+    def _sanitize_planning_error(self, error_msg: str) -> str:
+        """
+        Sanitize planning error messages to prevent sensitive information exposure.
+        
+        Args:
+            error_msg: Raw error message from planning agent
+            
+        Returns:
+            str: User-friendly error message without sensitive details
+        """
+        # Convert to lowercase for pattern matching
+        error_lower = error_msg.lower()
+        
+        # Handle AI provider/model specific errors
+        if "status_code: 404" in error_msg and "model" in error_lower:
+            return "AI model configuration error. Please contact your administrator to verify the AI model settings."
+        
+        if "status_code: 401" in error_msg or "unauthorized" in error_lower:
+            return "AI service authentication failed. Please check your API credentials."
+        
+        if "status_code: 403" in error_msg or "forbidden" in error_lower:
+            return "AI service access denied. Please verify your API permissions."
+        
+        if "status_code: 429" in error_msg or "rate limit" in error_lower:
+            return "AI service rate limit exceeded. Please try again in a few moments."
+        
+        if "vertex" in error_lower and "not found" in error_lower:
+            return "Vertex AI model not found or access denied. Please verify your model configuration."
+        
+        if "openai" in error_lower and ("api" in error_lower or "key" in error_lower):
+            return "OpenAI API configuration error. Please check your API key and settings."
+        
+        if "anthropic" in error_lower and ("api" in error_lower or "key" in error_lower):
+            return "Anthropic API configuration error. Please check your API key and settings."
+        
+        # Handle PydanticAI specific errors
+        if "exceeded maximum retries" in error_lower and "output validation" in error_lower:
+            return "Planning agent failed to generate a valid execution plan. The AI model may be having difficulty understanding the query structure. Please try rephrasing your request or try again later."
+        
+        if "validation" in error_lower and "pydantic" in error_lower:
+            return "Planning agent encountered a validation error while generating the execution plan. Please try rephrasing your query."
+        
+        # Handle timeout errors
+        if "timeout" in error_lower or "timed out" in error_lower:
+            return "Planning request timed out. The AI service may be experiencing high load. Please try again."
+        
+        # Handle connection errors
+        if "connection" in error_lower and ("refused" in error_lower or "failed" in error_lower):
+            return "Unable to connect to AI service. Please check your network connection and try again."
+        
+        # Handle generic HTTP errors
+        if "status_code:" in error_msg:
+            return "AI service error occurred. Please try again or contact your administrator if the issue persists."
+        
+        # Handle JSON/parsing errors
+        if "json" in error_lower and ("decode" in error_lower or "parse" in error_lower):
+            return "AI service returned an invalid response. Please try again."
+        
+        # Generic fallback for any unmatched errors
+        if len(error_msg) > 200:  # Long error messages likely contain sensitive details
+            return "Planning agent encountered an unexpected error. Please try rephrasing your query or contact your administrator."
+        
+        # For short, generic errors, provide a safe version
+        return "Planning agent failed to process your request. Please try rephrasing your query or try again later."
+    
     def _should_force_api_only_mode(self, query: str, force_api_only: bool = False) -> tuple[bool, str]:
         """
         Determine if query should use API-only mode and modify query if needed.
@@ -898,10 +963,32 @@ class ModernExecutionManager:
             )
             
             # Execute Planning Agent with dependencies - use modified query if needed
-            planning_result = await planning_agent.run(modified_query, deps=planning_deps)
-            
-            # Trust the agent - just extract the plan
-            execution_plan = planning_result.output.plan
+            try:
+                logger.info(f"[{correlation_id}] Calling planning agent with query: {modified_query}")
+                planning_result = await planning_agent.run(modified_query, deps=planning_deps)
+                
+                # Trust the agent - just extract the plan
+                execution_plan = planning_result.output.plan
+                
+                logger.info(f"[{correlation_id}] Planning agent completed successfully")
+                
+            except Exception as planning_error:
+                # Specific error handling for planning agent failures with enhanced sanitization
+                error_msg = str(planning_error)
+                logger.error(f"[{correlation_id}] Planning Agent failed: {error_msg}")
+                
+                # Sanitize error messages to prevent sensitive information exposure
+                user_friendly_error = self._sanitize_planning_error(error_msg)
+                
+                # Return a structured error response that matches the expected format
+                return {
+                    'success': False,
+                    'error': user_friendly_error,
+                    'correlation_id': correlation_id,
+                    'query': query,
+                    'phase': 'planning_error',
+                    'planning_error': True  # Flag to indicate this is a planning-specific error
+                }
             
             # Store current execution plan for external access (minimal addition for realtime interface)
             self.current_execution_plan = execution_plan
