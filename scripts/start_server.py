@@ -11,10 +11,12 @@ os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def stream_output(stream, prefix):
     """Stream output from a pipe to stdout"""
-    for line in iter(stream.readline, ""):
-        if line:
-            print(f"{prefix}: {line.strip()}")
-    stream.close()
+    try:
+        for line in iter(stream.readline, ""):
+            if line:
+                print(f"{prefix}: {line.strip()}")
+    finally:
+        stream.close()
 
 def run_command(command):
     """Run a shell command and print output from both stdout and stderr"""
@@ -144,18 +146,6 @@ def ensure_certificates():
         print("Using existing SSL certificates")
     
     return str(key_path), str(cert_path)
-
-def stream_output(stream, prefix):
-    """Stream output from a pipe to stdout with minimal modification"""
-    for line in iter(stream.readline, ""):
-        if line:
-            # Pass through log lines as-is, tag other output
-            line = line.strip()
-            if any(log_level in line for log_level in ["INFO:", "WARNING:", "ERROR:", "DEBUG:"]):
-                print(line)
-            else:
-                print(f"{prefix}: {line}")
-    stream.close()
 
 if __name__ == "__main__":
     # Parse command-line arguments
