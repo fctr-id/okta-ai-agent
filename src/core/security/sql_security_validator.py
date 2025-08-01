@@ -143,12 +143,14 @@ class SQLSecurityValidator:
 
     def _clean_sql(self, sql_query: str) -> str:
         """Clean and normalize SQL query"""
-        # Remove extra whitespace
-        cleaned = re.sub(r'\s+', ' ', sql_query.strip())
-        
-        # Remove comments (but preserve the query structure)
-        cleaned = re.sub(r'--.*$', '', cleaned, flags=re.MULTILINE)
+        # Remove comments BEFORE whitespace normalization to avoid regex issues
+        # Remove single-line comments (-- to end of line)
+        cleaned = re.sub(r'--.*(?=\n|$)', '', sql_query, flags=re.MULTILINE)
+        # Remove block comments
         cleaned = re.sub(r'/\*.*?\*/', '', cleaned, flags=re.DOTALL)
+        
+        # Remove extra whitespace AFTER comment removal
+        cleaned = re.sub(r'\s+', ' ', cleaned.strip())
         
         # Normalize to lowercase for pattern matching
         return cleaned.lower()
