@@ -502,6 +502,9 @@ class ModernExecutionManager:
         Generate Python code that injects previous step data as variables.
         This creates the missing link between enhanced context and execution environment.
         
+        CRITICAL: Creates both step_N_sample variables AND full_results dict structure
+        for Results Formatter Agent compatibility.
+        
         Args:
             current_step_number: Current step number
             correlation_id: Correlation ID for logging
@@ -516,6 +519,11 @@ class ModernExecutionManager:
         
         injection_lines = ["# === DATA INJECTION: Previous Step Data ==="]
         
+        # Initialize full_results dict for Results Formatter Agent compatibility
+        injection_lines.append("# Create full_results structure for Results Formatter Agent")
+        injection_lines.append("full_results = {}")
+        injection_lines.append("")
+        
         # Inject data from all previous steps
         for step_num in range(1, current_step_number):
             step_key = f"step_{step_num}"
@@ -523,6 +531,10 @@ class ModernExecutionManager:
             if step_key in self.step_metadata:
                 variable_name = self.step_metadata[step_key]["variable_name"]
                 step_data = self.data_variables.get(variable_name, [])
+                step_type = self.step_metadata[step_key].get("type", "unknown").lower()
+                
+                # Create consistent key format: {step_num}_{step_type}
+                full_results_key = f"{step_num}_{step_type}"
                 
                 # Create both the enhanced context variable name AND a simplified version
                 step_sample_var = f"step_{step_num}_sample"
@@ -538,15 +550,29 @@ class ModernExecutionManager:
                 step_context = self.step_metadata[step_key].get("step_context", f"Step {step_num} context")
                 
                 # Generate the injection code with Python-compatible serialization
-                injection_lines.append(f"# Step {step_num} data injection")
+                injection_lines.append(f"# Step {step_num} ({step_type}) data injection")
                 injection_lines.append(f"{step_sample_var} = {repr(sample_data)}")
                 injection_lines.append(f"{step_context_var} = {repr(step_context)}")
                 injection_lines.append(f"# Full data available as: {variable_name} = {repr(step_data)}")
+                
+                # CRITICAL: Add to full_results dict with consistent step_type key for Results Formatter Agent
+                injection_lines.append(f"full_results['{full_results_key}'] = {repr(step_data)}")
                 injection_lines.append("")
+        
+        # Add debug information for full_results structure (to stderr, not stdout)
+        injection_lines.append("# Debug full_results structure for Results Formatter Agent")
+        injection_lines.append("import sys")
+        injection_lines.append("print(f'DEBUG: full_results keys: {list(full_results.keys())}', file=sys.stderr)")
+        injection_lines.append("for key in full_results:")
+        injection_lines.append("    if isinstance(full_results[key], list):")
+        injection_lines.append("        print(f'DEBUG: full_results[{key}] is a list with {len(full_results[key])} items', file=sys.stderr)")
+        injection_lines.append("    else:")
+        injection_lines.append("        print(f'DEBUG: full_results[{key}] type: {type(full_results[key]).__name__}', file=sys.stderr)")
+        injection_lines.append("")
         
         injection_lines.append("# === END DATA INJECTION ===")
         
-        logger.debug(f"[{correlation_id}] Generated data injection code for {current_step_number-1} previous steps")
+        logger.debug(f"[{correlation_id}] Generated data injection code for {current_step_number-1} previous steps with full_results compatibility")
         return "\n".join(injection_lines)
     
     def _clear_execution_data(self):
@@ -921,7 +947,7 @@ class ModernExecutionManager:
             
             # Build step results for processing with ACTUAL DATA (Generic for all step types)
             for i, step_result in enumerate(execution_results.steps, 1):
-                step_name = f"step_{i}_{step_result.step_type.lower()}"
+                step_name = f"{i}_{step_result.step_type.lower()}"
                 
                 if step_result.success and step_result.result:
                     # Generic approach: Try multiple variable name patterns for any step type
