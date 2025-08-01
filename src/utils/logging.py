@@ -109,9 +109,15 @@ def get_logger(name: str, log_dir: Optional[Path] = None) -> logging.Logger:
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
-    # Add console handler
+    # Add console handler with UTF-8 encoding support for Windows
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(DEFAULT_CONSOLE_LEVEL)
+    # Set encoding to UTF-8 to handle emojis and Unicode characters on Windows
+    if hasattr(console_handler.stream, 'reconfigure'):
+        try:
+            console_handler.stream.reconfigure(encoding='utf-8', errors='replace')
+        except:
+            pass  # Fallback if reconfigure fails
     console_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         '%Y-%m-%d %H:%M:%S'
