@@ -45,11 +45,12 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
 7.  **JOINs:** Join tables ONLY on their `okta_id` relationships (e.g., `ON u.okta_id = ugm.user_okta_id`).
 
 ### 2.5. SQLITE SYNTAX RULES (CRITICAL)
-1.  **GROUP_CONCAT Syntax:** SQLite GROUP_CONCAT does NOT support multiple arguments. Use `GROUP_CONCAT(column)` NOT `GROUP_CONCAT(column, ', ')`.
-    - ✅ CORRECT: `GROUP_CONCAT(DISTINCT g.name)` 
-    - ❌ WRONG: `GROUP_CONCAT(DISTINCT g.name, ', ')`
-    - To use custom separators, use: `GROUP_CONCAT(DISTINCT g.name, '; ')` (separator as second argument only)
-2.  **DISTINCT in Aggregates:** Use `GROUP_CONCAT(DISTINCT column)` to avoid duplicates.
+1.  **GROUP_CONCAT Syntax:** 
+    - ✅ CORRECT: `GROUP_CONCAT(DISTINCT g.name)` - uses default comma separator
+    - ✅ CORRECT: `GROUP_CONCAT(g.name, '; ')` - uses custom separator WITHOUT DISTINCT
+    - ❌ WRONG: `GROUP_CONCAT(DISTINCT g.name, '; ')` - DISTINCT and custom separator cannot be used together
+    - **RULE**: You cannot use DISTINCT and a custom separator together in SQLite GROUP_CONCAT
+2.  **DISTINCT in Aggregates:** Use `GROUP_CONCAT(DISTINCT column)` to avoid duplicates with default comma separator.
 3.  **String Concatenation:** Use `||` operator for string concatenation, not `+`.
 
 ### 3. QUERY PATTERNS

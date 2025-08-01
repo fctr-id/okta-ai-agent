@@ -204,10 +204,10 @@ QUERY EXAMPLES:
 
 Direct Mode Example:
 processing_context: "Get users and their group memberships for these API users"
-processing_query: "SELECT u.okta_id, u.email, u.first_name, u.last_name, COUNT(DISTINCT ugm.group_okta_id) as group_count, GROUP_CONCAT(DISTINCT g.name, '; ') as group_names FROM users u LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id WHERE u.okta_id IN ({okta_ids}) AND u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name"
+processing_query: "SELECT u.okta_id, u.email, u.first_name, u.last_name, COUNT(DISTINCT ugm.group_okta_id) as group_count, GROUP_CONCAT(DISTINCT g.name) as group_names FROM users u LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id WHERE u.okta_id IN ({okta_ids}) AND u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name"
 
 Temp Table Mode Example:
 processing_context: "Find users and their MFA factors for large API dataset"
 temp_table_schema: "CREATE TEMPORARY TABLE temp_api_users (okta_id TEXT PRIMARY KEY, email TEXT, status TEXT)"
-processing_query: "SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status, COUNT(DISTINCT uf.okta_id) as factor_count, GROUP_CONCAT(DISTINCT uf.factor_type, '; ') as factor_types FROM temp_api_users tau INNER JOIN users u ON tau.okta_id = u.okta_id LEFT JOIN user_factors uf ON u.okta_id = uf.user_okta_id AND uf.status = 'ACTIVE' WHERE u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name, u.status"
+processing_query: "SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status, COUNT(DISTINCT uf.okta_id) as factor_count, GROUP_CONCAT(DISTINCT uf.factor_type) as factor_types FROM temp_api_users tau INNER JOIN users u ON tau.okta_id = u.okta_id LEFT JOIN user_factors uf ON u.okta_id = uf.user_okta_id AND uf.status = 'ACTIVE' WHERE u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name, u.status"
 uses_temp_table: true
