@@ -49,16 +49,19 @@ class PolarsSecurityValidator:
         'is_in', 'is_not_null', 'is_null', 'apply', 'map_elements',
         
         # Advanced data operations (JSON/struct processing)
-        'over', 'implode', 'explode', 'struct_field', 'struct_fields', 
+        'over', 'implode', 'explode', 'struct.field', 'struct.fields', 
         'flatten', 'unnest', 'map_dict', 'map_batches',
-        
-        # List/array operations
-        'list_eval', 'list_len', 'list_get', 'list_first', 'list_last',
-        'list_slice', 'list_sum', 'list_max', 'list_min', 'list_unique',
         
         # String operations (safe)
         'str.len', 'str.contains', 'str.starts_with', 'str.ends_with',
         'str.to_lowercase', 'str.to_uppercase', 'str.strip',
+        
+        # List/Array operations (modern syntax)
+        'list.len', 'list.get', 'list.first', 'list.last',
+        'list.slice', 'list.sum', 'list.max', 'list.min', 'list.unique',
+        
+        # Struct operations (modern syntax)  
+        'struct.field', 'struct.fields', 'struct.rename_fields',
         
         # Date/time operations (safe)
         'dt.year', 'dt.month', 'dt.day', 'dt.hour', 'dt.minute', 'dt.second',
@@ -239,12 +242,12 @@ class PolarsSecurityValidator:
                 'with_columns', 'rename', 'cast', 'apply', 'map_elements'
             ],
             'json_struct_processing': [
-                'explode', 'implode', 'struct_field', 'struct_fields', 
+                'explode', 'implode', 'struct.field', 'struct.fields', 
                 'flatten', 'unnest', 'map_dict', 'map_batches'
             ],
             'list_array_operations': [
-                'list_eval', 'list_len', 'list_get', 'list_first', 'list_last',
-                'list_slice', 'list_sum', 'list_max', 'list_min', 'list_unique'
+                'list.len', 'list.get', 'list.first', 'list.last',
+                'list.slice', 'list.sum', 'list.max', 'list.min', 'list.unique'
             ],
             'window_operations': [
                 'over', 'rolling', 'expanding'
@@ -290,7 +293,7 @@ class PolarsSecurityValidator:
         prompt_text += "- Combine methods with standard Polars chaining syntax\n"
         prompt_text += "- Use .apply() for custom transformations\n"
         prompt_text += "- Use .explode() and .implode() for list/struct processing\n"
-        prompt_text += "- Use .struct_field() to extract fields from struct columns\n"
+        prompt_text += "- Use .struct.field() to extract fields from struct columns (NOT .struct_field())\n"
         prompt_text += "- Use .over() for window operations\n"
         
         return prompt_text
