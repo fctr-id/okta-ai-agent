@@ -323,42 +323,16 @@ async def execute_plan_and_stream(
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
         logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
         
-        # Start execution in background task to get plan info early
-        execution_task = asyncio.create_task(modern_executor.execute_query(query))
+        # Start execution - if planning fails, it will be caught by the outer try/catch
+        result = await modern_executor.execute_query(query)
         
-        # Wait for plan to be ready and send step info
-        await step_info_ready.wait()
-        if step_info_data:
+        # Wait for plan to be ready and send step info (if planning succeeded)
+        if step_info_ready.is_set() and step_info_data:
             yield {
                 "event": "step_plan_info",
                 "data": json.dumps({'process_id': process_id, 'steps': step_info_data})
             }
             await asyncio.sleep(0.01)
-        
-        # Process step status updates while execution is running
-        execution_complete = False
-        result = None
-        
-        while not execution_complete:
-            try:
-                # Check if execution is complete
-                if execution_task.done():
-                    result = await execution_task
-                    execution_complete = True
-                    break
-                
-                # Try to get step status update with short timeout
-                try:
-                    step_event = await asyncio.wait_for(step_status_queue.get(), timeout=0.1)
-                    yield step_event
-                    await asyncio.sleep(0.01)
-                except asyncio.TimeoutError:
-                    # No step status update, continue checking execution
-                    await asyncio.sleep(0.05)
-                    
-            except Exception as e:
-                logger.error(f"[{process_id}] Error processing step status updates: {e}")
-                break
         
         # Process any remaining step status events after execution completes
         while not step_status_queue.empty():
@@ -404,37 +378,95 @@ async def execute_plan_and_stream(
         failed_steps = result.get('failed_steps', 0)
         successful_steps = result.get('successful_steps', 0)
         total_steps = result.get('total_steps', 0)
+        overall_success = result.get('success', False)
         
         # Process execution results and send appropriate SSE events
         logger.info(f"[{process_id}] Modern Execution Manager completed - processing results for streaming")
         
-        if failed_steps > 0:
-            # Some steps failed
+        # Check for planning failures or execution failures
+        if not overall_success or failed_steps > 0:
+            # Planning failed or some steps failed
             active_processes[process_id]["status"] = ProcessStatus.COMPLETED_WITH_ERRORS
             
-            # Send step status updates for failed steps
+            # Determine appropriate error message and type
+            error_type = "execution_error"  # Default type
+            if total_steps == 0 and not overall_success:
+                # Planning failure - no steps were generated
+                error_message = "Planning failed: Unable to generate execution plan"
+                error_type = "planning_error"
+                logger.error(f"[{process_id}] Planning failure detected - no steps generated")
+            else:
+                # Step execution failures - be more specific about what failed
+                failed_step_types = []
+                results_formatter_failed = False
+                
+                for step_result in step_results:
+                    if not step_result.get('success', True):
+                        step_type = step_result.get('step_type', 'unknown')
+                        if step_type == 'results_formatter':
+                            results_formatter_failed = True
+                        else:
+                            failed_step_types.append(step_type)
+                
+                # Create specific error message based on failure types
+                if results_formatter_failed:
+                    error_message = "Results processing failed: Unable to format query results"
+                    error_type = "results_formatter_error"
+                elif failed_step_types:
+                    unique_types = list(set(failed_step_types))
+                    if len(unique_types) == 1:
+                        step_type = unique_types[0].upper()
+                        error_message = f"{step_type} execution failed: Unable to complete {step_type.lower()} operations"
+                        error_type = f"{step_type.lower()}_error"
+                    else:
+                        error_message = f"Multiple step failures: {', '.join(unique_types)} operations failed"
+                        error_type = "multiple_step_errors"
+                else:
+                    error_message = f"Execution completed with {failed_steps} failed steps"
+                    error_type = "execution_error"
+                
+                logger.error(f"[{process_id}] Step execution failures detected - {error_type}: {error_message}")
+            
+            # Send step status updates for failed steps (if any steps existed)
             for i, step_result in enumerate(step_results):
                 if not step_result.get('success', True):
+                    step_error = step_result.get('error', 'Step execution failed')
+                    step_type = step_result.get('step_type', 'unknown')
+                    
                     yield {
                         "event": "step_status_update",
                         "data": json.dumps({
                             'process_id': process_id,
                             'step_index': i,  # 0-based index
+                            'step_type': step_type,  # Include step type for frontend
                             'status': 'error',
                             'operation_status': 'error',
-                            'error_message': step_result.get('error', 'Step execution failed')
+                            'error_message': step_error,
+                            'error_type': error_type  # Add error type classification
                         })
                     }
                     await asyncio.sleep(0.01)
             
-            # Send error event
-            error_message = f"Execution completed with {failed_steps} failed steps"
+            # Send error event with enhanced error information
             yield {
                 "event": "plan_error",
                 "data": json.dumps({
                     'process_id': process_id,
                     'status': ProcessStatus.COMPLETED_WITH_ERRORS.value,
-                    'message': error_message
+                    'message': error_message,
+                    'error_type': error_type,  # Add specific error type for frontend
+                    'failed_steps': failed_steps,
+                    'total_steps': total_steps,
+                    'error_details': {
+                        'planning_failed': total_steps == 0 and not overall_success,
+                        'step_failures': [
+                            {
+                                'step_type': step_result.get('step_type', 'unknown'),
+                                'error': step_result.get('error', 'Unknown error')
+                            }
+                            for step_result in step_results if not step_result.get('success', True)
+                        ]
+                    }
                 })
             }
             await asyncio.sleep(0.01)
@@ -556,17 +588,52 @@ async def execute_plan_and_stream(
     except Exception as e:
         logger.error(f"[{process_id}] Error during Modern Execution Manager execution: {e}", exc_info=True)
         
+        # Determine error type based on exception details
+        error_str = str(e).lower()
+        error_type = "execution_error"  # Default
+        user_message = "An unexpected error occurred during execution."
+        
+        # Classify error types for better frontend handling
+        if "planning" in error_str or "plan" in error_str:
+            error_type = "planning_error"
+            user_message = "Planning failed: Unable to generate execution plan."
+        elif "sql" in error_str and ("database" in error_str or "query" in error_str):
+            error_type = "sql_error"
+            user_message = "Database query failed: Unable to execute SQL operations."
+        elif "api" in error_str and ("request" in error_str or "endpoint" in error_str):
+            error_type = "api_error" 
+            user_message = "API request failed: Unable to complete API operations."
+        elif "format" in error_str or "results" in error_str:
+            error_type = "results_formatter_error"
+            user_message = "Results processing failed: Unable to format query results."
+        elif "timeout" in error_str or "cancelled" in error_str:
+            error_type = "timeout_error"
+            user_message = "Query execution timed out or was cancelled."
+        elif isinstance(e, BaseError):
+            error_type = "application_error"
+            user_message = format_error_for_user(e)
+        
         if process_id in active_processes:
             active_processes[process_id]["status"] = ProcessStatus.ERROR
-            error_detail = format_error_for_user(e) if isinstance(e, BaseError) else "An unexpected error occurred during execution."
-            active_processes[process_id]["error_message"] = error_detail
+            active_processes[process_id]["error_message"] = user_message
+            active_processes[process_id]["error_type"] = error_type
         else:
-            error_detail = "Critical error: Process context lost during exception."
+            user_message = "Critical error: Process context lost during exception."
+            error_type = "critical_error"
         
         try:
             yield {
                 "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': ProcessStatus.ERROR.value, 'message': error_detail})
+                "data": json.dumps({
+                    'process_id': process_id, 
+                    'status': ProcessStatus.ERROR.value, 
+                    'message': user_message,
+                    'error_type': error_type,
+                    'error_details': {
+                        'exception_type': type(e).__name__,
+                        'critical_error': process_id not in active_processes
+                    }
+                })
             }
             await asyncio.sleep(0.01)
         except Exception as send_err:
@@ -668,13 +735,34 @@ async def stream_realtime_updates_endpoint(
 
             if current_process_status == ProcessStatus.ERROR:
                 event_name = "plan_error"
+                error_message = process_info.get("error_message", "Process previously ended in error.")
+                error_type = process_info.get("error_type", "unknown_error")
                 event_to_send.update({
                     'status': 'error',
-                    'message': process_info.get("error_message", "Process previously ended in error.")
+                    'message': error_message,
+                    'error_type': error_type,
+                    'error_details': {
+                        'terminal_state': True,
+                        'previous_execution': True
+                    }
                 })
             elif current_process_status == ProcessStatus.CANCELLED:
                 event_name = "plan_cancelled"
                 event_to_send['message'] = 'Process was previously cancelled.'
+            elif current_process_status == ProcessStatus.COMPLETED_WITH_ERRORS:
+                event_name = "plan_error"
+                error_message = process_info.get("error_message", "Process previously completed with errors.")
+                error_type = process_info.get("error_type", "execution_error")
+                event_to_send.update({
+                    'status': 'completed_with_errors',
+                    'message': error_message,
+                    'error_type': error_type,
+                    'error_details': {
+                        'terminal_state': True,
+                        'previous_execution': True,
+                        'partial_success': True
+                    }
+                })
             else:
                 event_name = "final_result"
                 final_data = process_info.get("final_result_data", {})
