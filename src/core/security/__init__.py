@@ -6,10 +6,9 @@ Implements simple but effective security controls:
 
 1. Method Whitelisting - Validates Python code and operations
 2. Network Security - Restricts HTTP traffic to authorized domains
-3. Polars Security - Controls data processing operations
 
 Usage:
-    from src.core.security import validate_generated_code, validate_url, validate_polars_operation
+    from src.core.security import validate_generated_code, validate_url
     
     # Validate generated code
     result = validate_generated_code(python_code)
@@ -20,11 +19,6 @@ Usage:
     result = validate_url(request_url)
     if not result.is_allowed:
         logger.error(f"Network blocked: {result.blocked_reason}")
-    
-    # Validate Polars operation
-    result = validate_polars_operation("head")
-    if not result.is_allowed:
-        logger.error(f"Polars operation blocked: {result.violations}")
 """
 
 # Import main validation functions from consolidated security_config
@@ -44,14 +38,6 @@ from .network_security import (
     NetworkSecurityResult
 )
 
-from .polars_security import (
-    validate_polars_operation,
-    validate_polars_chain,
-    get_safe_polars_operations,
-    PolarsSecurityValidator,
-    PolarsSecurityResult
-)
-
 __all__ = [
     # Method whitelisting (consolidated into security_config)
     'validate_generated_code',
@@ -66,13 +52,6 @@ __all__ = [
     'get_security_headers',
     'NetworkSecurityValidator',
     'NetworkSecurityResult',
-    
-    # Polars security
-    'validate_polars_operation',
-    'validate_polars_chain',
-    'get_safe_polars_operations',
-    'PolarsSecurityValidator',
-    'PolarsSecurityResult',
 ]
 
 # Version info

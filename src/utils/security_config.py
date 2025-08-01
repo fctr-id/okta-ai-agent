@@ -90,6 +90,9 @@ COMPREHENSIVE_ALLOWED_BUILTINS = {
     'abs', 'round', 'isinstance', 'issubclass', 'type', 'id', 'hash',
     'repr', 'format', 'print',  # Allow print for debugging
     'any', 'all',  # Boolean aggregation functions
+    'iter', 'next', 'map', 'filter',  # Iterator functions commonly used in data processing
+    'getattr', 'hasattr',  # Attribute access functions (safe when used properly)
+    'slice',  # For list slicing operations
     
     # Essential function calls that should be allowed
     'OktaAPIClient',  # Our API client class
@@ -112,6 +115,7 @@ ALLOWED_USER_FUNCTION_PATTERNS = {
     # Helper functions
     'handle_*', 'create_*', 'build_*', 'setup_*', 'init_*',
     'calculate_*', 'validate_*', 'check_*', 'verify_*',
+    'safe_*',  # Safe helper functions like safe_join, safe_get, etc.
     
     # Main execution functions
     'main', 'run_*', 'execute_*', 'start_*'
@@ -124,20 +128,30 @@ COMPREHENSIVE_ALLOWED_PYTHON_METHODS = {
     'headers', 'params', 'timeout', 'raise_for_status',
     
     # JSON methods
-    'loads', 'dumps', 'load', 'dump',
+    'loads', 'dumps', 'load', 'dump',              # Core JSON serialization/deserialization
+    'JSONDecodeError', 'JSONEncoder', 'JSONDecoder', # JSON error handling and custom processing
     
     # Dictionary/list operations
     'to_dict', 'as_dict', 'dict', 'items', 'keys', 'values', 'get',
     'append', 'extend', 'insert', 'add', 'remove', 'pop', 'clear',
     'index', 'count', 'sort', 'reverse', 'update',  # Added 'update' for set.update()
+    'fromkeys', 'setdefault', 'popitem',            # Additional dict methods
+    'copy', 'deepcopy',                             # Safe copying methods
+    
+    # Set operations commonly used in data processing
+    'difference', 'intersection', 'union', 'symmetric_difference',
+    'discard', 'isdisjoint', 'issubset', 'issuperset',
     
     # String methods
     'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
     'capitalize', 'title', 'startswith', 'endswith', 'replace', 'format',
+    'encode', 'decode', 'find', 'rfind', 'count',   # Additional string methods for JSON processing
     
     # Data processing
     'filter', 'map', 'any', 'all', 'flatten_dict', 'combine_results',
     'sorted', 'sum', 'min', 'max', 'len', 'round', 'enumerate', 'zip',
+    'iter', 'next', 'range',                        # Iterator and range operations
+    'safe_join', 'safe_get', 'safe_split',          # Safe helper functions for data processing
     
     # Pagination helpers (from original security_config.py)
     'paginate_results', 'handle_single_entity_request',
@@ -225,6 +239,7 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
     # String methods
     'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
     'capitalize', 'title', 'startswith', 'endswith', 'replace', 'format',
+    'encode', 'decode', 'find', 'rfind', 'count',   # Additional string methods for JSON processing
     
     # Pagination methods
     'next', 'has_next', 'has_prev', 'prev_page', 'next_page', 'total_pages', 'paginate_results', 'handle_single_entity_request'
@@ -233,10 +248,24 @@ ALLOWED_UTILITY_METHODS: Set[str] = {
     'get', 'is_okta_url_allowed',
     
     'items', 'keys', 'values', 'enumerate', 'zip',  # Dictionary/list operations
-    'format', 'replace', 'startswith', 'endswith',  # String processing
+    'fromkeys', 'setdefault', 'popitem',            # dict.fromkeys() for deduplication, dict.setdefault(), dict.popitem()
+    'copy', 'deepcopy',                             # copy.copy(), copy.deepcopy() for safe copying
+    'format', 'replace', 'startswith', 'endswith',  # String processing (duplicate cleanup)
     'sorted', 'filter', 'map', 'any', 'all',        # Data processing
     'sum', 'min', 'max', 'len', 'round',            # Math and sizing
     'flatten_dict', 'combine_results',              # Results processing helpers
+    'safe_join', 'safe_get', 'safe_split',          # Safe helper functions for data processing
+    
+    # Additional list/set operations commonly used in data processing
+    'difference', 'intersection', 'union', 'symmetric_difference',  # Set operations
+    'discard', 'isdisjoint', 'issubset', 'issuperset',             # Set comparison methods
+    'slice', 'step',                                                # List slicing operations
+    
+    # JSON and data structure methods for Results Formatter
+    'dumps', 'loads', 'load', 'dump',               # json.dumps(), json.loads(), json.load(), json.dump()
+    'JSONDecodeError', 'JSONEncoder', 'JSONDecoder', # JSON error handling and custom encoders/decoders
+    'isinstance', 'type', 'str', 'int', 'float', 'bool', 'list', 'tuple', 'set', 'dict',  # Type checking and conversion
+    'range', 'iter', 'next',                        # For loops and iterations
 }
 
 # Allowed modules (legacy - use COMPREHENSIVE_ALLOWED_MODULES for new code)
@@ -647,7 +676,8 @@ class EnhancedSecurityValidator:
             'collect_', 'aggregate_', 'combine_', 'merge_', 'filter_',
             'handle_', 'create_', 'build_', 'setup_', 'init_',
             'calculate_', 'validate_', 'check_', 'verify_',
-            'run_', 'execute_', 'start_', 'stop_', 'end_'
+            'run_', 'execute_', 'start_', 'stop_', 'end_',
+            'safe_'  # Allow safe_ prefixed functions like safe_join
         ]
         
         # Check if function starts with any safe pattern
@@ -942,3 +972,53 @@ def is_code_safe(code: str, okta_domain: Optional[str] = None) -> bool:
     """
     result = validate_generated_code(code)
     return result.is_valid
+
+def get_allowed_methods_for_prompt() -> str:
+    """
+    Generate a formatted string of allowed methods for inclusion in LLM prompts.
+    This ensures the LLM knows exactly what methods it can use, reducing security violations.
+    
+    Returns:
+        Formatted string listing all allowed methods categorized by type
+    """
+    
+    # Built-in functions that are safe to use
+    builtins = sorted([
+        'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'tuple', 'set',
+        'range', 'enumerate', 'zip', 'sorted', 'sum', 'min', 'max', 'isinstance', 
+        'type', 'any', 'all', 'iter', 'next', 'print'
+    ])
+    
+    # Dictionary and list methods
+    dict_list_methods = sorted([
+        'get', 'items', 'keys', 'values', 'append', 'extend', 'insert', 'add', 
+        'remove', 'pop', 'clear', 'index', 'count', 'sort', 'reverse', 'update', 
+        'fromkeys', 'setdefault', 'copy'
+    ])
+    
+    # String methods
+    string_methods = sorted([
+        'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower', 
+        'startswith', 'endswith', 'replace', 'format', 'find', 'count'
+    ])
+    
+    # JSON methods
+    json_methods = sorted(['dumps', 'loads', 'load', 'dump', 'JSONDecodeError'])
+    
+    # Set operations
+    set_methods = sorted([
+        'difference', 'intersection', 'union', 'discard', 'isdisjoint', 
+        'issubset', 'issuperset'
+    ])
+    
+    return f"""**Built-in Functions:** {', '.join(f'`{m}`' for m in builtins)}
+
+**Dict/List Methods:** {', '.join(f'`{m}`' for m in dict_list_methods)}
+
+**String Methods:** {', '.join(f'`{m}`' for m in string_methods)}
+
+**JSON Methods:** {', '.join(f'`{m}`' for m in json_methods)}
+
+**Set Operations:** {', '.join(f'`{m}`' for m in set_methods)}
+
+**Safe Helper Functions:** You may define helper functions starting with `safe_`, `get_`, `build_`, `process_`, `format_` (e.g., `safe_join()`, `build_lookup()`)"""
