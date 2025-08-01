@@ -58,7 +58,6 @@ from src.core.security import (
     validate_http_method, 
     validate_api_endpoint,
     validate_url,
-    validate_polars_operation,
     get_security_headers
 )
 
@@ -1029,11 +1028,28 @@ class ModernExecutionManager:
                             formatted_response['metadata']['processing_executed'] = True
                             formatted_response['metadata']['actual_results'] = len(processed_data) if isinstance(processed_data, list) else 'processed'
                     else:
-                        logger.warning(f"[{correlation_id}] Processing code execution failed: {processing_execution_result.get('error', 'Unknown error')}")
+                        logger.error(f"[{correlation_id}] Processing code execution failed: {processing_execution_result.get('error', 'Unknown error')}")
                         # Keep original placeholder content but add error info to metadata
                         if 'metadata' in formatted_response:
                             formatted_response['metadata']['processing_executed'] = False
                             formatted_response['metadata']['execution_error'] = processing_execution_result.get('error', 'Unknown error')
+                        
+                        # CRITICAL FIX: Mark execution as failed when Results Formatter processing fails
+                        # This ensures the frontend receives proper error status like other agent failures
+                        execution_results.final_result = False
+                        processing_error = processing_execution_result.get('error', 'Unknown error')
+                        
+                        # Add this as a step failure so it appears in the errors array
+                        formatter_step = StepResult(
+                            step_number=len(execution_results.steps) + 1,
+                            step_type="results_formatter",
+                            tool_name="results_formatter",
+                            success=False,
+                            error=f"Results Formatter processing code execution failed: {processing_error}",
+                            data=None,
+                            execution_time=0.0
+                        )
+                        execution_results.steps.append(formatter_step)
                 
                 # Save results to file
                 await self._save_results_to_file(query, formatted_response, step_results_for_processing, correlation_id)
@@ -1045,6 +1061,22 @@ class ModernExecutionManager:
                     'content': {'text': f'Results formatting failed: {e}'},
                     'metadata': {'error': 'Results formatting failed'}
                 }
+                
+                # CRITICAL FIX: Mark execution as failed when Results Formatter fails
+                # This ensures the frontend receives proper error status like other agent failures
+                execution_results.final_result = False
+                
+                # Add this as a step failure so it appears in the errors array
+                formatter_step = StepResult(
+                    step_number=len(execution_results.steps) + 1,
+                    step_type="results_formatter",
+                    tool_name="results_formatter",
+                    success=False,
+                    error=f"Results Formatter failed: {str(e)}",
+                    data=None,
+                    execution_time=0.0
+                )
+                execution_results.steps.append(formatter_step)
             
             # Format results for compatibility with test expectations
             success_rate = sum(1 for step in execution_results.steps if step.success) / len(execution_results.steps)
@@ -1723,42 +1755,19 @@ class ModernExecutionManager:
         import shutil
         
         try:
-            # POLARS-FIRST SECURITY VALIDATION: For Polars code, use specialized validation first
-            if 'polars' in python_code.lower() or 'pl.' in python_code:
-                logger.info(f"[{correlation_id}] Polars usage detected - using specialized Polars security validation")
-                polars_result = validate_polars_operation(python_code)
-                
-                if not polars_result.is_allowed:
-                    error_msg = f"Polars security violation: {'; '.join(polars_result.violations)}"
-                    logger.error(f"[{correlation_id}] {error_msg}")
-                    return {
-                        'success': False,
-                        'error': error_msg,
-                        'security_violations': polars_result.violations,
-                        'risk_level': polars_result.risk_level
-                    }
-                
-                logger.info(f"[{correlation_id}] Polars security validation passed")
-                
-                # For Polars code, skip general method validation (it's redundant and conflicts)
-                logger.info(f"[{correlation_id}] Skipping general method validation for Polars code")
-                
-            else:
-                # GENERAL SECURITY VALIDATION: For non-Polars code, use general validation
-                logger.info(f"[{correlation_id}] Security validation: Checking generated code for safety")
-                security_result = validate_generated_code(python_code)
-                
-                if not security_result.is_valid:
-                    error_msg = f"Security violation in generated code: {'; '.join(security_result.violations)}"
-                    logger.error(f"[{correlation_id}] {error_msg}")
-                    return {
-                        'success': False,
-                        'error': error_msg,
-                        'security_violations': security_result.violations,
-                        'risk_level': security_result.risk_level
-                    }
-                
-                logger.info(f"[{correlation_id}] General security validation passed")
+            # SECURITY VALIDATION: Use general validation for all Python code
+            logger.info(f"[{correlation_id}] Security validation: Checking generated code for safety")
+            security_result = validate_generated_code(python_code)
+            
+            if not security_result.is_valid:
+                error_msg = f"Security violation in generated code: {'; '.join(security_result.violations)}"
+                logger.error(f"[{correlation_id}] {error_msg}")
+                return {
+                    'success': False,
+                    'error': error_msg,
+                    'security_violations': security_result.violations,
+                    'risk_level': security_result.risk_level
+                }
             
             logger.info(f"[{correlation_id}] Security validation passed - code is safe to execute")
             
