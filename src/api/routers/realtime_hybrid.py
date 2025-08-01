@@ -304,7 +304,7 @@ async def execute_plan_and_stream(
                 
                 # Log error status for debugging
                 if status == 'error':
-                    logger.error(f"[{process_id}] 🔴 SENDING ERROR STATUS - Step {step_number} ({step_type}) failed")
+                    logger.error(f"[{process_id}] ERROR STATUS - Step {step_number} ({step_type}) failed")
                 
                 # Queue the step status event
                 await step_status_queue.put({
