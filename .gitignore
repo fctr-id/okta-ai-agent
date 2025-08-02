@@ -86,3 +86,7 @@ src/data/entity_analysis.txt
 src/data/test_entities.py
 src/data/test_no_legacy_tools.py
 src/data/test_unified_logging.py
+docs/execution_manager_architecture.md
+docs/execution_manager_complete_definitions.md
+docs/execution_manager_implementation_status.md
+docs/execution_manager_polars_complete.md
