@@ -270,6 +270,7 @@ const {
   currentStepIndex: rtCurrentStepIndexVal,
   steps: rtSteps,
   results: rtResults,
+  chunkedResults, // Add chunked results for progress indicators
   startProcess,
   connectToStream,
   cancelProcess,
@@ -1523,6 +1524,22 @@ watch(showToolsModal, (newVal) => {
   color: #b91c1c;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Chunk progress indicator styles */
+.chunk-progress-indicator {
+  border-left: 3px solid #3b82f6;
+  background-color: #eff6ff;
+  animation: pulse-blue 2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-blue {
+  0% {
+    background-color: #eff6ff;
+  }
+  100% {
+    background-color: #dbeafe;
+  }
 }
 
 /* Responsive styles */

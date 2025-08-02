@@ -36,10 +36,19 @@
                                 </div>
 
                                 <div class="right-section">
-                                    <!--<div class="results-count" v-if="displayedItems.length">
-                                        {{ displayedItems.length }} {{ displayedItems.length === 1 ? 'result' :
-                                        'results' }}
-                                    </div>-->
+                                    <!-- Streaming indicator in header -->
+                                    <div v-if="isStreaming" class="streaming-indicator me-3">
+                                        <v-progress-circular 
+                                            :model-value="streamingProgressPercent"
+                                            size="16" 
+                                            width="2" 
+                                            color="primary" 
+                                            class="me-2">
+                                        </v-progress-circular>
+                                        <span class="streaming-text">
+                                            Loading results ({{ streamingProgressPercent }}%)
+                                        </span>
+                                    </div>
 
                                     <v-text-field v-model="search" density="comfortable" hide-details
                                         placeholder="Search results" prepend-inner-icon="mdi-magnify" single-line
@@ -178,6 +187,27 @@ const formattedJson = computed(() => {
         console.error('JSON formatting error:', error)
         return String(props.content)
     }
+})
+
+// Streaming support computed properties
+const isStreaming = computed(() => {
+    return props.metadata?.isStreaming === true
+})
+
+const streamingProgress = computed(() => {
+    return props.metadata?.streamingProgress || null
+})
+
+const streamingProgressPercent = computed(() => {
+    if (!streamingProgress.value) return 0
+    const { current, total } = streamingProgress.value
+    return total > 0 ? Math.round((current / total) * 100) : 0
+})
+
+const streamingProgressText = computed(() => {
+    if (!streamingProgress.value) return ''
+    const { current, total, chunksReceived, totalChunks } = streamingProgress.value
+    return `${current.toLocaleString()}/${total.toLocaleString()} records (${chunksReceived}/${totalChunks} chunks)`
 })
 
 const getLastSyncTime = computed(() => {
@@ -387,7 +417,7 @@ const downloadCSV = () => {
     }
 }
 
-// Use this to debu streaming data udates sent from backend
+// Use this to debug streaming data updates sent from backend
 /*
 watch(() => props.content, (newContent) => {
     console.log('Content updated:', {
@@ -541,6 +571,27 @@ watch(() => props.content, (newContent) => {
 .results-count {
     color: #6B7280;
     font-size: 0.813rem;
+}
+
+.streaming-indicator {
+    color: #4C64E2;
+}
+
+.streaming-text {
+    font-size: 0.813rem;
+    font-weight: 500;
+    color: #4C64E2;
+}
+
+.streaming-footer-indicator {
+    border-top: 1px solid #eef1ff;
+    background: #f9faff;
+}
+
+.streaming-footer-text {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #4C64E2;
 }
 
 /* Content Type Styles */
