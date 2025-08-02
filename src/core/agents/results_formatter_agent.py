@@ -175,10 +175,15 @@ def _parse_raw_llm_response(raw_response: str, flow_id: str) -> Dict[str, Any]:
         logger.error(f"[{flow_id}] Failed to parse raw LLM response: {e}")
         logger.error(f"[{flow_id}] Raw response was: {raw_response}")
         
-        # Return a minimal fallback structure compatible with frontend
+        # For Results Formatter parsing failures, we should throw an exception
+        # so the upstream error handling can provide a clean user-friendly message
+        raise ValueError(f"Results formatting failed: Unable to parse LLM response. The AI model returned malformed output. Please try your query again.")
+        
+        # This fallback should never be reached due to the exception above
+        # but keeping it as a safety net
         return {
             'display_type': 'markdown',
-            'content': f'**Processing Error**: {raw_response}',
+            'content': 'Results processing failed: The AI model returned malformed output. Please try your query again.',
             'metadata': {'status': 'parsing_failed', 'error': str(e)},
             'processing_code': None
         }
