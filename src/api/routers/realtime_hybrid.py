@@ -625,8 +625,9 @@ async def execute_plan_and_stream(
                 
                 # Extract content based on display type
                 if display_type == 'vuetify_table' and content:
-                    # For Vuetify table, use the entire content structure
-                    final_result_content = content
+                    # For Vuetify table, keep content in formatted_response structure for frontend
+                    # Don't copy to final_result_content - frontend expects it in formatted_response.content
+                    final_result_content = f"Table with {len(content)} records"
                 elif display_type == 'markdown' and isinstance(content, dict) and content.get('text'):
                     final_result_content = content['text']
                 elif isinstance(content, str):

@@ -355,6 +355,138 @@ Your tasks:
 
 Include performance optimizations and processing recommendations in your metadata."""
 
+def _is_single_sql_query(results: Dict[str, Any], original_plan: Optional[str] = None) -> bool:
+    """
+    Check if this is a single SQL query that can be formatted directly without LLM processing.
+    Returns True if:
+    1. Only one data source (SQL)
+    2. No API data
+    3. Simple tabular data structure
+    """
+    try:
+        # Check the results structure - should only have SQL data
+        data_sources = []
+        sql_data = None
+        
+        # Count different data sources
+        if results.get('1_sql'):
+            data_sources.append('sql')
+            sql_data = results['1_sql']
+        
+        # Check for API data sources (numbered API results)
+        for i in range(1, 10):  # Check up to 10 potential API steps
+            if results.get(f'{i}_api'):
+                data_sources.append('api')
+                break
+        
+        # Should only have SQL data, no API data
+        if len(data_sources) != 1 or 'sql' not in data_sources:
+            return False
+        
+        # Check if SQL data is simple tabular structure  
+        if not isinstance(sql_data, list) or not sql_data:
+            return False
+            return False
+            
+        # Check if all records have the same structure (simple table)
+        first_row = sql_data[0]
+        if not isinstance(first_row, dict):
+            return False
+            
+        # All rows should have the same keys (consistent table structure)
+        first_keys = set(first_row.keys())
+        for row in sql_data[:5]:  # Check first 5 rows for consistency
+            if set(row.keys()) != first_keys:
+                return False
+        
+        # Check original plan if available - should be simple single step
+        if original_plan:
+            try:
+                if isinstance(original_plan, str):
+                    import json
+                    plan_data = json.loads(original_plan) if original_plan.startswith('{') else {'steps': []}
+                else:
+                    plan_data = original_plan
+                    
+                steps = plan_data.get('steps', [])
+                if len(steps) != 1:
+                    return False
+                    
+                step = steps[0]
+                if step.get('tool_name', '').lower() != 'sql':
+                    return False
+            except:
+                # If plan parsing fails, still allow optimization based on data structure
+                pass
+        
+        return True
+        
+    except Exception as e:
+        # If detection fails, fall back to normal LLM processing
+        return False
+
+def _format_single_sql_directly(results: Dict[str, Any], flow_id: str, total_records: int) -> Dict[str, Any]:
+    """
+    Format single SQL query results directly using legacy ai_service.py pattern.
+    Creates Vuetify table structure without LLM processing.
+    """
+    try:
+        sql_data = results.get('1_sql', [])
+        
+        if not sql_data:
+            return {
+                'display_type': 'markdown',
+                'content': {'text': 'Query executed successfully but returned no results.'},
+                'metadata': {
+                    'total_records': 0,
+                    'query_type': 'sql',
+                    'single_sql_optimization': True,
+                    'bypassed_llm_processing': True,
+                    'execution_summary': 'No data returned from SQL query',
+                    'confidence_level': 'High',
+                    'data_sources': ['sql'],
+                    'processing_time': 'Instant (bypassed LLM)',
+                    'limitations': 'None'
+                },
+                'usage_info': {'tokens': 0, 'model': 'direct_formatting'}
+            }
+        
+        # Create Vuetify headers from first row keys (same as legacy ai_service.py)
+        first_row = sql_data[0]
+        headers = [{
+            "text": key.replace('_', ' ').title(),
+            "value": key,
+            "align": 'start'
+        } for key in first_row.keys()]
+        
+        logger.info(f"[{flow_id}] Direct SQL formatting: {len(sql_data)} records with {len(headers)} columns")
+        logger.info(f"[{flow_id}] Bypassed LLM processing - using legacy ai_service.py pattern")
+        
+        # Return the SAME structure as complex queries (display_type: "table", not "vuetify_table")
+        return {
+            'display_type': 'table',  # Match complex queries - NOT 'vuetify_table'
+            'content': sql_data,  # Will be chunked by realtime_hybrid.py if needed
+            'metadata': {
+                'total_records': len(sql_data),
+                'query_type': 'sql',
+                'single_sql_optimization': True,
+                'bypassed_llm_processing': True,
+                'execution_summary': f'Retrieved {len(sql_data)} records from database query',
+                'confidence_level': 'High',
+                'data_sources': ['sql'],
+                'processing_time': 'Instant (bypassed LLM)',
+                'limitations': 'None - direct database results',
+                'column_count': len(headers),
+                'columns': [h['value'] for h in headers]
+            },
+            'processing_code': None  # CRITICAL FIX: Set to None instead of string to avoid execution
+        }
+        
+    except Exception as e:
+        logger.error(f"[{flow_id}] Direct SQL formatting failed: {e}")
+        # Fall back to normal processing if direct formatting fails
+        raise e
+
 async def format_results(query: str, results: Dict[str, Any], is_sample: bool = False, 
                          original_plan: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Enhanced results formatting with conditional processing based on dataset size"""
@@ -368,6 +500,11 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
     logger.info(f"[{flow_id}] Processing {total_records} total records (is_sample: {is_sample})")
     logger.debug(f"[{flow_id}] Query: {query}")
     logger.debug(f"[{flow_id}] Original Plan: {original_plan}")
+    
+    # SINGLE SQL OPTIMIZATION: Check if this is a simple single SQL query
+    if _is_single_sql_query(results, original_plan):
+        logger.info(f"[{flow_id}] SINGLE SQL OPTIMIZATION: Detected single SQL query - using direct formatting")
+        return _format_single_sql_directly(results, flow_id, total_records)
     
     # Log the input data structure for debugging
     if 'raw_results' in results:

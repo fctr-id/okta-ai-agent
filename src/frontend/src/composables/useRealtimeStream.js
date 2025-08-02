@@ -189,12 +189,11 @@ export function useRealtimeStream() {
             });
 
             eventSource.addEventListener("final_result", (event) => {
-                // console.log("[EventSource] Received final_result event:", event.data);
                 handleFinalResultEvent(event);
             });
 
             eventSource.addEventListener("final_result_chunk", (event) => {
-                // console.log("[EventSource] Received final_result_chunk event:", event.data);
+                console.log("[EventSource] Received final_result_chunk event:", event.data);
                 handleFinalResultChunkEvent(event);
             });
 
@@ -508,6 +507,7 @@ export function useRealtimeStream() {
                 execution.results = {
                     content: [], // Start with empty array
                     display_type: formattedResponse.display_type || data.display_type || "table",
+                    headers: formattedResponse.headers || [], // Include headers for chunked streaming
                     metadata: {
                         ...formattedResponse.metadata,
                         isStreaming: true,
@@ -590,7 +590,7 @@ export function useRealtimeStream() {
             
             // If we're receiving chunks, this might be the final completion signal
             if (chunkedResults.value.isReceivingChunks) {
-                // console.log("[handleFinalResultEvent] Received final_result during chunked streaming - completing");
+                console.log("[handleFinalResultEvent] Received final_result during chunked streaming - completing");
 
                 // Force completion of chunked streaming
                 execution.results.metadata.isStreaming = false;
@@ -643,6 +643,7 @@ export function useRealtimeStream() {
                 execution.results = {
                     content: formattedResponse.content || data.content || data.result_content || "", // Try formatted_response first
                     display_type: formattedResponse.display_type || data.display_type || "markdown",
+                    headers: formattedResponse.headers || [], // Include headers for Vuetify table display
                     metadata: agentDisplayMetadata, // This will now correctly pass headers, totalItems, etc.
                 };
 
