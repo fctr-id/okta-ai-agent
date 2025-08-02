@@ -43,12 +43,18 @@ Key Features:
 """
 
 import asyncio
+import os
 import uuid
 import json
 import re
 import time
 from enum import Enum
 from typing import Dict, Any, AsyncGenerator, List, Optional, Tuple
+
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 from fastapi import APIRouter, HTTPException, Request, Depends, status
 from fastapi.responses import JSONResponse
@@ -68,6 +74,9 @@ from src.utils.logging import get_logger, set_correlation_id
 
 # Using main "okta_ai_agent" namespace for unified logging across all components
 logger = get_logger("okta_ai_agent")
+
+# --- Configuration ---
+RESULT_STREAM_CHUNK_SIZE = int(os.getenv("RESULT_STREAM_CHUNK_SIZE", "1000"))
 
 # --- Query sanitization (same as legacy) ---
 custom_sanitizer = Sanitizer({
@@ -120,6 +129,51 @@ def sanitize_query(query: str) -> Tuple[str, List[str]]:
     sanitized_query = re.sub(r'data\s*:\s*\w+/\w+\s*;\s*base64', 'data-removed', sanitized_query, flags=re.IGNORECASE)
     
     return sanitized_query.strip(), warnings
+
+# --- Chunked Streaming Support ---
+def _chunk_large_response(data: Dict[str, Any], chunk_size: int = None) -> List[Dict[str, Any]]:
+    """
+    Chunk large response data for streaming to prevent large JSON payloads
+    Args:
+        data: The response data dictionary
+        chunk_size: Number of records per chunk (defaults to RESULT_STREAM_CHUNK_SIZE env var)
+    Returns:
+        List of chunks to stream
+    """
+    # Use environment variable if chunk_size not provided
+    if chunk_size is None:
+        chunk_size = RESULT_STREAM_CHUNK_SIZE
+        
+    if isinstance(data, dict) and 'formatted_response' in data:
+        formatted_response = data['formatted_response']
+        if isinstance(formatted_response.get('content'), list):
+            # Large table data - chunk the content array
+            content_array = formatted_response['content']
+            if len(content_array) > chunk_size:
+                logger.info(f" CHUNKED STREAMING: Breaking {len(content_array)} records into chunks of {chunk_size}")
+                # Create chunks
+                chunks = []
+                for i in range(0, len(content_array), chunk_size):
+                    chunk_data = content_array[i:i + chunk_size]
+                    chunk = {
+                        **data,  # Copy all other data (process_id, status, etc.)
+                        'formatted_response': {
+                            **formatted_response,  # Copy metadata, display_type, etc.
+                            'content': chunk_data
+                        },  
+                        'chunk_info': {
+                            'chunk_number': i // chunk_size + 1,
+                            'total_chunks': (len(content_array) + chunk_size - 1) // chunk_size,
+                            'chunk_size': len(chunk_data),
+                            'total_size': len(content_array),
+                            'is_final_chunk': i + chunk_size >= len(content_array)
+                        }
+                    }
+                    chunks.append(chunk)
+                return chunks
+    
+    # Not chunkable or small data - return as single chunk
+    return [data]
 
 # --- Process Status Enum (same as legacy) ---
 class ProcessStatus(str, Enum):  
@@ -278,6 +332,7 @@ async def execute_plan_and_stream(
         # Set up callback to capture step info when plan is ready (before execution starts)
         async def on_plan_ready(execution_plan):
             nonlocal step_info_data
+            logger.info(f"[{process_id}]  on_plan_ready callback triggered with {len(execution_plan.steps)} steps")
             step_info_data = [
                 {
                     'id': i,
@@ -290,7 +345,16 @@ async def execute_plan_and_stream(
                 }
                 for i, step in enumerate(execution_plan.steps)
             ]
+            logger.info(f"[{process_id}]  on_plan_ready - step_info_data created: {step_info_data}")
             step_info_ready.set()
+            logger.info(f"[{process_id}]  on_plan_ready - step_info_ready event set")
+            
+            #  IMMEDIATE YIELD: Send step_plan_info event immediately when plan is ready
+            logger.info(f"[{process_id}]  Sending step_plan_info event with {len(step_info_data)} steps")
+            await step_status_queue.put({
+                "event": "step_plan_info",
+                "data": json.dumps({'process_id': process_id, 'steps': step_info_data})
+            })
 
         async def on_step_status(step_number, step_type, status):
             """Callback when step status changes - send real-time step updates"""
@@ -323,23 +387,32 @@ async def execute_plan_and_stream(
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
         logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
         
-        # Start execution - if planning fails, it will be caught by the outer try/catch
-        result = await modern_executor.execute_query(query)
+        #  CONCURRENT EXECUTION: Start execution and process events concurrently
+        # Create a task for the execution
+        execution_task = asyncio.create_task(modern_executor.execute_query(query))
         
-        # Wait for plan to be ready and send step info (if planning succeeded)
-        if step_info_ready.is_set() and step_info_data:
-            yield {
-                "event": "step_plan_info",
-                "data": json.dumps({'process_id': process_id, 'steps': step_info_data})
-            }
-            await asyncio.sleep(0.01)
+        # Process events from the queue while execution is running
+        while not execution_task.done():
+            try:
+                # Wait for either an event or the execution to complete (with short timeout)
+                event = await asyncio.wait_for(step_status_queue.get(), timeout=0.1)
+                yield event
+                await asyncio.sleep(0.01)
+                step_status_queue.task_done()
+            except asyncio.TimeoutError:
+                # No event received, continue checking if execution is done
+                continue
         
-        # Process any remaining step status events after execution completes
+        # Get the execution result
+        result = await execution_task
+        
+        # Process any remaining events after execution completes
         while not step_status_queue.empty():
             try:
                 step_event = step_status_queue.get_nowait()
                 yield step_event
                 await asyncio.sleep(0.01)
+                step_status_queue.task_done()
             except asyncio.QueueEmpty:
                 break
         
@@ -495,10 +568,62 @@ async def execute_plan_and_stream(
             
             # Check if we have a formatted response from the results formatter
             if formatted_response:
+                #  ERROR DETECTION: Check if the formatted response contains error content
+                usage_info = formatted_response.get('usage_info', {})
+                has_error = usage_info.get('error') is not None
+                
+                # Check if content contains error text patterns
+                content = formatted_response.get('content', {})
+                error_patterns = ["**Processing Error**", "Results formatting failed", "Unable to parse LLM response"]
+                content_has_error = False
+                
+                if isinstance(content, dict) and content.get('text'):
+                    content_text = content['text']
+                    content_has_error = any(pattern in content_text for pattern in error_patterns)
+                elif isinstance(content, str):
+                    content_has_error = any(pattern in content for pattern in error_patterns)
+                
+                # If we detect error content, send plan_error instead of final_result
+                if has_error or content_has_error:
+                    error_message = "Results processing failed"
+                    if isinstance(content, dict) and content.get('text'):
+                        # Extract clean error message from content
+                        error_text = content['text']
+                        if "Results formatting failed:" in error_text:
+                            # Extract the specific error message
+                            error_message = error_text.split("Results formatting failed: ")[1] if "Results formatting failed: " in error_text else error_message
+                    elif usage_info.get('error'):
+                        error_message = usage_info['error']
+                    
+                    logger.error(f"[{process_id}] Results Formatter error detected in formatted response: {error_message}")
+                    
+                    # Update process status to error
+                    active_processes[process_id]["status"] = ProcessStatus.COMPLETED_WITH_ERRORS
+                    
+                    # Send plan_error event instead of final_result
+                    yield {
+                        "event": "plan_error",
+                        "data": json.dumps({
+                            'process_id': process_id,
+                            'status': ProcessStatus.COMPLETED_WITH_ERRORS.value,
+                            'message': error_message,
+                            'error_type': 'results_formatter_error',
+                            'failed_steps': 1,  # Results formatter step failed
+                            'total_steps': total_steps,
+                            'error_details': {
+                                'results_formatter_failed': True,
+                                'original_error': usage_info.get('error', 'Unknown error'),
+                                'formatted_response_available': True
+                            }
+                        })
+                    }
+                    await asyncio.sleep(0.01)
+                    return  # Exit early - don't send final_result
+                
+                # No error detected - proceed with normal processing
                 display_type = formatted_response.get('display_type', 'markdown')
                 
                 # Extract content based on display type
-                content = formatted_response.get('content', {})
                 if display_type == 'vuetify_table' and content:
                     # For Vuetify table, use the entire content structure
                     final_result_content = content
@@ -576,14 +701,28 @@ async def execute_plan_and_stream(
                     'metadata': last_sync_metadata
                 }
             
-            # Store final result in process data
-            active_processes[process_id]["final_result_data"] = final_result_data
-            
+        # Store final result in process data
+        active_processes[process_id]["final_result_data"] = final_result_data
+
+        # CHUNKED STREAMING: Stream large responses in chunks
+        chunks = list(_chunk_large_response(final_result_data))  # Uses RESULT_STREAM_CHUNK_SIZE env var
+        
+        if len(chunks) > 1:
+            logger.info(f"[{process_id}] CHUNKED STREAMING: Sending {len(chunks)} chunks for large response")
+            for i, chunk in enumerate(chunks):
+                event_type = "final_result_chunk" if i < len(chunks) - 1 else "final_result"
+                yield {
+                    "event": event_type,
+                    "data": json.dumps(chunk)
+                }
+                await asyncio.sleep(0.05)
+        else:
+            # Small response - send as single event
             yield {
-                "event": "final_result",
+                "event": "final_result", 
                 "data": json.dumps(final_result_data)
             }
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.05)
 
     except Exception as e:
         logger.error(f"[{process_id}] Error during Modern Execution Manager execution: {e}", exc_info=True)
