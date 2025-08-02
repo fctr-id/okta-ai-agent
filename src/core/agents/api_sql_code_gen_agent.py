@@ -43,18 +43,16 @@ class ApiSqlDependencies(BaseModel):
     sql_tables: Dict[str, Any] = {}  # Dynamic schema from okta_schema.json
 
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
-import os
-import logging
 
-# Note: logger already defined above with unified "okta_ai_agent" namespace
-
-class SqlStatementsOutput(BaseModel):
-    """Output from SQL generation agent"""
-    sql_statements: List[str] = Field(..., description="Complete SQL statements: CREATE, INSERT, SELECT")
-    explanation: str = Field(..., description="Context about what the SQL accomplishes")
+class PolarsOptimizedOutput(BaseModel):
+    """Output optimized for Polars DataFrame processing - no temp tables needed"""
+    id_extraction_path: str = Field(..., description="JSONPath or field name to extract IDs from API data (e.g. 'id', 'profile.login', 'actor.id')")
+    sql_query_template: str = Field(..., description="SQL query with {user_ids} placeholder for IN clause")
+    api_dataframe_fields: List[str] = Field(..., description="Fields to keep from API data for final JOIN")
+    join_field: str = Field(..., description="Field name to join API DataFrame and SQL results on")
+    explanation: str = Field(..., description="Context about what this accomplishes")
     estimated_records: int = Field(0, description="Estimated number of records")
-    extraction_summary: str = Field(..., description="Summary of data extraction approach")
+    use_polars_optimization: bool = Field(True, description="Flag indicating this uses Polars optimization")
 
 def load_api_sql_system_prompt() -> str:
     """Load API-SQL system prompt from external file"""
@@ -79,15 +77,19 @@ class ApiSqlCodeGenAgent:
         # Add tenant_id as a dynamic variable at the end of the system prompt
         self.system_prompt += f"\n\n## DYNAMIC SQL VARIABLES\n\nSQL_TENANT_ID = '{actual_tenant_id}'\n\nWhen generating SQL queries, use the SQL_TENANT_ID value above for any tenant_id conditions.\nExample: WHERE u.tenant_id = '{actual_tenant_id}' AND u.is_deleted = 0"
         
+        # Add Polars optimization instructions to the main prompt
+        self.system_prompt += self._get_polars_optimization_prompt()
+        
+        # Single agent for Polars optimization only
         self.agent = Agent(
             model=model,
-            output_type=SqlStatementsOutput,
+            output_type=PolarsOptimizedOutput,
             deps_type=ApiSqlDependencies,
             system_prompt=self.system_prompt,
             retries=0
         )
         
-        # Add dynamic schema access tool (same pattern as SQL agent)
+        # Add dynamic schema access tool
         @self.agent.system_prompt
         async def okta_database_schema(ctx) -> str:
             """Access the complete okta database schema to answer user questions"""
@@ -100,13 +102,104 @@ class ApiSqlCodeGenAgent:
         
         logger.info(f"API-SQL Agent initialized with tenant_id: {actual_tenant_id}")
 
+    def _get_polars_optimization_prompt(self) -> str:
+        """Get additional prompt text for Polars optimization mode"""
+        return """
+
+## POLARS OPTIMIZATION MODE
+
+You are now operating in POLARS OPTIMIZATION MODE for high-performance DataFrame processing.
+
+Instead of generating temp table specifications, generate direct SQL queries with placeholders for dynamic user ID lists.
+
+**OUTPUT FORMAT**: PolarsOptimizedOutput with these fields:
+- `id_extraction_path`: Dot-notation path to extract IDs from API data
+- `sql_query_template`: SQL query with {user_ids} placeholder for IN clause
+- `api_dataframe_fields`: List of API fields to keep for final JOIN (e.g., ['id', 'email', 'status'])
+- `join_field`: Field name for joining API DataFrame with SQL results (usually 'okta_id' or 'id')
+- `explanation`: What this query accomplishes
+- `estimated_records`: Expected number of results
+
+**ID EXTRACTION PATHS** (Dynamic - works with ANY API structure):
+- Raw string data: `"identity"` or `"self"` → extracts string directly (for simple ID lists)
+- Simple field: `"id"` → extracts record["id"]
+- Nested field: `"profile.login"` → extracts record["profile"]["login"]  
+- Deep nesting: `"actor.alternateId"` → extracts record["actor"]["alternateId"]
+- Array extraction: `"user_ids.*"` → extracts all items from record["user_ids"] array
+- Application data: `"settings.app.authURL"` → extracts record["settings"]["app"]["authURL"]
+- Group info: `"profile.name"` → extracts record["profile"]["name"]
+- Log data: `"target.id"` → extracts record["target"]["id"]
+
+**EXAMPLE FOR API ARRAY DATA** (API returns {'user_ids': [...], ...}):
+```json
+{
+    "id_extraction_path": "user_ids.*",
+    "sql_query_template": "SELECT okta_id, first_name, last_name, email, status FROM users WHERE okta_id IN ({user_ids}) AND tenant_id = 'dev-123456' AND is_deleted = 0",
+    "api_dataframe_fields": ["user_count", "total_events"],
+    "join_field": "okta_id",
+    "explanation": "Extract user IDs from API array and fetch database user records",
+    "estimated_records": 50
+}
+```
+
+**EXAMPLE FOR USERS**:
+```json
+{
+    "id_extraction_path": "id",
+    "sql_query_template": "SELECT okta_id, first_name, last_name, email, status FROM users WHERE okta_id IN ({user_ids}) AND tenant_id = 'dev-123456' AND is_deleted = 0",
+    "api_dataframe_fields": ["id", "profile.email", "status"],
+    "join_field": "okta_id",
+    "explanation": "Extract user IDs from API data and fetch corresponding database user records",
+    "estimated_records": 50
+}
+```
+
+**EXAMPLE FOR GROUPS**:
+```json
+{
+    "id_extraction_path": "id", 
+    "sql_query_template": "SELECT group_id, group_name, description FROM groups WHERE group_id IN ({user_ids}) AND tenant_id = 'dev-123456'",
+    "api_dataframe_fields": ["id", "profile.name", "profile.description"],
+    "join_field": "group_id",
+    "explanation": "Extract group IDs and fetch database group details", 
+    "estimated_records": 25
+}
+```
+
+**EXAMPLE FOR LOGS**:
+```json
+{
+    "id_extraction_path": "actor.id",
+    "sql_query_template": "SELECT okta_id, first_name, last_name FROM users WHERE okta_id IN ({user_ids}) AND tenant_id = 'dev-123456'",
+    "api_dataframe_fields": ["actor.id", "actor.displayName", "eventType"],
+    "join_field": "okta_id", 
+    "explanation": "Extract actor IDs from log events and get user details",
+    "estimated_records": 100
+}
+```
+
+**KEY ADVANTAGES**:
+- No temp table creation/insertion overhead  
+- Direct SQL execution with IN clauses
+- Polars DataFrame JOIN for final result combination
+- 13,964x performance improvement over temp tables
+
+**CRITICAL RULES**:
+- Always use {user_ids} placeholder for dynamic ID lists
+- Include proper tenant_id filtering in SQL
+- Specify exact API fields needed for final result
+- Use clear join field names for DataFrame operations
+"""
+
     async def process_api_data(self, api_data: Union[List[Dict[str, Any]], Dict[str, Any]], 
                               processing_context: str, 
                               correlation_id: str,
-                              use_temp_table: bool = False,
                               all_step_contexts: Optional[Dict[str, Any]] = None,
-                              sql_tables: Optional[Dict[str, Any]] = None) -> Any:
-        """Process API data using direct SQL generation - creates temp table and JOINs with existing database"""
+                              sql_tables: Optional[Dict[str, Any]] = None,
+                              **kwargs) -> Any:
+        """
+        Process API data using Polars optimization (ONLY mode supported)
+        """
         
         # Normalize api_data to always be a list for consistent processing
         if isinstance(api_data, dict):
@@ -139,34 +232,37 @@ class ApiSqlCodeGenAgent:
             api_data_sample=sample_data,
             api_data_count=len(normalized_api_data),
             processing_context=processing_context,
-            temp_table_mode=True,  # Always use temp tables for database JOINs
+            temp_table_mode=False,  # Polars optimization mode - no temp tables
             flow_id=correlation_id,
             tenant_id=tenant_id,
             sql_tables=sql_tables or {}  # Pass dynamic schema information
         )
         
-        # Build user message with actual API data
+        # Build user message for Polars optimization
         user_message = f"""
 ## USER QUERY
 {processing_context}
 
-## API DATA TO CONVERT TO SQL
+## API DATA TO PROCESS
 Records found: {len(normalized_api_data)}
 Tenant ID: {tenant_id}
 
-ACTUAL API DATA TO ANALYZE:
+SAMPLE API DATA STRUCTURE:
 {json.dumps(sample_data, indent=2)}
 
-## TASK
-Generate complete SQL statements (CREATE TEMPORARY TABLE, INSERT statements, SELECT query) 
-to process this API data and answer the user's query.
+## TASK - POLARS OPTIMIZATION MODE
+Generate PolarsOptimizedOutput with:
+1. id_extraction_path: How to extract IDs from the API data
+2. sql_query_template: SQL with {{user_ids}} placeholder for IN clause  
+3. api_dataframe_fields: API fields to keep for final JOIN
+4. join_field: Field name for DataFrame JOIN operations
 
-Remember:
-- Use tenant_id = 'TENANT_PLACEHOLDER' in WHERE clauses
-- Include all relationship identifiers for proper data linking
-- Generate one INSERT per API record
-- Ensure SQL security compliance
-- JOIN with existing database tables to find related data (groups, applications, etc.)
+The system will:
+- Extract IDs from API data using your specified path
+- Execute SQL query with IN clause (no temp tables)
+- Perform final Polars DataFrame JOIN for optimal performance
+
+Use tenant_id = '{tenant_id}' in SQL WHERE clauses.
 """
         
         if all_step_contexts:
@@ -178,56 +274,15 @@ Remember:
                 else:
                     user_message += f"\n{step_key}: {step_data}"
         
-        # Execute SQL generation agent
+        # Execute Polars optimization agent (ONLY mode)
         try:
+            logger.info(f"[{correlation_id}] Using Polars optimization mode")
             result = await self.agent.run(user_message, deps=deps)
+            logger.info(f"[{correlation_id}] Polars optimization output generated")
+            return result
         except Exception as e:
-            logger.error(f"[{correlation_id}] SQL Agent execution failed: {str(e)}")
-            raise RuntimeError(f"SQL generation failed: {str(e)}")
-        
-        # Validate that we got sql_statements
-        if not hasattr(result.output, 'sql_statements') or not result.output.sql_statements:
-            raise ValueError("SQL agent failed to generate sql_statements")
-        
-        # Replace tenant placeholder with actual tenant ID
-        processed_statements = []
-        for stmt in result.output.sql_statements:
-            processed_stmt = stmt.replace('TENANT_PLACEHOLDER', tenant_id)
-            processed_statements.append(processed_stmt)
-        
-        # Validate SQL security
-        is_valid, error_msg = self.validate_sql(processed_statements)
-        if not is_valid:
-            logger.error(f"[{correlation_id}] SQL Agent generated invalid SQL: {error_msg}")
-            logger.debug(f"[{correlation_id}] Rejected SQL statements: {processed_statements}")
-            raise ValueError(f"Generated SQL failed security validation: {error_msg}")
-        
-        logger.info(f"[{correlation_id}] SQL generation completed with {len(processed_statements)} statements")
-        logger.debug(f"[{correlation_id}] SQL security validation passed")
-        
-        # Create compatible result object for existing execution manager
-        class SqlResult:
-            def __init__(self, sql_statements, explanation, estimated_records, extraction_summary):
-                self.sql_statements = sql_statements
-                self.explanation = explanation
-                self.estimated_records = estimated_records
-                self.extraction_summary = extraction_summary
-                
-                # Create a fake output object for compatibility
-                self.output = type('obj', (object,), {
-                    'processing_query': sql_statements[-1] if sql_statements else '',  # Last statement is typically SELECT
-                    'explanation': explanation,
-                    'estimated_records': estimated_records,
-                    'uses_temp_table': True,
-                    'sql_statements': sql_statements
-                })()
-        
-        return SqlResult(
-            processed_statements,
-            result.output.explanation,
-            int(result.output.estimated_records) if str(result.output.estimated_records).isdigit() else len(normalized_api_data),
-            result.output.extraction_summary
-        )
+            logger.error(f"[{correlation_id}] Polars Agent execution failed: {str(e)}")
+            raise RuntimeError(f"Polars optimization failed: {str(e)}")
 
 # Create global instance
 api_sql_code_gen_agent = ApiSqlCodeGenAgent()

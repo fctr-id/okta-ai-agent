@@ -1,33 +1,33 @@
 """
 Modern Execution Manager for Okta AI Agent.
 
-FULL POLARS ARCHITECTURE FOR MAXIMUM PERFORMANCE:
-================================================
+REPEATABLE DATA FLOW ARCHITECTURE:
+================================
 
-This executor implements a Polars-first data flow pattern for 13,964x performance improvement:
+This executor implements a variable-based data flow pattern that scales with any number of tools/steps:
 
-1. POLARS DATA STORAGE PATTERN:
-   - polars_dataframes: {"sql_data_step_1": DataFrame, "api_data_step_2": DataFrame}
+1. DATA STORAGE PATTERN:
+   - data_variables: {"sql_data_step_1": [all_records], "api_data_step_2": response}
    - step_metadata: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query description"}}
 
-2. FULL POLARS STEP EXECUTION PATTERN:
+2. STEP EXECUTION PATTERN:
    - Each step gets ENHANCED CONTEXT from ALL previous steps
-   - Each step gets POLARS DataFrame from previous step for processing
-   - Each step stores results as POLARS DataFrame using _store_step_data()
+   - Each step gets FULL data from previous step for processing
+   - Each step stores FULL results using _store_step_data()
 
 3. ADDING NEW TOOLS/STEPS:
    - Add new tool type in execute_steps() elif block
    - Create _execute_[tool]_step() method following pattern:
      * Get enhanced context: self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
-     * Get full data: self._get_polars_data_from_previous_step(step_number)
+     * Get full data: self._get_full_data_from_previous_step(step_number)
      * Process with tool agent (full data for processing, enhanced context for LLM)
      * Store results: self._store_step_data(step_number, "tool_type", data, metadata, step_context)
    - No changes needed to existing steps - fully repeatable!
 
-4. POLARS DATA ACCESS PATTERN:
+4. DATA ACCESS PATTERN:
    - LLM Context: Always use enhanced context from ALL previous steps for intelligent decisions
-   - Processing: Always use Polars DataFrames for maximum performance
-   - Variable Lookup: Access any previous step data by DataFrame name
+   - Processing: Always use full datasets for actual execution
+   - Variable Lookup: Access any previous step data by variable name
    - Automatic Storage: All results stored with consistent naming
 
 This replaces complex sample extraction and "last step" tracking with a clean,
@@ -40,7 +40,6 @@ import os
 import sys
 import sqlite3
 import json
-import polars as pl  # High-performance DataFrame operations replacing temp tables
 from pydantic import BaseModel
 
 # Add src path for imports
@@ -210,11 +209,8 @@ class ModernExecutionManager:
         
         # REPEATABLE DATA FLOW PATTERN: Variable-based data management
         # Based on proven old executor approach - scales with any number of tools/steps
-        self.data_variables = {}      # Legacy compatibility - FULL POLARS architecture uses polars_dataframes
+        self.data_variables = {}      # Full datasets: {"sql_data_step_1": [all_records], "api_data_step_2": response}
         self.step_metadata = {}       # Step tracking: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query"}}
-        
-        # POLARS DATAFRAME ENHANCEMENT: High-performance DataFrame storage replacing temp tables
-        self.polars_dataframes: Dict[str, pl.DataFrame] = {}  # {"sql_data_step_1": DataFrame, "api_data_step_2": DataFrame}
         
         # EXECUTION PLAN ACCESS: Store current execution plan for external access (minimal for realtime interface)
         self.current_execution_plan = None
@@ -473,7 +469,7 @@ class ModernExecutionManager:
     
     def _store_step_data(self, step_number: int, step_type: str, data: Any, metadata: Dict[str, Any] = None, step_context: str = None) -> str:
         """
-        Store step data using FULL POLARS architecture for maximum performance.
+        Store step data using repeatable variable-based pattern.
         
         Args:
             step_number: Current step number
@@ -487,22 +483,8 @@ class ModernExecutionManager:
         """
         variable_name = f"{step_type}_data_step_{step_number}"
         
-        # FULL POLARS: Convert to DataFrame for all operations
-        if isinstance(data, list) and data:
-            # Convert list of dicts to Polars DataFrame
-            df = pl.DataFrame(data)
-            self.polars_dataframes[variable_name] = df
-            logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
-        elif isinstance(data, dict):
-            # Single record - convert to DataFrame
-            df = pl.DataFrame([data])
-            self.polars_dataframes[variable_name] = df
-            logger.debug(f"Created Polars DataFrame from single record: {df.shape[0]} rows × {df.shape[1]} columns")
-        else:
-            # Empty or invalid data
-            df = pl.DataFrame()
-            self.polars_dataframes[variable_name] = df
-            logger.warning(f"Created empty Polars DataFrame for {variable_name}: no valid data")
+        # Store full dataset
+        self.data_variables[variable_name] = data
         
         # Store metadata including step context
         self.step_metadata[f"step_{step_number}"] = {
@@ -539,16 +521,16 @@ class ModernExecutionManager:
                 step_metadata = self.step_metadata[step_key]
                 step_context = step_metadata.get("step_context", f"Step {step_num} context not available")
                 
-                # FULL POLARS ARCHITECTURE: Get step data samples from polars_dataframes
+                # Get step data samples
                 variable_name = step_metadata.get("variable_name")
-                if variable_name and variable_name in self.polars_dataframes:
-                    df = self.polars_dataframes[variable_name]
-                    if not df.is_empty():
-                        # Sample the DataFrame efficiently
-                        step_data = df.head(max_samples).to_dicts()
-                        step_sample = step_data if len(step_data) <= max_samples else step_data[:max_samples]
+                if variable_name and variable_name in self.data_variables:
+                    step_data = self.data_variables[variable_name]
+                    
+                    # Sample the data
+                    if isinstance(step_data, list):
+                        step_sample = step_data[:max_samples] if len(step_data) > max_samples else step_data
                     else:
-                        step_sample = []
+                        step_sample = step_data
                 else:
                     step_sample = []
                 
@@ -558,43 +540,26 @@ class ModernExecutionManager:
         
         return all_contexts
 
-    def _get_polars_data_from_previous_step(self, current_step_number: int) -> List[Dict[str, Any]]:
+    def _get_full_data_from_previous_step(self, current_step_number: int) -> Any:
         """
-        Get data from the previous step using FULL POLARS architecture.
+        Get full dataset from the previous step using variable lookup.
         
         Args:
             current_step_number: Current step number
             
         Returns:
-            List of dictionaries from previous step Polars DataFrame, or empty list if none
-        """
-        df = self._get_polars_dataframe_from_previous_step(current_step_number)
-        if df is not None:
-            return df.to_dicts()
-        return []
-    
-    def _get_polars_dataframe_from_previous_step(self, current_step_number: int) -> Optional[pl.DataFrame]:
-        """
-        Get Polars DataFrame from the previous step for high-performance operations.
-        
-        Args:
-            current_step_number: Current step number
-            
-        Returns:
-            Polars DataFrame from previous step, or None if not available
+            Full dataset from previous step, or empty list if none
         """
         if current_step_number <= 1:
-            return None
+            return []
         
-        previous_step_num = current_step_number - 1
-        step_key = f"step_{previous_step_num}"
+        # Look for the most recent step's variable
+        previous_step_key = f"step_{current_step_number - 1}"
+        if previous_step_key in self.step_metadata:
+            variable_name = self.step_metadata[previous_step_key]["variable_name"]
+            return self.data_variables.get(variable_name, [])
         
-        if step_key in self.step_metadata:
-            variable_name = self.step_metadata[step_key]["variable_name"]
-            if variable_name in self.polars_dataframes:
-                return self.polars_dataframes[variable_name]
-        
-        return None
+        return []
     
     def _generate_data_injection_code(self, current_step_number: int, correlation_id: str) -> str:
         """
@@ -629,14 +594,7 @@ class ModernExecutionManager:
             
             if step_key in self.step_metadata:
                 variable_name = self.step_metadata[step_key]["variable_name"]
-                
-                # FULL POLARS: Get data from Polars DataFrame instead of legacy data_variables
-                if variable_name in self.polars_dataframes:
-                    df = self.polars_dataframes[variable_name]
-                    step_data = df.to_dicts()
-                else:
-                    step_data = []
-                    
+                step_data = self.data_variables.get(variable_name, [])
                 step_type = self.step_metadata[step_key].get("type", "unknown").lower()
                 
                 # Create consistent key format: {step_num}_{step_type}
@@ -683,10 +641,9 @@ class ModernExecutionManager:
     
     def _clear_execution_data(self):
         """Clear all execution data for fresh run - maintains repeatability."""
-        self.data_variables.clear()  # Legacy compatibility - FULL POLARS uses polars_dataframes
-        self.polars_dataframes.clear()  # FULL POLARS ARCHITECTURE: Clear DataFrame storage
+        self.data_variables.clear()
         self.step_metadata.clear()
-        logger.debug("FULL POLARS: Cleared execution data for fresh run")
+        logger.debug("Cleared execution data for fresh run")
     
     def cancel_query(self, correlation_id: str, reason: str = "User cancellation"):
         """Aggressively cancel a query - minimal implementation"""
@@ -1064,15 +1021,14 @@ class ModernExecutionManager:
             # Process results through Results Formatter Agent (like old executor)
             logger.info(f"[{correlation_id}] Processing results through Results Formatter Agent...")
             
-            # Build step_results_for_processing using FULL POLARS architecture (FULL DATASETS)
+            # Build step_results_for_processing using our data_variables storage (FULL DATASETS)
             step_results_for_processing = {}
             raw_results = {}
             
-            # FULL POLARS: Collect ALL data from polars_dataframes storage
+            # Collect ALL data from our variable-based storage
             all_collected_data = []
-            for variable_name, df in self.polars_dataframes.items():
-                data = df.to_dicts() if not df.is_empty() else []
-                logger.debug(f"[{correlation_id}] FULL POLARS: Added {variable_name.split('_')[0]} data from {variable_name}: {len(data)} records")
+            for variable_name, data in self.data_variables.items():
+                logger.debug(f"[{correlation_id}] Collecting data from {variable_name}: {len(data)} records")
                 all_collected_data.extend(data)
             
             # Build step results for processing with ACTUAL DATA (Generic for all step types)
@@ -1090,14 +1046,12 @@ class ModernExecutionManager:
                         f"api_data_step_{i}",                        # legacy API pattern
                     ]
                     
-                    # FULL POLARS ARCHITECTURE: Find data in polars_dataframes instead of data_variables
+                    # Find the actual variable that exists in our storage
                     step_data = []
                     found_variable = None
                     for variable_name in possible_variable_names:
-                        if variable_name in self.polars_dataframes:
-                            # Convert Polars DataFrame to list of dicts for Results Formatter
-                            df = self.polars_dataframes[variable_name]
-                            step_data = df.to_dicts() if not df.is_empty() else []
+                        if variable_name in self.data_variables:
+                            step_data = self.data_variables.get(variable_name, [])
                             found_variable = variable_name
                             break
                     
@@ -1117,9 +1071,9 @@ class ModernExecutionManager:
                             raw_results['execution_result'] = {'execution_output': step_data}
                         
                         step_results_for_processing[step_name] = step_data
-                        logger.debug(f"[{correlation_id}] FULL POLARS: Added {step_result.step_type} data from {found_variable}: {len(step_data)} records")
+                        logger.debug(f"[{correlation_id}] Added {step_result.step_type} data from {found_variable}: {len(step_data)} records")
                     else:
-                        logger.warning(f"[{correlation_id}] FULL POLARS: No data found for {step_result.step_type} step {i} (tried: {possible_variable_names})")
+                        logger.warning(f"[{correlation_id}] No data found for {step_result.step_type} step {i} (tried: {possible_variable_names})")
             
             # Log total data being passed to Results Formatter
             total_records = sum(len(data) for data in step_results_for_processing.values() if isinstance(data, list))
@@ -1218,7 +1172,6 @@ class ModernExecutionManager:
             # Build structured result with comprehensive execution details
             result = {
                 'success': overall_success,
-                'overall_success': overall_success,  # For test compatibility
                 'correlation_id': correlation_id,
                 'query': query,
                 'execution_plan': execution_plan.model_dump(),
@@ -1232,7 +1185,6 @@ class ModernExecutionManager:
                 # Add results formatter output like old executor
                 'raw_results': raw_results,
                 'processed_summary': formatted_response,
-                'formatted_response': formatted_response,  # For test compatibility
                 'processing_method': 'results_formatter_structured_pydantic'
             }
             
@@ -1356,10 +1308,10 @@ class ModernExecutionManager:
                             logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
                     
                     # Data storage is handled automatically in step execution methods
-                    # Log current data state using FULL POLARS
-                    total_dataframes = len(self.polars_dataframes)
+                    # Log current data state
+                    total_variables = len(self.data_variables)
                     total_metadata = len(self.step_metadata)
-                    logger.debug(f"[{correlation_id}] Data state: {total_dataframes} DataFrames, {total_metadata} step metadata entries")
+                    logger.debug(f"[{correlation_id}] Data state: {total_variables} variables, {total_metadata} step metadata entries")
                 else:
                     failed_steps += 1
                     logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
@@ -1420,9 +1372,8 @@ class ModernExecutionManager:
         - Store full results for next step access
         """
         try:
-            # FULL POLARS: Get data from previous step using Polars DataFrame only
-            full_previous_data = self._get_polars_data_from_previous_step(step_number)
-            logger.debug(f"[{correlation_id}] Retrieved {len(full_previous_data)} records from Polars DataFrame")
+            # REPEATABLE PATTERN: Get full data from previous step for processing
+            full_previous_data = self._get_full_data_from_previous_step(step_number)
             
             # Determine which SQL agent to use based on step position
             if step_number == 1:
@@ -1572,30 +1523,68 @@ class ModernExecutionManager:
         logger.info(f"[{correlation_id}] Processing API data with Internal API-SQL Agent: {data_count} full records")
         logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
         
-        # ALWAYS use Polars DataFrame processing (13,964x performance improvement)
-        logger.debug(f"[{correlation_id}] Using Polars DataFrame processing for all API-SQL operations")
+        # ALWAYS use temp table mode to avoid placeholder issues
+        # This is safer and more robust than placeholder replacement
+        use_temp_table = True
+        logger.debug(f"[{correlation_id}] Using temp table mode for all API-SQL operations")
         
-        # Call Internal API-SQL Agent with Polars optimization (ONLY mode)
+        # Call Internal API-SQL Agent - IT handles all the complexity
+        # Pass raw data through as-is - let LLM handle any processing needed
         result = await api_sql_code_gen_agent.process_api_data(
-            api_data=full_data,
+            api_data=full_data,  # REPEATABLE PATTERN: Pass raw data through as-is
             processing_context=step.query_context,
             correlation_id=correlation_id,
-            all_step_contexts=all_step_contexts,
-            sql_tables=self.sql_tables,
-            use_polars_optimization=True  # Always use Polars optimization
+            use_temp_table=use_temp_table,
+            all_step_contexts=all_step_contexts,  # NEW: Enhanced context from all previous steps
+            sql_tables=self.sql_tables  # NEW: Pass dynamic schema information
         )
         
-        # Execute Polars-optimized workflow (ONLY flow)
-        try:
-            db_data = await self._execute_polars_optimized_workflow(
-                polars_output=result.output,
-                api_data=full_data,
-                correlation_id=correlation_id
-            )
-            logger.info(f"[{correlation_id}] Polars optimization completed: {len(db_data)} results")
+        # Check if enhanced API-SQL agent returned sql_statements (new format)
+        if hasattr(result.output, 'sql_statements') and result.output.sql_statements:
+            logger.info(f"[{correlation_id}] Executing enhanced SQL statements: {len(result.output.sql_statements)} statements")
             
-        except Exception as e:
-            logger.error(f"[{correlation_id}] Polars optimization failed: {e}")
+            try:
+                # Execute all SQL statements in sequence
+                db_data = await self._execute_sql_statements_sequence(
+                    sql_statements=result.output.sql_statements,
+                    correlation_id=correlation_id
+                )
+                logger.info(f"[{correlation_id}] Enhanced API-SQL processing completed: {len(db_data)} results")
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] SQL statements execution failed: {e}")
+                db_data = []
+                
+        # Legacy temp table workflow (for backward compatibility)
+        elif result.output.uses_temp_table and hasattr(result.output, 'table_structure') and result.output.table_structure:
+            logger.info(f"[{correlation_id}] Creating temporary table and inserting {data_count} API records (legacy mode)")
+            
+            try:
+                # Debug output structure
+                logger.debug(f"[{correlation_id}] Output fields available: {dir(result.output)}")
+                logger.debug(f"[{correlation_id}] Table structure type: {type(result.output.table_structure)}")
+                logger.debug(f"[{correlation_id}] Data extraction type: {type(result.output.data_extraction)}")
+                
+                # Execute temp table operations in a single connection session
+                db_data = await self._execute_temp_table_workflow(
+                    table_structure=result.output.table_structure.dict() if hasattr(result.output.table_structure, 'dict') else result.output.table_structure,
+                    data_extraction=result.output.data_extraction.dict() if hasattr(result.output.data_extraction, 'dict') else result.output.data_extraction,
+                    processing_query=result.output.processing_query,
+                    api_data=full_data,
+                    correlation_id=correlation_id
+                )
+                logger.info(f"[{correlation_id}] Temp table API-SQL processing completed: {len(db_data)} results")
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Temp table workflow failed: {e}")
+                db_data = []
+            
+        elif result.output.processing_query:
+            # Direct mode (shouldn't happen now since we force temp table)
+            db_data = await self._execute_raw_sql_query(result.output.processing_query, correlation_id)
+            logger.info(f"[{correlation_id}] Direct API-SQL processing completed: {len(db_data)} results")
+        else:
+            logger.warning(f"[{correlation_id}] No SQL query generated by Internal API-SQL Agent")
             db_data = []
         
         # REPEATABLE PATTERN: Store full SQL results for next step access
@@ -1604,12 +1593,11 @@ class ModernExecutionManager:
             step_type="api_sql",
             data=db_data,
             metadata={
-                "sql_query": result.output.sql_query_template,  # Use Polars template
+                "sql_query": result.output.sql_statements[-1] if hasattr(result.output, 'sql_statements') and result.output.sql_statements else result.output.processing_query,
                 "explanation": result.output.explanation,
                 "input_record_count": data_count,
-                "polars_processing": True,  # Track that we used Polars processing
-                "polars_optimization": True,  # Polars optimization mode
-                "id_extraction_path": result.output.id_extraction_path
+                "use_temp_table": use_temp_table,
+                "sql_statements_count": len(result.output.sql_statements) if hasattr(result.output, 'sql_statements') else 1
             },
             step_context=step.query_context  # NEW: Store step context
         )
@@ -1617,7 +1605,7 @@ class ModernExecutionManager:
         logger.info(f"[{correlation_id}] API-SQL step completed: {len(db_data)} records stored as {variable_name}")
         
         # Create result object that matches expected structure
-        sql_query = result.output.sql_query_template  # Use Polars template
+        sql_query = result.output.sql_statements[-1] if hasattr(result.output, 'sql_statements') and result.output.sql_statements else result.output.processing_query
         result_data = SQLExecutionResult(sql_query, result.output.explanation, db_data)
         
         return StepResult(
@@ -1665,10 +1653,9 @@ class ModernExecutionManager:
             # ENHANCED PATTERN: Get context and samples from ALL previous steps
             all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
             
-            # FULL POLARS: Get data from previous step using Polars DataFrame only
-            full_previous_data = self._get_polars_data_from_previous_step(step_number)
-            actual_record_count = len(full_previous_data)
-            logger.debug(f"[{correlation_id}] Retrieved {actual_record_count} records from Polars DataFrame")
+            # REPEATABLE PATTERN: Get full data from previous step for processing
+            full_previous_data = self._get_full_data_from_previous_step(step_number)
+            actual_record_count = len(full_previous_data) if isinstance(full_previous_data, list) else 1
             
             logger.info(f"[{correlation_id}] API Code Gen: Processing {actual_record_count} records")
             logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
@@ -1912,11 +1899,15 @@ except Exception as e:
                 # CANCELLATION CHECK - Before subprocess execution
                 if correlation_id in self.cancelled_queries:
                     logger.warning(f"[{correlation_id}] SUBPROCESS CANCELLED - Not executing generated code due to cancellation")
-                    # Clean up Polars DataFrames from memory
+                    # Direct temp table cleanup using standard db_path pattern
                     try:
-                        if hasattr(self, 'polars_dataframes') and correlation_id in self.polars_dataframes:
-                            del self.polars_dataframes[correlation_id]
-                            logger.debug(f"[{correlation_id}] Polars DataFrames cleared from memory during cancellation")
+                        db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
+                        db_path = os.path.abspath(db_path)
+                        with sqlite3.connect(db_path) as conn:
+                            cursor = conn.cursor()
+                            cursor.execute("DROP TABLE IF EXISTS temp_api_users")
+                            cursor.execute("DROP TABLE IF EXISTS temp_api_data")
+                            conn.commit()
                     except Exception:
                         pass  # Ignore cleanup errors during cancellation
                     
@@ -1948,27 +1939,12 @@ except Exception as e:
             # Parse the output
             if result.returncode == 0 and result.stdout.strip():
                 try:
-                    # DEBUG: Log raw subprocess output before parsing
-                    logger.debug(f"[{correlation_id}] Raw subprocess stdout ({len(result.stdout)} chars): {result.stdout}")
-                    logger.debug(f"[{correlation_id}] Raw subprocess stderr ({len(result.stderr)} chars): {result.stderr}")
-                    
                     output = json.loads(result.stdout.strip())
-                    
-                    # DEBUG: Log parsed JSON structure
-                    logger.debug(f"[{correlation_id}] Parsed JSON type: {type(output)}")
-                    logger.debug(f"[{correlation_id}] Parsed JSON keys: {list(output.keys()) if isinstance(output, dict) else 'Not a dict'}")
-                    logger.debug(f"[{correlation_id}] JSON status: {output.get('status') if isinstance(output, dict) else 'No status'}")
-                    
                     if output.get('status') == 'success':
-                        data = output.get('data', [])
-                        logger.debug(f"[{correlation_id}] Extracted data type: {type(data)}")
-                        logger.debug(f"[{correlation_id}] Extracted data length: {len(data) if hasattr(data, '__len__') else 'No length'}")
-                        logger.debug(f"[{correlation_id}] Extracted data content: {data}")
-                        
                         logger.info(f"[{correlation_id}] Code execution successful")
                         return {
                             'success': True,
-                            'output': data,
+                            'output': output.get('data', []),
                             'stdout': result.stdout,
                             'stderr': result.stderr
                         }
@@ -2022,14 +1998,14 @@ except Exception as e:
         Args:
             sql_query: The SQL query to execute
             correlation_id: Correlation ID for logging
-            use_internal_validation: If True, use internal SQL validation (legacy mode)
+            use_internal_validation: If True, use internal SQL validation (allows temp tables)
             
         Returns:
             List of dictionaries containing query results
         """
         logger.debug(f"[{correlation_id}] Executing SQL query against database...")
         
-        # Safety check - use internal validation for legacy operations
+        # Safety check - use internal validation for temp table operations
         if use_internal_validation:
             from src.core.security.sql_security_validator import validate_internal_sql
             is_valid, error_msg = validate_internal_sql(sql_query, correlation_id)
@@ -2198,159 +2174,419 @@ except Exception as e:
             logger.error(f"[{correlation_id}] SQL sequence execution failed: {e}")
             return []
 
-    async def _execute_polars_optimized_workflow(self, polars_output, api_data, correlation_id: str) -> List[Dict[str, Any]]:
+    async def _execute_temp_table_workflow(self, table_structure: Dict[str, Any], data_extraction: Dict[str, Any], 
+                                          processing_query: str, api_data: List[Any], correlation_id: str) -> List[Dict[str, Any]]:
         """
-        Execute the new Polars-optimized workflow with flexible data handling.
-        
-        1. Normalize API data to consistent format
-        2. Extract IDs from API data using JSONPath
-        3. Execute SQL query with IN clause  
-        4. Return filtered SQL results directly (simplified JOIN)
+        Execute the complete temp table workflow using LLM-provided specifications.
+        Creates temp table from structure spec, extracts data using extraction spec, and runs query.
         
         Args:
-            polars_output: PolarsOptimizedOutput from the API-SQL agent
-            api_data: Raw API data to process (can be dict or list)
+            table_structure: JSON specification of table columns and types
+            data_extraction: JSON specification of how to extract API data
+            processing_query: Main SQL query that uses the temporary table
+            api_data: Data to insert into the temporary table
             correlation_id: Correlation ID for logging
             
         Returns:
-            List of combined results
+            List of query results
         """
-        try:
-            # Handle both single dict and list of dicts
-            if isinstance(api_data, dict):
-                api_records = [api_data]
-                logger.debug(f"[{correlation_id}] Converted single dict to list: 1 record")
-            elif isinstance(api_data, list):
-                api_records = api_data
-                logger.debug(f"[{correlation_id}] Using list data: {len(api_records)} records")
-            else:
-                logger.warning(f"[{correlation_id}] Unexpected API data type: {type(api_data)}")
-                return []
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _generate_safe_table_schema(table_structure: Dict[str, Any], table_name: str) -> str:
+            """Generate safe SQL DDL from JSON table structure specification"""
+            # Whitelist of allowed column types
+            ALLOWED_TYPES = {'TEXT', 'INTEGER', 'REAL', 'BLOB'}
             
-            logger.debug(f"[{correlation_id}] Starting Polars-optimized workflow with {len(api_records)} API records")
-            logger.debug(f"[{correlation_id}] Sample API data structure: {api_records[:2] if api_records else 'No data'}")
+            columns = table_structure.get('columns', [])
+            if not columns:
+                raise ValueError("Table structure must have at least one column")
             
-            if not api_records:
-                logger.warning(f"[{correlation_id}] No API data to process")
-                return []
+            column_definitions = []
+            primary_keys = []
             
-            # Step 2: Extract IDs dynamically using the specified path
-            id_extraction_path = polars_output.id_extraction_path
-            logger.debug(f"[{correlation_id}] Extracting IDs using path: {id_extraction_path}")
+            for col in columns:
+                # Validate column name (alphanumeric + underscore only)
+                name = col.get('name', '').strip()
+                if not name or not name.replace('_', '').replace('-', '').isalnum():
+                    raise ValueError(f"Invalid column name: {name}")
+                
+                # Validate column type
+                col_type = col.get('type', '').upper()
+                if col_type not in ALLOWED_TYPES:
+                    raise ValueError(f"Invalid column type: {col_type}. Allowed: {ALLOWED_TYPES}")
+                
+                # Build column definition
+                col_def = f"{name} {col_type}"
+                
+                if col.get('primary_key', False):
+                    primary_keys.append(name)
+                
+                column_definitions.append(col_def)
             
-            # Dynamic ID extraction using JSONPath-like logic
-            extracted_ids = []
+            # Add primary key constraint if specified
+            if primary_keys:
+                pk_constraint = f"PRIMARY KEY ({', '.join(primary_keys)})"
+                column_definitions.append(pk_constraint)
             
-            logger.debug(f"[{correlation_id}] Processing {len(api_records)} API records for ID extraction")
+            return f"CREATE TEMPORARY TABLE {table_name} ({', '.join(column_definitions)})"
+        
+        def _extract_data_from_api_response(api_data: List[Any], data_extraction: Dict[str, Any]) -> List[tuple]:
+            """Extract data from API response using extraction specification"""
+            extraction_type = data_extraction.get('extraction_type', '')
+            mappings = data_extraction.get('mappings', [])
             
-            for i, record in enumerate(api_records):
+            extracted_rows = []
+            
+            # Special handling for nested_extraction with array patterns
+            if extraction_type == 'nested_extraction':
+                for mapping in mappings:
+                    source_field = mapping.get('source_field', '')
+                    if source_field.endswith('.*'):
+                        # Array extraction - process differently
+                        field_name = source_field.replace('.*', '')
+                        logger.debug(f"Processing array extraction for field: {field_name}")
+                        
+                        for record in api_data:
+                            if isinstance(record, dict) and field_name in record:
+                                array_data = record[field_name]
+                                if isinstance(array_data, list):
+                                    logger.debug(f"Extracting {len(array_data)} items from {field_name}")
+                                    for item in array_data:
+                                        extracted_rows.append((item,))
+                                else:
+                                    logger.warning(f"Field {field_name} is not a list: {type(array_data)}")
+                            else:
+                                logger.debug(f"Record missing field {field_name} or not a dict: {type(record)}")
+                        return extracted_rows
+            
+            # Standard extraction for other types
+            for record in api_data:
+                row_values = []
+                record_processed = False
+                
+                for mapping in mappings:
+                    source_field = mapping.get('source_field', '')
+                    required = mapping.get('required', True)
+                    default_value = mapping.get('default_value', '')
+                    
+                    try:
+                        if extraction_type == 'dictionary_mapping':
+                            # Extract from dictionary
+                            if isinstance(record, dict):
+                                value = record.get(source_field, default_value if not required else None)
+                            else:
+                                value = default_value if not required else None
+                                
+                        elif extraction_type == 'list_values':
+                            # Extract the item itself (for string lists)
+                            if source_field == '@item':
+                                value = record
+                            else:
+                                value = default_value if not required else None
+                                
+                        elif extraction_type == 'nested_extraction':
+                            # Handle non-array nested extraction
+                            if '.' in source_field and not source_field.endswith('.*'):
+                                # Navigate nested object paths like "users.id"
+                                parts = source_field.split('.')
+                                value = record
+                                for part in parts:
+                                    if isinstance(value, dict) and part in value:
+                                        value = value[part]
+                                    else:
+                                        value = default_value if not required else None
+                                        break
+                            else:
+                                value = default_value if not required else None
+                        else:
+                            value = default_value if not required else None
+                        
+                        if value is None and required:
+                            logger.warning(f"Required field {source_field} not found in record: {record}")
+                            record_processed = True
+                            break
+                            
+                        row_values.append(value)
+                        
+                    except Exception as e:
+                        if required:
+                            logger.error(f"Error extracting {source_field}: {e}")
+                            record_processed = True
+                            break
+                        else:
+                            row_values.append(default_value)
+                
+                # Only add row if we have the expected number of values and no errors
+                if not record_processed and row_values and len(row_values) == len(mappings):
+                    extracted_rows.append(tuple(row_values))
+            
+            return extracted_rows
+        
+        def _sync_temp_table_workflow():
+            try:
+                import sqlite3
+                
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                # Single connection for entire workflow
+                conn = sqlite3.connect(db_path)
+                
                 try:
-                    logger.debug(f"[{correlation_id}] Processing record {i}: {type(record)} = {record}")
+                    # Enable WAL mode for concurrent access  
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA synchronous=NORMAL")
                     
-                    # Handle special case where API data is simple strings (like user IDs)
-                    if isinstance(record, str) and id_extraction_path in ['identity', 'self', '']:
-                        extracted_ids.append(record)
-                        continue
+                    cursor = conn.cursor()
                     
-                    # Handle normal dictionary records with path navigation
-                    if isinstance(record, dict):
-                        extracted_values = self._extract_values_from_record(record, id_extraction_path)
-                        logger.debug(f"[{correlation_id}] Extracted from record {i}: {extracted_values}")
-                        extracted_ids.extend(extracted_values)
+                    # Generate secure table name
+                    table_name = f"temp_api_users_{correlation_id.replace('-', '_')}"
+                    
+                    # Step 1: Generate and execute safe table schema
+                    temp_table_schema = _generate_safe_table_schema(table_structure, table_name)
+                    logger.debug(f"[{correlation_id}] Creating temporary table with schema: {temp_table_schema}")
+                    cursor.execute(temp_table_schema)
+                    
+                    # Step 2: Extract and insert API data using LLM specifications
+                    if api_data:
+                        # DEBUG: Show the actual API data structure before extraction
+                        logger.debug(f"[{correlation_id}] Raw API data structure: {type(api_data)}")
+                        if isinstance(api_data, list) and api_data:
+                            logger.debug(f"[{correlation_id}] First API record: {api_data[0]}")
+                            logger.debug(f"[{correlation_id}] API data sample: {api_data[:2]}")
+                        elif isinstance(api_data, dict):
+                            logger.debug(f"[{correlation_id}] API data keys: {list(api_data.keys())}")
+                            logger.debug(f"[{correlation_id}] API data structure: {api_data}")
+                        
+                        extracted_data = _extract_data_from_api_response(api_data, data_extraction)
+                        
+                        # DEBUG: Show what was extracted
+                        logger.debug(f"[{correlation_id}] Data extraction spec: {data_extraction}")
+                        logger.debug(f"[{correlation_id}] Extracted data: {extracted_data}")
+                        
+                        if extracted_data:
+                            # Build parameterized insert query
+                            columns = [col['name'] for col in table_structure.get('columns', [])]
+                            placeholders = ', '.join(['?' for _ in columns])
+                            insert_sql = f"INSERT OR IGNORE INTO {table_name} ({', '.join(columns)}) VALUES ({placeholders})"
+                            
+                            logger.debug(f"[{correlation_id}] Inserting {len(extracted_data)} rows into temp table")
+                            cursor.executemany(insert_sql, extracted_data)
+                            
+                            rows_inserted = cursor.rowcount
+                            logger.debug(f"[{correlation_id}] Successfully inserted {rows_inserted} rows into temp table")
+                        else:
+                            logger.warning(f"[{correlation_id}] No data extracted from API response")
                     else:
-                        # For other data types, try to convert to string if it's a simple value
-                        if id_extraction_path in ['identity', 'self', '']:
-                            extracted_ids.append(str(record))
-                        logger.debug(f"[{correlation_id}] Record {i} not a dict, type: {type(record)}")
-                except Exception as e:
-                    logger.debug(f"[{correlation_id}] Failed to extract from record {i} using path '{id_extraction_path}': {e}")
-                    continue
-            
-            # Remove None values and duplicates
-            user_ids = list(set([uid for uid in extracted_ids if uid is not None and uid != ""]))
-            logger.info(f"[{correlation_id}] Extracted {len(user_ids)} unique IDs from {len(api_data)} API records using path: {id_extraction_path}")
-            
-            if not user_ids:
-                logger.warning(f"[{correlation_id}] No IDs extracted from API data using path: {id_extraction_path}")
-                logger.debug(f"[{correlation_id}] Sample API data structure: {api_records[:2] if api_records else 'No data'}")
-                return []
-            
-            # Step 2.5: Create API DataFrame for potential JOIN operations
-            try:
-                api_df = pl.DataFrame(api_records)
-                logger.debug(f"[{correlation_id}] Created API DataFrame: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
-            except Exception as e:
-                logger.warning(f"[{correlation_id}] Could not create API DataFrame: {e}")
-                api_df = None
-            
-            # Step 3: Execute SQL query with IN clause
-            sql_template = polars_output.sql_query_template
-            
-            # Format the IN clause with proper SQL escaping
-            id_placeholders = ', '.join([f"'{str(uid).replace(chr(39), chr(39) + chr(39))}'" for uid in user_ids])
-            sql_query = sql_template.replace('{user_ids}', id_placeholders)
-            
-            logger.debug(f"[{correlation_id}] Executing SQL query: {sql_query[:200]}...")
-            
-            # Execute the SQL query
-            db_results = await self._execute_raw_sql_query(sql_query, correlation_id)
-            logger.info(f"[{correlation_id}] SQL query returned {len(db_results)} database records")
-            
-            if not db_results:
-                logger.warning(f"[{correlation_id}] No database records found for extracted user IDs")
-                return []
-            
-            # Step 4: Create database DataFrame and JOIN with API data
-            db_df = pl.DataFrame(db_results)
-            logger.debug(f"[{correlation_id}] Created database DataFrame: {db_df.shape[0]} rows × {db_df.shape[1]} columns")
-            
-            # Prepare API DataFrame with only needed fields
-            api_fields = polars_output.api_dataframe_fields
-            if api_fields and api_df is not None and not (len(api_records) > 0 and isinstance(api_records[0], str)):
-                # Only filter fields if we have structured data (not raw strings)
-                try:
-                    # Select only the specified fields from API data
-                    api_df_filtered = api_df.select(api_fields)
-                    logger.debug(f"[{correlation_id}] Filtered API DataFrame to {len(api_fields)} fields: {api_fields}")
-                except Exception as e:
-                    logger.warning(f"[{correlation_id}] Failed to filter API fields, using all: {e}")
-                    api_df_filtered = api_df
-            else:
-                api_df_filtered = api_df if api_df is not None else pl.DataFrame()
-            
-            # Handle JOIN based on data type
-            join_field = polars_output.join_field
-            logger.debug(f"[{correlation_id}] Joining on field: {join_field}")
-            
-            try:
-                # Since the SQL query already filtered by the extracted IDs,
-                # we can return the database results directly
-                # The API data was only used for ID extraction
-                result_data = db_results
-                logger.info(f"[{correlation_id}] SQL results already filtered by extracted IDs: {len(result_data)} records")
+                        logger.warning(f"[{correlation_id}] No API data provided for temp table")
+                    
+                    # Step 3: Execute the main processing query
+                    # Replace temp_api_users with actual table name in query
+                    actual_query = processing_query.replace('temp_api_users', table_name)
+                    logger.debug(f"[{correlation_id}] Executing processing query: {actual_query}")
+                    
+                    # DEBUG: Show what user IDs are in the temp table for debugging
+                    cursor.execute(f"SELECT okta_id FROM {table_name}")
+                    temp_user_ids = [row[0] for row in cursor.fetchall()]
+                    logger.debug(f"[{correlation_id}] Temp table contains user IDs: {temp_user_ids}")
+                    
+                    # Execute query without parameters since tenant_id is now injected directly into the query
+                    cursor.execute(actual_query)
+                    columns = [description[0] for description in cursor.description]
+                    results = cursor.fetchall()
+                    
+                    # Convert to list of dictionaries
+                    result_dicts = []
+                    for row in results:
+                        result_dict = dict(zip(columns, row))
+                        result_dicts.append(result_dict)
+                    
+                    logger.debug(f"[{correlation_id}] Query returned {len(result_dicts)} results")
+                    
+                    # Step 4: Cleanup - drop temp table
+                    cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+                    logger.debug(f"[{correlation_id}] Cleaned up temporary table: {table_name}")
+                    
+                    return result_dicts
                 
-                return result_data
-                
+                except Exception as e:
+                    logger.error(f"[{correlation_id}] Error in temp table workflow: {e}")
+                    raise
+                finally:
+                    conn.close()
+                    
             except Exception as e:
-                logger.error(f"[{correlation_id}] Result processing failed: {e}")
-                return db_results  # Fallback to raw database results
-            
+                logger.error(f"[{correlation_id}] Failed to execute temp table workflow: {e}")
+                raise
+        
+        try:
+            # Run workflow in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                return await loop.run_in_executor(executor, _sync_temp_table_workflow)
         except Exception as e:
-            logger.error(f"[{correlation_id}] Polars-optimized workflow failed: {e}")
-            return []
+            logger.error(f"[{correlation_id}] Failed to execute temp table workflow: {e}")
+            raise
 
-    # Legacy methods removed - only Polars optimization supported
+    async def _insert_api_data_into_temp_table(self, api_data: List[Dict[str, Any]], correlation_id: str) -> None:
+        """
+        Insert API data into the temporary table created by the API-SQL agent.
+        Uses thread pool to avoid blocking the event loop.
+        
+        Args:
+            api_data: List of API response data to insert
+            correlation_id: Correlation ID for logging
+        """
+        if not api_data:
+            logger.warning(f"[{correlation_id}] No API data to insert into temp table")
+            return
+        
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _sync_insert_data():
+            try:
+                import sqlite3
+                
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                # Connect to database
+                conn = sqlite3.connect(db_path)
+                
+                # Enable WAL mode for concurrent access  
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                
+                cursor = conn.cursor()
+                
+                # Get the first record to determine the structure
+                first_record = api_data[0]
+                
+                # Handle both string lists (user IDs) and dictionary lists
+                if isinstance(first_record, str):
+                    # Convert string list to dictionary list for temp table insertion
+                    # Assume these are okta_id values for temp_api_users table
+                    columns = ['okta_id']
+                    logger.debug(f"[{correlation_id}] Converting string list to okta_id dictionary format")
+                else:
+                    # Dictionary format - always use okta_id schema for consistency
+                    columns = ['okta_id']
+                    logger.debug(f"[{correlation_id}] Using okta_id extraction for dictionary format")
+                
+                # Create parameterized INSERT statement
+                # Assume temp table is named temp_api_users (standard from prompt)
+                placeholders = ', '.join(['?' for _ in columns])
+                column_names = ', '.join(columns)
+                
+                insert_sql = f"INSERT OR IGNORE INTO temp_api_users ({column_names}) VALUES ({placeholders})"
+                
+                logger.debug(f"[{correlation_id}] Inserting {len(api_data)} records into temp table")
+                logger.debug(f"[{correlation_id}] Insert SQL: {insert_sql}")
+                
+                # Insert all records
+                for record in api_data:
+                    if isinstance(record, str):
+                        # Handle string records (user IDs) - convert to dictionary format
+                        values = [record]  # okta_id value
+                    else:
+                        # Handle dictionary records - extract okta_id intelligently
+                        if 'user_id' in record:
+                            # Role assignment format
+                            values = [record['user_id']]
+                        elif 'actor' in record and 'id' in record.get('actor', {}):
+                            # Login event format
+                            values = [record['actor']['id']]
+                        elif 'id' in record:
+                            # Standard user record
+                            values = [record['id']]
+                        else:
+                            # Cannot extract - skip record
+                            logger.warning(f"[{correlation_id}] Cannot extract okta_id, skipping record")
+                            continue
+                    cursor.execute(insert_sql, values)
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                logger.info(f"[{correlation_id}] Successfully inserted {len(api_data)} records into temp table")
+                
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to insert API data into temp table: {e}")
+                raise
+        
+        try:
+            # Run insertion in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                await loop.run_in_executor(executor, _sync_insert_data)
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Failed to insert API data into temp table: {e}")
+            raise
+
+    async def _cleanup_temp_table(self, correlation_id: str) -> None:
+        """
+        Drop the temporary table created during API-SQL processing.
+        Uses thread pool to avoid blocking the event loop.
+        
+        Args:
+            correlation_id: Correlation ID for logging
+        """
+        # Execute in thread pool to avoid blocking event loop
+        import asyncio
+        import concurrent.futures
+        
+        def _sync_cleanup():
+            try:
+                import sqlite3
+                
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                # Connect to database
+                conn = sqlite3.connect(db_path)
+                
+                # Enable WAL mode for concurrent access
+                conn.execute("PRAGMA journal_mode=WAL")
+                
+                cursor = conn.cursor()
+                
+                # Drop the temp table (standard name from prompt)
+                drop_sql = "DROP TABLE IF EXISTS temp_api_users"
+                cursor.execute(drop_sql)
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                logger.debug(f"[{correlation_id}] Temporary table cleaned up successfully")
+                
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Failed to cleanup temp table (non-critical): {e}")
+        
+        try:
+            # Run cleanup in thread pool
+            loop = asyncio.get_event_loop()
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                await loop.run_in_executor(executor, _sync_cleanup)
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Failed to cleanup temp table (non-critical): {e}")
 
     async def _emergency_cleanup(self, correlation_id: str):
-        """Aggressive cleanup on cancellation - Polars DataFrame implementation"""
+        """Aggressive cleanup on cancellation - minimal implementation"""
         try:
             # 1. Log the cancellation
-            logger.warning(f"[{correlation_id}] EMERGENCY CLEANUP: Clearing DataFrames and stopping all operations")
+            logger.warning(f"[{correlation_id}] EMERGENCY CLEANUP: Deleting temp tables and stopping all operations")
             
-            # 2. Clear Polars DataFrames (memory cleanup)
-            if hasattr(self, 'polars_dataframes') and correlation_id in self.polars_dataframes:
-                del self.polars_dataframes[correlation_id]
-                logger.info(f"[{correlation_id}] Polars DataFrames cleared from memory")
+            # 2. Drop any temp tables aggressively
+            await self._force_drop_temp_tables(correlation_id)
             
             # 3. Clear any stored data for this query
             self.data_variables.clear()
@@ -2362,64 +2598,39 @@ except Exception as e:
         except Exception as e:
             logger.error(f"[{correlation_id}] Emergency cleanup failed (non-critical): {e}")
 
-    def _extract_values_from_record(self, record: Dict[str, Any], extraction_path: str) -> List[Any]:
-        """
-        Extract values from a record using a dot-notation path.
+    async def _force_drop_temp_tables(self, correlation_id: str):
+        """Force drop temp tables - aggressive cleanup"""
+        def _sync_force_cleanup():
+            try:
+                import sqlite3
+                
+                # Database path (correct for new structure)
+                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
+                db_path = os.path.abspath(db_path)
+                
+                conn = sqlite3.connect(db_path)
+                
+                # Drop common temp table names aggressively
+                temp_tables = ['temp_api_users', 'temp_user_data', 'temp_processing']
+                for table in temp_tables:
+                    try:
+                        conn.execute(f"DROP TABLE IF EXISTS {table}")
+                    except:
+                        pass  # Ignore errors - aggressive cleanup
+                
+                conn.commit()
+                conn.close()
+                logger.info(f"[{correlation_id}] Temp tables forcefully dropped")
+                
+            except Exception as e:
+                logger.warning(f"[{correlation_id}] Force temp table cleanup failed (non-critical): {e}")
         
-        Args:
-            record: The record to extract from
-            extraction_path: Dot-notation path like 'id', 'profile.login', 'user_ids.*', etc.
-            
-        Returns:
-            List of extracted values (empty if path not found)
-        """
-        try:
-            # Handle special array extraction syntax like 'user_ids.*'
-            if extraction_path.endswith('.*'):
-                array_path = extraction_path[:-2]  # Remove '.*'
-                path_parts = array_path.split('.')
-                
-                # Navigate to the array
-                current = record
-                for part in path_parts:
-                    if isinstance(current, dict) and part in current:
-                        current = current[part]
-                    else:
-                        return []
-                
-                # If current is an array, return all items
-                if isinstance(current, list):
-                    return [item for item in current if item is not None]
-                else:
-                    return [current] if current is not None else []
-            
-            # Split the path into parts for normal navigation
-            path_parts = extraction_path.split('.')
-            
-            # Navigate through the record
-            current = record
-            for part in path_parts:
-                if isinstance(current, dict) and part in current:
-                    current = current[part]
-                elif isinstance(current, list) and part.isdigit():
-                    # Handle array indexing like 'items.0.id'
-                    index = int(part)
-                    if 0 <= index < len(current):
-                        current = current[index]
-                    else:
-                        return []
-                else:
-                    return []
-            
-            # If we got a single value, return it as a list
-            if not isinstance(current, list):
-                return [current] if current is not None else []
-            else:
-                # If it's a list, flatten it
-                return [item for item in current if item is not None]
-                
-        except Exception:
-            return []
+        # Run in thread pool
+        import concurrent.futures
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            await loop.run_in_executor(executor, _sync_force_cleanup)
+
 
 # Create singleton instance
 modern_executor = ModernExecutionManager()
