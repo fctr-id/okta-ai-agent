@@ -1714,7 +1714,8 @@ class ModernExecutionManager:
             # DEBUG: Log the actual generated code if debug level is enabled
             generated_code = api_result_dict.get('code', '')
             if generated_code:
-                logger.debug(f"[{correlation_id}] Generated API Code:\n{'-'*50}\n{generated_code}\n{'-'*50}")
+                # logger.debug(f"[{correlation_id}] Generated API Code:\n{'-'*50}\n{generated_code}\n{'-'*50}")
+                pass
             else:
                 logger.warning(f"[{correlation_id}] No API code was generated!")
             
@@ -2276,10 +2277,28 @@ except Exception as e:
                 logger.debug(f"[{correlation_id}] Sample API data structure: {api_records[:2] if api_records else 'No data'}")
                 return []
             
-            # Step 2.5: Create API DataFrame for potential JOIN operations
+            # Step 2.5: Create API DataFrame for potential JOIN operations with schema normalization
             try:
-                api_df = pl.DataFrame(api_records)
-                logger.debug(f"[{correlation_id}] Created API DataFrame: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                # Normalize API data for consistent schema
+                normalized_api_records = []
+                for record in api_records:
+                    if isinstance(record, dict):
+                        normalized_record = {}
+                        for key, value in record.items():
+                            # Ensure consistent data types
+                            if value is None:
+                                normalized_record[key] = ""
+                            elif isinstance(value, (list, dict)):
+                                normalized_record[key] = str(value)  # Convert complex types to strings
+                            else:
+                                normalized_record[key] = value
+                        normalized_api_records.append(normalized_record)
+                    else:
+                        # Handle non-dict records
+                        normalized_api_records.append({'value': str(record)})
+                
+                api_df = pl.DataFrame(normalized_api_records)
+                logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not create API DataFrame: {e}")
                 api_df = None
@@ -2301,9 +2320,26 @@ except Exception as e:
                 logger.warning(f"[{correlation_id}] No database records found for extracted user IDs")
                 return []
             
-            # Step 4: Create database DataFrame and JOIN with API data
-            db_df = pl.DataFrame(db_results)
-            logger.debug(f"[{correlation_id}] Created database DataFrame: {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+            # Step 4: Create database DataFrame - skip NULL values to avoid schema issues
+            try:
+                # Filter out rows with NULL values that cause schema conflicts
+                clean_results = []
+                for row in db_results:
+                    # Skip rows where critical fields are NULL
+                    if row.get('application_okta_id') is not None or 'application_okta_id' not in row:
+                        clean_results.append(row)
+                
+                if clean_results:
+                    db_df = pl.DataFrame(clean_results)
+                    logger.debug(f"[{correlation_id}] Created database DataFrame (filtered {len(db_results) - len(clean_results)} NULL rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                else:
+                    logger.warning(f"[{correlation_id}] All rows had NULL values, returning original data")
+                    return db_results
+            except Exception as e:
+                logger.error(f"[{correlation_id}] Failed to create database DataFrame: {e}")
+                # Fallback: return raw database results
+                logger.warning(f"[{correlation_id}] Falling back to raw database results due to DataFrame creation error")
+                return db_results
             
             # Prepare API DataFrame with only needed fields
             api_fields = polars_output.api_dataframe_fields
