@@ -51,6 +51,7 @@ from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, gener
 from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
 from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent
 from src.core.agents.results_formatter_agent import process_results_structured
+from src.core.agents.results_template_agent import generate_results_template, execute_results_template  # NEW: Template-based results formatting
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 
 # Import security validation
@@ -1125,13 +1126,13 @@ class ModernExecutionManager:
             total_records = sum(len(data) for data in step_results_for_processing.values() if isinstance(data, list))
             logger.info(f"[{correlation_id}] Passing {total_records} total records to Results Formatter")
             
-            # Call Results Formatter Agent like old executor
+            # Call Results Formatter Agent like backup executor - let it decide complete vs sample processing
             try:
                 formatted_response = await process_results_structured(
                     query=query,
                     results=step_results_for_processing,
                     original_plan=str(execution_plan.model_dump()),
-                    is_sample=False,
+                    is_sample=False,  # Let Results Formatter decide internally
                     metadata={'flow_id': correlation_id}
                 )
                 
