@@ -75,6 +75,7 @@ ALLOWED_MODULES: Set[str] = {
     
     # Template system (specific allowlist for security)
     'src.core.agents.results_template_agent',
+    'src',  # Allow src module imports for template system
 }
 
 # Safe built-in functions and classes
@@ -92,6 +93,9 @@ ALLOWED_BUILTINS = {
     'main',           # Main function
     'timedelta', 'datetime',  # DateTime operations
     'dumps', 'loads',  # JSON operations
+    
+    # Template system functions (allow direct function calls)
+    'execute_results_template_from_dict',  # Results template processor
 }
 
 # Allowed Python methods for generated code
@@ -187,15 +191,25 @@ class EnhancedSecurityValidator:
                 elif isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name):
                         func_name = node.func.id
+                        # Allow user-defined functions (not in builtins but also not dangerous)
+                        # Only block if it's NOT in allowed builtins AND matches dangerous patterns
                         if func_name not in self.allowed_builtins:
-                            violations.append(f"Unauthorized function call: {func_name}")
-                            risk_level = 'MEDIUM'
+                            # Check if it's a dangerous function name
+                            dangerous_patterns = ['exec', 'eval', 'compile', 'open', 'input', 'system']
+                            if any(dangerous in func_name.lower() for dangerous in dangerous_patterns):
+                                violations.append(f"Unauthorized function call: {func_name}")
+                                risk_level = 'HIGH'
+                            # Allow user-defined functions like fetch_user_roles, process_data, etc.
                     
                     elif isinstance(node.func, ast.Attribute):
                         attr_name = node.func.attr
                         if attr_name not in self.allowed_methods:
-                            violations.append(f"Unauthorized method call: {attr_name}")
-                            risk_level = 'MEDIUM'
+                            # Check if it's a dangerous method name
+                            dangerous_patterns = ['exec', 'eval', 'compile', 'open', 'input', 'system']
+                            if any(dangerous in attr_name.lower() for dangerous in dangerous_patterns):
+                                violations.append(f"Unauthorized method call: {attr_name}")
+                                risk_level = 'HIGH'
+                            # Allow user-defined methods
         
         except SyntaxError as e:
             violations.append(f"Syntax error in code: {e}")

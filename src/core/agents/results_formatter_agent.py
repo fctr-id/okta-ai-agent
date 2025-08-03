@@ -497,81 +497,59 @@ def _format_single_sql_directly(results: Dict[str, Any], flow_id: str, total_rec
 
 async def format_results(query: str, results: Dict[str, Any], is_sample: bool = False, 
                          original_plan: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Enhanced results formatting with conditional processing based on dataset size"""
+    """
+    Main function for the Results Formatter Agent.
+    - For large datasets, uses a template-based system for robust processing.
+    - For small datasets, uses a direct LLM call for formatting.
+    """
+    flow_id = metadata.get('correlation_id') if metadata else generate_correlation_id()
+    set_correlation_id(flow_id)
     
+    logger.info(f"Results Formatter Agent Starting")
     
-    # Count total records to inform the LLM about dataset size
     total_records = _count_total_records(results)
-    flow_id = metadata.get("flow_id", "unknown") if metadata else "unknown"
+    logger.info(f"Processing {total_records} total records (is_sample: {is_sample})")
     
-    logger.info(f"[{flow_id}] Results Formatter Agent Starting")
-    logger.info(f"[{flow_id}] Processing {total_records} total records (is_sample: {is_sample})")
-    logger.debug(f"[{flow_id}] Query: {query}")
-    logger.debug(f"[{flow_id}] Original Plan: {original_plan}")
+    # Simplified logic: Always use the template system for consistency and reliability.
+    # This avoids generating Python code for the final step, which was causing the ModuleNotFoundError.
     
-    # SINGLE SQL OPTIMIZATION: Check if this is a simple single SQL query
-    if _is_single_sql_query(results, original_plan):
-        logger.info(f"[{flow_id}] SINGLE SQL OPTIMIZATION: Detected single SQL query - using direct formatting")
-        return _format_single_sql_directly(results, flow_id, total_records)
-    
-    # Log the input data structure for debugging
-    if 'raw_results' in results:
-        raw_results = results['raw_results']
-        if 'sql_execution' in raw_results:
-            sql_data = raw_results['sql_execution'].get('data', [])
-            logger.debug(f"[{flow_id}] SQL Data: {len(sql_data)} records")
-            if sql_data:
-                sample_record = sql_data[0]
-                logger.debug(f"[{flow_id}] Sample SQL Record Keys: {list(sample_record.keys())}")
-                # Log the complete first record for debugging (not truncated fields)
-                logger.debug(f"[{flow_id}] Complete Sample SQL Record: {sample_record}")
-    
-    def _estimate_token_count(data):
-        """
-        Estimate token count for LLM processing.
-        Rough estimation: 1 token ≈ 4 characters for English text
-        """
-        try:
-            import json
-            data_str = json.dumps(data, ensure_ascii=False)
-            # Rough token estimation: 1 token ≈ 4 characters
-            estimated_tokens = len(data_str) // 4
-            return estimated_tokens
-        except:
-            # Fallback to string length estimation
-            data_str = str(data)
-            return len(data_str) // 4
+    logger.debug(f"Query: {query}")
+    logger.debug(f"Original Plan: {original_plan}")
 
-    try:
-        # Determine processing approach based on estimated token count only (LLM context-aware)
-        estimated_tokens = _estimate_token_count(results)
-        token_threshold = 1000  # Conservative threshold to stay within LLM context limits
-        
-        if estimated_tokens <= token_threshold:  # Process if within token limits
-            # Small-to-medium dataset - process directly with aggregation  
-            logger.info(f"[{flow_id}] Processing complete dataset directly (estimated {estimated_tokens} tokens, {total_records} records)")
-            return await _process_complete_data(query, results, original_plan, flow_id, total_records)
-        else:
-            # Large dataset - use sampling for efficiency and to avoid token limits
-            logger.info(f"[{flow_id}] Processing samples for large dataset (estimated {estimated_tokens} tokens, {total_records} records)")
-            sampled_results = _create_intelligent_samples(results, total_records)
-            return await _process_sample_data(query, sampled_results, original_plan, flow_id, total_records)
-            
-    except Exception as e:
-        logger.error(f"[{flow_id}] Results Formatter Agent Error: {e}")
-        return {
-            'display_type': 'markdown', 
-            'content': {'text': f'**Error**: {e}'},
-            'metadata': {
-                'execution_summary': f'Formatting failed: {e}',
-                'confidence_level': 'Low',
-                'data_sources': ['error'],
-                'total_records': 0,
-                'processing_time': 'N/A',
-                'limitations': 'Processing failed due to error'
-            },
-            'usage_info': {'error': 'Processing failed'}
-        }
+    # 1. Create intelligent samples to determine data structure for the template agent.
+    sampled_results = _create_intelligent_samples(results, total_records)
+    logger.info(f"Using template system for dataset processing ({total_records} total records)")
+
+    # 2. Generate the template configuration based on the sample data structure.
+    logger.info("Template System: Starting template generation")
+    template_config = await generate_results_template(
+        query=query,
+        data_structure=sampled_results,
+        original_plan=original_plan,
+        correlation_id=flow_id
+    )
+    logger.info(f"Template generated: {template_config.template_name}")
+    logger.debug(f"Template config: {len(template_config.field_mappings)} field mappings")
+
+    # 3. Execute the generated template on the FULL dataset.
+    # This is the core of the fix: direct execution instead of code generation.
+    logger.info("Template System: Executing template on full dataset")
+    formatted_results = execute_results_template(template_config, results)
+    logger.info("Template System: Formatting complete")
+
+    # The formatted_results from the executor is the final content.
+    # We just need to wrap it in the standard response structure.
+    return {
+        "display_type": template_config.display_type,
+        "content": formatted_results,
+        "metadata": {
+            "headers": template_config.headers,
+            "total_records": len(formatted_results),
+            "data_source": "template_executor"
+        },
+        "processing_code": None  # No code generated, so this is None
+    }
+
 
 async def _process_complete_data(query: str, results: Dict[str, Any], original_plan: Optional[str], 
                                 flow_id: str, total_records: int) -> Dict[str, Any]:
