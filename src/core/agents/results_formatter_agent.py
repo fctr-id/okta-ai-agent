@@ -31,6 +31,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.utils.logging import get_logger, generate_correlation_id, set_correlation_id, get_default_log_dir
 from src.utils.security_config import get_allowed_methods_for_prompt
 
+# Import template system for sample data processing
+from src.core.agents.results_template_agent import generate_results_template, execute_results_template
+
 # Setup centralized logging with file output  
 # Using main "okta_ai_agent" namespace for unified logging across all agents
 logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
@@ -88,26 +91,31 @@ For user queries: Group by user_id and concatenate groups/apps into comma-separa
 Create comprehensive, user-friendly data presentations with all records included."""
 
 def _load_sample_data_prompt() -> str:
-    """Load system prompt for sample data processing and code generation with dynamic allowed methods"""
+    """Load system prompt for sample data processing using template system"""
     try:
-        prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_sample_data_prompt.txt")
+        # NEW: Use template-based prompt for sample data processing
+        prompt_file = os.path.join(os.path.dirname(__file__), "prompts", "results_formatter_sample_data_template_prompt.txt")
         with open(prompt_file, 'r', encoding='utf-8') as f:
             prompt_content = f.read()
         
-        # Inject current allowed methods dynamically
-        allowed_methods_section = get_allowed_methods_for_prompt()
-        
-        # Replace placeholder in prompt with actual allowed methods
-        if "{{ALLOWED_METHODS_PLACEHOLDER}}" in prompt_content:
-            prompt_content = prompt_content.replace("{{ALLOWED_METHODS_PLACEHOLDER}}", allowed_methods_section)
-        
-        logger.debug("Loaded sample data prompt with dynamic allowed methods for pure Python processing")
+        logger.debug("Loaded sample data template prompt - will use template system for large datasets")
         return prompt_content
         
     except FileNotFoundError:
-        logger.warning("Sample data prompt file not found, using fallback")
-        return """You are a Results Formatter Agent that processes sample data and generates processing code.
-Analyze samples and create efficient code for processing complete datasets."""
+        logger.warning("Sample data template prompt file not found, using fallback")
+        return """You are a Results Template Agent that analyzes data structures and selects the most appropriate formatting template for large datasets that need to be presented in tabular format.
+
+## CORE MISSION
+Your job is to analyze the structure of SAMPLE DATA from large query results and generate a ResultsTemplate configuration that will properly format the complete dataset for display.
+
+## AVAILABLE TEMPLATE PATTERNS
+1. SIMPLE_TABLE - Single dataset with direct field mapping
+2. USER_LOOKUP - Join user IDs with user profile data (most common)  
+3. AGGREGATION - Group records by entity and aggregate list fields
+4. HIERARCHY - Nested parent-child relationships
+5. LIST_CONSOLIDATION - Merge multiple list fields
+
+Remember to respond with a valid ResultsTemplate JSON object."""
 
 # Create Results Formatter Agents with PydanticAI (2 specialized agents)
 # Create PydanticAI agents with string output to avoid validation issues
@@ -627,7 +635,7 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
 
 async def _process_sample_data(query: str, sampled_results: Dict[str, Any], original_plan: Optional[str], 
                               flow_id: str, total_records: int) -> Dict[str, Any]:
-    """Process sample data and generate code for full dataset processing"""
+    """Process sample data using template system for large dataset formatting"""
     
     # Debug logging for samples received
     logger.debug(f"[{flow_id}] Sample Data Processing - Samples received:")
@@ -638,55 +646,134 @@ async def _process_sample_data(query: str, sampled_results: Dict[str, Any], orig
             # Log complete first 2 records for debugging (not truncated fields)
             logger.debug(f"[{flow_id}] Complete first 2 SQL sample records: {sql_data[:2]}")
     
-    prompt = _create_sample_data_prompt(query, sampled_results, original_plan, total_records)
-    
-    # Debug logging for prompt being sent
-    logger.debug(f"[{flow_id}] Sample Data Prompt (length: {len(prompt)} chars):")
-    logger.debug(f"[{flow_id}] Sample Prompt Content: {prompt[:1000]}..." if len(prompt) > 1000 else f"[{flow_id}] Sample Prompt Content: {prompt}")
+    logger.info(f"[{flow_id}] Using template system for large dataset processing ({total_records} total records)")
     
     try:
-        if config['enable_token_reporting']:
-            logger.info(f"[{flow_id}] Processing samples and generating code with specialized PydanticAI agent...")
+        # NEW: Use template system for sample data processing
+        logger.info(f"[{flow_id}] Template System: Starting template-based formatting for large dataset")
         
-        # Run formatter with flexible validation
-        try:
-            result = await sample_data_formatter.run(prompt)
-            
-            # Since we're not using structured output, result should be a string
-            raw_response = str(result.data) if hasattr(result, 'data') else str(result)
-            
-            # Parse the raw response manually
-            formatted_result = _parse_raw_llm_response(raw_response, flow_id)
-            
-        except Exception as validation_error:
-            logger.error(f"[{flow_id}] Sample data processing failed: {validation_error}")
-            # Re-raise the error to be caught by outer exception handler
-            raise validation_error
+        # Convert sampled data structure to format expected by template system
+        # Template system expects step_results format like: {'1_sql': [...], '2_api': [...]}
+        template_data_structure = {}
         
-        # Debug logging for final formatted output
-        logger.debug(f"[{flow_id}] Sample Data Final Result Keys: {list(formatted_result.keys())}")
-        if 'processing_code' in formatted_result:
-            logger.debug(f"[{flow_id}] Final Processing Code Generated: {formatted_result['processing_code'][:300] if formatted_result['processing_code'] else 'None'}...")
-            # Log the complete final processing code for debugging
-            if formatted_result['processing_code']:
-                logger.debug(f"[{flow_id}] COMPLETE FINAL PROCESSING CODE GENERATED:\n{formatted_result['processing_code']}")
+        # Extract step data from sampled_results format
+        if 'raw_results' in sampled_results:
+            raw_data = sampled_results['raw_results']
+            step_counter = 1
+            
+            # Handle SQL data
+            if 'sql_execution' in raw_data and raw_data['sql_execution'].get('data'):
+                template_data_structure[f'{step_counter}_sql'] = raw_data['sql_execution']['data']
+                step_counter += 1
+            
+            # Handle API data
+            if 'api_execution' in raw_data and raw_data['api_execution'].get('data'):
+                template_data_structure[f'{step_counter}_api'] = raw_data['api_execution']['data']
+                step_counter += 1
+            
+            # Handle step results if present
+            if 'step_results' in raw_data:
+                for i, step in enumerate(raw_data['step_results'], 1):
+                    if step.get('data'):
+                        step_type = step.get('step_type', 'unknown')
+                        template_data_structure[f'{i}_{step_type}'] = step['data']
         
-        return formatted_result
+        # If no proper structure found, try direct sampled_results
+        if not template_data_structure:
+            # Look for direct step data in sampled_results
+            for key, value in sampled_results.items():
+                if isinstance(value, list) and value:
+                    template_data_structure[key] = value
+        
+        logger.debug(f"[{flow_id}] Template data structure keys: {list(template_data_structure.keys())}")
+        
+        # Generate template configuration using sample data
+        template_config = await generate_results_template(
+            query=query,
+            data_structure=template_data_structure,
+            original_plan=original_plan,
+            correlation_id=flow_id
+        )
+        
+        logger.info(f"[{flow_id}] Template generated: {template_config.template_name}")
+        logger.debug(f"[{flow_id}] Template config: {len(template_config.field_mappings)} field mappings")
+        
+        # NOTE: For sample processing, we should return the template configuration as processing_code
+        # This allows the execution manager to apply the template to the full dataset
+        
+        # Convert template config to Python dict format (not JSON) to avoid true/false vs True/False issues
+        import pprint
+        template_dict = template_config.model_dump()
+        template_dict_str = pprint.pformat(template_dict, indent=2, width=120)
+        
+        template_code = f"""
+# Template-based processing for large dataset
+import json
+
+# Template configuration
+template_config = {template_dict_str}
+
+# Execute template on full dataset
+from src.core.agents.results_template_agent import execute_results_template_from_dict
+result = execute_results_template_from_dict(template_config, full_results)
+print(json.dumps(result))
+"""
+        
+        # Return template-based response with processing code
+        formatted_response = {
+            'display_type': 'table',
+            'content': 'Template-based processing configured for large dataset',
+            'metadata': {
+                'template_system_used': True,
+                'template_name': template_config.template_name,
+                'total_records': total_records,
+                'processing_mode': 'sample_with_template',
+                'execution_summary': f'Generated {template_config.template_name} template for {total_records} records',
+                'confidence_level': 'High',
+                'data_sources': list(template_data_structure.keys()),
+                'field_mappings': len(template_config.field_mappings)
+            },
+            'processing_code': template_code.strip()
+        }
+        
+        logger.info(f"[{flow_id}] Template-based sample processing completed")
+        return formatted_response
         
     except Exception as e:
-        logger.error(f"[{flow_id}] Sample data processing failed: {e}")
-        # Return fallback response instead of re-raising
-        return {
-            'display_type': 'markdown',
-            'content': {'text': f'**Processing Error**: {str(e)}'},
-            'metadata': {
-                'execution_summary': f'Sample data processing failed: {e}',
-                'confidence_level': 'Low',
-                'total_records_processed': total_records,
-                'processing_mode': 'sample'
-            },
-            'usage_info': {'error': 'Sample data processing failed'}
-        }
+        logger.error(f"[{flow_id}] Template-based sample processing failed: {e}")
+        # Fallback to traditional LLM processing
+        logger.warning(f"[{flow_id}] Falling back to traditional LLM sample processing")
+        
+        prompt = _create_sample_data_prompt(query, sampled_results, original_plan, total_records)
+        
+        try:
+            result = await sample_data_formatter.run(prompt)
+            raw_response = str(result.data) if hasattr(result, 'data') else str(result)
+            formatted_result = _parse_raw_llm_response(raw_response, flow_id)
+            
+            # Add fallback metadata
+            if 'metadata' not in formatted_result:
+                formatted_result['metadata'] = {}
+            formatted_result['metadata']['template_system_used'] = False
+            formatted_result['metadata']['fallback_reason'] = str(e)
+            
+            return formatted_result
+            
+        except Exception as fallback_error:
+            logger.error(f"[{flow_id}] Fallback sample processing also failed: {fallback_error}")
+            return {
+                'display_type': 'markdown',
+                'content': {'text': f'**Processing Error**: Both template and LLM processing failed'},
+                'metadata': {
+                    'execution_summary': f'All sample processing methods failed',
+                    'confidence_level': 'Low',
+                    'total_records_processed': total_records,
+                    'processing_mode': 'sample_failed',
+                    'template_error': str(e),
+                    'llm_error': str(fallback_error)
+                },
+                'usage_info': {'error': 'All processing methods failed'}
+            }
 
 # Backward compatibility function
 async def process_results_structured(

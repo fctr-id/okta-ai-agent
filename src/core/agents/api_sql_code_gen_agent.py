@@ -96,10 +96,6 @@ class ApiSqlCodeGenAgent:
             from src.data.schemas.shared_schema import get_okta_database_schema
             return get_okta_database_schema()
         
-        # Import SQL security validation
-        from src.utils.security_config import validate_sql_for_execution
-        self.validate_sql = validate_sql_for_execution
-        
         logger.info(f"API-SQL Agent initialized with tenant_id: {actual_tenant_id}")
 
     def _get_polars_optimization_prompt(self) -> str:
