@@ -310,8 +310,8 @@
       "description": "Previews the SSO SAML metadata for a SAML application.",
       "folder_path": "Application SSO",
       "parameters": { "required": ["appId"], "optional": ["kid"] },
-      "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the SAML application.\n\n## Query Parameters\n*   **`kid`** (String, Optional): The ID of the key to use for signing the metadata. If not provided, the most recently created key is used."
+      "depends_on": ["list-applications", "list-application-keys", "list-application-jwks"],
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the SAML application.\n\n## Query Parameters\n*   **`kid`** (String, Optional): The ID of the key to use for signing the metadata. If not provided, the most recently created key is used. you MSUT use list-application-keys to get expirty dates and other detils on the saml signing keys for the application"
     },
     {
       "id": "list-application-csrs",
@@ -350,7 +350,7 @@
       "folder_path": "Application Key Credentials",
       "parameters": { "required": ["appId"], "optional": [] },
       "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application. You MUST use this to get expiry dates for SAML applications keys. This is where you get all the key details including expiry dates."
     },
     {
       "id": "get-application-key",
