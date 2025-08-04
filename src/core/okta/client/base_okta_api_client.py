@@ -61,7 +61,7 @@ class OktaAPIClient:
         # Setup headers
         self.headers = {
             "Authorization": f"SSWS {self.api_token}",
-            "Accept": "application/json",
+            "Accept": "application/json, text/xml, application/xml, */*",
             "Content-Type": "application/json"
         }
         
@@ -453,17 +453,29 @@ class OktaAPIClient:
         
         # Success case
         try:
-            data = await response.json()
-            # Normalize the data structure to ensure consistent format
-            normalized_data = self._normalize_okta_response(data)
-            return {
-                "status": "success", 
-                "data": normalized_data
-            }
+            # Check content type to determine how to parse response
+            content_type = response.headers.get('Content-Type', '').lower()
+            
+            if 'xml' in content_type:
+                # Handle XML responses (e.g., SAML metadata)
+                data = await response.text()
+                return {
+                    "status": "success", 
+                    "data": data
+                }
+            else:
+                # Handle JSON responses (default)
+                data = await response.json()
+                # Normalize the data structure to ensure consistent format
+                normalized_data = self._normalize_okta_response(data)
+                return {
+                    "status": "success", 
+                    "data": normalized_data
+                }
         except Exception as e:
             return {
                 "status": "error",
-                "error": f"Failed to parse response JSON: {str(e)}"
+                "error": f"Failed to parse response: {str(e)}"
             }
 
     def _normalize_okta_response(self, data):
