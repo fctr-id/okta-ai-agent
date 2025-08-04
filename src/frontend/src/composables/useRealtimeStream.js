@@ -164,68 +164,58 @@ export function useRealtimeStream() {
 
             // Handle connection open event
             eventSource.onopen = () => {
+                console.log("SSE connection opened");
                 execution.status = execution.planGenerated ? "executing" : "planning";
             };
 
-            // Set up event handlers for different event types
-            eventSource.addEventListener("plan_status", (event) => {
-                // console.log("[EventSource] Received plan_status event:", event.data);
-                handlePlanStatusEvent(event);
-            });
-
-            eventSource.addEventListener("phase_update", (event) => {
-                // console.log("[EventSource] Received phase_update event:", event.data);
-                handlePhaseUpdateEvent(event);
-            });
-
-            eventSource.addEventListener("step_status_update", (event) => {
-                // console.log("[EventSource] Received step_status_update event:", event.data);
-                handleStepStatusEvent(event);
-            });
-
-            eventSource.addEventListener("step_plan_info", (event) => {
-                // console.log("[EventSource] Received step_plan_info event:", event.data);
-                handleStepPlanInfoEvent(event);
-            });
-
-            eventSource.addEventListener("final_result", (event) => {
-                handleFinalResultEvent(event);
-            });
-
-            eventSource.addEventListener("final_result_chunk", (event) => {
-                console.log("[EventSource] Received final_result_chunk event:", event.data);
-                handleFinalResultChunkEvent(event);
-            });
-
-            eventSource.addEventListener("plan_error", (event) => {
-                // console.log("[EventSource] Received plan_error event:", event.data);
-                handleErrorEvent(event);
-            });
-
-            eventSource.addEventListener("plan_cancelled", (event) => {
-                // console.log("[EventSource] Received plan_cancelled event:", event.data);
-                handleCancelledEvent(event);
-            });
-
-            // Handle general messages (some backends send untyped messages)
+            // Handle all messages with unified JSON format {type: "...", content: {...}}
             eventSource.onmessage = (event) => {
-                // console.log("[EventSource] Received generic onmessage event:", event.data);
+                console.log("SSE Event received:", event.data);
                 try {
                     const data = JSON.parse(event.data);
-                    // Handle based on message content structure
-                    if (data.plan)
-                        handlePlanStatusEvent({ data: JSON.stringify({ status: "generated", plan: data.plan }) });
-                    else if (data.phase) handlePhaseUpdateEvent({ data: JSON.stringify({ phase: data.phase }) });
-                    else if (data.result) handleFinalResultEvent({ data: JSON.stringify({ result: data.result }) });
-                    // else console.log("[EventSource] Unhandled generic message type:", data);
+                    console.log("Parsed SSE data:", data);
+                    
+                    // Route messages based on the unified 'type' field
+                    switch (data.type) {
+                        case 'status':
+                            console.log("Handling status event");
+                            handlePlanStatusEvent(event);
+                            break;
+                        case 'plan':
+                            console.log("Handling plan event");
+                            handleStepPlanInfoEvent(event);
+                            break;
+                        case 'step_status':
+                            console.log("Handling step_status event");
+                            handleStepStatusEvent(event);
+                            break;
+                        case 'error':
+                            console.log("Handling error event");
+                            handleErrorEvent(event);
+                            break;
+                        case 'metadata':
+                            console.log("Handling metadata event - start of chunked streaming");
+                            handleChunkedMetadata(event);
+                            break;
+                        case 'batch':
+                            console.log("Handling batch event - chunked data batch");
+                            handleChunkedBatch(event);
+                            break;
+                        case 'complete':
+                            console.log("Handling complete event");
+                            handleFinalResultEvent(event);
+                            break;
+                        default:
+                            console.log("Unhandled message type:", data.type, data);
+                    }
                 } catch (err) {
-                    console.error("[EventSource] Error handling generic message:", err);
+                    console.error("Error parsing SSE message:", err, event.data);
                 }
             };
 
             // Handle connection errors
             eventSource.onerror = (e) => {
-                console.error("EventSource error:", e);
+                console.error("SSE connection error:", e);
                 handleConnectionError(e, eventSource);
             };
 
@@ -247,11 +237,12 @@ export function useRealtimeStream() {
     const handlePlanStatusEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
+            const content = data.content;
 
             // Handle rich plan details when available
-            if (data.plan_details) {
+            if (content.plan_details) {
                 execution.planGenerated = true;
-                const steps = data.plan_details.steps_summary || [];
+                const steps = content.plan_details.steps_summary || [];
                 execution.steps = steps.map((step) => ({
                     id: step.step_index,
                     tool_name: step.tool_name,
@@ -264,9 +255,9 @@ export function useRealtimeStream() {
 
             // Handle simpler plan status updates
             if (
-                data.status === "generated" ||
-                data.status === "starting_execution" ||
-                data.status === "running_execution"
+                content.status === "generated" ||
+                content.status === "starting_execution" ||
+                content.status === "running_execution"
             ) {
                 execution.planGenerated = true;
                 execution.status = "executing";
@@ -280,14 +271,18 @@ export function useRealtimeStream() {
      * Handle step status update events
      */
     const handleStepStatusEvent = (event) => {
+        console.log("handleStepStatusEvent called with:", event.data);
         try {
             const data = JSON.parse(event.data);
+            const content = data.content;
+            console.log("Step status content:", content);
 
-            // Handle Modern Execution Manager format (new)
-            if (data.step_number !== undefined && data.step_name && data.status) {
+            // Handle Modern Execution Manager format
+            if (content.step_number !== undefined && content.step_name && content.status) {
+                console.log(`Processing step ${content.step_number}: ${content.step_name} - ${content.status}`);
                 // Map step numbers to our inserted steps (accounting for generate_plan at index 0)
                 // Backend step 1 -> frontend index 1 (after generate_plan)
-                const stepIndex = data.step_number; // Keep 1-based since generate_plan is at index 0
+                const stepIndex = content.step_number; // Keep 1-based since generate_plan is at index 0
                 
                 if (stepIndex >= 1 && stepIndex < execution.steps.length - 1) { // Exclude finalizing_results (last step)
                     // Map backend status to frontend status
@@ -297,12 +292,12 @@ export function useRealtimeStream() {
                         'error': 'error'
                     };
                     
-                    const frontendStatus = statusMap[data.status] || data.status;
+                    const frontendStatus = statusMap[content.status] || content.status;
                     execution.steps[stepIndex].status = frontendStatus;
                     
                     // Handle ERROR status - immediately stop execution and show error
-                    if (data.status === 'error') {
-                        console.error('Step failed:', data);
+                    if (content.status === 'error') {
+                        console.error('Step failed:', content);
                         execution.status = "error";
                         execution.currentStepIndex = stepIndex;
                         
@@ -326,13 +321,13 @@ export function useRealtimeStream() {
                     }
                     
                     // Update current step index if step is running
-                    if (data.status === 'running') {
+                    if (content.status === 'running') {
                         execution.currentStepIndex = stepIndex;
                         execution.status = "executing";
                     }
                     
                     // Check if all execution steps are completed (excluding bookends)
-                    if (data.status === 'completed') {
+                    if (content.status === 'completed') {
                         const executionSteps = execution.steps.slice(1, -1); // Exclude generate_plan and finalizing_results
                         const allExecutionStepsCompleted = executionSteps.every(step => step.status === 'completed');
                         
@@ -346,67 +341,6 @@ export function useRealtimeStream() {
                         }
                     }
                 }
-                return;
-            }
-
-            // Handle legacy format (existing)
-            const stepIndex = data.step_index;
-
-            // First check if this is an error status update
-            if (data.operation_status === "error") {
-                // Mark the step as error immediately
-                if (stepIndex >= 0 && stepIndex < execution.steps.length) {
-                    console.error('Legacy operation failed:', data);
-                    execution.steps[stepIndex].status = "error";
-                    execution.steps[stepIndex].error = true; // Explicitly set error flag for v-stepper-item
-                    execution.steps[stepIndex].error_message = data.error_message;
-
-                    // Also update execution status to prevent finalizing steps from going green
-                    execution.status = "error";
-                    execution.currentStepIndex = stepIndex;
-                    
-                    // Set error message for user display
-                    const stepName = execution.steps[stepIndex].tool_name || `Step ${stepIndex}`;
-                    error.value = `Execution failed at ${stepName}. The system encountered an error and cannot continue.`;
-
-                    // Mark any remaining future steps as cancelled/disabled
-                    for (let i = stepIndex + 1; i < execution.steps.length; i++) {
-                        if (execution.steps[i].status === "pending" || execution.steps[i].status === "active") {
-                            execution.steps[i].status = "pending";
-                            execution.steps[i].disabled = true;
-                        }
-                    }
-                    
-                    // Stop processing
-                    isProcessing.value = false;
-                    isStreaming.value = false;
-                }
-                return;
-            }
-
-            // Handle normal status updates for valid steps
-            if (stepIndex >= 0 && stepIndex < execution.steps.length) {
-                // Map statuses correctly
-                if (data.status === "running") {
-                    execution.steps[stepIndex].status = "active";
-                    execution.currentStepIndex = stepIndex;
-                } else if (data.status === "completed") {
-                    // Handle completion status outside the 'running' condition
-                    setTimeout(() => {
-                        execution.steps[stepIndex].status = "completed";
-                        if (data.result_summary) {
-                            execution.steps[stepIndex].result_summary = data.result_summary;
-                        }
-                    }, 0);
-                } else {
-                    // For other statuses, map correctly
-                    const statusMap = {
-                        running: "active",
-                        completed: "completed",
-                        error: "error",
-                    };
-                    execution.steps[stepIndex].status = statusMap[data.status] || data.status;
-                }
             }
         } catch (err) {
             console.error("Error processing step status event:", err);
@@ -419,23 +353,18 @@ export function useRealtimeStream() {
     const handleStepPlanInfoEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            
-            // DEBUG: Log the received step plan info
-            // console.log("[handleStepPlanInfoEvent] Received step_plan_info event:", data);
-            // console.log("[handleStepPlanInfoEvent] Current execution.steps before:", execution.steps);
+            const content = data.content;
 
-            if (data.steps && Array.isArray(data.steps)) {
-                // console.log(`[handleStepPlanInfoEvent] Processing ${data.steps.length} steps from plan`);
+            if (content.steps && Array.isArray(content.steps)) {
                 execution.planGenerated = true;
                 
                 // Complete the generate_plan step
                 if (execution.steps[0] && execution.steps[0].id === 'generate_plan') {
                     execution.steps[0].status = 'completed';
-                    // console.log("[handleStepPlanInfoEvent] Completed generate_plan step");
                 }
 
                 // Create the new execution steps from the plan
-                const newExecutionSteps = data.steps.map((step, index) => {
+                const newExecutionSteps = content.steps.map((step, index) => {
                     const newStep = {
                         id: `step_${index + 1}`,
                         tool_name: step.tool_name,
@@ -445,12 +374,10 @@ export function useRealtimeStream() {
                         status: "pending",
                         critical: step.critical
                     };
-                    // console.log(`[handleStepPlanInfoEvent] Created step ${index + 1}:`, newStep);
                     return newStep;
                 });
 
                 // Insert the new steps between generate_plan (index 0) and finalizing_results (last)
-                // Keep generate_plan, insert new steps, keep finalizing_results
                 const generatePlanStep = execution.steps[0];
                 const finalizingResultsStep = execution.steps[execution.steps.length - 1];
                 
@@ -460,9 +387,7 @@ export function useRealtimeStream() {
                     finalizingResultsStep
                 ];
 
-                // console.log("[handleStepPlanInfoEvent] Updated execution.steps:", execution.steps);
                 execution.status = "executing";
-                // console.log("[handleStepPlanInfoEvent] Set execution status to 'executing'");
             } else {
                 console.warn("[handleStepPlanInfoEvent] No valid steps array found in data:", data);
             }
@@ -472,125 +397,21 @@ export function useRealtimeStream() {
         }
     };
 
-    /**
-     * Handle chunked final result events - Stream table updates progressively
-     */
-    const handleFinalResultChunkEvent = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            const chunkInfo = data.chunk_info;
-            
-            // console.log(`[handleFinalResultChunkEvent] Received chunk ${chunkInfo.chunk_number}/${chunkInfo.total_chunks} (${chunkInfo.chunk_size} records)`);
-            
-            // First chunk - initialize chunked result state and show initial table
-            if (chunkInfo.chunk_number === 1) {
-                chunkedResults.value = {
-                    chunks: [],
-                    expectedChunks: chunkInfo.total_chunks,
-                    receivedChunks: 0,
-                    totalRecords: chunkInfo.total_size,
-                    isReceivingChunks: true,
-                    baseData: data // Store non-content data for final assembly
-                };
-                
-                // Activate the finalizing_results step
-                const finalizingStepIndex = execution.steps.length - 1;
-                if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                    execution.steps[finalizingStepIndex].status = 'active';
-                    execution.currentStepIndex = finalizingStepIndex;
-                }
-                
-                // console.log(`[handleFinalResultChunkEvent] Starting chunked reception: expecting ${chunkInfo.total_chunks} chunks with ${chunkInfo.total_size} total records`);
-                
-                // NEW: Show initial empty table with streaming indicator
-                const formattedResponse = data.formatted_response || {};
-                execution.results = {
-                    content: [], // Start with empty array
-                    display_type: formattedResponse.display_type || data.display_type || "table",
-                    headers: formattedResponse.headers || [], // Include headers for chunked streaming
-                    metadata: {
-                        ...formattedResponse.metadata,
-                        isStreaming: true,
-                        streamingProgress: {
-                            current: 0,
-                            total: chunkInfo.total_size,
-                            chunksReceived: 0,
-                            totalChunks: chunkInfo.total_chunks
-                        }
-                    }
-                };
-            }
-            
-            // NEW: Add chunk data to existing results and update progressively
-            if (data.formatted_response?.content) {
-                chunkedResults.value.chunks.push(...data.formatted_response.content);
-                chunkedResults.value.receivedChunks++;
-                
-                // Update the table content in real-time
-                execution.results.content = [...chunkedResults.value.chunks]; // Spread to trigger reactivity
-                
-                // Update streaming progress
-                execution.results.metadata.streamingProgress = {
-                    current: chunkedResults.value.chunks.length,
-                    total: chunkedResults.value.totalRecords,
-                    chunksReceived: chunkedResults.value.receivedChunks,
-                    totalChunks: chunkedResults.value.expectedChunks
-                };
-                
-                // console.log(`[handleFinalResultChunkEvent] Updated table: ${chunkedResults.value.chunks.length}/${chunkedResults.value.totalRecords} records`);
-            }
-            
-            // If this is the final chunk or we've received all chunks
-            if (chunkInfo.is_final_chunk || chunkedResults.value.receivedChunks >= chunkedResults.value.expectedChunks) {
-                // console.log(`[handleFinalResultChunkEvent] All chunks received, finalizing streaming table`);
-                
-                // Mark streaming as complete
-                execution.results.metadata.isStreaming = false;
-                delete execution.results.metadata.streamingProgress; // Remove progress indicator
-                
-                // Complete the finalizing_results step
-                setTimeout(() => {
-                    const finalizingStepIndex = execution.steps.length - 1;
-                    if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                        execution.steps[finalizingStepIndex].status = 'completed';
-                    }
-                    
-                    execution.status = "completed";
-                    isProcessing.value = false;
-                    isStreaming.value = false;
-                    
-                    // Close EventSource after completion
-                    if (activeEventSource.value) {
-                        activeEventSource.value.close();
-                        activeEventSource.value = null;
-                    }
-                }, 300); // Brief delay to show completion
-                
-                // Reset chunk state
-                chunkedResults.value.isReceivingChunks = false;
-            }
-            
-        } catch (err) {
-            console.error("[handleFinalResultChunkEvent] Error processing final result chunk:", err);
-            console.error("[handleFinalResultChunkEvent] Event data:", event.data);
-            
-            // Reset chunk state on error
-            chunkedResults.value.isReceivingChunks = false;
-            execution.status = "error";
-            error.value = "Failed to process chunked response";
-        }
-    };
+    // This function was redundant - chunked streaming is now handled by handleChunkedMetadata and handleChunkedBatch
 
     /**
      * Handle final result events - Activate finalizing_results step and then complete
      */
     const handleFinalResultEvent = (event) => {
+        console.log("handleFinalResultEvent called with:", event.data);
         try {
             const data = JSON.parse(event.data);
+            const content = data.content;
+            console.log("Final result content:", content);
             
             // If we're receiving chunks, this might be the final completion signal
             if (chunkedResults.value.isReceivingChunks) {
-                console.log("[handleFinalResultEvent] Received final_result during chunked streaming - completing");
+                console.log("Received final_result during chunked streaming - completing");
 
                 // Force completion of chunked streaming
                 execution.results.metadata.isStreaming = false;
@@ -626,28 +447,80 @@ export function useRealtimeStream() {
             if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
                 execution.steps[finalizingStepIndex].status = 'active';
                 execution.currentStepIndex = finalizingStepIndex;
+                console.log("Activated finalizing_results step");
             }
             
             // Small delay to show the finalizing step as active, then complete it
             setTimeout(() => {
+                console.log("Completing finalizing step and setting results");
                 // Complete the finalizing_results step
                 if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
                     execution.steps[finalizingStepIndex].status = 'completed';
                 }
                 
-                // The Results Formatter output is in data.formatted_response
-                const formattedResponse = data.formatted_response || {};
-                const agentDisplayMetadata = formattedResponse.metadata || data.metadata || data.display_hints || {};
+                // The Results Formatter output is in content.formatted_response
+                const formattedResponse = content.formatted_response || {};
+                const agentDisplayMetadata = formattedResponse.metadata || content.metadata || content.display_hints || {};
+
+                // Handle nested content structure from Modern Execution Manager
+                let actualContent, actualMetadata;
+                if (formattedResponse.content && typeof formattedResponse.content === 'object' && formattedResponse.content.content) {
+                    // Nested structure: formatted_response.content.content contains the actual data
+                    actualContent = formattedResponse.content.content;
+                    actualMetadata = {
+                        ...agentDisplayMetadata,
+                        ...formattedResponse.content.metadata // Merge metadata from nested content
+                    };
+                    console.log("Using nested content structure");
+                } else {
+                    // Flat structure
+                    actualContent = formattedResponse.content || content.content || content.result_content || "";
+                    actualMetadata = agentDisplayMetadata;
+                    console.log("Using flat content structure");
+                }
+
+                // Clean up malformed array data from backend
+                if (Array.isArray(actualContent)) {
+                    actualContent = actualContent.map(row => {
+                        const cleanedRow = { ...row };
+                        Object.keys(cleanedRow).forEach(key => {
+                            const value = cleanedRow[key];
+                            // Fix stringified empty arrays like ["[]"] -> []
+                            if (Array.isArray(value) && value.length === 1 && value[0] === "[]") {
+                                cleanedRow[key] = [];
+                                console.log(`Fixed malformed array in ${key}: ["[]"] -> []`);
+                            }
+                            // Fix other stringified arrays like ["[\"item1\",\"item2\"]"] -> ["item1", "item2"]
+                            else if (Array.isArray(value) && value.length === 1 && typeof value[0] === 'string' && value[0].startsWith('[')) {
+                                try {
+                                    cleanedRow[key] = JSON.parse(value[0]);
+                                    console.log(`Fixed stringified array in ${key}:`, value[0], '->', cleanedRow[key]);
+                                } catch (e) {
+                                    console.warn(`Could not parse stringified array in ${key}:`, value[0]);
+                                }
+                            }
+                        });
+                        return cleanedRow;
+                    });
+                    console.log("Cleaned content:", actualContent);
+                }
 
                 // Format the result to the expected shape for the frontend
                 execution.results = {
-                    content: formattedResponse.content || data.content || data.result_content || "", // Try formatted_response first
-                    display_type: formattedResponse.display_type || data.display_type || "markdown",
-                    headers: formattedResponse.headers || [], // Include headers for Vuetify table display
-                    metadata: agentDisplayMetadata, // This will now correctly pass headers, totalItems, etc.
+                    content: actualContent,
+                    display_type: formattedResponse.display_type || content.display_type || "markdown",
+                    headers: actualMetadata.headers || formattedResponse.headers || [], // Include headers for Vuetify table display
+                    metadata: actualMetadata, // This will now correctly pass headers, totalItems, etc.
                 };
 
-                execution.status = data.status || "completed"; // Use status from data if available
+                console.log("Final execution.results set:", execution.results);
+                console.log("execution.results.content:", execution.results.content);
+                console.log("execution.results.content as JSON:", JSON.stringify(execution.results.content, null, 2));
+                console.log("execution.results.display_type:", execution.results.display_type);
+                console.log("execution.results.metadata:", execution.results.metadata);
+                console.log("execution.results.metadata as JSON:", JSON.stringify(execution.results.metadata, null, 2));
+                
+                execution.status = content.status || "completed"; // Use status from content if available
                 isProcessing.value = false;
                 isStreaming.value = false; // Ensure streaming is also marked as false
                 
@@ -668,32 +541,132 @@ export function useRealtimeStream() {
     };
 
     /**
-     * Handle phase update events - Detect results formatter phase
+     * Handle chunked streaming metadata events (unified format)
      */
-    const handlePhaseUpdateEvent = (event) => {
+    const handleChunkedMetadata = (event) => {
         try {
             const data = JSON.parse(event.data);
+            const content = data.content || {};
             
-            const newPhase = data.phase || execution.status;
+            console.log(`[handleChunkedMetadata] Starting chunked streaming with ${content.total_batches} batches`);
             
-            // Check if this indicates the start of results formatting
-            if (newPhase.toLowerCase().includes('results') || 
-                newPhase.toLowerCase().includes('formatting') ||
-                newPhase.toLowerCase().includes('finalizing')) {
-                
-                // Activate the finalizing_results step
-                const finalizingStepIndex = execution.steps.length - 1;
-                if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                    execution.steps[finalizingStepIndex].status = 'active';
-                    execution.currentStepIndex = finalizingStepIndex;
-                }
+            // Initialize chunked result state
+            chunkedResults.value = {
+                chunks: [],
+                expectedChunks: content.total_batches || 0,
+                receivedChunks: 0,
+                totalRecords: 0, // Will be updated when we get first batch
+                isReceivingChunks: true,
+                baseData: data // Store metadata for final assembly
+            };
+            
+            // Activate the finalizing_results step
+            const finalizingStepIndex = execution.steps.length - 1;
+            if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
+                execution.steps[finalizingStepIndex].status = 'active';
+                execution.currentStepIndex = finalizingStepIndex;
             }
             
-            execution.status = newPhase;
+            // Show initial empty table with streaming indicator
+            execution.results = {
+                content: [], // Start with empty array
+                display_type: content.display_type || "table",
+                headers: [], // Will be updated when we get first batch
+                metadata: {
+                    isStreaming: true,
+                    streamingProgress: {
+                        current: 0,
+                        total: 0, // Will be updated
+                        chunksReceived: 0,
+                        totalChunks: content.total_batches || 0
+                    }
+                }
+            };
         } catch (err) {
-            console.error("Error processing phase update event:", err);
+            console.error("[handleChunkedMetadata] Error processing metadata:", err);
         }
     };
+
+    /**
+     * Handle chunked streaming batch events (unified format)
+     */
+    const handleChunkedBatch = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content || {};
+            const metadata = data.metadata || {};
+            
+            console.log(`[handleChunkedBatch] Received batch ${metadata.batch_number}/${metadata.total_batches}`);
+            
+            // Add chunk data to existing results
+            if (content.formatted_response?.content) {
+                // First batch - set up headers and total records
+                if (metadata.batch_number === 1) {
+                    const formattedResponse = content.formatted_response;
+                    execution.results.headers = formattedResponse.headers || [];
+                    chunkedResults.value.totalRecords = content.chunk_info?.total_size || 0;
+                    
+                    // Update total in streaming progress
+                    execution.results.metadata.streamingProgress.total = chunkedResults.value.totalRecords;
+                }
+                
+                chunkedResults.value.chunks.push(...content.formatted_response.content);
+                chunkedResults.value.receivedChunks++;
+                
+                // Update the table content in real-time
+                execution.results.content = [...chunkedResults.value.chunks]; // Spread to trigger reactivity
+                
+                // Update streaming progress
+                execution.results.metadata.streamingProgress = {
+                    current: chunkedResults.value.chunks.length,
+                    total: chunkedResults.value.totalRecords,
+                    chunksReceived: chunkedResults.value.receivedChunks,
+                    totalChunks: chunkedResults.value.expectedChunks
+                };
+                
+                console.log(`[handleChunkedBatch] Updated table: ${chunkedResults.value.chunks.length}/${chunkedResults.value.totalRecords} records`);
+            }
+            
+            // Check if this is the final batch
+            if (metadata.is_final || chunkedResults.value.receivedChunks >= chunkedResults.value.expectedChunks) {
+                console.log(`[handleChunkedBatch] All batches received, completing streaming`);
+                
+                // Mark streaming as complete
+                execution.results.metadata.isStreaming = false;
+                delete execution.results.metadata.streamingProgress;
+                
+                // Complete the finalizing_results step
+                setTimeout(() => {
+                    const finalizingStepIndex = execution.steps.length - 1;
+                    if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
+                        execution.steps[finalizingStepIndex].status = 'completed';
+                    }
+                    
+                    execution.status = "completed";
+                    isProcessing.value = false;
+                    isStreaming.value = false;
+                    
+                    // Close EventSource after completion
+                    if (activeEventSource.value) {
+                        activeEventSource.value.close();
+                        activeEventSource.value = null;
+                    }
+                }, 300);
+                
+                // Reset chunk state
+                chunkedResults.value.isReceivingChunks = false;
+            }
+        } catch (err) {
+            console.error("[handleChunkedBatch] Error processing batch:", err);
+            
+            // Reset chunk state on error
+            chunkedResults.value.isReceivingChunks = false;
+            execution.status = "error";
+            error.value = "Failed to process chunked response";
+        }
+    };
+
+    // This function was redundant - phase updates are handled by step_status events
 
     /**
      * Handle error events
@@ -701,7 +674,9 @@ export function useRealtimeStream() {
     const handleErrorEvent = (event) => {
         try {
             const data = JSON.parse(event.data);
-            error.value = data.error || data.message || "An error occurred during execution";
+            const content = data.content;
+            
+            error.value = content.error || content.message || "An error occurred during execution";
             execution.status = "error";
             isProcessing.value = false;
             isStreaming.value = false;
@@ -716,20 +691,7 @@ export function useRealtimeStream() {
         }
     };
 
-    /**
-     * Handle cancelled events
-     */
-    const handleCancelledEvent = (event) => {
-        execution.status = "cancelled";
-        isProcessing.value = false;
-        isStreaming.value = false;
-
-        // Close the connection
-        if (activeEventSource.value) {
-            activeEventSource.value.close();
-            activeEventSource.value = null;
-        }
-    };
+    // This function was redundant - cancellation is handled by the main error handling
 
     /**
      * Handle connection errors

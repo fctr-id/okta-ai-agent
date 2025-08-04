@@ -1,45 +1,16 @@
 """
 Realtime Hybrid Execution Router - Modern Execution Manager Integration
 
-This module replaces the legacy realtime execution system with the Modern Execution Manager
-while maintaining full SSE streaming compatibility and API contracts.
+This module provides SSE streaming integration with the Modern Execution Manager
+while maintaining full API contracts and frontend compatibility.
 
 Key Features:
-- Modern Execution Manager integration for robust execution
+- Modern Execution Manager integration via execute_query() method
 - SSE (Server-Sent Events) streaming for real-time updates
+- Plan and step status callbacks for live progress updates
 - Enhanced error handling and database health checking
-- Full API contract preservat    # Create a better placeholder plan for immediate UI response (actual steps will be sent during execution)
-    placeholder_plan = ApiPlan(
-        original_query=sanitized_query,
-        reasoning="Generating execution plan with Modern Execution Manager",
-        confidence=None,
-        steps=[
-            ApiStep(
-                id=0,
-                tool_name="list_events",
-                query_context={"description": "Retrieving system events and activity data"},
-                reason="Collect system event data from Okta",
-                critical=True,
-                status="pending"
-            ),
-            ApiStep(
-                id=1,
-                tool_name="sql_users",
-                query_context={"description": "Querying user database for relevant information"},
-                reason="Query local database for user details",
-                critical=True,
-                status="pending"
-            ),
-            ApiStep(
-                id=2,
-                tool_name="list_by_user",
-                query_context={"description": "Combining and processing user-specific data"},
-                reason="Process and correlate user data",
-                critical=False,
-                status="pending"
-            )
-        ]
-    ) compatibility
+- Chunked streaming for large result sets
+- Full API contract compatibility with existing frontend
 """
 
 import asyncio
@@ -303,23 +274,29 @@ async def execute_plan_and_stream(
     try:
         if process_id not in active_processes:
             logger.error(f"[{process_id}] Process data missing at execution start. Aborting.")
-            yield {
-                "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': ProcessStatus.ERROR.value, 'message': 'Internal error: Process data lost before execution.'})
+            missing_process_event = {
+                "type": "error",
+                "content": {
+                    'process_id': process_id, 
+                    'status': ProcessStatus.ERROR.value, 
+                    'message': 'Internal error: Process data lost before execution.'
+                }
             }
+            yield json.dumps(missing_process_event) + "\n"
             await asyncio.sleep(0.01)
             return
 
         # Update status to running
         active_processes[process_id]["status"] = ProcessStatus.RUNNING_EXECUTION
-        yield {
-            "event": "plan_status",
-            "data": json.dumps({
+        status_event = {
+            "type": "status",
+            "content": {
                 'process_id': process_id,
                 'status': ProcessStatus.RUNNING_EXECUTION.value,
                 'message': 'Executing with Modern Execution Manager (test_query_1.py pattern)'
-            })
+            }
         }
+        yield json.dumps(status_event) + "\n"
         await asyncio.sleep(0.01)
 
         # Store step info to yield when plan is ready
@@ -332,7 +309,7 @@ async def execute_plan_and_stream(
         # Set up callback to capture step info when plan is ready (before execution starts)
         async def on_plan_ready(execution_plan):
             nonlocal step_info_data
-            logger.info(f"[{process_id}]  on_plan_ready callback triggered with {len(execution_plan.steps)} steps")
+            logger.info(f"[{process_id}] on_plan_ready callback triggered with {len(execution_plan.steps)} steps")
             step_info_data = [
                 {
                     'id': i,
@@ -345,16 +322,20 @@ async def execute_plan_and_stream(
                 }
                 for i, step in enumerate(execution_plan.steps)
             ]
-            logger.info(f"[{process_id}]  on_plan_ready - step_info_data created: {step_info_data}")
+            logger.info(f"[{process_id}] on_plan_ready - step_info_data created: {step_info_data}")
             step_info_ready.set()
-            logger.info(f"[{process_id}]  on_plan_ready - step_info_ready event set")
+            logger.info(f"[{process_id}] on_plan_ready - step_info_ready event set")
             
-            #  IMMEDIATE YIELD: Send step_plan_info event immediately when plan is ready
-            logger.info(f"[{process_id}]  Sending step_plan_info event with {len(step_info_data)} steps")
-            await step_status_queue.put({
-                "event": "step_plan_info",
-                "data": json.dumps({'process_id': process_id, 'steps': step_info_data})
-            })
+            # IMMEDIATE YIELD: Send step_plan_info event immediately when plan is ready
+            logger.info(f"[{process_id}] Sending step_plan_info event with {len(step_info_data)} steps")
+            plan_event = {
+                "type": "plan",
+                "content": {
+                    'process_id': process_id, 
+                    'steps': step_info_data
+                }
+            }
+            await step_status_queue.put(json.dumps(plan_event) + "\n")
 
         async def on_step_status(step_number, step_type, status):
             """Callback when step status changes - send real-time step updates"""
@@ -370,11 +351,14 @@ async def execute_plan_and_stream(
                 if status == 'error':
                     logger.error(f"[{process_id}] ERROR STATUS - Step {step_number} ({step_type}) failed")
                 
+                # Create step status event in frontend format
+                step_event = {
+                    "type": "step_status",
+                    "content": step_status_data
+                }
+                
                 # Queue the step status event
-                await step_status_queue.put({
-                    "event": "step_status_update",
-                    "data": json.dumps(step_status_data)
-                })
+                await step_status_queue.put(json.dumps(step_event) + "\n")
                 
                 logger.info(f"[{process_id}] Step status sent: {step_number} - {step_type} - {status}")
             except Exception as e:
@@ -387,7 +371,7 @@ async def execute_plan_and_stream(
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
         logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
         
-        #  CONCURRENT EXECUTION: Start execution and process events concurrently
+        # CONCURRENT EXECUTION: Start execution and process events concurrently
         # Create a task for the execution
         execution_task = asyncio.create_task(modern_executor.execute_query(query))
         
@@ -398,6 +382,10 @@ async def execute_plan_and_stream(
                 event = await asyncio.wait_for(step_status_queue.get(), timeout=0.1)
                 yield event
                 await asyncio.sleep(0.01)
+                step_status_queue.task_done()
+            except asyncio.TimeoutError:
+                # No event received, continue checking if execution is done
+                continue
                 step_status_queue.task_done()
             except asyncio.TimeoutError:
                 # No event received, continue checking if execution is done
@@ -506,9 +494,9 @@ async def execute_plan_and_stream(
                     step_error = step_result.get('error', 'Step execution failed')
                     step_type = step_result.get('step_type', 'unknown')
                     
-                    yield {
-                        "event": "step_status_update",
-                        "data": json.dumps({
+                    step_error_event = {
+                        "type": "step_error",
+                        "content": {
                             'process_id': process_id,
                             'step_index': i,  # 0-based index
                             'step_type': step_type,  # Include step type for frontend
@@ -516,14 +504,16 @@ async def execute_plan_and_stream(
                             'operation_status': 'error',
                             'error_message': step_error,
                             'error_type': error_type  # Add error type classification
-                        })
+                        }
                     }
+                    
+                    yield json.dumps(step_error_event) + "\n"
                     await asyncio.sleep(0.01)
             
             # Send error event with enhanced error information
-            yield {
-                "event": "plan_error",
-                "data": json.dumps({
+            error_event = {
+                "type": "error",
+                "content": {
                     'process_id': process_id,
                     'status': ProcessStatus.COMPLETED_WITH_ERRORS.value,
                     'message': error_message,
@@ -540,8 +530,9 @@ async def execute_plan_and_stream(
                             for step_result in step_results if not step_result.get('success', True)
                         ]
                     }
-                })
+                }
             }
+            yield json.dumps(error_event) + "\n"
             await asyncio.sleep(0.01)
             
         else:
@@ -550,16 +541,17 @@ async def execute_plan_and_stream(
             
             # Send step completion updates
             for i, step_result in enumerate(step_results):
-                yield {
-                    "event": "step_status_update",
-                    "data": json.dumps({
+                step_completion_event = {
+                    "type": "step_status",
+                    "content": {
                         'process_id': process_id,
                         'step_index': i,  # 0-based index
                         'status': 'completed',
                         'operation_status': 'completed',
                         'result_summary': f'Step {i+1} completed successfully'
-                    })
+                    }
                 }
+                yield json.dumps(step_completion_event) + "\n"
                 await asyncio.sleep(0.01)
             
             # Handle final result with formatted response from Results Formatter
@@ -600,10 +592,10 @@ async def execute_plan_and_stream(
                     # Update process status to error
                     active_processes[process_id]["status"] = ProcessStatus.COMPLETED_WITH_ERRORS
                     
-                    # Send plan_error event instead of final_result
-                    yield {
-                        "event": "plan_error",
-                        "data": json.dumps({
+                    # Send error event instead of final_result
+                    formatter_error_event = {
+                        "type": "error", 
+                        "content": {
                             'process_id': process_id,
                             'status': ProcessStatus.COMPLETED_WITH_ERRORS.value,
                             'message': error_message,
@@ -615,8 +607,9 @@ async def execute_plan_and_stream(
                                 'original_error': usage_info.get('error', 'Unknown error'),
                                 'formatted_response_available': True
                             }
-                        })
+                        }
                     }
+                    yield json.dumps(formatter_error_event) + "\n"
                     await asyncio.sleep(0.01)
                     return  # Exit early - don't send final_result
                 
@@ -710,19 +703,49 @@ async def execute_plan_and_stream(
         
         if len(chunks) > 1:
             logger.info(f"[{process_id}] CHUNKED STREAMING: Sending {len(chunks)} chunks for large response")
-            for i, chunk in enumerate(chunks):
-                event_type = "final_result_chunk" if i < len(chunks) - 1 else "final_result"
-                yield {
-                    "event": event_type,
-                    "data": json.dumps(chunk)
+            
+            # Send metadata first to inform frontend about chunking
+            metadata_event = {
+                "type": "metadata",
+                "content": {
+                    "total_batches": len(chunks),
+                    "process_id": process_id,
+                    "display_type": display_type
                 }
-                await asyncio.sleep(0.05)
-        else:
-            # Small response - send as single event
-            yield {
-                "event": "final_result", 
-                "data": json.dumps(final_result_data)
             }
+            yield json.dumps(metadata_event) + "\n"
+            await asyncio.sleep(0.01)
+            
+            # Send each chunk as batch data
+            for i, chunk in enumerate(chunks):
+                batch_event = {
+                    "type": "batch",
+                    "content": chunk,
+                    "metadata": {
+                        "batch_number": i + 1,
+                        "total_batches": len(chunks),
+                        "is_final": i == len(chunks) - 1
+                    }
+                }
+                yield json.dumps(batch_event) + "\n"
+                await asyncio.sleep(0.05)
+            
+            # Send completion event
+            completion_event = {
+                "type": "complete",
+                "content": {
+                    "total_chunks": len(chunks),
+                    "process_id": process_id
+                }
+            }
+            yield json.dumps(completion_event) + "\n"
+        else:
+            # Small response - send as single complete event
+            complete_event = {
+                "type": "complete",
+                "content": final_result_data
+            }
+            yield json.dumps(complete_event) + "\n"
             await asyncio.sleep(0.05)
 
     except Exception as e:
@@ -762,9 +785,9 @@ async def execute_plan_and_stream(
             error_type = "critical_error"
         
         try:
-            yield {
-                "event": "plan_error",
-                "data": json.dumps({
+            exception_error_event = {
+                "type": "error",
+                "content": {
                     'process_id': process_id, 
                     'status': ProcessStatus.ERROR.value, 
                     'message': user_message,
@@ -773,11 +796,12 @@ async def execute_plan_and_stream(
                         'exception_type': type(e).__name__,
                         'critical_error': process_id not in active_processes
                     }
-                })
+                }
             }
+            yield json.dumps(exception_error_event) + "\n"
             await asyncio.sleep(0.01)
         except Exception as send_err:
-            logger.error(f"[{process_id}] Failed to send plan_error SSE event: {send_err}")
+            logger.error(f"[{process_id}] Failed to send error SSE event: {send_err}")
     
     finally:
         final_status = active_processes.get(process_id, {}).get('status', ProcessStatus.UNKNOWN)
@@ -849,10 +873,11 @@ async def stream_realtime_updates_endpoint(
     if process_id not in active_processes:
         logger.warning(f"[{process_id}] [/stream-updates] Process not found or session expired.")
         async def not_found_generator():
-            yield {
-                "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': 'Process not found or session expired.'})
+            error_event = {
+                "type": "error",
+                "content": {'process_id': process_id, 'status': 'error', 'message': 'Process not found or session expired.'}
             }
+            yield json.dumps(error_event) + "\n"
             await asyncio.sleep(0.01)
         return EventSourceResponse(not_found_generator())
 
@@ -870,56 +895,69 @@ async def stream_realtime_updates_endpoint(
     if current_process_status in terminal_statuses:
         logger.info(f"[{process_id}] Process in terminal state: {current_process_status}")
         async def terminal_status_generator():
-            event_to_send = {"process_id": process_id}
-            event_name = "generic_status"
-
             if current_process_status == ProcessStatus.ERROR:
-                event_name = "plan_error"
                 error_message = process_info.get("error_message", "Process previously ended in error.")
                 error_type = process_info.get("error_type", "unknown_error")
-                event_to_send.update({
-                    'status': 'error',
-                    'message': error_message,
-                    'error_type': error_type,
-                    'error_details': {
-                        'terminal_state': True,
-                        'previous_execution': True
+                event = {
+                    "type": "error",
+                    "content": {
+                        'process_id': process_id,
+                        'status': 'error',
+                        'message': error_message,
+                        'error_type': error_type,
+                        'error_details': {
+                            'terminal_state': True,
+                            'previous_execution': True
+                        }
                     }
-                })
+                }
             elif current_process_status == ProcessStatus.CANCELLED:
-                event_name = "plan_cancelled"
-                event_to_send['message'] = 'Process was previously cancelled.'
+                event = {
+                    "type": "error",
+                    "content": {
+                        'process_id': process_id,
+                        'status': 'cancelled',
+                        'message': 'Process was previously cancelled.'
+                    }
+                }
             elif current_process_status == ProcessStatus.COMPLETED_WITH_ERRORS:
-                event_name = "plan_error"
                 error_message = process_info.get("error_message", "Process previously completed with errors.")
                 error_type = process_info.get("error_type", "execution_error")
-                event_to_send.update({
-                    'status': 'completed_with_errors',
-                    'message': error_message,
-                    'error_type': error_type,
-                    'error_details': {
-                        'terminal_state': True,
-                        'previous_execution': True,
-                        'partial_success': True
+                event = {
+                    "type": "error",
+                    "content": {
+                        'process_id': process_id,
+                        'status': 'completed_with_errors',
+                        'message': error_message,
+                        'error_type': error_type,
+                        'error_details': {
+                            'terminal_state': True,
+                            'previous_execution': True,
+                            'partial_success': True
+                        }
                     }
-                })
+                }
             else:
-                event_name = "final_result"
                 final_data = process_info.get("final_result_data", {})
                 if isinstance(final_data, dict):
-                    event_to_send.update(final_data)
+                    event_content = final_data.copy()
                 else:
-                    event_to_send['result_content'] = str(final_data) if final_data is not None else "No result available."
+                    event_content = {'result_content': str(final_data) if final_data is not None else "No result available."}
                 
                 # Ensure standard fields
-                if "status" not in event_to_send: 
-                    event_to_send["status"] = current_process_status.value
-                if "message" not in event_to_send: 
-                    event_to_send["message"] = "Process previously completed."
-                if "display_type" not in event_to_send: 
-                    event_to_send["display_type"] = "markdown"
+                if "status" not in event_content: 
+                    event_content["status"] = current_process_status.value
+                if "message" not in event_content: 
+                    event_content["message"] = "Process previously completed."
+                if "display_type" not in event_content: 
+                    event_content["display_type"] = "markdown"
+                    
+                event = {
+                    "type": "complete",
+                    "content": event_content
+                }
 
-            yield {"event": event_name, "data": json.dumps(event_to_send)}
+            yield json.dumps(event) + "\n"
             await asyncio.sleep(0.01)
         return EventSourceResponse(terminal_status_generator())
 
@@ -927,14 +965,15 @@ async def stream_realtime_updates_endpoint(
     if current_process_status == ProcessStatus.RUNNING_EXECUTION:
         logger.warning(f"[{process_id}] Client reconnected to running execution")
         async def already_running_generator():
-            yield {
-                "event": "plan_status",
-                "data": json.dumps({
+            event = {
+                "type": "status",
+                "content": {
                     'process_id': process_id,
                     'status': 'reconnected_to_running',
                     'message': 'Reconnected to ongoing Modern Execution Manager execution.'
-                })
+                }
             }
+            yield json.dumps(event) + "\n"
             await asyncio.sleep(0.01)
         return EventSourceResponse(already_running_generator())
 
@@ -942,10 +981,11 @@ async def stream_realtime_updates_endpoint(
     if current_process_status != ProcessStatus.PLAN_GENERATED:
         logger.warning(f"[{process_id}] Invalid status for streaming: {current_process_status}")
         async def invalid_status_generator():
-            yield {
-                "event": "plan_error",
-                "data": json.dumps({'process_id': process_id, 'status': 'error', 'message': f'Process cannot be streamed. Current state: {current_process_status}'})
+            event = {
+                "type": "error",
+                "content": {'process_id': process_id, 'status': 'error', 'message': f'Process cannot be streamed. Current state: {current_process_status}'}
             }
+            yield json.dumps(event) + "\n"
             await asyncio.sleep(0.01)
         return EventSourceResponse(invalid_status_generator())
 
@@ -954,10 +994,11 @@ async def stream_realtime_updates_endpoint(
         logger.info(f"[{process_id}] Process cancelled before execution stream started.")
         active_processes[process_id]["status"] = ProcessStatus.CANCELLED
         async def cancelled_generator():
-            yield {
-                "event": "plan_cancelled",
-                "data": json.dumps({'process_id': process_id, 'message': 'Process was cancelled before execution started.'})
+            event = {
+                "type": "error",
+                "content": {'process_id': process_id, 'status': 'cancelled', 'message': 'Process was cancelled before execution started.'}
             }
+            yield json.dumps(event) + "\n"
             await asyncio.sleep(0.01)
         return EventSourceResponse(cancelled_generator())
 
