@@ -45,10 +45,21 @@
             </transition>
 
             <!-- Search input -->
-            <v-text-field v-model="userInput" @keydown="handleKeyDown" @keydown.enter.prevent="handleQuerySubmit"
-              placeholder="Ask a question about your Okta tenant..." variant="plain" color="#4C64E2"
-              bg-color="transparent" hide-details class="search-input" :clearable="true" :disabled="isProcessing"           
-              </v-text-field>
+            <div class="search-input-wrapper">
+              <textarea 
+                v-model="userInput" 
+                @keydown="handleKeyDown" 
+                @input="adjustTextareaHeight"
+                ref="textareaRef"
+                placeholder="Ask a question about your Okta tenant..." 
+                class="search-textarea"
+                :disabled="isProcessing"
+                rows="1"
+              ></textarea>
+              <button v-if="userInput" @click="clearInput" class="clear-btn" aria-label="Clear input">
+                <v-icon size="small">mdi-close</v-icon>
+              </button>
+            </div>
             <v-tooltip text="Send query" location="top">
               <template v-slot:activator="{ props }">
                 <button v-bind="props" class="action-btn send-btn" :disabled="!canSubmitQuery" :loading="isSubmitting"
@@ -280,6 +291,7 @@ const {
 const userInput = ref('');
 const messages = ref([]);
 const messagesContainerRef = ref(null);
+const textareaRef = ref(null);
 const isSubmitting = ref(false);
 const isCancelling = ref(false);
 const autoScroll = ref(true);
@@ -387,13 +399,34 @@ const handleKeyDown = (e) => {
     if (historyIndex.value < messageHistory.value.length - 1) {
       historyIndex.value++;
       userInput.value = messageHistory.value[historyIndex.value];
+      nextTick(() => adjustTextareaHeight());
     }
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
     if (historyIndex.value > -1) {
       historyIndex.value--;
       userInput.value = historyIndex.value === -1 ? '' : messageHistory.value[historyIndex.value];
+      nextTick(() => adjustTextareaHeight());
     }
+  }
+};
+
+// Dynamic textarea height adjustment
+const adjustTextareaHeight = () => {
+  if (textareaRef.value) {
+    textareaRef.value.style.height = 'auto';
+    const scrollHeight = textareaRef.value.scrollHeight;
+    const maxHeight = 6 * 24; // 6 rows * 24px line height
+    textareaRef.value.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+  }
+};
+
+// Clear input function
+const clearInput = () => {
+  userInput.value = '';
+  adjustTextareaHeight();
+  if (textareaRef.value) {
+    textareaRef.value.focus();
   }
 };
 
@@ -599,6 +632,11 @@ watch(messages, () => {
   scrollToBottom();
 }, { deep: true });
 
+// Watch for input changes to adjust textarea height
+watch(userInput, () => {
+  nextTick(() => adjustTextareaHeight());
+});
+
 // Filter Okta entities based on search
 const filteredTools = computed(() => {
   if (!toolSearch.value) return availableTools.value;
@@ -735,37 +773,66 @@ watch(showToolsModal, (newVal) => {
   flex: 1;
 }
 
-.search-input :deep(.v-field) {
-  box-shadow: none !important;
+.search-input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 42px;
+}
+
+.search-textarea {
+  flex: 1;
   border: none;
-  min-height: 44px !important;
-}
-
-.search-input :deep(.v-field__input) {
-  padding: 0 0 0 16px !important;
+  outline: none;
+  background: transparent;
   font-size: 15px;
-  min-height: 42px !important;
-  display: flex !important;
-  align-items: center !important;
+  font-family: inherit;
+  color: #333;
+  padding: 11px 40px 11px 4px; /* Reduced left padding to 4px for more text space */
+  margin: 0;
+  resize: none;
+  line-height: 1.5;
+  min-height: 42px;
+  max-height: 144px; /* 6 rows * 24px */
+  overflow-y: auto;
+  transition: height 0.2s ease;
 }
 
-.search-input :deep(.v-field__input input) {
-  margin-top: 0 !important;
-  padding: 0 !important;
+.search-textarea::placeholder {
+  color: #999;
+  font-size: 15px;
 }
 
-.search-input :deep(.v-field__clearable) {
-  align-self: center !important;
-  padding: 0 !important;
+.search-textarea:disabled {
+  color: #999;
+  cursor: not-allowed;
 }
 
-.search-input :deep(.v-field__clearable .v-icon) {
+.clear-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #e0e0e0;
+  border: 1px solid #bbb;
+  color: #555;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transform: translateY(-2px);
-  padding: 0;
-  margin-right: 4px;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.clear-btn:hover {
+  color: #333;
+  background: #d0d0d0;
+  border-color: #999;
 }
 
 /* Button styles */
