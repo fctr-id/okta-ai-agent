@@ -17,7 +17,6 @@ declare module 'vue' {
     LoginView: typeof import('./src/components/views/LoginView.vue')['default']
     NotFoundView: typeof import('./src/components/views/NotFoundView.vue')['default']
     RealtimeChatInterface: typeof import('./src/components/views/RealtimeChatInterface.vue')['default']
-    RealtimeChatInterface_backup: typeof import('./src/components/views/RealtimeChatInterface_backup.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SetupView: typeof import('./src/components/views/SetupView.vue')['default']
