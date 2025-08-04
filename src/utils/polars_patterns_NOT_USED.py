@@ -108,34 +108,66 @@ class PolarsPatternsLibrary:
     @staticmethod
     def filter_by_condition(df: pl.DataFrame, conditions: List[Dict[str, Any]]) -> pl.DataFrame:
         """Filter DataFrame based on a list of conditions (AND logic)"""
+        if not conditions:
+            return df
+            
         exprs = []
         for cond in conditions:
-            col = cond["column"]
-            op = cond["operator"]
-            val = cond["value"]
+            # Validate condition structure
+            if not isinstance(cond, dict):
+                logger.warning(f"Invalid condition format: {cond}. Skipping.")
+                continue
+                
+            col = cond.get("column")
+            op = cond.get("operator") 
+            val = cond.get("value")
             
-            if op == "eq":
-                exprs.append(pl.col(col) == val)
-            elif op == "neq":
-                exprs.append(pl.col(col) != val)
-            elif op == "gt":
-                exprs.append(pl.col(col) > val)
-            elif op == "lt":
-                exprs.append(pl.col(col) < val)
-            elif op == "is_in":
-                exprs.append(pl.col(col).is_in(val))
-            elif op == "contains":
-                exprs.append(pl.col(col).str.contains(val))
+            # Validate required fields
+            if not col or not op:
+                logger.warning(f"Missing column or operator in condition: {cond}. Skipping.")
+                continue
+                
+            # Check if column exists in DataFrame
+            if col not in df.columns:
+                logger.warning(f"Column '{col}' not found in DataFrame. Available columns: {df.columns}. Skipping condition.")
+                continue
+            
+            try:
+                if op == "eq":
+                    exprs.append(pl.col(col) == val)
+                elif op == "neq":
+                    exprs.append(pl.col(col) != val)
+                elif op == "gt":
+                    exprs.append(pl.col(col) > val)
+                elif op == "lt":
+                    exprs.append(pl.col(col) < val)
+                elif op == "is_in":
+                    exprs.append(pl.col(col).is_in(val))
+                elif op == "contains":
+                    if val is not None:
+                        exprs.append(pl.col(col).str.contains(str(val)))
+                else:
+                    logger.warning(f"Unknown operator '{op}' in condition: {cond}. Skipping.")
+                    continue
+                    
+            except Exception as e:
+                logger.warning(f"Failed to create condition for {cond}: {e}. Skipping.")
+                continue
         
         if not exprs:
+            logger.info("No valid filter conditions found, returning original DataFrame")
             return df
         
-        # Combine all conditions with AND logic
-        final_expr = exprs[0]
-        for i in range(1, len(exprs)):
-            final_expr = final_expr & exprs[i]
-            
-        return df.filter(final_expr)
+        try:
+            # Combine all conditions with AND logic
+            final_expr = exprs[0]
+            for i in range(1, len(exprs)):
+                final_expr = final_expr & exprs[i]
+                
+            return df.filter(final_expr)
+        except Exception as e:
+            logger.error(f"Failed to apply filter conditions: {e}. Returning original DataFrame.")
+            return df
 
     @staticmethod
     def sort_by_columns(df: pl.DataFrame, sort_specs: List[Dict[str, Any]]) -> pl.DataFrame:
@@ -220,6 +252,117 @@ class PolarsPatternsLibrary:
         # Return first available dataframe
         return list(dataframes.values())[0] if dataframes else None
 
+    @staticmethod
+    def flatten_nested_arrays(df: pl.DataFrame, array_fields: List[str], strategy: str = "first_item") -> pl.DataFrame:
+        """
+        Polars-based flattening of nested arrays - HIGH PERFORMANCE
+        
+        Args:
+            df: Input DataFrame with nested array columns
+            array_fields: List of column names containing arrays of objects
+            strategy: "first_item" (take first from each array) or "explode" (create multiple rows)
+        
+        Returns:
+            Flattened DataFrame with prefixed column names
+        """
+        result_df = df.clone()
+        
+        for array_field in array_fields:
+            if array_field not in df.columns:
+                continue
+                
+            if strategy == "first_item":
+                # Strategy 1: Take first item from each array (most LLM-friendly)
+                prefix = array_field.rstrip('s')  # role_assignments -> role_assignment
+                
+                # Extract first item and create flattened columns
+                try:
+                    # Get the first element of each array
+                    first_items = result_df.select(
+                        pl.col(array_field).list.first().alias(f"{prefix}_first")
+                    )
+                    
+                    # If first item is a struct/object, extract its fields
+                    if not first_items.is_empty():
+                        sample_item = first_items.to_dicts()[0][f"{prefix}_first"]
+                        if isinstance(sample_item, dict):
+                            # Create expressions to extract each field from the first item
+                            extract_exprs = []
+                            for field_name in sample_item.keys():
+                                extract_exprs.append(
+                                    pl.col(array_field)
+                                    .list.first()
+                                    .struct.field(field_name)
+                                    .alias(f"{prefix}_{field_name}")
+                                )
+                            
+                            # Add count column
+                            extract_exprs.append(
+                                pl.col(array_field).list.len().alias(f"{array_field}_count")
+                            )
+                            
+                            # Apply extractions
+                            result_df = result_df.with_columns(extract_exprs)
+                    
+                    # Remove original array column
+                    result_df = result_df.drop(array_field)
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to flatten array field {array_field}: {e}")
+                    # Keep original column if flattening fails
+                    continue
+                    
+            elif strategy == "explode":
+                # Strategy 2: Explode arrays into multiple rows
+                result_df = result_df.explode(array_field)
+                
+                # Extract fields from exploded objects
+                try:
+                    if not result_df.is_empty():
+                        sample_item = result_df.to_dicts()[0][array_field]
+                        if isinstance(sample_item, dict):
+                            prefix = array_field.rstrip('s')
+                            extract_exprs = []
+                            for field_name in sample_item.keys():
+                                extract_exprs.append(
+                                    pl.col(array_field)
+                                    .struct.field(field_name)
+                                    .alias(f"{prefix}_{field_name}")
+                                )
+                            
+                            result_df = result_df.with_columns(extract_exprs)
+                            result_df = result_df.drop(array_field)
+                            
+                except Exception as e:
+                    logger.warning(f"Failed to explode and extract {array_field}: {e}")
+                    continue
+        
+        return result_df
+
+    @staticmethod 
+    def auto_detect_and_flatten(df: pl.DataFrame) -> pl.DataFrame:
+        """
+        Automatically detect array columns and flatten them using Polars
+        
+        This is the main method that should be used by the LLM patterns
+        """
+        if df.is_empty():
+            return df
+            
+        # Detect array columns by sampling first row
+        sample_row = df.to_dicts()[0] if df.height > 0 else {}
+        array_fields = []
+        
+        for col_name, value in sample_row.items():
+            if isinstance(value, list) and value and isinstance(value[0], dict):
+                array_fields.append(col_name)
+        
+        if not array_fields:
+            return df
+            
+        logger.info(f"Auto-detected array fields for flattening: {array_fields}")
+        return PolarsPatternsLibrary.flatten_nested_arrays(df, array_fields, "first_item")
+
 
 class PolarsPatternEngine:
     """Engine that executes Polars patterns based on LLM instructions"""
@@ -258,7 +401,8 @@ class PolarsPatternEngine:
         entity_type = plan.get("entity_type", "unknown")
         
         if not steps:
-            # Fallback: simple concatenation of all DataFrames
+            # No steps provided - let the LLM decide what to do with the data
+            # This is the fallback that sends data to LLM for intelligent processing
             return self._simple_concatenation(dataframes)
         
         result_df = None
@@ -269,7 +413,13 @@ class PolarsPatternEngine:
             
             # Add validation before executing patterns
             try:
-                if pattern == "select_columns":
+                if pattern == "auto_detect_and_flatten":
+                    df_key = params.get("dataframe", list(dataframes.keys())[0])
+                    if df_key in dataframes:
+                        result_df = self.patterns.auto_detect_and_flatten(dataframes[df_key])
+                        logger.info(f"Auto-detected and flattened nested arrays in {df_key}")
+                        
+                elif pattern == "select_columns":
                     df_key = params.get("dataframe", list(dataframes.keys())[0])
                     if df_key in dataframes:
                         df = dataframes[df_key]
