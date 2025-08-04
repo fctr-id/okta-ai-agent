@@ -133,9 +133,7 @@ const sortBy = ref([{ key: 'email', order: 'asc' }])
 const isStreamData = computed(() => props.type === MessageType.STREAM)
 const isJsonData = computed(() => props.type === MessageType.JSON)
 const isError = computed(() => props.type === MessageType.ERROR)
-//const isTextData = computed(() => props.type === MessageType.TEXT)
 const isMetadata = computed(() => props.type === MessageType.METADATA)
-
 
 const isTextData = computed(() =>
     props.type === 'text' ||
@@ -416,16 +414,6 @@ const downloadCSV = () => {
         console.error('CSV generation error:', error)
     }
 }
-
-// Use this to debug streaming data updates sent from backend
-/*
-watch(() => props.content, (newContent) => {
-    console.log('Content updated:', {
-        length: Array.isArray(newContent) ? newContent.length : 0,
-        type: props.type
-    });
-}, { deep: true });
-*/
 
 </script>
 
