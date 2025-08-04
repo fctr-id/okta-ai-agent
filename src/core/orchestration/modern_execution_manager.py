@@ -50,8 +50,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
 from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
 from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent
-from src.core.agents.results_formatter_agent import process_results_structured
-from src.core.agents.results_template_agent import generate_results_template, execute_results_template  # NEW: Template-based results formatting
+from src.core.agents.results_formatter_agent import process_results_formatter  # Unified token-based results formatting
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 
 # Import security validation
@@ -1128,12 +1127,12 @@ class ModernExecutionManager:
             
             # Call Results Formatter Agent like backup executor - let it decide complete vs sample processing
             try:
-                formatted_response = await process_results_structured(
-                    query=query,
+                formatted_response = await process_results_formatter(
                     results=step_results_for_processing,
-                    original_plan=str(execution_plan.model_dump()),
-                    is_sample=False,  # Let Results Formatter decide internally
-                    metadata={'flow_id': correlation_id}
+                    query=query,
+                    plan=execution_plan.model_dump(),
+                    flow_id=correlation_id,
+                    is_sample=False  # Pattern-based approach handles all data
                 )
                 
                 logger.info(f"[{correlation_id}] Results formatting completed with {formatted_response.get('display_type', 'unknown')} format")
@@ -1714,8 +1713,7 @@ class ModernExecutionManager:
             # DEBUG: Log the actual generated code if debug level is enabled
             generated_code = api_result_dict.get('code', '')
             if generated_code:
-                # logger.debug(f"[{correlation_id}] Generated API Code:\n{'-'*50}\n{generated_code}\n{'-'*50}")
-                pass
+                logger.info(f"[{correlation_id}] Generated API Code:\n{'-'*50}\n{generated_code}\n{'-'*50}")
             else:
                 logger.warning(f"[{correlation_id}] No API code was generated!")
             
@@ -1957,15 +1955,21 @@ except Exception as e:
                     output = json.loads(result.stdout.strip())
                     
                     # DEBUG: Log parsed JSON structure
-                    logger.debug(f"[{correlation_id}] Parsed JSON type: {type(output)}")
-                    logger.debug(f"[{correlation_id}] Parsed JSON keys: {list(output.keys()) if isinstance(output, dict) else 'Not a dict'}")
+                    #logger.debug(f"[{correlation_id}] Parsed JSON type: {type(output)}")
+                    #logger.debug(f"[{correlation_id}] Parsed JSON keys: {list(output.keys()) if isinstance(output, dict) else 'Not a dict'}")
                     logger.debug(f"[{correlation_id}] JSON status: {output.get('status') if isinstance(output, dict) else 'No status'}")
                     
                     if output.get('status') == 'success':
                         data = output.get('data', [])
-                        logger.debug(f"[{correlation_id}] Extracted data type: {type(data)}")
+                        #logger.debug(f"[{correlation_id}] Extracted data type: {type(data)}")
                         logger.debug(f"[{correlation_id}] Extracted data length: {len(data) if hasattr(data, '__len__') else 'No length'}")
-                        logger.debug(f"[{correlation_id}] Extracted data content: {data}")
+                        # Print just the first entry to avoid logging huge data structures
+                        if isinstance(data, list) and len(data) > 0:
+                            logger.debug(f"[{correlation_id}] First data entry: {data[0]}")
+                        elif isinstance(data, dict):
+                            logger.debug(f"[{correlation_id}] Data sample: {dict(list(data.items())[:1])}")  # First 1 key-value pair
+                        else:
+                            logger.debug(f"[{correlation_id}] Extracted data content: {data}")
                         
                         logger.info(f"[{correlation_id}] Code execution successful")
                         return {
