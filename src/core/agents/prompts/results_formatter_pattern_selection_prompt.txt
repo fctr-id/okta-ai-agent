@@ -137,31 +137,99 @@ Combined pattern: explode array AND extract fields from each object
 }
 ```
 
-## DATA ANALYSIS PATTERNS
-
-### Pattern 1: SIMPLE ENTITY LIST
-```
-Data: {'2_api_sql': [list of entities]}
-Response: select_columns pattern with relevant fields
-```
-
-### Pattern 2: USER PROFILE WITH ASSIGNMENTS  
-```
-Data: {'2_api_sql': [user profiles], '3_api': [role assignments]}
-Response: user_enrichment pattern
-```
-
-### Pattern 3: RELATED ENTITIES JOIN
-```
-Data: {'1_api': [entity IDs], '2_api_sql': [entity details]}
-Response: left_join pattern
+### 8. FLATTEN_AND_CONCAT (For UI-Friendly Display)
+Flattens a list of objects into a single comma-separated string. Ideal for displaying complex data like assigned groups or apps in a simple table cell.
+```json
+{
+  "pattern": "flatten_and_concat",
+  "params": {
+    "dataframe": "final_df",
+    "list_column": "assigned_groups",
+    "extract_field": "name",
+    "alias": "Assigned Groups"
+  }
+}
 ```
 
-### Pattern 4: GROUPED DATA
+### 9. FILTER_BY_CONDITION
+Filter data based on one or more conditions (e.g., status is 'ACTIVE').
+```json
+{
+  "pattern": "filter_by_condition",
+  "params": {
+    "dataframe": "initial_data",
+    "conditions": [
+      {"column": "status", "operator": "eq", "value": "ACTIVE"},
+      {"column": "created", "operator": "gt", "value": "2024-01-01T00:00:00.000Z"}
+    ]
+  }
+}
 ```
-Data: Multiple records per entity needing consolidation
-Response: group_and_aggregate pattern
+
+### 10. SORT_BY_COLUMNS
+Sort data by one or more columns.
+```json
+{
+  "pattern": "sort_by_columns",
+  "params": {
+    "dataframe": "filtered_data",
+    "sort_specs": [
+      {"column": "last_name", "descending": false},
+      {"column": "created", "descending": true}
+    ]
+  }
+}
 ```
+
+### 11. CAST_COLUMN_TYPE
+Cast columns to a specific data type for correct sorting and filtering.
+```json
+{
+  "pattern": "cast_column_type",
+  "params": {
+    "dataframe": "initial_data",
+    "casts": [
+      {"column": "created", "dtype": "datetime"},
+      {"column": "user_count", "dtype": "int"}
+    ]
+  }
+}
+```
+
+### 12. SMART_DATAFRAME_SELECTION
+Intelligently select the best dataframe when complex operations are not feasible
+```json
+{
+  "pattern": "smart_dataframe_selection",
+  "params": {
+    "preference_order": ["2_api_sql", "3_api", "1_api"],
+    "required_fields": ["email", "okta_id"],
+    "fallback_to_largest": true
+  }
+}
+```
+
+## INSTRUCTIONS
+
+1. **Analyze the Query and Data**: Understand the user's request and examine the sample data structure provided.
+2. **Select Primary DataFrame**: Choose the dataframe with the most complete/relevant data as your starting point.
+3. **Plan Processing Steps**: Design a sequence of pattern operations to transform and enrich the data.
+4. **Validate Column Availability**: Ensure each step only references columns that exist in the current dataframe state.
+5. **Output Valid JSON**: Return a single JSON object with your processing plan.
+
+### CRITICAL PATTERN EXECUTION RULES:
+
+1. **Column Availability**: Only reference columns that exist in the specified dataframe. Check the sample data carefully.
+2. **Step Sequencing**: Each step operates on the result of the previous step or a named dataframe.
+3. **Join Requirements**: 
+   - `left_field` must exist in the left dataframe
+   - `right_field` must exist in the right dataframe
+   - Use exact column names from sample data
+4. **Select Columns**: Only select columns that exist in the target dataframe after all previous operations.
+
+### DATAFRAME NAMING:
+- Dataframes are named by execution step (e.g., `1_api`, `2_api_sql`, `3_api`)
+- Always specify the exact dataframe name in pattern parameters
 
 ## FIELD MAPPING GUIDELINES
 
@@ -198,18 +266,44 @@ Response: group_and_aggregate pattern
 
 ## EXAMPLES
 
-### Example 1: User Data with Applications and Roles
+### Example 1: Simple Dataframe Selection
 ```json
 {
-  "analysis": "User profile data with applications, groups, and role assignments",
+  "analysis": "User profile data available in API-SQL step, select and format columns",
   "entity_type": "users",
   "steps": [
     {
-      "pattern": "user_enrichment",
+      "pattern": "select_columns",
       "params": {
-        "base_data": "2_api_sql",
-        "role_data": "3_api",
-        "join_field": "okta_id"
+        "dataframe": "2_api_sql",
+        "columns": ["okta_id", "email", "first_name", "last_name"],
+        "aliases": {
+          "okta_id": "user_id"
+        }
+      }
+    }
+  ],
+  "field_mappings": {
+    "user_id": "User ID",
+    "email": "Email Address",
+    "first_name": "First Name",
+    "last_name": "Last Name"
+  }
+}
+```
+
+### Example 2: Smart Selection When Joins Are Complex
+```json
+{
+  "analysis": "Multiple datasources with different structures, select best available",
+  "entity_type": "users",
+  "steps": [
+    {
+      "pattern": "smart_dataframe_selection",
+      "params": {
+        "preference_order": ["2_api_sql", "3_api", "1_api"],
+        "required_fields": ["email"],
+        "fallback_to_largest": true
       }
     }
   ],
@@ -217,35 +311,31 @@ Response: group_and_aggregate pattern
     "okta_id": "User ID",
     "email": "Email Address",
     "first_name": "First Name",
-    "direct_applications": "Applications",
-    "groups": "Groups",
-    "role_assignments": "Roles"
+    "last_name": "Last Name"
   }
 }
 ```
 
-### Example 2: Simple Group List
+### Example 3: Safe Join Operation
 ```json
 {
-  "analysis": "List of groups with basic information",
-  "entity_type": "groups", 
+  "analysis": "Join user profile with role data using common user_id field",
+  "entity_type": "users",
   "steps": [
     {
-      "pattern": "select_columns",
+      "pattern": "left_join",
       "params": {
-        "dataframe": "1_api",
-        "columns": ["id", "name", "description", "type"],
-        "aliases": {
-          "id": "group_id"
-        }
+        "left_df": "2_api_sql",
+        "right_df": "3_api", 
+        "left_field": "okta_id",
+        "right_field": "user_id"
       }
     }
   ],
   "field_mappings": {
-    "group_id": "Group ID",
-    "name": "Group Name",
-    "description": "Description",
-    "type": "Group Type"
+    "okta_id": "User ID",
+    "email": "Email Address",
+    "roles": "Assigned Roles"
   }
 }
 ```
@@ -257,5 +347,20 @@ Response: group_and_aggregate pattern
 3. **USER FRIENDLY**: Create readable field names
 4. **PATTERN BASED**: Only use predefined patterns
 5. **VALID SYNTAX**: Ensure JSON parses correctly
+6. **COLUMN VALIDATION**: Only reference columns that exist in the sample data
+7. **SIMPLE FIRST**: Prefer simple patterns over complex multi-step operations
+8. **FALLBACK READY**: Use smart_dataframe_selection when complex operations might fail
+
+### COMMON FAILURE PATTERNS TO AVOID:
+- Selecting columns that don't exist after joins
+- Assuming column names without checking sample data
+- Complex multi-step operations without validation
+- Referencing arrays/lists in select_columns without exploding first
+
+### RECOMMENDED SAFE PATTERNS:
+1. For simple data display: Use `select_columns` with exact column names from sample
+2. For complex data: Use `smart_dataframe_selection` to pick best dataframe
+3. For joins: Verify both join keys exist in sample data before attempting
+4. For array data: Use `explode_and_extract` instead of complex multi-step operations
 
 Your response must start with `{` and end with `}` with valid JSON between.

@@ -32,11 +32,13 @@ logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
 try:
     from src.core.models.model_picker import ModelConfig, ModelType
     reasoning_model = ModelConfig.get_model(ModelType.REASONING)
+    coding_model = ModelConfig.get_model(ModelType.CODING)
 except ImportError:
     def get_simple_model():
         model_name = os.getenv('LLM_MODEL', 'openai:gpt-4o')
         return model_name
     reasoning_model = get_simple_model()
+    coding_model = get_simple_model()
 
 def _load_complete_data_prompt() -> str:
     """Load system prompt for complete data processing"""
@@ -72,7 +74,7 @@ complete_data_agent = Agent(
 )
 
 sample_data_agent = Agent(
-    reasoning_model,
+    coding_model,
     system_prompt=_load_sample_data_prompt(),
     retries=0
 )
@@ -310,9 +312,14 @@ Return JSON response with template configuration that can process all records in
         pattern_plan = _parse_pattern_response(str(response_text), flow_id)
         
         # Execute using Polars Pattern Engine
-        from src.data.polars_patterns import PolarsPatternEngine
+        from src.utils.polars_patterns import PolarsPatternEngine
         pattern_engine = PolarsPatternEngine()
         template_result = pattern_engine.execute_processing_plan(results, pattern_plan)
+        
+        # Log any errors that occurred during pattern execution
+        if template_result.get("metadata", {}).get("error"):
+            logger.warning(f"[{flow_id}] Polars pattern execution failed: {template_result['metadata']['error']}")
+            
         template_result['metadata']['processing_method'] = 'sample_data_template'
         template_result['metadata']['is_sample'] = True
         
@@ -409,63 +416,97 @@ def _parse_pattern_response(response_text: str, flow_id: str) -> Dict[str, Any]:
 def _create_fallback_result(results: Dict[str, Any], flow_id: str, error: str = None) -> Dict[str, Any]:
     """Create a simple fallback result when pattern processing fails"""
     try:
-        # Try to find the largest dataset and return it as-is
-        largest_data = []
-        largest_key = ""
+        logger.warning(f"[{flow_id}] Initiating fallback processing due to error: {error}")
         
-        for key, data in results.items():
-            if isinstance(data, list) and len(data) > len(largest_data):
-                largest_data = data
-                largest_key = key
-            elif isinstance(data, dict) and 'data' in data:
-                if isinstance(data['data'], list) and len(data['data']) > len(largest_data):
-                    largest_data = data['data']
-                    largest_key = key
+        # Prioritize finding the most complete, user-centric dataset
+        preferred_keys = ['api_sql', 'sql', 'api']
+        best_key = None
         
-        if largest_data:
-            # Create simple headers from first record
-            headers = []
-            if largest_data and isinstance(largest_data[0], dict):
-                for key in largest_data[0].keys():
-                    headers.append({
-                        "value": key,
-                        "text": key.replace("_", " ").title(),
-                        "sortable": True
-                    })
+        # Find the best key by checking for preferred substrings
+        for p_key in preferred_keys:
+            for r_key in results.keys():
+                if p_key in r_key:
+                    best_key = r_key
+                    break
+            if best_key:
+                break
+        
+        # If no preferred key found, find the largest dataset as a last resort
+        if not best_key:
+            largest_len = -1
+            for key, data in results.items():
+                current_len = 0
+                if isinstance(data, list):
+                    current_len = len(data)
+                elif isinstance(data, dict) and 'data' in data and isinstance(data['data'], list):
+                    current_len = len(data['data'])
+                
+                if current_len > largest_len:
+                    largest_len = current_len
+                    best_key = key
+
+        if not best_key:
+            logger.error(f"[{flow_id}] Fallback failed: No suitable data found in results.")
+            return _create_error_response("No data available for fallback.", flow_id)
+
+        logger.info(f"[{flow_id}] Fallback selected data from step: '{best_key}'")
+        
+        # Extract data from the selected step
+        data_source = results.get(best_key, [])
+        if isinstance(data_source, dict) and 'data' in data_source:
+            final_data = data_source['data']
+        elif isinstance(data_source, list):
+            final_data = data_source
         else:
-            headers = []
-            largest_data = []
+            final_data = []
+
+        if not isinstance(final_data, list):
+            final_data = []
+
+        # Create simple headers from the first record
+        headers = []
+        if final_data and isinstance(final_data[0], dict):
+            for key in final_data[0].keys():
+                headers.append({
+                    "value": key,
+                    "text": key.replace("_", " ").title(),
+                    "sortable": True
+                })
         
-        logger.info(f"[{flow_id}] Fallback processing: {len(largest_data)} records from {largest_key}")
+        logger.info(f"[{flow_id}] Fallback processing: {len(final_data)} records from {best_key}")
         
         return {
             "display_type": "table",
-            "content": largest_data,
+            "content": final_data,
             "metadata": {
                 "headers": headers,
-                "total_records": len(largest_data),
-                "processing_method": "fallback_simple",
+                "total_records": len(final_data),
+                "processing_method": "fallback_intelligent",
                 "entity_type": "unknown",
                 "is_sample": False,
-                "source": largest_key,
-                "error": error
+                "source": best_key,
+                "error": f"Primary processing failed: {error}. Displaying best available data."
             }
         }
         
     except Exception as e:
         logger.error(f"[{flow_id}] Fallback processing also failed: {e}")
-        return {
-            "display_type": "table", 
-            "content": [],
-            "metadata": {
-                "headers": [],
-                "total_records": 0,
-                "processing_method": "error_fallback",
-                "entity_type": "unknown",
-                "is_sample": False,
-                "error": f"Complete processing failure: {error or str(e)}"
-            }
+        return _create_error_response(f"Complete processing failure: {error or str(e)}", flow_id)
+
+def _create_error_response(error_message: str, flow_id: str) -> Dict[str, Any]:
+    """Creates a standardized error response object."""
+    return {
+        "display_type": "table", 
+        "content": [],
+        "metadata": {
+            "headers": [],
+            "total_records": 0,
+            "processing_method": "error_fallback",
+            "entity_type": "unknown",
+            "is_sample": False,
+            "error": error_message
         }
+    }
 
 def _count_total_records(results: Dict[str, Any]) -> int:
     """Count total records across all data sources"""
