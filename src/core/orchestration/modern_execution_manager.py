@@ -50,7 +50,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
 from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
 from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent
-from src.core.agents.results_formatter_agent import process_results_formatter  # Unified token-based results formatting
+from src.core.agents.results_formatter_agent import format_results as process_results_formatter  # Unified token-based results formatting
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 
 # Import security validation
@@ -1128,11 +1128,11 @@ class ModernExecutionManager:
             # Call Results Formatter Agent like backup executor - let it decide complete vs sample processing
             try:
                 formatted_response = await process_results_formatter(
-                    results=step_results_for_processing,
                     query=query,
-                    plan=execution_plan.model_dump(),
-                    flow_id=correlation_id,
-                    is_sample=False  # Pattern-based approach handles all data
+                    results=step_results_for_processing,
+                    is_sample=False,  # Pattern-based approach handles all data
+                    original_plan=json.dumps(execution_plan.model_dump()),
+                    metadata={"flow_id": correlation_id}
                 )
                 
                 logger.info(f"[{correlation_id}] Results formatting completed with {formatted_response.get('display_type', 'unknown')} format")
