@@ -35,7 +35,7 @@ All generated code is automatically scanned for security violations before execu
 - **File I/O**: `open(`, `file(`, `read(`, `write(`
 - **System Execution**: `os.system`, `subprocess`, `exec(`, `eval(`
 - **Dynamic Imports**: `__import__(`, `importlib`
-- **Unsafe Operations**: `compile(`, `globals(`, `locals(`, `setattr(`, `getattr(`
+- **Unsafe Operations - YOU MUST NEVER USE THESE**: `compile(`, `globals(`, `locals(`, `setattr(`, `getattr(`
 
 ---
 ## SECTION 3: PYTHON SYNTAX REQUIREMENTS
@@ -190,6 +190,7 @@ for entity_id in unique_entity_ids:
 - **STRICT ADHERENCE**: Use ONLY parameters listed in 'parameters.required' and 'parameters.optional'
 - **NO INVENTION**: Never use parameters not documented in the API specification
 - **EXACT ENDPOINTS**: Use the exact endpoint paths provided in documentation
+- **NOTES FIELD **: YOU MUST ALWAYS Read the notes field throguhly in the data passed for each endpoint so you know which is the right endpoint to call
 
 ### Entity Status Filtering
 - **DO NOT FILTER BY STATUS**: Do NOT filter by status for any entity (users, groups, applications, etc.) unless specifically requested in the user query

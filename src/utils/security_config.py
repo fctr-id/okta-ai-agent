@@ -66,6 +66,16 @@ ALLOWED_MODULES: Set[str] = {
     'asyncio', 'json', 'datetime', 'time', 'sys', 'pathlib',
     'logging', 're', 'typing', 'collections', 'itertools',
     'pprint',  # For template config formatting
+    'xml.etree.ElementTree',  # For SAML certificate and XML processing
+    'xml.etree',  # For XML processing imports (from xml.etree import ElementTree)
+    'base64',  # For base64 encoding/decoding (SAML certificates)
+    
+    # Cryptography for SAML certificate processing
+    'cryptography',  # Certificate parsing and validation
+    'cryptography.hazmat.backends',  # Cryptographic backends
+    'cryptography.hazmat.primitives',  # Cryptographic primitives
+    'cryptography.x509',  # X.509 certificate handling
+    'ssl',  # SSL/TLS certificate processing for SAML metadata
     
     # HTTP and networking
     'aiohttp',
