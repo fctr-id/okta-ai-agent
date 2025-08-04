@@ -1949,9 +1949,9 @@ except Exception as e:
             if result.returncode == 0 and result.stdout.strip():
                 try:
                     # DEBUG: Log raw subprocess output before parsing
-                    logger.debug(f"[{correlation_id}] Raw subprocess stdout ({len(result.stdout)} chars): {result.stdout}")
+                    #logger.debug(f"[{correlation_id}] Raw subprocess stdout ({len(result.stdout)} chars): {result.stdout}")
                     logger.debug(f"[{correlation_id}] Raw subprocess stderr ({len(result.stderr)} chars): {result.stderr}")
-                    
+
                     output = json.loads(result.stdout.strip())
                     
                     # DEBUG: Log parsed JSON structure
