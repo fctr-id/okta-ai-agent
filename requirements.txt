@@ -1,6 +1,6 @@
 # Core dependencies
 pydantic~=2.11.7
-pydantic-ai~=0.4.7
+pydantic-ai~=0.4.11
 openai~=1.97.0
 python-dotenv~=1.1.1
 okta~=2.9.13
