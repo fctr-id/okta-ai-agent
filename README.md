@@ -63,7 +63,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 - [🛡️ Security & Privacy](#️-security--privacy)
   - [Tako Architecture](#tako-architecture)
     - [Common Security Features](#common-security-features)
-    - [Access Management](#access-management)
+    - [API Token](#api-token)
     - [AI Provider Options](#ai-provider-options)
     - [Data Security](#data-security)
     - [Database Model](#database-model)
@@ -266,14 +266,14 @@ The following data model applies only when using Database Mode with a synced SQL
 
 | **Entity** | **Core Fields** |
 |------------|-----------------|
-| **Users** | id, tenant_id, okta_id, email, login, first_name, last_name, status, mobile_phone, primary_phone, employee_number, department, manager, password_changed_at, status_changed_at, user_type, country_code, title, organization, custom_attributes, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **Groups** | id, tenant_id, okta_id, name, description, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **Applications** | id, tenant_id, okta_id, name, label, status, sign_on_mode, metadata_url, policy_id, sign_on_url, audience, destination, signing_kid, username_template, username_template_type, implicit_assignment, admin_note, attribute_statements, honor_force_authn, hide_ios, hide_web, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **UserFactors** | id, tenant_id, okta_id, user_okta_id, factor_type, provider, status, authenticator_name, email, phone_number, device_type, device_name, platform, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **Policies** | id, tenant_id, okta_id, name, description, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **Devices** | id, tenant_id, okta_id, status, display_name, platform, manufacturer, model, os_version, registered, secure_hardware_present, disk_encryption_type, serial_number, udid, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **UserDevices** | id, tenant_id, user_okta_id, device_okta_id, management_status, user_device_created_at, screen_lock_type, created_at, updated_at |
-| **Authenticators** | id, tenant_id, okta_id, name, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Users** | id, okta_id, email, login, first_name, last_name, status, mobile_phone, primary_phone, employee_number, department, manager, password_changed_at, status_changed_at, user_type, country_code, title, organization, custom_attributes, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Groups** | id, okta_id, name, description, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Applications** | id, okta_id, name, label, status, sign_on_mode, metadata_url, policy_id, sign_on_url, audience, destination, signing_kid, username_template, username_template_type, implicit_assignment, admin_note, attribute_statements, honor_force_authn, hide_ios, hide_web, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **UserFactors** | id, okta_id, user_okta_id, factor_type, provider, status, authenticator_name, email, phone_number, device_type, device_name, platform, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Policies** | id, okta_id, name, description, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Devices** | id, okta_id, status, display_name, platform, manufacturer, model, os_version, registered, secure_hardware_present, disk_encryption_type, serial_number, udid, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **UserDevices** | id, user_okta_id, device_okta_id, management_status, user_device_created_at, screen_lock_type, created_at, updated_at |
+| **Authenticators** | id, okta_id, name, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
 
 **Note**: You can view the data saved to your SQLite DB using tools like DB Browser for SQLite.
 
