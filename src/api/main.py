@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
-from .routers import query, auth, sync, realtime_hybrid
+from .routers import auth, sync, realtime_hybrid
 from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import AuthUser
@@ -124,7 +124,6 @@ app.add_middleware(
 )
 
 # Register router for API endpoints
-app.include_router(query.router, prefix="/api")
 app.include_router(auth.router) 
 app.include_router(sync.router, prefix="/api")
 app.include_router(realtime_hybrid.router, prefix="/api/realtime")

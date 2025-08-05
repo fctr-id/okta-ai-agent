@@ -1,5 +1,5 @@
-from src.legacy.sql_mode.okta_pre_reasoning_agent import reasoning_agent
-from src.legacy.sql_mode.okta_generate_sql import sql_agent, extract_json_from_text
+from src.core.helpers.okta_pre_reasoning_agent import reasoning_agent
+from src.core.helpers.okta_generate_sql import sql_agent, extract_json_from_text
 from src.core.okta.sync.operations import DatabaseOperations
 from src.config.settings import settings
 from typing import Dict, List, Any
