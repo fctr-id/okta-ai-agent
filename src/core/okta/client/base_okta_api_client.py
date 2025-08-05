@@ -289,11 +289,11 @@ class OktaAPIClient:
                                 self.logger.info(f"Rate limit details: {rate_limit_remaining}/{rate_limit_limit} remaining, resets at epoch {rate_limit_reset}")
                             
                             if retry_count < max_retries - 1:  # Don't sleep on last retry
-                                # Exponential backoff for consecutive rate limits
-                                backoff_multiplier = 1 + (retry_count * 0.5)
-                                actual_wait = min(retry_after * backoff_multiplier, 300)  # Max 5 min wait
+                                # Use Okta's exact Retry-After header (no multiplier needed)
+                                # Okta's rate limits reset at specific times, so we trust their timing
+                                actual_wait = min(retry_after, 300)  # Max 5 min wait for safety
                                 
-                                self.logger.info(f"Applying backoff multiplier {backoff_multiplier:.1f}x: waiting {actual_wait:.0f} seconds for rate limit to clear")
+                                self.logger.info(f"Waiting {actual_wait} seconds as specified by Okta Retry-After header")
                                 await asyncio.sleep(actual_wait)
                                 retry_count += 1
                                 continue
@@ -303,7 +303,9 @@ class OktaAPIClient:
                         
                         # Add Link header and rate limit info for pagination detection
                         if result["status"] == "success":
-                            result["link_header"] = response.headers.get('Link', '')
+                            # Get ALL Link headers (Okta sends multiple Link headers)
+                            link_headers = response.headers.getall('Link', [])
+                            result["link_header"] = ', '.join(link_headers)
                             
                             # Include rate limit information in successful responses
                             if rate_limit_limit and rate_limit_remaining:
