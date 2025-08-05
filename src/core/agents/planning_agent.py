@@ -275,13 +275,30 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
     
     # Add parameter efficiency hints for planning decisions
     parameter_hints = {
-        "group_list": "supports expand=stats for user counts without fetching members",
-        "application_list": "supports expand=user/{userId} for user assignment details",
-        "user_list": "supports expand=classification for user metadata without extra calls",
-        "user_get": "supports expand=blocks|classification for user details without extra calls", 
-        "user_list_roles": "supports expand=targets/groups|targets/catalog/apps for role targets",
-        "application_user_list": "supports expand=user for full user objects instead of just assignments",
-        "group_list_members": "pagination-heavy - consider expand=stats on group_list instead for counts"
+        "group_list": "supports expand=stats for user counts (avoids separate group_list_members calls) or expand=app for application details",
+        "application_list": "supports expand=user/{userId} for user assignment details (REQUIRES user.id eq '{userId}' filter)",
+        "application_get": "supports expand=user/{userId} to return specific application user in _embedded (avoids separate user lookup)",
+        "application_grants_list": "supports expand=scope to include OAuth scope details in grants (avoids separate scope lookups)",
+        "application_grants_get": "supports expand=scope to include OAuth scope details for specific grant",
+        "application_groups_list": "supports expand=group to include full group objects instead of just assignment references",
+        "application_groups_get": "supports expand=group to include full group object for specific assignment",
+        "application_tokens_list": "supports expand=scope to include OAuth scope details in token listings",
+        "application_tokens_get": "supports expand=scope to include OAuth scope details for specific token",
+        "application_user_list": "supports expand=user for full user objects instead of just assignment references (reduces API calls)",
+        "application_user_get": "supports expand=user for full user object instead of just assignment reference",
+        "user_list": "supports expand=classification for user metadata (compliance/risk data) without extra calls",
+        "user_get": "supports expand=blocks for access restrictions or expand=classification for metadata", 
+        "user_list_roles": "supports expand=targets/groups for group targets or expand=targets/catalog/apps for app targets (avoids separate target lookups)",
+        "devices_list": "supports expand=user to include associated user details and device management status in _embedded",
+        "user_list_devices": "lists devices enrolled by a specific user - available via /users/{userId}/devices endpoint",
+        "device_list_users": "lists all users for a specific device - available via /devices/{deviceId}/users endpoint",
+        "policy_get": "supports expand=rules to include all policy rules in same response (avoids separate list_policy_rules call)",
+        "policy_list": "supports expand=rules to include all policies with their rules in same response (significant efficiency gain)",
+        "group_rules_list": "supports expand for additional rule condition and action details",
+        "group_rules_get": "supports expand for additional rule condition and action details",
+        "group_list_roles": "supports expand for role targets in group role assignments (avoids separate target queries)",
+        "yubikey_tokens_list": "supports expand for additional YubiKey token metadata and status details",
+        "group_list_members": "INEFFICIENT - prefer expand=stats on group_list for counts instead of fetching all members"
     }
     
     # Create context data with API entities, SQL tables, and efficiency hints

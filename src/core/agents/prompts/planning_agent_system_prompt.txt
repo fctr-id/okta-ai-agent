@@ -66,12 +66,16 @@ You are a HYBRID query planner for an Okta system. Your job is to create an effi
 
 **EFFICIENCY OPTIMIZATION**:
 - **Check parameter_efficiency_hints** in AVAILABLE DATA SOURCES for optimal API usage
-- **User counts**: prefer expand=stats on group_list over group_list_members + counting
-- **Role analysis**: use expand=targets/groups|targets/catalog/apps on user_list_roles 
-- **User details**: use expand=classification on user_list or expand=blocks|classification on user_get
-- **Application assignments**: use expand=user on application_user_list for full user objects
-- **Bulk operations**: consider parameter options that reduce API calls
-- **Example**: For "count users in group X", use group_list with expand=stats rather than group_list_members
+- **Expand Parameter Usage**: Use expand parameters to include related data in single API calls
+  - **User counts**: prefer `expand=stats` on group_list over group_list_members + counting
+  - **Role analysis**: use `expand=targets/groups|targets/catalog/apps` on user_list_roles 
+  - **User details**: use `expand=classification` on user_list or `expand=blocks|classification` on user_get
+  - **Application assignments**: use `expand=user` on application_user_list for full user objects
+  - **Policy rules**: use `expand=rules` on policy_get/policy_list to include rules in same response
+  - **OAuth scopes**: use `expand=scope` on grant/token endpoints to include scope details
+- **Filter Requirements**: Some expand parameters require specific filters (e.g., `expand=user/{userId}` needs `user.id eq "{userId}"`)
+- **Bulk operations**: Always prioritize parameter options that reduce total API calls
+- **Example**: For "count users in group X", use `group_list` with `expand=stats` rather than `group_list_members`
 
 **OUTPUT RESPONSE FORMAT** - EXACTLY this JSON structure:
 {

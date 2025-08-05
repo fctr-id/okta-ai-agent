@@ -259,7 +259,7 @@
       "folder_path": "Application Grants",
       "parameters": { "required": ["appId"], "optional": ["expand"] },
       "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application (must be an OAuth 2.0 client).\n\n## Important Notes\n*   This shows which users have consented to which OAuth scopes for this application."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application (must be an OAuth 2.0 client).\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details in grants.\n\n## Important Notes\n*   This shows which users have consented to which OAuth scopes for this application."
     },
     {
       "id": "get-application-grant",
@@ -272,7 +272,7 @@
       "folder_path": "Application Grants",
       "parameters": { "required": ["appId", "grantId"], "optional": ["expand"] },
       "depends_on": ["list-applications", "list-application-grants"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-application-grants`."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-application-grants`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details for specific grant."
     },
     {
       "id": "list-application-group-assignments",
@@ -285,7 +285,7 @@
       "folder_path": "Application Groups",
       "parameters": { "required": ["appId"], "optional": ["q", "after", "limit", "expand"] },
       "depends_on": ["list-applications", "list-application-user-assignments", "list-policies"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list group assignments.\n\n## Important Notes\n*   This endpoint is used to discover which groups have been granted access to a specific application.\n*   For complete access analysis, also check `list-application-user-assignments` and policy mappings."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list group assignments.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=group` to include full group objects instead of just assignments.\n\n## Important Notes\n*   This endpoint is used to discover which groups have been granted access to a specific application.\n*   For complete access analysis, also check `list-application-user-assignments` and policy mappings."
     },
     {
       "id": "get-application-group-assignment",
@@ -298,7 +298,7 @@
       "folder_path": "Application Groups",
       "parameters": { "required": ["appId", "groupId"], "optional": ["expand"] },
       "depends_on": ["list-applications", "list-groups"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`groupId`** (String, Required): The ID of the group.\n\n## Important Notes\n*   Use this to check the details of a specific assignment, such as the priority or profile information."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`groupId`** (String, Required): The ID of the group.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=group` to include full group object for specific assignment.\n\n## Important Notes\n*   Use this to check the details of a specific assignment, such as the priority or profile information."
     },
     {
       "id": "get-application-saml-metadata",
@@ -454,7 +454,7 @@
       "folder_path": "Application Tokens",
       "parameters": { "required": ["appId"], "optional": ["expand", "after", "limit"] },
       "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the OAuth 2.0 application."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the OAuth 2.0 application.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details in token listings."
     },
     {
       "id": "get-application-token",
@@ -467,7 +467,7 @@
       "folder_path": "Application Tokens",
       "parameters": { "required": ["appId", "tokenId"], "optional": ["expand"] },
       "depends_on": ["list-applications", "list-application-tokens"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`tokenId`** (String, Required): The ID of the token, obtained from `list-application-tokens`."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`tokenId`** (String, Required): The ID of the token, obtained from `list-application-tokens`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details for specific token."
     },
     {
       "id": "list-application-user-assignments",
@@ -493,7 +493,7 @@
       "folder_path": "Application Users",
       "parameters": { "required": ["appId", "userId"], "optional": ["expand"] },
       "depends_on": ["list-applications", "list-users"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`userId`** (String, Required): The ID of the user.\n\n## Important Notes\n*   Use this to get details of a specific assignment, like the username specific to that application if it differs from their Okta username."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`userId`** (String, Required): The ID of the user.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=user` to include full user object instead of just assignment.\n\n## Important Notes\n*   Use this to get details of a specific assignment, like the username specific to that application if it differs from their Okta username."
     },
     {
       "id": "get-authenticator-well-known-config",
@@ -597,7 +597,7 @@
       "folder_path": "Devices",
       "parameters": { "required": [], "optional": ["after", "limit", "search", "expand"] },
       "depends_on": ["list-device-assurance-policies", "list-device-posture-checks"],
-      "notes": "## Query Parameters\n*   **`search`** (String): A SCIM filter to find devices based on properties. Example: `profile.platform eq \"IOS\"`.\n\n## Important Notes\n*   For device compliance analysis, also check `list-device-assurance-policies` and `list-device-posture-checks`."
+      "notes": "## Query Parameters\n*   **`search`** (String): A SCIM filter to find devices based on properties. Example: `profile.platform eq \"IOS\"`.\n*   **`expand`** (String, Optional): Use `expand=user` to include associated user details and management status in `_embedded` property.\n\n## Important Notes\n*   For device compliance analysis, also check `list-device-assurance-policies` and `list-device-posture-checks`."
     },
     {
       "id": "get-device",
@@ -792,7 +792,7 @@
       "folder_path": "Group Rules",
       "parameters": { "required": [], "optional": ["limit", "after", "search", "expand"] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   Group rules allow you to dynamically assign users to groups based on their profile attributes."
+      "notes": "## Query Parameters\n*   **`expand`** (String, Optional): Include additional rule details in the response.\n\n## Important Notes\n*   Group rules allow you to dynamically assign users to groups based on their profile attributes."
     },
     {
       "id": "get-group-rule",
@@ -805,7 +805,7 @@
       "folder_path": "Group Rules",
       "parameters": { "required": ["groupRuleId"], "optional": ["expand"] },
       "depends_on": ["list-group-rules"],
-      "notes": "## Path Parameters\n*   **`groupRuleId`** (String, Required): The ID of the group rule, obtained from `list-group-rules`."
+      "notes": "## Path Parameters\n*   **`groupRuleId`** (String, Required): The ID of the group rule, obtained from `list-group-rules`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include additional rule details in the response."
     },
     {
       "id": "list-log-streams",
@@ -883,7 +883,7 @@
       "folder_path": "Policies",
       "parameters": { "required": ["type"], "optional": ["status", "q", "expand", "sortBy", "limit", "resourceId", "after"] },
       "depends_on": [],
-      "notes": "## Critical Parameters\n*   **`type`** (String, Required): This parameter is **mandatory**. You must specify the type of policy to list. Common values include:\n    *   `OKTA_SIGN_ON`: For Global Session Policies.\n    *   `PASSWORD`: For Password Policies.\n    *   `MFA_ENROLL`: For Multifactor Enrollment Policies.\n    *   `ACCESS_POLICY`: For Authentication Policies.\n    *   `OAUTH_AUTHORIZATION_POLICY`: For OAuth Authorization Server Policies."
+      "notes": "## Critical Parameters\n*   **`type`** (String, Required): This parameter is **mandatory**. You must specify the type of policy to list. Common values include:\n    *   `OKTA_SIGN_ON`: For Global Session Policies.\n    *   `PASSWORD`: For Password Policies.\n    *   `MFA_ENROLL`: For Multifactor Enrollment Policies.\n    *   `ACCESS_POLICY`: For Authentication Policies.\n    *   `OAUTH_AUTHORIZATION_POLICY`: For OAuth Authorization Server Policies.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=rules` to include all policies with their rules in the same response."
     },
     {
       "id": "get-policy",
@@ -1091,7 +1091,7 @@
       "folder_path": "Group Role Assignments",
       "parameters": { "required": ["groupId"], "optional": ["expand"] },
       "depends_on": ["list-groups"],
-      "notes": "## Path Parameters\n*   **`groupId`** (String, Required): The ID of the group for which to list roles."
+      "notes": "## Path Parameters\n*   **`groupId`** (String, Required): The ID of the group for which to list roles.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include role targets in `_embedded` property for group role assignments."
     },
     {
       "id": "get-group-role",
@@ -1429,7 +1429,7 @@
       "folder_path": "User Factors",
       "parameters": { "required": [], "optional": ["after", "expand", "filter", "forDownload", "limit", "sortBy", "sortOrder"] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   This endpoint lists the hardware tokens themselves, not user enrollments."
+      "notes": "## Query Parameters\n*   **`expand`** (String, Optional): Include additional token details in the response.\n\n## Important Notes\n*   This endpoint lists the hardware tokens themselves, not user enrollments."
     },
     {
       "id": "get-yubikey-token",
