@@ -1,37 +1,7 @@
 """
 Modern Execution Manager for Okta AI Agent.
 
-FULL POLARS ARCHITECTURE FOR MAXIMUM PERFORMANCE:
-================================================
 
-This executor implements a Polars-first data flow pattern for 13,964x performance improvement:
-
-1. POLARS DATA STORAGE PATTERN:
-   - polars_dataframes: {"sql_data_step_1": DataFrame, "api_data_step_2": DataFrame}
-   - step_metadata: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query description"}}
-
-2. FULL POLARS STEP EXECUTION PATTERN:
-   - Each step gets ENHANCED CONTEXT from ALL previous steps
-   - Each step gets POLARS DataFrame from previous step for processing
-   - Each step stores results as POLARS DataFrame using _store_step_data()
-
-3. ADDING NEW TOOLS/STEPS:
-   - Add new tool type in execute_steps() elif block
-   - Create _execute_[tool]_step() method following pattern:
-     * Get enhanced context: self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
-     * Get full data: self._get_polars_data_from_previous_step(step_number)
-     * Process with tool agent (full data for processing, enhanced context for LLM)
-     * Store results: self._store_step_data(step_number, "tool_type", data, metadata, step_context)
-   - No changes needed to existing steps - fully repeatable!
-
-4. POLARS DATA ACCESS PATTERN:
-   - LLM Context: Always use enhanced context from ALL previous steps for intelligent decisions
-   - Processing: Always use Polars DataFrames for maximum performance
-   - Variable Lookup: Access any previous step data by DataFrame name
-   - Automatic Storage: All results stored with consistent naming
-
-This replaces complex sample extraction and "last step" tracking with a clean,
-scalable variable-based approach proven in the old executor.
 """
 
 from typing import Dict, List, Any, Optional
@@ -75,31 +45,16 @@ logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
 # 
 # CURRENT TIMEOUT VALUES:
 # - API Operations: 180s (3 min) - Standard API calls with pagination
-# - System Logs: 300s (5 min) - Extended for heavy system log queries  
 # - SQL Operations: 60s (1 min) - Database queries
-# - HTTP Requests: 30s - Individual API requests (used in generated code)
 #
 # REASONING FOR VALUES:
-# - System log queries need 5 minutes due to pagination + large datasets
-# - Regular API calls need 3 minutes for multiple paginated calls
+# - API calls (including system logs) need 3 minutes for multiple paginated calls
 # - SQL queries are fast, 1 minute is sufficient
-# - HTTP requests timeout quickly to fail fast and retry
 # ================================================================
 
-# API Execution Timeouts (in seconds)
-API_EXECUTION_TIMEOUT = 180           # Subprocess timeout for API code execution (3 minutes)
-SYSTEM_LOG_TIMEOUT = 300              # Extended timeout for system_log queries (5 minutes)
-SQL_EXECUTION_TIMEOUT = 60            # Subprocess timeout for SQL operations (1 minute)
-
-# Database Timeouts (in seconds)
-DATABASE_CONNECTION_TIMEOUT = 30      # SQLite connection timeout
-SQL_QUERY_TIMEOUT = 60                # Individual SQL query execution timeout
-
-# HTTP Request Timeouts (in seconds) - Used in generated API code
-HTTP_REQUEST_TIMEOUT = 30             # Individual HTTP request timeout to Okta API
-
-# LLM Model Timeouts (in seconds)
-LLM_MODEL_TIMEOUT = 60                # AI model HTTP client timeout
+# API Execution Timeouts (in seconds) - Read from environment with fallbacks
+API_EXECUTION_TIMEOUT = int(os.getenv('API_EXECUTION_TIMEOUT', 180))           # Subprocess timeout for API code execution (3 minutes)
+SQL_EXECUTION_TIMEOUT = int(os.getenv('SQL_EXECUTION_TIMEOUT', 60))            # Subprocess timeout for SQL operations (1 minute)
 
 # ================================================================
 
@@ -1927,13 +1882,9 @@ except Exception as e:
                         "cancelled": True
                     }
                 
-                # Determine timeout based on entity type
-                if step and step.entity == 'system_log':
-                    execution_timeout = SYSTEM_LOG_TIMEOUT
-                    logger.debug(f"[{correlation_id}] Using system_log timeout: {execution_timeout} seconds")
-                else:
-                    execution_timeout = API_EXECUTION_TIMEOUT
-                    logger.debug(f"[{correlation_id}] Using standard API timeout: {execution_timeout} seconds")
+                # Use standard API timeout for all API operations (including system_log)
+                execution_timeout = API_EXECUTION_TIMEOUT
+                logger.debug(f"[{correlation_id}] Using API timeout: {execution_timeout} seconds")
                     
                 result = subprocess.run(
                     [sys.executable, temp_file_path],
@@ -2007,7 +1958,7 @@ except Exception as e:
                 }
                 
         except subprocess.TimeoutExpired:
-            timeout_used = SYSTEM_LOG_TIMEOUT if (step and step.entity == 'system_log') else API_EXECUTION_TIMEOUT
+            timeout_used = API_EXECUTION_TIMEOUT
             logger.error(f"[{correlation_id}] Code execution timed out after {timeout_used} seconds")
             return {
                 'success': False,
