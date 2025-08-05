@@ -6,7 +6,7 @@
 
 <h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.0-beta)</h2>
 
-Meet Tako, the **world's first unified multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent SQL vs API decision-making, Tako automatically determines the optimal data source for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
+Meet Tako, the **world's first  multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent SQL vs API decision-making, Tako automatically determines the optimal data source for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
 
 Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
 
@@ -65,8 +65,8 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
     - [Common Security Features](#common-security-features)
     - [Access Management](#access-management)
     - [AI Provider Options](#ai-provider-options)
-    - [Data Privacy by Mode](#data-privacy-by-mode)
-    - [Database Mode Data Model](#database-mode-data-model)
+    - [Data Security](#data-security)
+    - [Database Model](#database-model)
 - [⚠️ Good to Know](#️-good-to-know)
   - [Beta Release 🧪](#beta-release-)
   - [Security First 🛡️](#security-first-️)
@@ -111,7 +111,6 @@ Tako leverages the power of leading AI providers with enhanced compatibility:
 - **Multi-layered Security**: Comprehensive validation with enterprise security framework
 - **Optimized Operations**: 99% reduction in token usage through smart filtering and parallel processing
 
-📋 **[View complete architecture documentation →](docs/LLM_Optimized_API_Architecture.md)**
   
 
 ## 🚀 Quick Start (The No-Frills Docker Way)
@@ -242,7 +241,7 @@ docker compose logs -f
 </div>
 
 #### Common Security Features
-#### Access Management
+#### API Token
 - **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
 - **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
 
@@ -252,20 +251,17 @@ docker compose logs -f
   - Deploy Ollama locally for a completely air-gapped environment
   - Full control over model selection and data boundaries
 
-#### Data Privacy by Mode
+#### Data Security
 
-**Database Mode**
+**Local Storage & Privacy**
 - **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
 - **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
 - **No Okta Data to LLMs**: Only user queries and system prompts are sent to AI providers
-
-**Realtime Mode**
-- **Direct API Access**: Queries Okta API directly with no local storage
 - **Limited Data Sampling**: Small samples of query results are sent to AI providers for processing
 - **Sandboxed Execution**: All code runs in a secure, isolated environment
 - **Data Minimization**: Only data necessary to fulfill specific queries is processed
 
-#### Database Mode Data Model
+#### Database Model
 The following data model applies only when using Database Mode with a synced SQLite database:
 
 | **Entity** | **Core Fields** |
