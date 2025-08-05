@@ -4,29 +4,31 @@
   </a>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: AI Agent for Okta (v0.6.1-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.0-beta)</h2>
 
-Meet Tako, the first AI agent of its kind that offers dual capabilities - both powerful database queries and real-time API operations through natural language. Built specifically for administrators, IAM managers, IT GRC teams and auditors, Tako leverages enterprise AI models to translate plain English questions into accurate data insights from synced databases or direct Okta API interactions. Our vision is to evolve Tako into a fully autonomous agent capable of performing nearly all Okta administrative functions while maintaining enterprise-grade security and compliance.
+Meet Tako, the **world's first unified multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent SQL vs API decision-making, Tako automatically determines the optimal data source for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
+
+Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
 
 <div align="center">
 <h3>📖 Featured Articles</h3>
-<p>Learn more about Tako's journey and capabilities:</p>
+<p>Learn more about Tako's journey and advanced multi-agent architecture:</p>
 <div style="margin: 20px 0;">
   <a href="https://iamse.blog/2025/05/21/tako-okta-ai-agent-takes-a-huge-step-towards-becoming-autonomous/" style="margin-right: 20px;">
-    📚 Tako Takes a Huge Step Towards Becoming Autonomous (May 2025)
+    📚 Tako's Multi-Agent Architecture Revolution (Aug 2025)
   </a>
   <br>
-  <a href="https://iamse.blog/2025/02/20/okta-ai-agent-for-natural-language-querying/">
-    📚 Okta AI Agent for Natural Language Querying (Feb 2025)
+  <a href="https://github.com/fctr-id/okta-ai-agent/wiki/Previous-Architecture">
+    📚 Previous Architecture Documentation (Legacy v0.6.x)
   </a>
 </div>
 </div>
 
 <div align="center">
-<h3>A new web interface!</h3>
+<h3>Revolutionary Multi-Agent Architecture</h3>
 </div>
 <p align="center">
-  <img src="docs/media/realitime-mode.gif" alt="Tako AI Agent Demo" width="1024px" height="auto">
+  <img src="docs/media/realitime-mode.gif" alt="Tako Unified Agent Demo" width="1024px" height="auto">
 </p>
 
 <div align="center">
@@ -42,9 +44,11 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
 ## 📋 Table of Contents
 
 - [📋 Table of Contents](#-table-of-contents)
-- [⚠️ BREAKING CHANGES ALERT](#️-breaking-changes-alert)
-- [🆕 New in This Version (0.6.1-beta)](#-new-in-this-version-061-beta)
-- [✨ What's Special?](#-whats-special)
+- [⚠️ MAJOR ARCHITECTURE UPGRADE](#️-major-architecture-upgrade)
+- [🆕 What Makes Tako Revolutionary?](#-what-makes-tako-revolutionary)
+  - [🚀 Game-Changing Multi-Agent Architecture](#-game-changing-multi-agent-architecture)
+  - [⚡ Multiple AI Provider Support](#-multiple-ai-provider-support)
+  - [🔄 Enterprise-Grade Performance & Security](#-enterprise-grade-performance--security)
 - [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
   - [Prerequisites](#prerequisites)
   - [Docker Compose](#docker-compose)
@@ -55,70 +59,53 @@ Meet Tako, the first AI agent of its kind that offers dual capabilities - both p
   - [🆘 Need Help?](#-need-help)
   - [Launching the Application](#launching-the-application)
   - [Tailing docker logs](#tailing-docker-logs)
-  - [Access the Web Interface](#access-the-web-interface)
-  - [Dual Operation Modes](#dual-operation-modes)
-  - [When to Use Each Mode](#when-to-use-each-mode)
-  - [Realtime Agent Capabilities](#realtime-agent-capabilities)
-  - [Additional Improvements](#additional-improvements)
-  - [Available Tools for Realtime Mode](#available-tools-for-realtime-mode)
-  - [LLM Requirements for Realtime Mode](#llm-requirements-for-realtime-mode)
-- [🛡️ Security \& Privacy](#️-security--privacy)
-  - [Common Security Features](#common-security-features)
-    - [Access Management](#access-management)
-    - [AI Provider Options](#ai-provider-options)
-  - [Data Privacy by Mode](#data-privacy-by-mode)
-    - [Database Mode](#database-mode)
-    - [Realtime Mode](#realtime-mode)
-  - [Database Mode Data Model](#database-mode-data-model)
-- [⚠️ Good to Know](#️-good-to-know)
-  - [Beta Release 🧪](#beta-release-)
-  - [Security First 🛡️](#security-first-️)
-  - [Current Limitations 🔍](#current-limitations-)
+  - [Access the Unified Agent Interface](#access-the-unified-agent-interface)
+- [How Tako Works](#how-tako-works)
+  - [Key Capabilities](#key-capabilities)
+  - [Modern AI Compatibility](#modern-ai-compatibility)
+- [🛡️ Security & Privacy](#️-security--privacy)
+- [⚠️ Important Notes](#️-important-notes)
 - [🗺️ Roadmap](#️-roadmap)
-  - [Phase 1: Data Access \& Insights](#phase-1-data-access--insights)
-  - [Phase 2: Infrastructure \& Interface Enhancements](#phase-2-infrastructure--interface-enhancements)
-  - [Phase 3: Real-time Operations](#phase-3-real-time-operations)
-  - [Phase 4: Autonomous Operations](#phase-4-autonomous-operations)
-  - [Phase 5: Full Automation](#phase-5-full-automation)
 - [🆘 Need Help?](#-need-help-1)
-- [💡 Feature Requests \& Ideas](#-feature-requests--ideas)
+- [💡 Feature Requests & Ideas](#-feature-requests--ideas)
 - [👥 Contributors](#-contributors)
 - [💌 Thank You](#-thank-you)
 - [⚖️ Legal Stuff](#️-legal-stuff)
 
 &nbsp;
 
-## ⚠️ BREAKING CHANGES ALERT
-> **IMPORTANT**: Version 0.6.1-beta contains breaking changes. If you are using previous versions or installed before 06/13/2025, you will need to completely redo your setup to ensure compatibility with the new realtime capabilities.
+## ⚠️ MAJOR ARCHITECTURE UPGRADE
+> **IMPORTANT**: Version 1.0-beta introduces a **completely new multi-agent architecture** with advanced context engineering and intelligent data source selection. This represents a fundamental evolution from previous versions.
 > 
-> **Docker users:** Stop containers, delete SQLite files (`rm sqlite_db/*.db`), then restart.
+> **Previous v0.6.x users:** This version uses an entirely different approach. Your existing setup will work, but to access the new unified agent capabilities, follow the new installation process.
 > 
-> **Repository Clone users:** Delete database files (`rm *.db sqlite_db/*.db`), update dependencies (`pip install -r requirements.txt`), then restart.
+> **Legacy Documentation:** Previous architecture documentation has been moved to our [Wiki](https://github.com/fctr-id/okta-ai-agent/wiki/Previous-Architecture).
 
-## 🆕 New in This Version (0.6.1-beta)
-- **📋 Custom User Attributes** - You can define custom user attributes that will be synced and available for querying.
-- **📱 Devices Sync** - Full devices sync with user relationships, security context, and analytics (Optional - set to false by default)
-- **🔍 Enhanced Queries** - Query users by custom attributes and devices by platform, security status, etc.
-- **🔒 SSL Certificate Support** - Self-signed certificates and organizational CAs are now supported for the openai_compatible provider
-  
-**Note**: Device sync controlled by `SYNC_OKTA_DEVICES` environment variable in .env file.
+## 🆕 What Makes Tako Revolutionary?
 
-📋 **[View complete change log →](VERSION.md)**
+### **🚀 Game-Changing Multi-Agent Architecture**
+- **5 Specialized Agents**: Planning, Execution Management, SQL, API, and Results Formatting working in perfect coordination
+- **Dual Data Source Mastery**: Works seamlessly with SQLite user database OR direct Okta API entities without database dependency
+- **Intelligent Data Selection**: Automatically chooses between database and API based on query requirements and data freshness
+- **Universal API Support**: **Automatic code generation across ALL 107+ Okta GET endpoints** ([complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Supported-Endpoints)) - not restricted to a few like previous versions
 
-## ✨ What's Special?
+### **⚡ Multiple AI Provider Support**
+Tako leverages the power of leading AI providers with enhanced compatibility:
+- Google Vertex AI (Gemini 1.5 Pro, 2.5 Pro)
+- OpenAI (GPT-4, o4-mini) 
+- Azure OpenAI (GPT-4)
+- Anthropic (Claude 3.7 Sonnet)
+- AWS Bedrock (Claude, Nova, Llama models)
+- Ollama (Local, Self-hosted, use 32B+ models)
+- OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter, etc.)
 
-* 🚀 **Easy Okta Sync** - Quick and parallel okta sync to local SQLite DB
-* 💡 **Natural Language Queries** - Talk to your Okta data with Tako using simple English
-* 🔄 **Real-time Operation Mode** - Direct API interaction for up-to-the-second data access
-* ⚡ **Multiple AI Providers** - Tako leverages the power of leading AI providers:
-     -  Google Vertex AI (Gemini 1.5 Pro, 2.5 Pro)
-     -  OpenAI (GPT-4, o4-mini)
-     -  Azure OpenAI (GPT-4)
-     -  Anthropic (Claude 3.7 Sonnet)
-     -  AWS Bedrock (Claude, Nova, Llama models)
-     -  Ollama (Local, Self-hosted, use 32B+ models)
-     -  OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter ...etc)
-* 🖥️ **Web Interface** - Modern UI for easier interaction with Tako and your Okta data
+### **🔄 Enterprise-Grade Performance & Security**
+- **Polars DataFrames**: Lightning-fast data processing and transformation
+- **Advanced Context Engineering**: Agents coordinate with complete execution context and relationship mapping
+- **Multi-layered Security**: Comprehensive validation with enterprise security framework
+- **Optimized Operations**: 99% reduction in token usage through smart filtering and parallel processing
+
+📋 **[View complete architecture documentation →](docs/LLM_Optimized_API_Architecture.md)**
   
 
 ## 🚀 Quick Start (The No-Frills Docker Way)
@@ -235,181 +222,59 @@ docker compose up -d
 docker compose logs -f
 ```
 
-### Access the Web Interface
-- 🌐 Open your browser and go to: https://localhost:8001 to start using Tako 🌐
+### Access the Unified Agent Interface
+- 🌐 Open your browser and go to: https://localhost:8001 to start using Tako's new multi-agent system 🌐
 
 
-### Dual Operation Modes
+## How Tako Works
 
-Tako now offers two powerful ways to interact with your Okta tenant:
+Tako automatically determines the best approach for your query:
+- **Database queries** for comprehensive analysis and bulk operations
+- **API calls** for real-time data and current status
+- **Hybrid workflows** combining both sources for complete insights
 
-- **Database Mode** - The original query engine for fast insights from synced data
-- **Realtime Mode** - Direct API operations for up-to-the-second data access and complex workflows
+### Key Capabilities
 
-### When to Use Each Mode
+| Category | What Tako Covers |
+|----------|------------------|
+| **Users & Groups** | Complete lifecycle, relationships, MFA status, and access analysis |
+| **Applications** | Security auditing, certificate management, and assignment tracking |
+| **Compliance** | Audit trails, policy analysis, device management, and session monitoring |
 
-| Feature | Database Mode | Realtime Mode |
-|---------|--------------|---------------|
-| **Best for** | Historical analysis, reporting, bulk queries | Up-to-the-minute data, complex workflows |
-| **Data freshness** | Limited to last sync time | Always current (direct API) |
-| **Setup required** | Initial DB sync | None (instant access) |
-| **Security** | No Okta data sent to LLMs | Small samples sent for processing |
-| **Query complexity** | Better for simple queries | Handles multi-step operations |
-| **Performance** | Faster for large data sets | Better for targeted lookups |
+**107+ Okta API Endpoints Supported** - [Complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Supported-Endpoints)
 
-### Realtime Agent Capabilities
+### Modern AI Compatibility
 
-- **Direct API Integration** - Tako now connects directly to Okta's API for real-time data access
-- **Intelligent Code Generation** - Safely generates and executes Python code based on your natural language queries
-- **Multi-step Processing** - Complex queries are broken down into manageable steps with intelligent results processing
-- **Command Line Interface** - New CLI script allows advanced queries without context limitations
+Optimized for latest reasoning models (December 2024+): OpenAI o4-mini, Gemini Pro 2.5, Claude 3.7 Sonnet, DeepSeek v3
 
-### Additional Improvements
+## 🛡️ Security & Privacy
 
-- **Anthropic Support** - Added Claude models as another AI provider option
-- **Custom HTTP Headers** - Support for LLM proxies and security solutions
-- **Enhanced Sync Process** - Better API-DB synchronization with cleaner logging
-- **Performance Optimizations** - Faster response times and improved stability
+- **Local Data**: SQLite database stays on your infrastructure
+- **Minimal Cloud Exposure**: Only query text and small result samples sent to AI providers
+- **Token Control**: You manage Okta API permissions and restrictions
+- **Enterprise Security**: Multi-layered validation and secure code execution
 
-### Available Tools for Realtime Mode
+## ⚠️ Important Notes
 
-| Category | Tools |
-|----------|-------|
-| **User** | list_users, get_user, list_user_groups, list_factors |
-| **Application** | list_applications, get_application, list_application_users, list_application_group_assignments |
-| **Group** | list_groups, list_group_users, list_assigned_applications_for_group |
-| **Events** | get_logs |
-| **Network & Policy** | list_policy_rules, list_network_zones, get_network_zone |
-| **DateTime Utilities** | get_current_time, parse_relative_time, format_date_for_query |
+**Enterprise-Ready**: Multi-agent architecture with 5 specialized agents, advanced error handling, and comprehensive security framework.
 
-### LLM Requirements for Realtime Mode
+**Modern AI Required**: Optimized for reasoning models released after December 2024 with multi-provider support and intelligent fallback mechanisms.
 
-> **IMPORTANT NOTICE**: Realtime agent functionality requires modern reasoning LLMs released after December 2024 to work effectively. Older models may not properly reason through complex API calls and data relationships.
-
-**Tested and Compatible Models:**
-- OpenAI - o4-mini
-- Google Vertex AI - Gemini Pro 2.5
-- Anthropic - Claude 3.7 Sonnet (with thinking)
-- DeepSeek v3
-
-Using older or less capable models may result in degraded performance or incorrect API calls when in realtime mode.
-
-## 🛡️ Security & Privacy 
-
-<p align="center">
-  <img src="docs/media/tako_dual_models.png" alt="Tako Architecture" width="800" height="auto">
-</p>
-
-### Common Security Features
-
-#### Access Management
-- **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
-- **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
-
-#### AI Provider Options
-- **LLM Flexibility**: 
-  - Use your enterprise-approved AI providers
-  - Deploy Ollama locally for a completely air-gapped environment
-  - Full control over model selection and data boundaries
-
-### Data Privacy by Mode
-
-#### Database Mode
-- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
-- **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
-- **No Okta Data to LLMs**: Only user queries and system prompts are sent to AI providers
-
-#### Realtime Mode
-- **Direct API Access**: Queries Okta API directly with no local storage
-- **Limited Data Sampling**: Small samples of query results are sent to AI providers for processing
-- **Sandboxed Execution**: All code runs in a secure, isolated environment
-- **Data Minimization**: Only data necessary to fulfill specific queries is processed
-
-### Database Mode Data Model
-
-The following data model applies only when using Database Mode with a synced SQLite database:
-
-| Entity | Core Fields |
-|--------|-------------|
-| Users | `email`, `login`, `first_name`, `last_name`, `status`, `mobile_phone`, `primary_phone`, `employee_number`, `department`, `manager`, `password_changed_at`, `user_type`, `country_code`, `title`, `organization`, | `status_changed`| `custom_attributes` (as defined by user)|
-| Groups | `name`, `description` |
-| Applications | `name`, `label`, `status`, `sign_on_mode`, `metadata_url`, `sign_on_url`, `audience`, `destination`, `signing_kid`, `username_template`, `username_template_type`, `admin_note`, `attribute_statements`, `honor_force_authn`, `hide_ios`, `hide_web`, `policy_id`, `settings`, `features`, `visibility`, `credentials`, `licensing`, `embedded_url`, `accessibility`, `user_name_template`, `app_settings`, `app_embedded_url` |
-| UserFactors | `factor_type`, `provider`, `status`, `email`, `phone_number`, `device_type`, `device_name`, `platform` |
-| Policies | `name`, `description`, `status`, `type` |
-| Devices | `display_name`, `platform`, `manufacturer`, `model`, `status`, `os_version`, `serial_number`, `udid`, `registered`, `secure_hardware_present`, `disk_encryption_type` |
-| UserDevices | `management_status`, `screen_lock_type`, `user_device_created_at` (relationships between users and their devices) |
-
-> **Note**: You can view the data saved to your SQLite DB using tools like [DB Browser for SQLite](https://github.com/sqlitebrowser/sqlitebrowser).
-
-## ⚠️ Good to Know
-
-### Beta Release 🧪
-* Tako is still in testing grounds - keep it out of production!
-* Currently focusing on core user fields
-* Large orgs might need a coffee break during sync
-
-### Security First 🛡️
-* Data lives safely in your local SQLite
-* AI/LLM sees only what it needs to
-* Proper token hygiene required
-
-### Current Limitations 🔍
-* The responses are stateless, i.e., every query is answered as is asked without any relevance to the previous queries / responses.
-* Tested on Identity engine only
-* AI responses vary by provider
-* Complex questions might need simplifying
-* One tenant at a time
+**Current Scope**: 107+ Okta GET API endpoints, Identity Engine focus, single-tenant architecture with stateless operations.
 
 ## 🗺️ Roadmap
 
-### Phase 1: Data Access & Insights
-- [x] Tako's natural language queries for Okta data
-- [x] Multi-provider AI support
-- [x] Save details for users, apps, groups, factors, policies and their relationships
+### ✅ Completed: Multi-Agent Foundation
+Revolutionary architecture with Planning, Execution, SQL, API, and Results agents. Enterprise security framework and comprehensive API coverage.
 
-### Phase 2: Infrastructure & Interface Enhancements
-- [x] Modern Web Interface
-  - Intuitive dashboard experience
-  - Responsive design for all devices
-  - Accessibility compliance
-- [x] High-Performance API Backend
-  - FastAPI implementation for enhanced throughput
-  - Asynchronous request handling
-  - Optimized database interactions
-- [x] Enterprise Security Implementation
-  - HTTPS with proper certificate management
-  - Secure authentication mechanisms
-  - Data protection in transit
-- [x] Advanced Synchronization Interface
-  - Visual synchronization monitoring
-  - Progress tracking and analytics
+### ✅ Completed: Enhanced Intelligence  
+Intelligent data source selection, Polars DataFrames operations, modern LLM integration, and advanced web interface.
 
-### Phase 3: Real-time Operations
-- [x] Live user summary
-  - Profile, factors & activity snapshots
-  - Risk indicators
-  - Session management
-- [x] Event Log Analytics
-  - Natural language log queries
-  - Anomaly detection
-  - Custom report generation
+### 🚧 In Progress: Autonomous Operations
+Automated workflows, intelligent monitoring, self-service integration, and advanced analytics.
 
-### Phase 4: Autonomous Operations
-- [ ] Automated Changes with Approval Workflow
-  - Group memberships
-  - Policy modifications
-  - App assignments
-- [ ] Self-service Integration
-  - Chatbot interface
-  - Teams/Slack integration
-  - Email notifications
-
-### Phase 5: Full Automation
-- [ ] AI-driven Policy Management
-- [ ] Automated User Lifecycle
-- [ ] Intelligent Access Reviews
-- [ ] Risk-based Authentication
-- [ ] Complete Admin Automation
+### 🔮 Future: Full Enterprise Automation
+AI-driven policy management, complete user lifecycle automation, risk-based authentication, and autonomous administration.
 
 ## 🆘 Need Help?
 
