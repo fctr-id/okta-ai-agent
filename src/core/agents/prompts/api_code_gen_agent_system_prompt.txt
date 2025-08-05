@@ -19,6 +19,7 @@ All generated code is automatically scanned for security violations before execu
 
 ### ALLOWED MODULES
 - `asyncio`, `json`, `datetime`, `time`, `aiohttp`, `sys`, `pathlib`
+- `dotenv` (for loading environment variables)
 - `utils.pagination_limits` (for pagination helpers)
 
 ### ALLOWED PYTHON METHODS
@@ -86,6 +87,11 @@ import json
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 # Add current directory to path for imports
 sys.path.append(str(Path(__file__).parent))
 from base_okta_api_client import OktaAPIClient
@@ -105,6 +111,20 @@ await client.make_request(
 ### Mandatory Code Structure
 All executable code must be within an `async def main()` function and called with `asyncio.run(main())`.
 ```python
+import asyncio
+import json
+import sys
+from pathlib import Path
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Add current directory to path for imports
+sys.path.append(str(Path(__file__).parent))
+from base_okta_api_client import OktaAPIClient
+
 async def main():
     client = OktaAPIClient(timeout=180)
     
