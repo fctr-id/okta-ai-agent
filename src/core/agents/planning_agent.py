@@ -273,10 +273,22 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
         # Simple clean format - just the columns list
         sql_tables[table_name] = key_columns
     
-    # Create context data with API entities and SQL tables
+    # Add parameter efficiency hints for planning decisions
+    parameter_hints = {
+        "group_list": "supports expand=stats for user counts without fetching members",
+        "application_list": "supports expand=user/{userId} for user assignment details",
+        "user_list": "supports expand=classification for user metadata without extra calls",
+        "user_get": "supports expand=blocks|classification for user details without extra calls", 
+        "user_list_roles": "supports expand=targets/groups|targets/catalog/apps for role targets",
+        "application_user_list": "supports expand=user for full user objects instead of just assignments",
+        "group_list_members": "pagination-heavy - consider expand=stats on group_list instead for counts"
+    }
+    
+    # Create context data with API entities, SQL tables, and efficiency hints
     context_data = {
         "sql_tables": sql_tables,
-        "api_entities": api_entities
+        "api_entities": api_entities,
+        "parameter_efficiency_hints": parameter_hints
     }
     
     # Custom JSON formatting: readable structure but compact arrays
