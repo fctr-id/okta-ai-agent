@@ -6,12 +6,15 @@ WORKDIR /app/frontend
 # Copy frontend source code
 COPY src/frontend/ ./
 
+# Create the target directory for the build output
+RUN mkdir -p ../api/static
+
 # Install dependencies and build the frontend
 RUN npm ci && \
     npm run build
 
 # Stage 2: Python application with built frontend
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
@@ -26,29 +29,38 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy Python source code
-COPY src /app/src
+# Copy main entry point
+COPY main.py /app/
+
+# Copy Python source code (excluding legacy folder)
+COPY src/api /app/src/api
+COPY src/backend /app/src/backend
+COPY src/config /app/src/config
+COPY src/core /app/src/core
+COPY src/data /app/src/data
+COPY src/utils /app/src/utils
 
 # Copy built frontend assets from the frontend builder stage
-COPY --from=frontend-builder /app/backend/app/static/ /app/src/backend/app/static/
+# Frontend builds to ../api/static relative to the frontend directory
+COPY --from=frontend-builder /app/api/static/ /app/src/api/static/
 
 # Create necessary directories
-RUN mkdir -p /app/src/backend/certs /app/sqlite_db /app/logs
+RUN mkdir -p /app/certs /app/sqlite_db /app/logs
 
 # Create startup script for SSL and server
 RUN echo '#!/bin/bash \n\
 # Generate SSL certificates if they don\'t exist \n\
-if [ ! -f /app/src/backend/certs/cert.pem ] || [ ! -f /app/src/backend/certs/key.pem ]; then \n\
+if [ ! -f /app/certs/cert.pem ] || [ ! -f /app/certs/key.pem ]; then \n\
   echo "Generating SSL certificates..." \n\
-  mkdir -p /app/src/backend/certs \n\
-  openssl req -x509 -newkey rsa:2048 -keyout /app/src/backend/certs/key.pem -out /app/src/backend/certs/cert.pem -sha256 -days 3650 -nodes \
+  mkdir -p /app/certs \n\
+  openssl req -x509 -newkey rsa:2048 -keyout /app/certs/key.pem -out /app/certs/cert.pem -sha256 -days 3650 -nodes \
   -subj "/C=US/ST=State/L=City/O=Okta AI Agent/OU=Development/CN=localhost" \
   -addext "subjectAltName=DNS:localhost,DNS:127.0.0.1,DNS:host.docker.internal" \n\
   echo "SSL certificates generated successfully" \n\
 fi \n\
 \n\
 # Start the server with SSL \n\
-exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --ssl-keyfile /app/src/backend/certs/key.pem --ssl-certfile /app/src/backend/certs/cert.pem \n\
+exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --ssl-keyfile /app/certs/key.pem --ssl-certfile /app/certs/cert.pem \n\
 ' > /app/start.sh && chmod +x /app/start.sh
 
 # Environment variables

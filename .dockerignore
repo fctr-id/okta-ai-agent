@@ -39,6 +39,9 @@ htmlcov/
 .github
 .gitignore
 
+# Legacy code not needed in production
+src/legacy/
+
 # Only ignore node_modules - we need the rest for the build
 src/frontend/node_modules/
 
