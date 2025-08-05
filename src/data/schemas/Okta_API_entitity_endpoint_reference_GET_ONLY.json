@@ -181,7 +181,7 @@
       "folder_path": "Applications",
       "parameters": { "required": [], "optional": ["q", "after", "useOptimization", "limit", "filter", "expand", "includeNonDeleted"] },
       "depends_on": [],
-      "notes": "## Core Parameters\n*   **`filter`** (String): The most powerful way to search for apps with specific attributes. Examples: `status eq \"ACTIVE\"` or `signOnMode eq \"SAML_2_0\"`.\n*   **`q`** (String): A simpler quick search for apps by their label.\n*   **`limit`** (Integer): Maximum number of results to return (default: 20, max: 200)."
+      "notes": "## Query Parameters\n*   **`q`** (String): Searches for apps with name or label properties that start with the specified value.\n*   **`filter`** (String): Filters apps by status, user.id, group.id, credentials.signing.kid or name expression. Examples: `status eq \"ACTIVE\"` or `signOnMode eq \"SAML_2_0\"`.\n*   **`expand`** (String): Use `expand=user/{userId}` to include assigned application user details in the `_embedded` property. Must be used with `user.id eq \"{userId}\"` filter.\n*   **`limit`** (Integer): Number of results per page (default: 20, max: 200).\n*   **`after`** (String): Pagination cursor for the next page of results.\n*   **`useOptimization`** (Boolean): Set to true to return a subset of app properties for better performance.\n*   **`includeNonDeleted`** (Boolean): Include non-active but not deleted apps in results."
     },
     {
       "id": "get-application",
@@ -193,8 +193,8 @@
       "description": "Retrieves an application by its ID.",
       "folder_path": "Applications",
       "parameters": { "required": ["appId"], "optional": ["expand"] },
-      "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The unique ID of the application, obtained from an endpoint like `list-applications`.\n\n## Important Notes\n*   This endpoint will **NOT** return sensitive credentials like `client_secret`. The secret is only available upon application creation."
+      "depends_on": ["list-applications", "list-application-keys", "list-application-secrets"],
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The unique ID of the application, obtained from an endpoint like `list-applications`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=user/{userId}` to include a specific user's assignment details in the `_embedded` property.\n\n## Important Notes\n*   This endpoint will **NOT** return sensitive credentials like `client_secret`. The secret is only available upon application creation.\n*   For security analysis, use `list-application-keys` for certificates and `list-application-secrets` for OAuth secrets."
     },
     {
       "id": "get-default-application-connection",
@@ -284,8 +284,8 @@
       "description": "Lists all groups assigned to a specific application.",
       "folder_path": "Application Groups",
       "parameters": { "required": ["appId"], "optional": ["q", "after", "limit", "expand"] },
-      "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list group assignments.\n\n## Important Notes\n*   This endpoint is used to discover which groups have been granted access to a specific application."
+      "depends_on": ["list-applications", "list-application-user-assignments", "list-policies"],
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list group assignments.\n\n## Important Notes\n*   This endpoint is used to discover which groups have been granted access to a specific application.\n*   For complete access analysis, also check `list-application-user-assignments` and policy mappings."
     },
     {
       "id": "get-application-group-assignment",
@@ -480,7 +480,7 @@
       "folder_path": "Application Users",
       "parameters": { "required": ["appId"], "optional": ["after", "limit", "q", "expand"] },
       "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list user assignments.\n\n## Query Parameters\n*   **`q`** (String): A simple search for users by first name, last name, or email."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list user assignments.\n\n## Query Parameters\n*   **`q`** (String, Optional): Filter users by profile attributes. Matches against beginning of `userName`, `firstName`, `lastName`, and `email`. Supports startsWith operation only. For OIDC apps, only matches `userName` and `email`.\n*   **`expand`** (String, Optional): Include full User object in `_embedded` property. Valid value: `user`.\n*   **`limit`** (Integer, Optional): Number of objects per page. Use Link header for pagination.\n*   **`after`** (String, Optional): Pagination cursor for next page. Use value from previous response's next link.\n\n## Important Notes\n*   Returns only directly assigned users, not users assigned through group membership.\n*   For complete user access analysis, also check group assignments and role mappings."
     },
     {
       "id": "get-application-user-assignment",
@@ -596,8 +596,8 @@
       "description": "Lists all devices in the Okta Device Trust inventory.",
       "folder_path": "Devices",
       "parameters": { "required": [], "optional": ["after", "limit", "search", "expand"] },
-      "depends_on": [],
-      "notes": "## Query Parameters\n*   **`search`** (String): A SCIM filter to find devices based on properties. Example: `profile.platform eq \"IOS\"`."
+      "depends_on": ["list-device-assurance-policies", "list-device-posture-checks"],
+      "notes": "## Query Parameters\n*   **`search`** (String): A SCIM filter to find devices based on properties. Example: `profile.platform eq \"IOS\"`.\n\n## Important Notes\n*   For device compliance analysis, also check `list-device-assurance-policies` and `list-device-posture-checks`."
     },
     {
       "id": "get-device",
@@ -609,8 +609,8 @@
       "description": "Retrieves a device by its ID.",
       "folder_path": "Devices",
       "parameters": { "required": ["deviceId"], "optional": [] },
-      "depends_on": ["list-devices"],
-      "notes": "## Path Parameters\n*   **`deviceId`** (String, Required): The ID of the device, obtained from `list-devices`."
+      "depends_on": ["list-devices", "list-device-assurance-policies", "list-device-posture-checks"],
+      "notes": "## Path Parameters\n*   **`deviceId`** (String, Required): The ID of the device, obtained from `list-devices`.\n\n## Important Notes\n*   For device compliance analysis, also check `list-device-assurance-policies` and `list-device-posture-checks`."
     },
     {
       "id": "list-users-for-device",
@@ -726,8 +726,8 @@
       "description": "Lists all groups in the organization.",
       "folder_path": "Groups",
       "parameters": { "required": [], "optional": ["search", "filter", "q", "after", "limit", "expand", "sortBy", "sortOrder"] },
-      "depends_on": [],
-      "notes": "## Core Parameters\n*   **`search`** (String): The most powerful way to find groups using an expression. Example: `profile.name sw \"Sales\"`.\n*   **`q`** (String): A simple quick search for a group by its name or description.\n*   **`filter`** (String): Similar to search, often used for system properties like `lastUpdated`."
+      "depends_on": ["list-group-members", "list-groups-assigned-apps", "list-group-roles"],
+      "notes": "## Query Parameters\n*   **`search`** (String, Optional): Advanced filtering using expressions. Example: `search=type eq \"OKTA_GROUP\"`. Supports `sw` (starts with), `eq` (equals), `co` (contains) operators. URL encoding required.\n*   **`filter`** (String, Optional): Basic filter expression. Similar to search but simpler syntax. Example: `filter=id eq \"groupId\"`.\n*   **`q`** (String, Optional): Quick search matching group name property. Example: `q=Sales`. Default limit 300 results.\n*   **`expand`** (String, Optional): Include metadata in response. Values: `stats` (user count in `_embedded.stats.usersCount`) or `app` (application details).\n*   **`limit`** (Integer, Optional): Number of results per page. Recommended ≤200. Default varies based on query type.\n*   **`after`** (String, Optional): Pagination cursor for next page. Use value from previous response's next link.\n*   **`sortBy`** (String, Optional): Sort field (search queries only). Example: `sortBy=profile.name`.\n*   **`sortOrder`** (String, Optional): Sort direction `asc` or `desc` (search queries only). Requires `sortBy`.\n\n## Parameter Usage Notes\n*   Search and pagination are mutually exclusive - cannot page search results.\n*   Query (`q`) has different limit behavior than search/filter.\n*   All filter expressions must be URL encoded.\n*   For access analysis, also check `list-group-members`, `list-groups-assigned-apps`, and `list-group-roles`."
     },
     {
       "id": "get-group",
@@ -908,7 +908,7 @@
       "description": "Lists all applications mapped to a policy.",
       "folder_path": "Policies",
       "parameters": { "required": ["policyId"], "optional": [] },
-      "depends_on": ["list-policies"],
+      "depends_on": ["list-policies", "list-policy-resource-mappings"],
       "notes": "## Path Parameters\n*   **`policyId`** (String, Required): The ID of the policy.\n\n## Important Notes\n*   This endpoint is considered legacy. It is better to use `list-policy-resource-mappings` for newer policy types like Authentication Policies."
     },
     {
@@ -986,8 +986,8 @@
       "description": "Lists all roles assigned to a specific user.",
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId"], "optional": ["expand"] },
-      "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user for whom to list roles."
+      "depends_on": ["list-users", "list-app-targets-for-user-role", "list-group-targets-for-user-role"],
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user for whom to list roles.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include targets configured for role assignments in `_embedded` property. Supported values: `targets/groups` (group targets) or `targets/catalog/apps` (application targets).\n\n## Important Notes\n*   To understand what the user can actually manage, also check role targets using `list-app-targets-for-user-role` and `list-group-targets-for-user-role`.\n*   Use expand parameter to get targets in same response instead of separate API calls."
     },
     {
       "id": "get-user-role",
@@ -1363,8 +1363,8 @@
       "description": "Lists users in your organization.",
       "folder_path": "Users",
       "parameters": { "required": [], "optional": ["search", "filter", "q", "after", "limit", "sortBy", "sortOrder", "expand"] },
-      "depends_on": [],
-      "notes": "## Core Parameters\n*   **`search`** (String): The most powerful and recommended method for finding users with a SCIM expression. All profile attributes must be prefixed with `profile.`.\n    *   Example: `profile.lastName eq \"Smith\" and status eq \"ACTIVE\"`\n*   **`filter`** (String): Also uses SCIM expressions, typically for non-profile attributes like `status` or `lastUpdated`.\n*   **`q`** (String): A simple, quick search across common fields like name and email.\n\n## Important Notes\n*   To find users in a `DEPROVISIONED` state, you must explicitly use a filter: `filter=status eq \"DEPROVISIONED\"`."
+      "depends_on": ["list-user-authenticator-enrollments"],
+      "notes": "## Query Parameters\n*   **`search`** (String): Most powerful method using SCIM expressions. Searches profile attributes (prefix with `profile.`), status, created, activated, etc. Example: `profile.lastName eq \"Smith\" and status eq \"ACTIVE\"`.\n*   **`filter`** (String): SCIM expressions for limited properties: status, lastUpdated, id, profile.login, profile.email, profile.firstName, profile.lastName. Example: `status eq \"LOCKED_OUT\"`.\n*   **`q`** (String): Simple search matching firstName, lastName, or email (startsWith match). Note: Omits DEPROVISIONED users.\n*   **`expand`** (String): Use `expand=classification` to include user classification metadata in `_embedded` property.\n*   **`limit`** (Integer): Number of results returned (default: 10 for q parameter, 200 max).\n*   **`sortBy`** (String): Field to sort by (search queries only). Example: `sortBy=profile.lastName`.\n*   **`sortOrder`** (String): Sort direction: `asc` or `desc` (search queries only).\n*   **`after`** (String): Pagination cursor for next page.\n\n## Important Notes\n*   To find users in a `DEPROVISIONED` state, you must explicitly use filter/search: `filter=status eq \"DEPROVISIONED\"`.\n*   For MFA status analysis, use `list-user-authenticator-enrollments` to check enrollment details."
     },
     {
       "id": "get-user",
@@ -1376,8 +1376,8 @@
       "description": "Retrieves a user by their ID or login.",
       "folder_path": "Users",
       "parameters": { "required": ["id"], "optional": ["expand"] },
-      "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`id`** (String, Required): The user's unique ID (e.g., `00u1a2b3...`), their login (e.g., `john.doe@example.com`), or the special value `me`.\n\n## Important Notes\n*   Using the unique user ID is the most reliable method for retrieval.\n*   The special value `me` retrieves the profile of the user associated with the API token being used."
+      "depends_on": ["list-users", "list-user-app-links", "list-user-groups", "list-user-roles"],
+      "notes": "## Path Parameters\n*   **`id`** (String, Required): The user's unique ID (e.g., `00u1a2b3...`), their login (e.g., `john.doe@example.com`), or the special value `me`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include metadata in `_embedded` property. Valid values: `blocks` (user access blocks) or `classification` (user classification metadata).\n\n## Important Notes\n*   Using the unique user ID is the most reliable method for retrieval.\n*   The special value `me` retrieves the profile of the user associated with the API token being used.\n*   For comprehensive access analysis, also check `list-user-app-links`, `list-user-groups`, and `list-user-roles`."
     },
     {
       "id": "list-user-blocks",
@@ -1532,8 +1532,8 @@
       "description": "Lists all groups of which the user is a member.",
       "folder_path": "User Resources",
       "parameters": { "required": ["id"], "optional": [] },
-      "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`id`** (String, Required): The ID of the user."
+      "depends_on": ["list-users", "list-user-app-links", "list-user-roles"],
+      "notes": "## Path Parameters\n*   **`id`** (String, Required): The ID of the user.\n\n## Important Notes\n*   Groups provide access to applications through group assignments.\n*   For complete access analysis, also check `list-user-app-links` and `list-user-roles`."
     },
     {
       "id": "list-user-clients",
