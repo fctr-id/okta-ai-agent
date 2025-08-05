@@ -60,11 +60,17 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
   - [Launching the Application](#launching-the-application)
   - [Tailing docker logs](#tailing-docker-logs)
   - [Access the Unified Agent Interface](#access-the-unified-agent-interface)
-- [How Tako Works](#how-tako-works)
-  - [Key Capabilities](#key-capabilities)
-  - [Modern AI Compatibility](#modern-ai-compatibility)
 - [🛡️ Security & Privacy](#️-security--privacy)
-- [⚠️ Important Notes](#️-important-notes)
+  - [Tako Architecture](#tako-architecture)
+    - [Common Security Features](#common-security-features)
+    - [Access Management](#access-management)
+    - [AI Provider Options](#ai-provider-options)
+    - [Data Privacy by Mode](#data-privacy-by-mode)
+    - [Database Mode Data Model](#database-mode-data-model)
+- [⚠️ Good to Know](#️-good-to-know)
+  - [Beta Release 🧪](#beta-release-)
+  - [Security First 🛡️](#security-first-️)
+  - [Current Limitations 🔍](#current-limitations-)
 - [🗺️ Roadmap](#️-roadmap)
 - [🆘 Need Help?](#-need-help-1)
 - [💡 Feature Requests & Ideas](#-feature-requests--ideas)
@@ -87,7 +93,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 - **5 Specialized Agents**: Planning, Execution Management, SQL, API, and Results Formatting working in perfect coordination
 - **Dual Data Source Mastery**: Works seamlessly with SQLite user database OR direct Okta API entities without database dependency
 - **Intelligent Data Selection**: Automatically chooses between database and API based on query requirements and data freshness
-- **Universal API Support**: **Automatic code generation across ALL 107+ Okta GET endpoints** ([complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Supported-Endpoints)) - not restricted to a few like previous versions
+- **Universal API Support**: **Automatic code generation across ALL 107+ Okta GET endpoints** ([complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints)) - not restricted to a few like previous versions
 
 ### **⚡ Multiple AI Provider Support**
 Tako leverages the power of leading AI providers with enhanced compatibility:
@@ -226,41 +232,73 @@ docker compose logs -f
 - 🌐 Open your browser and go to: https://localhost:8001 to start using Tako's new multi-agent system 🌐
 
 
-## How Tako Works
-
-Tako automatically determines the best approach for your query:
-- **Database queries** for comprehensive analysis and bulk operations
-- **API calls** for real-time data and current status
-- **Hybrid workflows** combining both sources for complete insights
-
-### Key Capabilities
-
-| Category | What Tako Covers |
-|----------|------------------|
-| **Users & Groups** | Complete lifecycle, relationships, MFA status, and access analysis |
-| **Applications** | Security auditing, certificate management, and assignment tracking |
-| **Compliance** | Audit trails, policy analysis, device management, and session monitoring |
-
-**107+ Okta API Endpoints Supported** - [Complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Supported-Endpoints)
-
-### Modern AI Compatibility
-
-Optimized for latest reasoning models (December 2024+): OpenAI o4-mini, Gemini Pro 2.5, Claude 3.7 Sonnet, DeepSeek v3
-
 ## 🛡️ Security & Privacy
 
-- **Local Data**: SQLite database stays on your infrastructure
-- **Minimal Cloud Exposure**: Only query text and small result samples sent to AI providers
-- **Token Control**: You manage Okta API permissions and restrictions
-- **Enterprise Security**: Multi-layered validation and secure code execution
+### Tako Architecture
 
-## ⚠️ Important Notes
+<div align="center">
+  <img src="docs/media/unified-architecture.png" alt="Tako Unified Multi-Datasource Architecture" width="800px" height="auto">
+  <p><em>Tako's revolutionary multi-agent architecture with intelligent data source selection</em></p>
+</div>
 
-**Enterprise-Ready**: Multi-agent architecture with 5 specialized agents, advanced error handling, and comprehensive security framework.
+#### Common Security Features
+#### Access Management
+- **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
+- **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
 
-**Modern AI Required**: Optimized for reasoning models released after December 2024 with multi-provider support and intelligent fallback mechanisms.
+#### AI Provider Options
+- **LLM Flexibility**: 
+  - Use your enterprise-approved AI providers
+  - Deploy Ollama locally for a completely air-gapped environment
+  - Full control over model selection and data boundaries
 
-**Current Scope**: 107+ Okta GET API endpoints, Identity Engine focus, single-tenant architecture with stateless operations.
+#### Data Privacy by Mode
+
+**Database Mode**
+- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
+- **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
+- **No Okta Data to LLMs**: Only user queries and system prompts are sent to AI providers
+
+**Realtime Mode**
+- **Direct API Access**: Queries Okta API directly with no local storage
+- **Limited Data Sampling**: Small samples of query results are sent to AI providers for processing
+- **Sandboxed Execution**: All code runs in a secure, isolated environment
+- **Data Minimization**: Only data necessary to fulfill specific queries is processed
+
+#### Database Mode Data Model
+The following data model applies only when using Database Mode with a synced SQLite database:
+
+| **Entity** | **Core Fields** |
+|------------|-----------------|
+| **Users** | id, tenant_id, okta_id, email, login, first_name, last_name, status, mobile_phone, primary_phone, employee_number, department, manager, password_changed_at, status_changed_at, user_type, country_code, title, organization, custom_attributes, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Groups** | id, tenant_id, okta_id, name, description, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Applications** | id, tenant_id, okta_id, name, label, status, sign_on_mode, metadata_url, policy_id, sign_on_url, audience, destination, signing_kid, username_template, username_template_type, implicit_assignment, admin_note, attribute_statements, honor_force_authn, hide_ios, hide_web, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **UserFactors** | id, tenant_id, okta_id, user_okta_id, factor_type, provider, status, authenticator_name, email, phone_number, device_type, device_name, platform, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Policies** | id, tenant_id, okta_id, name, description, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **Devices** | id, tenant_id, okta_id, status, display_name, platform, manufacturer, model, os_version, registered, secure_hardware_present, disk_encryption_type, serial_number, udid, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **UserDevices** | id, tenant_id, user_okta_id, device_okta_id, management_status, user_device_created_at, screen_lock_type, created_at, updated_at |
+| **Authenticators** | id, tenant_id, okta_id, name, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+
+**Note**: You can view the data saved to your SQLite DB using tools like DB Browser for SQLite.
+
+## ⚠️ Good to Know
+
+### Beta Release 🧪
+- Tako is still in testing grounds - keep it out of production!
+- Currently focusing on core user fields
+- Large orgs might need a coffee break during sync
+
+### Security First 🛡️
+- Data lives safely in your local SQLite
+- AI/LLM sees only what it needs to
+- Proper token hygiene required
+
+### Current Limitations 🔍
+- The responses are stateless, i.e., every query is answered as is asked without any relevance to the previous queries / responses
+- Tested on Identity engine only
+- AI responses vary by provider
+- Complex questions might need simplifying
+- One tenant at a time
 
 ## 🗺️ Roadmap
 
