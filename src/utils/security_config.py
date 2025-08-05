@@ -69,6 +69,7 @@ ALLOWED_MODULES: Set[str] = {
     'xml.etree.ElementTree',  # For SAML certificate and XML processing
     'xml.etree',  # For XML processing imports (from xml.etree import ElementTree)
     'base64',  # For base64 encoding/decoding (SAML certificates)
+    'dotenv',  # For loading environment variables from .env file
     
     # Cryptography for SAML certificate processing
     'cryptography',  # Certificate parsing and validation
