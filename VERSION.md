@@ -1,6 +1,35 @@
 # Version History
 
-## Current latest: v0.6.1-beta (07-13-2025)
+
+
+## Current latest: v1.0-beta (08-06-2025)
+
+Revolutionary Multi-Agent Architecture:
+- 5 specialized agents working in perfect coordination
+- Context-engineered communication for optimal performance
+- 99% token reduction through intelligent context filtering
+
+API-Only Operation Mode:
+- NEW: Complete operation without database sync
+- 107+ Okta GET endpoints with automatic code generation
+- Real-time data access - choose hybrid or pure API-only mode
+
+Enhanced AI Provider Support:
+- Google Vertex AI, OpenAI, Azure OpenAI, Anthropic, AWS Bedrock, Ollama
+- Dual model architecture for reasoning + coding optimization
+
+Breaking Changes:
+- Complete architectural rewrite - not compatible with v0.6.x
+- New environment variables required for multi-agent setup
+- Updated Docker configuration - follow new installation guide
+
+Migration from v0.6.x:
+- Backup existing data if needed
+- Follow new installation process for setup
+- Configure new environment variables
+- Legacy documentation available for previous architecture
+
+## v0.6.1-beta (07-13-2025)
 
 - Support for new user attribute statusChanged
 - Huge performance imporvements for SQL (removed JSON_EXTRACT)
