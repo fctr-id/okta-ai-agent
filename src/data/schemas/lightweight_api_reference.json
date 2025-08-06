@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "application": {
+      "operations": ["application_get", "application_list"]
+    },
+    "application_assignment": {
+      "operations": ["application_assignment_get_group_assignment", "application_assignment_get_user_assignment", "application_assignment_list_group_assignments", "application_assignment_list_user_assignments"]
+    },
+    "application_connection": {
+      "operations": ["application_connection_get_default", "application_connection_get_jwks"]
+    },
+    "application_credential": {
+      "operations": ["application_credential_get_csr", "application_credential_get_jwk", "application_credential_get_key", "application_credential_get_secret", "application_credential_list_csrs", "application_credential_list_jwks", "application_credential_list_keys", "application_credential_list_secrets"]
+    },
+    "application_feature": {
+      "operations": ["application_feature_get", "application_feature_list"]
+    },
+    "application_federated_claim": {
+      "operations": ["application_federated_claim_get", "application_federated_claim_list"]
+    },
+    "application_grant": {
+      "operations": ["application_grant_get", "application_grant_list"]
+    },
+    "application_sso": {
+      "operations": ["application_sso_get_saml_metadata"]
+    },
+    "application_token": {
+      "operations": ["application_token_get", "application_token_list"]
+    },
+    "authenticator": {
+      "operations": ["authenticator_get", "authenticator_get_method", "authenticator_get_well_known_config", "authenticator_list", "authenticator_list_methods"]
+    },
+    "behavior_rule": {
+      "operations": ["behavior_rule_get", "behavior_rule_list"]
+    },
+    "custom_role": {
+      "operations": ["custom_role_get", "custom_role_get_permission", "custom_role_list", "custom_role_list_permissions"]
+    },
+    "device": {
+      "operations": ["device_get", "device_list", "device_list_users"]
+    },
+    "device_assurance_policy": {
+      "operations": ["device_assurance_policy_get", "device_assurance_policy_list"]
+    },
+    "device_integration": {
+      "operations": ["device_integration_get", "device_integration_list"]
+    },
+    "device_posture_check": {
+      "operations": ["device_posture_check_get", "device_posture_check_list", "device_posture_check_list_defaults"]
+    },
+    "group": {
+      "operations": ["group_get", "group_list", "group_list_assigned_apps", "group_list_members"]
+    },
+    "group_owner": {
+      "operations": ["group_owner_list"]
+    },
+    "group_rule": {
+      "operations": ["group_rule_get", "group_rule_list"]
+    },
+    "log_stream": {
+      "operations": ["log_stream_get", "log_stream_list"]
+    },
+    "network_zone": {
+      "operations": ["network_zone_get", "network_zone_list"]
+    },
+    "okta_application_settings": {
+      "operations": ["okta_application_settings_get"]
+    },
+    "policy": {
+      "operations": ["policy_get", "policy_get_resource_mapping", "policy_get_rule", "policy_list", "policy_list_apps", "policy_list_resources", "policy_list_rules"]
+    },
+    "resource_set": {
+      "operations": ["resource_set_get", "resource_set_get_binding", "resource_set_get_binding_member", "resource_set_get_resource", "resource_set_list", "resource_set_list_binding_members", "resource_set_list_bindings", "resource_set_list_resources"]
+    },
+    "role_assignment": {
+      "operations": ["role_assignment_get_for_client", "role_assignment_get_for_group", "role_assignment_get_for_user", "role_assignment_get_governance_source_for_user_role", "role_assignment_get_role_targets_by_assignment_type", "role_assignment_list_app_targets_for_client_role", "role_assignment_list_app_targets_for_group_role", "role_assignment_list_app_targets_for_user_role", "role_assignment_list_by_client", "role_assignment_list_by_group", "role_assignment_list_by_user", "role_assignment_list_governance_source_resources_for_user_role", "role_assignment_list_governance_sources_for_user_role", "role_assignment_list_group_targets_for_client_role", "role_assignment_list_group_targets_for_group_role", "role_assignment_list_group_targets_for_user_role", "role_assignment_list_users_with_roles"]
+    },
+    "system_log": {
+      "operations": ["system_log_list_events"]
+    },
+    "user": {
+      "operations": ["user_get", "user_list", "user_list_app_links", "user_list_blocks", "user_list_clients", "user_list_devices", "user_list_groups"]
+    },
+    "user_authenticator": {
+      "operations": ["user_authenticator_get_enrollment", "user_authenticator_get_factor", "user_authenticator_get_factor_transaction_status", "user_authenticator_get_yubikey_token", "user_authenticator_list_enrollments", "user_authenticator_list_factors", "user_authenticator_list_supported_factors", "user_authenticator_list_supported_security_questions", "user_authenticator_list_yubikey_tokens"]
+    }
+  },
+  "sql_tables": [
+    {
+      "name": "users",
+      "columns": ["id", "tenant_id", "okta_id", "email", "first_name", "last_name", "login", "status", "mobile_phone", "employee_number", "department", "manager", "user_type", "country_code", "title", "organization", "created_at", "last_updated_at", "status_changed_at", "is_deleted", "custom_attrib_1", "custom_attrib_2", "custom_attrib_3", "custom_attrib_4", "custom_attrib_5", "testAttrib"]
+    },
+    {
+      "name": "groups",
+      "columns": ["id", "tenant_id", "okta_id", "name", "description", "created_at", "last_updated_at", "is_deleted"]
+    },
+    {
+      "name": "user_group_memberships",
+      "columns": ["user_okta_id", "group_okta_id", "tenant_id", "created_at", "updated_at"]
+    },
+    {
+      "name": "applications",
+      "columns": ["id", "tenant_id", "okta_id", "name", "label", "status", "sign_on_mode", "policy_id", "created_at", "last_updated_at", "is_deleted"]
+    },
+    {
+      "name": "user_application_assignments",
+      "columns": ["user_okta_id", "application_okta_id", "tenant_id", "assignment_id", "credentials_setup", "hidden", "created_at", "updated_at"]
+    },
+    {
+      "name": "group_application_assignments",
+      "columns": ["group_okta_id", "application_okta_id", "tenant_id", "assignment_id", "created_at", "updated_at"]
+    },
+    {
+      "name": "user_factors",
+      "columns": ["id", "tenant_id", "okta_id", "user_okta_id", "factor_type", "provider", "status", "authenticator_name", "created_at", "last_updated_at"]
+    },
+    {
+      "name": "devices",
+      "columns": ["id", "tenant_id", "okta_id", "status", "display_name", "platform", "manufacturer", "model", "serial_number", "created_at", "last_updated_at"]
+    },
+    {
+      "name": "user_devices",
+      "columns": ["id", "tenant_id", "user_okta_id", "device_okta_id", "management_status", "screen_lock_type", "created_at"]
+    },
+    {
+      "name": "policies",
+      "columns": ["id", "tenant_id", "okta_id", "name", "description", "status", "type", "created_at", "last_updated_at"]
+    },
+    {
+      "name": "sync_history",
+      "columns": ["id", "tenant_id", "entity_type", "start_time", "end_time", "status", "success", "error_details", "records_processed"]
+    }
+  ]
+}

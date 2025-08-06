@@ -11,10 +11,12 @@ os.chdir(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def stream_output(stream, prefix):
     """Stream output from a pipe to stdout"""
-    for line in iter(stream.readline, ""):
-        if line:
-            print(f"{prefix}: {line.strip()}")
-    stream.close()
+    try:
+        for line in iter(stream.readline, ""):
+            if line:
+                print(f"{prefix}: {line.strip()}")
+    finally:
+        stream.close()
 
 def run_command(command):
     """Run a shell command and print output from both stdout and stderr"""
@@ -145,18 +147,6 @@ def ensure_certificates():
     
     return str(key_path), str(cert_path)
 
-def stream_output(stream, prefix):
-    """Stream output from a pipe to stdout with minimal modification"""
-    for line in iter(stream.readline, ""):
-        if line:
-            # Pass through log lines as-is, tag other output
-            line = line.strip()
-            if any(log_level in line for log_level in ["INFO:", "WARNING:", "ERROR:", "DEBUG:"]):
-                print(line)
-            else:
-                print(f"{prefix}: {line}")
-    stream.close()
-
 if __name__ == "__main__":
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Start the Okta AI Agent server")
@@ -164,6 +154,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8001, help="Port to bind to")
     parser.add_argument("--no-https", action="store_true", help="Run without HTTPS (not recommended)")
     parser.add_argument("--log-level", default="info", help="Logging level")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload on code changes")
     args = parser.parse_args()
     
     # Run the FastAPI server
@@ -171,7 +162,8 @@ if __name__ == "__main__":
     
     if args.no_https:
         print("WARNING: Running without HTTPS. This is not recommended for production use.")
-        command = f"python -m uvicorn src.backend.app.main:app --reload --host {args.host} --port {args.port} --log-level {args.log_level}"
+        reload_flag = " --reload" if args.reload else ""
+        command = f"venv\\Scripts\\python -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level}{reload_flag}"
         run_command(command)
     else:
         # Generate certificates if needed
@@ -179,9 +171,10 @@ if __name__ == "__main__":
         print(f"Starting secure server on https://{args.host}:{args.port}")
         
         # Run with HTTPS
+        reload_flag = " --reload" if args.reload else ""
         command = (
-            f"python -m uvicorn src.backend.app.main:app --reload --host {args.host} "
+            f"venv\\Scripts\\python -m uvicorn src.api.main:app --host {args.host} "
             f"--port {args.port} --log-level {args.log_level} "
-            f"--ssl-keyfile {key_path} --ssl-certfile {cert_path}"
+            f"--ssl-keyfile {key_path} --ssl-certfile {cert_path}{reload_flag}"
         )
         run_command(command)

@@ -29,16 +29,26 @@
 
                                     <div class="sync-info">
                                         <v-icon class="sync-icon" size="small">mdi-update</v-icon>
-                                        <span v-if="isRealtimeMode">Realtime Mode</span>
+                                        <span v-if="hasLastSyncTimestamp">Last Updated: {{ getLastSyncTime }}</span>
+                                        <span v-else-if="isRealtimeMode">Realtime Mode</span>
                                         <span v-else>Last Updated: {{ getLastSyncTime }}</span>
                                     </div>
                                 </div>
 
                                 <div class="right-section">
-                                    <!--<div class="results-count" v-if="displayedItems.length">
-                                        {{ displayedItems.length }} {{ displayedItems.length === 1 ? 'result' :
-                                        'results' }}
-                                    </div>-->
+                                    <!-- Streaming indicator in header -->
+                                    <div v-if="isStreaming" class="streaming-indicator me-3">
+                                        <v-progress-circular 
+                                            :model-value="streamingProgressPercent"
+                                            size="16" 
+                                            width="2" 
+                                            color="primary" 
+                                            class="me-2">
+                                        </v-progress-circular>
+                                        <span class="streaming-text">
+                                            Loading results ({{ streamingProgressPercent }}%)
+                                        </span>
+                                    </div>
 
                                     <v-text-field v-model="search" density="comfortable" hide-details
                                         placeholder="Search results" prepend-inner-icon="mdi-magnify" single-line
@@ -123,9 +133,7 @@ const sortBy = ref([{ key: 'email', order: 'asc' }])
 const isStreamData = computed(() => props.type === MessageType.STREAM)
 const isJsonData = computed(() => props.type === MessageType.JSON)
 const isError = computed(() => props.type === MessageType.ERROR)
-//const isTextData = computed(() => props.type === MessageType.TEXT)
 const isMetadata = computed(() => props.type === MessageType.METADATA)
-
 
 const isTextData = computed(() =>
     props.type === 'text' ||
@@ -134,11 +142,6 @@ const isTextData = computed(() =>
 )
 
 const displayedItems = computed(() => {
-    //console.log('Computing displayedItems:', {
-    //    type: props.type,
-    //    content: props.content
-    //});
-
     if (props.type === MessageType.STREAM || props.type === MessageType.BATCH || props.type === MessageType.TABLE) {
         return Array.isArray(props.content) ? props.content : [];
     }
@@ -184,6 +187,27 @@ const formattedJson = computed(() => {
     }
 })
 
+// Streaming support computed properties
+const isStreaming = computed(() => {
+    return props.metadata?.isStreaming === true
+})
+
+const streamingProgress = computed(() => {
+    return props.metadata?.streamingProgress || null
+})
+
+const streamingProgressPercent = computed(() => {
+    if (!streamingProgress.value) return 0
+    const { current, total } = streamingProgress.value
+    return total > 0 ? Math.round((current / total) * 100) : 0
+})
+
+const streamingProgressText = computed(() => {
+    if (!streamingProgress.value) return ''
+    const { current, total, chunksReceived, totalChunks } = streamingProgress.value
+    return `${current.toLocaleString()}/${total.toLocaleString()} records (${chunksReceived}/${totalChunks} chunks)`
+})
+
 const getLastSyncTime = computed(() => {
     // Get timestamp from the correct nested path
     let timestampStr = 'Never';
@@ -225,6 +249,42 @@ const getLastSyncTime = computed(() => {
     }
 
     return timestampStr;
+});
+
+// Check if we have a valid last sync timestamp in metadata
+const hasLastSyncTimestamp = computed(() => {
+    try {
+        // Ensure props and metadata exist
+        if (!props || !props.metadata) {
+            return false;
+        }
+        
+        // Check for last_sync data in metadata
+        if (props.metadata.last_sync) {
+            const lastSync = props.metadata.last_sync;
+            
+            // Check if it's a valid timestamp (not error states)
+            if (typeof lastSync === 'object' && lastSync && lastSync.last_sync) {
+                const timestampValue = lastSync.last_sync;
+                const result = timestampValue && 
+                       timestampValue !== 'Never' && 
+                       timestampValue !== 'Error' && 
+                       timestampValue !== 'No data';
+                return result;
+            } else if (typeof lastSync === 'string') {
+                const result = lastSync && 
+                       lastSync !== 'Never' && 
+                       lastSync !== 'Error' && 
+                       lastSync !== 'No data';
+                return result;
+            }
+        }
+        
+        return false;
+    } catch (error) {
+        console.warn('Error in hasLastSyncTimestamp computed:', error);
+        return false;
+    }
 });
 
 // Helper function to format timestamps consistently
@@ -354,16 +414,6 @@ const downloadCSV = () => {
         console.error('CSV generation error:', error)
     }
 }
-
-// Use this to debu streaming data udates sent from backend
-/*
-watch(() => props.content, (newContent) => {
-    console.log('Content updated:', {
-        length: Array.isArray(newContent) ? newContent.length : 0,
-        type: props.type
-    });
-}, { deep: true });
-*/
 
 </script>
 
@@ -509,6 +559,27 @@ watch(() => props.content, (newContent) => {
 .results-count {
     color: #6B7280;
     font-size: 0.813rem;
+}
+
+.streaming-indicator {
+    color: #4C64E2;
+}
+
+.streaming-text {
+    font-size: 0.813rem;
+    font-weight: 500;
+    color: #4C64E2;
+}
+
+.streaming-footer-indicator {
+    border-top: 1px solid #eef1ff;
+    background: #f9faff;
+}
+
+.streaming-footer-text {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #4C64E2;
 }
 
 /* Content Type Styles */

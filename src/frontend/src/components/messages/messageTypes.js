@@ -5,7 +5,9 @@ export const MessageType = {
     TEXT: 'text',        // For simple text messages
     BATCH: 'batch',      // For batch data chunks
     METADATA: 'metadata', // For stream metadata
-    COMPLETE: 'complete'  // For stream completion
+    COMPLETE: 'complete', // For stream completion
+    TABLE: 'table',       // For table display with Vuetify data table
+    MARKDOWN: 'markdown'  // For markdown content display
 }
 
 export const createMessage = (type, content, metadata = {}) => ({

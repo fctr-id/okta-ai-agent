@@ -5,7 +5,7 @@
       <div :class="['search-container', messages.length > 0 ? 'moved' : '']">
         <!-- Title with animated gradient underline -->
         <div :class="['title-wrapper', messages.length > 0 ? 'hidden' : '']">
-          <h1 class="main-title">Tako Realtime Query Mode</h1>
+          <h1 class="main-title">I'm Tako. How can I help you?</h1>
           <div class="title-underline"></div>
         </div>
 
@@ -45,10 +45,21 @@
             </transition>
 
             <!-- Search input -->
-            <v-text-field v-model="userInput" @keydown="handleKeyDown" @keydown.enter.prevent="handleQuerySubmit"
-              placeholder="Ask a question about your Okta tenant..." variant="plain" color="#4C64E2"
-              bg-color="transparent" hide-details class="search-input" :clearable="true" :disabled="isProcessing"           
-              </v-text-field>
+            <div class="search-input-wrapper">
+              <textarea 
+                v-model="userInput" 
+                @keydown="handleKeyDown" 
+                @input="adjustTextareaHeight"
+                ref="textareaRef"
+                placeholder="Ask a question about your Okta tenant..." 
+                class="search-textarea"
+                :disabled="isProcessing"
+                rows="1"
+              ></textarea>
+              <button v-if="userInput" @click="clearInput" class="clear-btn" aria-label="Clear input">
+                <v-icon size="small">mdi-close</v-icon>
+              </button>
+            </div>
             <v-tooltip text="Send query" location="top">
               <template v-slot:activator="{ props }">
                 <button v-bind="props" class="action-btn send-btn" :disabled="!canSubmitQuery" :loading="isSubmitting"
@@ -65,24 +76,36 @@
         <!-- Suggestions -->
         <transition name="fade-up">
           <div v-if="messages.length === 0 && !isProcessing" class="suggestions-wrapper">
-            <!-- Add note about case-sensitivity -->
+            <!-- Case-sensitivity note (commented out per user request)
             <div class="case-sensitivity-note mt-n8">
               <div class="note-content">
                 <v-icon color="info" size="small" class="note-icon">mdi-information</v-icon>
                 <span>Note: Application and group names are case-sensitive. Please enter them exactly as they appear in Okta.</span>
               </div>
             </div>
+            -->
+            
+            <!-- Sample query suggestions -->
+            <div class="suggestions-grid">
+              <v-btn v-for="(suggestion, i) in suggestions" :key="i" class="suggestion-btn"
+                variant="outlined" @click="selectSuggestion(suggestion)" size="small">
+                {{ suggestion }}
+              </v-btn>
+            </div>
+            
+            <!-- Spacer between suggestions and tools button -->
+            <div class="suggestions-spacer"></div>
             
             <div class="tools-button-container">
               <v-btn
                 color="primary"
                 class="tools-action-button"
-                prepend-icon="mdi-tools"
+                prepend-icon="mdi-database"
                 @click="showToolsModal = true"
                 elevation="1"
                 rounded
               >
-                View Available Tools
+                View API entities available
               </v-btn>
             </div>
           </div>
@@ -183,58 +206,54 @@
         </div>
       </transition>
 
-      <v-dialog v-model="showToolsModal" max-width="800px" scrollable>
-        <v-card>
-          <v-toolbar color="primary" class="text-white">
-            <v-toolbar-title>Available Tools</v-toolbar-title>
+      <v-dialog v-model="showToolsModal" max-width="850px" scrollable>
+        <v-card class="entities-modal">
+          <v-toolbar class="entities-modal-toolbar">
+            <v-toolbar-title class="entities-modal-title">Available Okta API Entities</v-toolbar-title>
             <v-spacer></v-spacer>
-            <v-text-field
-              v-model="toolSearch"
-              prepend-inner-icon="mdi-magnify"
-              placeholder="Search tools..."
-              hide-details
-              density="compact"
-              class="mt-2 search-field"
-              variant="outlined"
-              style="max-width: 250px"
-            ></v-text-field>
-            <v-btn icon @click="showToolsModal = false" class="ml-2">
+            
+            <div class="entities-search-wrapper">
+              <v-text-field
+                v-model="toolSearch"
+                prepend-inner-icon="mdi-magnify"
+                placeholder="Search entities..."
+                hide-details
+                density="compact"
+                class="entities-search-field"
+                variant="outlined"
+              ></v-text-field>
+            </div>
+            
+            <v-btn icon @click="showToolsModal = false" class="close-btn">
               <v-icon>mdi-close</v-icon>
             </v-btn>
           </v-toolbar>
           
-          <v-card-text class="pa-4">
-            <div v-if="isLoadingTools" class="d-flex justify-center my-4">
-              <v-progress-circular indeterminate color="primary"></v-progress-circular>
+          <v-card-text class="entities-modal-content">
+            <div v-if="isLoadingTools" class="loading-container">
+              <v-progress-circular indeterminate color="primary" size="28"></v-progress-circular>
+              <span class="loading-text">Loading Okta entities...</span>
             </div>
             
-            <div v-else class="tools-wrapper">
-              <!-- Fixed-column grid with vertical overflow -->
-              <div class="tools-grid-container">
-                <div 
-                  v-for="tool in filteredTools" 
-                  :key="tool.tool_name" 
-                  class="tool-cell"
-                  @click="userInput = tool.tool_name; showToolsModal = false;"
+            <div v-else class="entities-wrapper">
+              <!-- Compact chip layout for entities -->
+              <div class="entities-chips-container">
+                <div
+                  v-for="entity in filteredTools" 
+                  :key="entity.entity_name"
+                  class="entity-chip-wrapper"
                 >
-                  <div class="tool-content">
-                    <!-- Info icon moved to the left -->
-                    <v-tooltip location="top">
-                      <template v-slot:activator="{ props }">
-                        <v-icon v-bind="props" size="small" class="info-icon">mdi-information-outline</v-icon>
-                      </template>
-                      <span class="tooltip-text">{{ tool.description }}</span>
-                    </v-tooltip>
-                    <!-- Tool name after the icon -->
-                    <div class="tool-name">{{ tool.tool_name }}</div>
+                  <div class="entity-chip-content">
+                    {{ entity.display_name }}
                   </div>
                 </div>
               </div>
               
               <!-- No results message -->
-              <div v-if="filteredTools.length === 0" class="text-center py-8">
-                <v-icon size="large" color="grey-lighten-1">mdi-magnify-close</v-icon>
-                <div class="text-body-1 mt-2">No matching tools found</div>
+              <div v-if="filteredTools.length === 0" class="no-results-container">
+                <v-icon size="48" class="no-results-icon">mdi-magnify-close</v-icon>
+                <div class="no-results-text">No matching entities found</div>
+                <div class="no-results-subtitle">Try a different search term</div>
               </div>
             </div>
           </v-card-text>
@@ -262,6 +281,7 @@ const {
   currentStepIndex: rtCurrentStepIndexVal,
   steps: rtSteps,
   results: rtResults,
+  chunkedResults, // Add chunked results for progress indicators
   startProcess,
   connectToStream,
   cancelProcess,
@@ -271,6 +291,7 @@ const {
 const userInput = ref('');
 const messages = ref([]);
 const messagesContainerRef = ref(null);
+const textareaRef = ref(null);
 const isSubmitting = ref(false);
 const isCancelling = ref(false);
 const autoScroll = ref(true);
@@ -292,11 +313,34 @@ const exampleQueries = ref([
   'Show groups for user test.user@example.com',
 ]);
 
+// Comprehensive query suggestions for users (copied from ChatInterfaceV2.vue)
+const suggestions = ref([
+  'List all users along with their creation dates',
+  'Show users with PUSH factor registered', 
+  'Find users with SMS registered with phone number ending with 2364',
+  'Show me all users who are in locked status',
+  'List all groups and their descriptions',
+  'Show applications assigned to user dan@fctr.io',
+  'Find users in Engineering group with admin roles',
+  'How many users were created last month?'
+]);
+
 const canSubmitQuery = computed(() => userInput.value.trim().length > 0 && !isProcessing.value);
 const canCancelQuery = computed(() => isProcessing.value && rtProcessId.value && !isCancelling.value && rtExecutionStatus.value !== 'completed' && rtExecutionStatus.value !== 'error' && rtExecutionStatus.value !== 'cancelled');
 
 // Load saved history on component mount
 onMounted(() => {
+  // Force document to be scrollable (fix for scrolling issues)
+  document.documentElement.style.overflow = 'auto'
+  document.body.style.overflow = 'auto'
+  document.documentElement.style.height = 'auto'
+  document.body.style.height = 'auto'
+
+  // Force layout recalculation on smaller screens
+  if (window.innerHeight <= 800) {
+    document.querySelector('.chat-content')?.classList.add('small-screen')
+  }
+
   try {
     const savedHistory = localStorage.getItem('realtimeMessageHistory');
     if (savedHistory) {
@@ -355,14 +399,55 @@ const handleKeyDown = (e) => {
     if (historyIndex.value < messageHistory.value.length - 1) {
       historyIndex.value++;
       userInput.value = messageHistory.value[historyIndex.value];
+      nextTick(() => adjustTextareaHeight());
     }
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
     if (historyIndex.value > -1) {
       historyIndex.value--;
       userInput.value = historyIndex.value === -1 ? '' : messageHistory.value[historyIndex.value];
+      nextTick(() => adjustTextareaHeight());
     }
   }
+};
+
+// Dynamic textarea height adjustment
+const adjustTextareaHeight = () => {
+  if (textareaRef.value) {
+    textareaRef.value.style.height = 'auto';
+    const scrollHeight = textareaRef.value.scrollHeight;
+    const maxHeight = 6 * 24; // 6 rows * 24px line height
+    textareaRef.value.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+  }
+};
+
+// Clear input function
+const clearInput = () => {
+  userInput.value = '';
+  adjustTextareaHeight();
+  if (textareaRef.value) {
+    textareaRef.value.focus();
+  }
+};
+
+// Handle suggestion selection
+const selectSuggestion = (suggestion) => {
+  userInput.value = suggestion;
+  handleQuerySubmit();
+};
+
+// Map backend tool names to user-friendly display names (matching backend implementation)
+const getStepDisplayName = (toolName, entity) => {
+  if (!entity && toolName) {
+    return toolName;
+  }
+  
+  const displayMapping = {
+    "api": entity,  // "users", "groups", "system_log", etc.
+    "sql": `sql_${entity}`,  // "sql_users", "sql_groups", etc.
+  };
+  
+  return displayMapping[toolName] || toolName;
 };
 
 const handleQuerySubmit = async () => {
@@ -408,9 +493,9 @@ const getFailedStepName = () => {
 
 const hasStepperExpanded = computed(() => {
   // Expand the stepper container when:
-  // 1. Plan has been generated AND
-  // 2. There are plan steps available
-  return rtPlanGenerated.value && rtSteps.value?.length > 0;
+  // 1. We have received execution steps from step_plan_info (more than just the 2 bookend steps)
+  // 2. OR we have an error condition
+  return (rtSteps.value?.length > 2) || rtExecutionStatus.value === 'error';
 });
 
 const resetInterface = async () => {
@@ -420,6 +505,10 @@ const resetInterface = async () => {
   messages.value = [];
   userInput.value = '';
   cleanup();
+  
+  // Clear the error state from previous runs
+  rtError.value = null;
+  
   isCancelling.value = false;
   autoScroll.value = true;
   // Don't clear history when resetting interface
@@ -454,99 +543,71 @@ const scrollToBottom = () => {
 const handleScroll = () => {
   if (messagesContainerRef.value) {
     const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.value;
+    // Only enable auto-scroll if user is near the bottom (within 100px)
+    // If user scrolls up, disable auto-scroll to allow manual scrolling
     autoScroll.value = scrollHeight - scrollTop - clientHeight < 100;
   }
 };
 
-const PREPARE_PLAN_ID = 'prepare_plan';
-const GENERATING_CODE_ID = 'generating_code'; // New constant for the code generation step
-const FINALIZE_RESULTS_ID = 'finalize_results';
+// Stepper management using the managed step flow from useRealtimeStream
 
 const progressSteps = computed(() => {
-  const items = [];
-
-  // First step (Planning)
-  items.push({
-    id: PREPARE_PLAN_ID,
-    title: 'creating_plan',
-    status: rtExecutionStatus.value === 'planning' && !rtPlanGenerated.value ? 'active' :
-      (rtPlanGenerated.value || !['initial', 'planning'].includes(rtExecutionStatus.value) ? 'completed' : 'pending'),
+  // Use the managed step flow from useRealtimeStream directly
+  // This avoids Vue readonly warnings and ensures consistent state
+  return rtSteps.value.map((step, index) => {
+    let title;
+    
+    // Build step title based on the data structure from backend
+    if (step.tool_name === 'api' && step.operation) {
+      // For API steps: "api_operation" format (e.g., "api_list_by_user")
+      title = `api_${step.operation}`;
+    }
+    else if (step.tool_name === 'sql' && step.entity) {
+      // For SQL steps: "sql_entity" format (e.g., "sql_users")
+      title = `sql_${step.entity}`;
+    }
+    // Handle bookend steps
+    else if (step.tool_name === 'generate_plan') {
+      title = 'generate plan';
+    }
+    else if (step.tool_name === 'finalizing_results') {
+      title = 'finalizing results';
+    }
+    // Fallback for any other step types
+    else {
+      title = step.tool_name || step.name || `Step ${index + 1}`;
+    }
+    
+    return {
+      id: step.id || `step_${index}`,
+      title: title,
+      status: step.status || 'pending'
+    };
   });
-
-  // Add the new Generating Code step when plan is generated
-  if (rtPlanGenerated.value) {
-    const isGeneratingCode = rtExecutionStatus.value === 'generating_code';
-    // Check if any step has started or completed - this works even without phase="executing"
-    const hasStepsStarted = rtSteps.value?.some(step => 
-      step.status === 'active' || 
-      step.status === 'in_progress' ||
-      step.status === 'running' || 
-      step.status === 'completed');
-  
-    items.push({
-      id: GENERATING_CODE_ID,
-      title: 'generating_code',
-      status: isGeneratingCode && !hasStepsStarted ? 'active' : 'completed',
-    });
-  }
-
-  // Plan steps
-  if (rtPlanGenerated.value && rtSteps.value?.length > 0) {
-    rtSteps.value.forEach((step, index) => {
-      let itemStatus;
-
-      // Map statuses directly from the backend
-      if (step.status === 'completed') {
-        itemStatus = 'completed';
-      } else if (step.status === 'error') {
-        itemStatus = 'error';
-      } else if (step.status === 'active' || step.status === 'in_progress' || step.status === 'running') {
-        // Accept multiple possible "active" states
-        itemStatus = 'active';
-      } else {
-        itemStatus = 'pending';
-      }
-
-      items.push({
-        id: `plan_step_${step.id || index}`,
-        title: step.tool_name || `Action ${index + 1}`,
-        status: itemStatus,
-      });
-    });
-  }
-
-  // Final step
-  items.push({
-    id: FINALIZE_RESULTS_ID,
-    title: 'finalizing_results',
-    status: rtExecutionStatus.value === 'processing_final_results' ? 'active' :
-      (['completed', 'error', 'cancelled'].includes(rtExecutionStatus.value) ? 'completed' : 'pending'),
-  });
-
-  return items;
 });
 
 const currentProgressStepId = computed(() => {
-  const activeItem = progressSteps.value.find(item => item.status === 'active');
-  if (activeItem) return activeItem.id;
-
-  if (rtExecutionStatus.value === 'planning' && !rtPlanGenerated.value) return PREPARE_PLAN_ID;
-  if (rtExecutionStatus.value === 'generating_code') return GENERATING_CODE_ID;
-  if (rtExecutionStatus.value === 'planning' && rtPlanGenerated.value && rtSteps.value?.length > 0) return `plan_step_${rtSteps.value[0].id || 0}`;
-  if (rtExecutionStatus.value === 'executing' && rtSteps.value?.[rtCurrentStepIndexVal.value]) return `plan_step_${rtSteps.value[rtCurrentStepIndexVal.value].id || rtCurrentStepIndexVal.value}`;
-  if (rtExecutionStatus.value === 'processing_final_results') return FINALIZE_RESULTS_ID;
-  if (rtExecutionStatus.value === 'completed' || rtExecutionStatus.value === 'error' || rtExecutionStatus.value === 'cancelled') {
-    for (let i = progressSteps.value.length - 1; i >= 0; i--) {
-      if (progressSteps.value[i].status !== 'pending') return progressSteps.value[i].id;
-    }
-    return FINALIZE_RESULTS_ID;
+  // Find the currently active step from the managed step flow
+  const activeStep = rtSteps.value.find(step => step.status === 'active');
+  if (activeStep) {
+    return activeStep.id || 'active_step';
   }
-  return PREPARE_PLAN_ID;
+  
+  // If no active step, find the last non-pending step
+  for (let i = rtSteps.value.length - 1; i >= 0; i--) {
+    const step = rtSteps.value[i];
+    if (step.status !== 'pending') {
+      return step.id || `step_${i}`;
+    }
+  }
+  
+  // Default to first step if all are pending
+  return rtSteps.value.length > 0 ? (rtSteps.value[0].id || 'step_0') : 'default_step';
 });
 
 const showProgressDisplayArea = computed(() =>
   messages.value.length > 0 &&
-  (isProcessing.value || ['planning', 'generating_code', 'executing', 'processing_final_results'].includes(rtExecutionStatus.value)) &&
+  (isProcessing.value || ['planning', 'executing', 'processing_final_results'].includes(rtExecutionStatus.value)) &&
   !rtResults.value && rtExecutionStatus.value !== 'error' && rtExecutionStatus.value !== 'cancelled'
 );
 
@@ -558,7 +619,6 @@ const showFinalOutcomeArea = computed(() =>
 // Keep this for backwards compatibility but we're not displaying it anymore
 const progressAreaTitle = computed(() => {
   if (rtExecutionStatus.value === 'planning' && !rtPlanGenerated.value) return "Understanding Your Query";
-  if (rtExecutionStatus.value === 'generating_code') return "Generating Code";
   if (rtPlanGenerated.value && (rtExecutionStatus.value === 'planning' || rtExecutionStatus.value === 'executing')) return "Executing Plan";
   if (rtExecutionStatus.value === 'processing_final_results') return "Preparing Your Results";
   return "";
@@ -572,36 +632,42 @@ watch(messages, () => {
   scrollToBottom();
 }, { deep: true });
 
-// Filter tools based on search
+// Watch for input changes to adjust textarea height
+watch(userInput, () => {
+  nextTick(() => adjustTextareaHeight());
+});
+
+// Filter Okta entities based on search
 const filteredTools = computed(() => {
   if (!toolSearch.value) return availableTools.value;
 
   const search = toolSearch.value.toLowerCase();
-  return availableTools.value.filter(tool =>
-    tool.tool_name.toLowerCase().includes(search) ||
-    tool.description.toLowerCase().includes(search)
+  return availableTools.value.filter(entity =>
+    entity.display_name.toLowerCase().includes(search) ||
+    entity.entity_name.toLowerCase().includes(search) ||
+    entity.description.toLowerCase().includes(search)
   );
 });
 
-// Function to fetch available tools from backend
-const fetchAvailableTools = async () => {
+// Function to fetch Okta entities from backend
+const fetchOktaEntities = async () => {
   isLoadingTools.value = true;
   try {
-    const response = await fetch('/api/realtime/available-tools');
+    const response = await fetch('/api/realtime/okta-entities');
     const data = await response.json();
-    availableTools.value = data.tools;
+    availableTools.value = data.entities || [];
   } catch (error) {
-    console.error('Error fetching tools:', error);
+    console.error('Error fetching Okta entities:', error);
     availableTools.value = [];
   } finally {
     isLoadingTools.value = false;
   }
 };
 
-// Watch modal visibility to load tools when opened
+// Watch modal visibility to load entities when opened
 watch(showToolsModal, (newVal) => {
   if (newVal && availableTools.value.length === 0) {
-    fetchAvailableTools();
+    fetchOktaEntities();
   }
 });
 
@@ -609,6 +675,11 @@ watch(showToolsModal, (newVal) => {
 </script>
 
 <style scoped>
+/* CSS Variables */
+:root {
+  --primary: #8e54e9;
+}
+
 /* Basic layout and structure */
 .chat-content {
   background: transparent;
@@ -702,37 +773,66 @@ watch(showToolsModal, (newVal) => {
   flex: 1;
 }
 
-.search-input :deep(.v-field) {
-  box-shadow: none !important;
+.search-input-wrapper {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  min-height: 42px;
+}
+
+.search-textarea {
+  flex: 1;
   border: none;
-  min-height: 44px !important;
-}
-
-.search-input :deep(.v-field__input) {
-  padding: 0 0 0 16px !important;
+  outline: none;
+  background: transparent;
   font-size: 15px;
-  min-height: 42px !important;
-  display: flex !important;
-  align-items: center !important;
+  font-family: inherit;
+  color: #333;
+  padding: 11px 40px 11px 4px; /* Reduced left padding to 4px for more text space */
+  margin: 0;
+  resize: none;
+  line-height: 1.5;
+  min-height: 42px;
+  max-height: 144px; /* 6 rows * 24px */
+  overflow-y: auto;
+  transition: height 0.2s ease;
 }
 
-.search-input :deep(.v-field__input input) {
-  margin-top: 0 !important;
-  padding: 0 !important;
+.search-textarea::placeholder {
+  color: #999;
+  font-size: 15px;
 }
 
-.search-input :deep(.v-field__clearable) {
-  align-self: center !important;
-  padding: 0 !important;
+.search-textarea:disabled {
+  color: #999;
+  cursor: not-allowed;
 }
 
-.search-input :deep(.v-field__clearable .v-icon) {
+.clear-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #e0e0e0;
+  border: 1px solid #bbb;
+  color: #555;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transform: translateY(-2px);
-  padding: 0;
-  margin-right: 4px;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+
+.clear-btn:hover {
+  color: #333;
+  background: #d0d0d0;
+  border-color: #999;
 }
 
 /* Button styles */
@@ -855,6 +955,11 @@ watch(showToolsModal, (newVal) => {
   justify-content: center;
   max-width: 850px;
   margin: 0 auto;
+}
+
+.suggestions-spacer {
+  height: 24px;
+  width: 100%;
 }
 
 .suggestion-btn {
@@ -1221,80 +1326,186 @@ watch(showToolsModal, (newVal) => {
   transition: width 0.5s ease, opacity 0.5s ease;
 }
 
-/* Fixed 3-column grid with vertical flow */
-.tools-grid-container {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr); /* Exactly 3 columns */
-  gap: 12px;
-  width: 100%;
-  padding: 8px 4px;
-  box-sizing: border-box;
+/* Entities Modal Styling - Match Realtime Interface Theme */
+.entities-modal {
+  border-radius: 16px !important;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12) !important;
 }
 
-/* Force 3 columns with higher specificity */
-.v-dialog .tools-grid-container {
-  display: grid !important;
-  grid-template-columns: repeat(2, 1fr) !important;
-  gap: 12px !important;
-  width: 100% !important;
-  padding: 8px 4px !important;
-  box-sizing: border-box !important;
+.entities-modal-toolbar {
+  background: linear-gradient(135deg, #667eea, #764ba2) !important;
+  color: white !important;
+  padding: 0 24px !important;
+  min-height: 72px !important;
 }
 
-/* No height restriction on wrapper */
-.tools-wrapper {
-  width: 100%;
+.entities-modal-title {
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  color: white !important;
 }
 
-/* Let the dialog handle vertical scrolling */
-.v-dialog {
-  overflow-y: auto;
+.entities-search-wrapper {
+  flex: 1;
+  max-width: none;
+  margin: 0 20px;
 }
 
-/* Tool cell styling */
-.tool-cell {
-  background-color: #f8f9fa;
-  border-radius: 8px;
-  padding: 12px;
-  cursor: pointer;
-  border: 1px solid #e0e0e0;
+.entities-search-field {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  backdrop-filter: blur(10px);
+}
+
+.entities-search-field :deep(.v-field) {
+  background-color: rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  border: 1px solid rgba(255, 255, 255, 0.3) !important;
+}
+
+.entities-search-field :deep(.v-field__input) {
+  color: white !important;
+  font-size: 14px !important;
+}
+
+.entities-search-field :deep(.v-field__input input::placeholder) {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.entities-search-field :deep(.v-field__prepend-inner) {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.close-btn {
+  color: white !important;
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-radius: 8px !important;
   transition: all 0.2s ease;
 }
 
-/* Hover effect for tool cell */
-.tool-cell:hover {
-  background-color: #eef2ff;
-  border-color: #4C64E2;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+.close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2) !important;
 }
 
-/* Updated content layout with icon on left */
-/* Fix for icon and text alignment on same line */
-.tool-content {
+.entities-modal-content {
+  padding: 24px !important;
+  background: #fafbfc;
+}
+
+.loading-container {
   display: flex;
-  align-items: center; 
-  flex-direction: row; /* Ensure horizontal layout */
-  width: 100%;
-  min-width: 0; /* Important for flex item sizing */
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  gap: 16px;
 }
 
-.info-icon {
-  flex: 0 0 auto; /* Don't grow, don't shrink, use auto basis */
-  margin-right: 12px;
-  color: #bbc0d5;
-  transition: all 0.25s ease;
-}
-
-.tool-name {
-  flex: 1 1 auto; /* Allow grow and shrink */
-  font-size: 14px;
+.loading-text {
+  color: #666;
+  font-size: 16px;
   font-weight: 500;
-  font-family: 'SF Pro Display', system-ui, -apple-system, sans-serif;
-  white-space: nowrap;
+}
+
+/* Entities Wrapper and Chips - Match Suggestion Button Style */
+.entities-wrapper {
+  width: 100%;
+}
+
+.entities-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+  align-items: flex-start;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.entity-chip-wrapper {
+  position: relative;
+  border-radius: 8px;
   overflow: hidden;
-  text-overflow: ellipsis;
+  border: 1px solid transparent;
+}
+
+.entity-chip-wrapper:nth-child(4n+1) {
+  border-color: rgba(102, 126, 234, 0.4);
+}
+
+.entity-chip-wrapper:nth-child(4n+2) {
+  border-color: rgba(118, 75, 162, 0.4);
+}
+
+.entity-chip-wrapper:nth-child(4n+3) {
+  border-color: rgba(86, 204, 242, 0.4);
+}
+
+.entity-chip-wrapper:nth-child(4n+4) {
+  border-color: rgba(47, 128, 237, 0.4);
+}
+
+.entity-chip-content {
+  background: white;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
   color: #444;
-  letter-spacing: 0.2px;
+  letter-spacing: 0.1px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  position: relative;
+  z-index: 1;
+  min-height: 28px;
+}
+
+/* No Results Styling */
+.no-results-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  text-align: center;
+}
+
+.no-results-icon {
+  color: #bbb !important;
+  margin-bottom: 16px;
+}
+
+.no-results-text {
+  font-size: 18px;
+  font-weight: 500;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.no-results-subtitle {
+  font-size: 14px;
+  color: #999;
+}
+
+/* Scrollbar styling for chips container */
+.entities-chips-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.entities-chips-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.entities-chips-container::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.entities-chips-container::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
 }
 /* White search field with proper icon styling */
 .search-field {
@@ -1380,6 +1591,22 @@ watch(showToolsModal, (newVal) => {
   color: #b91c1c;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Chunk progress indicator styles */
+.chunk-progress-indicator {
+  border-left: 3px solid #3b82f6;
+  background-color: #eff6ff;
+  animation: pulse-blue 2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-blue {
+  0% {
+    background-color: #eff6ff;
+  }
+  100% {
+    background-color: #dbeafe;
+  }
 }
 
 /* Responsive styles */

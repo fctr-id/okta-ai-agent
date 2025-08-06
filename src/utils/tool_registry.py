@@ -229,89 +229,76 @@ def build_tools_documentation() -> str:
     """
     Build comprehensive documentation for all available tools in JSON format.
     
+    Now uses Modern Execution Manager instead of legacy tool registry.
+    
     Returns:
         JSON string containing all tool names and descriptions
     """
-    if not _TOOLS:
-        logger.warning("No tools registered when building documentation")
-        return json.dumps([])
-    
-    tools_list = []
-    
-    # Process all tools across all entity types
-    for entity_type, tools in _TOOLS_BY_ENTITY.items():
-        for tool in tools:
-            # Get first paragraph as brief description
-            desc_lines = tool.description.strip().split("\n\n")
-            brief_desc = desc_lines[0].strip()
-            if len(brief_desc) > 300:
-                brief_desc = brief_desc[:297] + "..."
-            
-            # Add tool to list
-            tools_list.append({
-                "tool_name": tool.name,
-                "description": brief_desc
-            })
-    
-    # Sort tools by name for consistency
-    #tools_list.sort(key=lambda x: x["tool_name"])
-    
-    # Return as formatted JSON string
-    return json.dumps(tools_list, indent=2)
+    try:
+        # Import Modern Execution Manager to get current tools
+        from src.core.orchestration.modern_execution_manager import ModernExecutionManager
+        
+        # Create a temporary instance to get available entities and endpoints
+        modern_executor = ModernExecutionManager()
+        
+        tools_list = []
+        
+        # Add API tools based on available entities and endpoints
+        for entity in modern_executor.available_entities:
+            # Create API tool entry
+            api_tool = {
+                "tool_name": f"api_{entity}",
+                "description": f"API operations for {entity} including list, get, and manage operations"
+            }
+            tools_list.append(api_tool)
+        
+        # Add SQL tools based on available SQL tables
+        for table_name in modern_executor.sql_tables.keys():
+            # Create SQL tool entry
+            sql_tool = {
+                "tool_name": f"sql_{table_name}",
+                "description": f"SQL queries for {table_name} table with filtering and analysis capabilities"
+            }
+            tools_list.append(sql_tool)
+        
+        # Sort tools by name for consistency
+        tools_list.sort(key=lambda x: x["tool_name"])
+        
+        logger.info(f"Built tools documentation with {len(tools_list)} tools from Modern Execution Manager")
+        return json.dumps(tools_list, indent=2)
+        
+    except Exception as e:
+        logger.error(f"Error building tools documentation from Modern Execution Manager: {e}")
+        
+        # Fallback to empty list if Modern Execution Manager fails
+        fallback_tools = [{
+            "tool_name": "modern_execution_manager",
+            "description": "Modern execution manager with API and SQL capabilities"
+        }]
+        
+        return json.dumps(fallback_tools, indent=2)
 
 
 def load_tools() -> bool:
     """
     Load all tool modules.
     
+    NOTE: Disabled for Modern Execution Manager mode.
+    Legacy realtime mode tools are no longer needed as we use the Modern Execution Manager.
+    
     Returns:
         True if successful, False otherwise
     """
-    try:
-        # Import tool modules
-        packages_to_try = [
-            "src.core.realtime.tools.user_tools",
-            "src.core.realtime.tools.group_tools",
-            "src.core.realtime.tools.datetime_tools",
-            "src.core.realtime.tools.logevents_tools",
-            "src.core.realtime.tools.application_tools",
-            "src.core.realtime.tools.network_policy_tools",
-            "src.core.realtime.tools.specialized_tools.user_app_access",
-            # Add more tool modules as they become available
-        ]
-        
-        loaded_modules = []
-        for package in packages_to_try:
-            try:
-                module = importlib.import_module(package)
-                loaded_modules.append(module.__name__)
-            except ImportError as e:
-                # This is expected for optional modules
-                logger.warning(f"Could not import {package}: {str(e)}")
-            except Exception as e:
-                # Log other errors but continue importing other modules
-                logger.error(f"Error loading {package}: {str(e)}")
-        
-        # Note that we don't need to explicitly register the tools,
-        # because they register themselves when their modules are imported
-        # via the @register_tool decorator
-        
-        # Log success even if some modules failed - as long as we have some tools
-        if is_registry_initialized():
-            logger.info(f"Loaded {len(_TOOLS)} tools across {len(_TOOLS_BY_ENTITY)} entity types")
-            return True
-        else:
-            logger.warning("No tools were loaded")
-            return False
-            
-    except Exception as e:
-        logger.error(f"Unexpected error loading tools: {str(e)}")
-        return False
+    # DISABLED: Legacy tool loading no longer needed with Modern Execution Manager
+    logger.info("Tool registry loading disabled - using Modern Execution Manager instead")
+    return True
 
 
-# Initialize the registry when this module is imported
+# DON'T initialize the registry automatically anymore since we use Modern Execution Manager
+# The old approach would automatically load legacy tools which we no longer need
 try:
-    load_tools()
+    # load_tools()  # COMMENTED OUT - no longer needed
+    logger.info("Tool registry initialization skipped - Modern Execution Manager provides all functionality")
 except Exception as e:
     # Never let initialization errors propagate up to the importer
     logger.error(f"Error during tool registry initialization: {str(e)}")

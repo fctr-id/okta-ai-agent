@@ -17,15 +17,8 @@
 
                 <div class="header-actions">
                     <!-- Add SyncStatusButton here -->
-                    <div class="mode-toggle" v-if="showLogout">
-                        <span class="mode-label">Database</span>
-                        <v-switch v-model="isRealtimeMode" color="primary" density="compact" hide-details class="mx-2"
-                            inset></v-switch>
-                        <span class="mode-label" :class="{ 'active': isRealtimeMode }">Realtime</span>
-                    </div>
-
                     <div class="header-spacer"></div>
-                    <SyncStatusButton v-if="showLogout && !isRealtimeMode" />
+                    <SyncStatusButton v-if="showLogout" />
                     <v-tooltip text="Logout" location="bottom">
                         <template v-slot:activator="{ props }">
                             <button v-if="showLogout" v-bind="props" class="logout-btn" aria-label="Logout"
@@ -88,6 +81,7 @@ const handleLogout = async () => {
     background: linear-gradient(180deg, #e5eaf5 0%, #f0f4fb 100%);
     position: relative;
     overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
 }
@@ -300,100 +294,6 @@ const handleLogout = async () => {
     box-shadow: var(--shadow-medium);
     padding: 40px;
     animation: cardEntry 0.6s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-/* Mode toggle container */
-/* Mode toggle container */
-.mode-toggle {
-    display: flex;
-    align-items: center;
-    background: rgba(255, 255, 255, 0.9);
-    padding: 5px 12px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.15);
-    margin-right: 12px;
-    transition: all 0.25s ease;
-    border: 1px solid rgba(76, 100, 226, 0.12);
-    position: relative;
-    overflow: hidden;
-}
-
-/* Add subtle gradient background */
-.mode-toggle::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(135deg,
-            rgba(76, 100, 226, 0.03) 0%,
-            rgba(94, 114, 228, 0.05) 100%);
-    z-index: 0;
-}
-
-/* Ensure content shows above gradient */
-.mode-toggle>* {
-    position: relative;
-    z-index: 1;
-}
-
-.mode-toggle:hover {
-    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.25);
-    transform: translateY(-2px);
-    border-color: rgba(76, 100, 226, 0.2);
-}
-
-/* Mode labels with enhanced styling */
-.mode-label {
-    font-size: 13px;
-    font-weight: 500;
-    transition: all 0.25s ease;
-    padding: 3px 6px;
-    border-radius: 6px;
-}
-
-.mode-toggle .mode-label:first-child {
-    color: #6B63B5;
-    margin-right: 8px;
-    opacity: 0.7;
-}
-
-.mode-toggle .mode-label.active:first-child {
-    opacity: 1;
-    background: rgba(107, 99, 181, 0.1);
-    text-shadow: 0 0 10px rgba(107, 99, 181, 0.2);
-}
-
-.mode-toggle .mode-label:last-child {
-    color: #4C64E2;
-    margin-left: 8px;
-    opacity: 0.7;
-}
-
-.mode-toggle .mode-label.active {
-    font-weight: 600;
-    opacity: 1;
-    background: rgba(76, 100, 226, 0.1);
-    text-shadow: 0 0 10px rgba(76, 100, 226, 0.2);
-}
-
-.v-switch__track {
-    display: inline-flex;
-    align-items: center;
-    font-size: 0.5rem;
-    padding: 0 5px;
-    background-color: #6B63B5 !important;
-    border-radius: 9999px;
-    height: 14px;
-    opacity: 0.6;
-    min-width: 36px;
-    cursor: pointer;
-    transition: 0.2s background-color cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Add responsive styling */
-@media (max-width: 768px) {
-    .mode-label {
-        font-size: 12px;
-    }
 }
 
 .header-spacer {

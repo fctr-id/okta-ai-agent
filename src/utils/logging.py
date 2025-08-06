@@ -17,10 +17,11 @@ from dotenv import load_dotenv
 
 load_dotenv(override=True)
 
-# Default log levels
-DEFAULT_CONSOLE_LEVEL = os.getenv("RLTIME_CONSOLE_LOG_LEVEL", "INFO").upper()
-# Default file log level    
-DEFAULT_FILE_LEVEL = os.getenv("RLTIME_FILE_LOG_LEVEL", "DEBUG").upper()
+# Default log levels - Use standard LOG_LEVEL variable for all logging
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+DEFAULT_CONSOLE_LEVEL = LOG_LEVEL
+# Default file log level - Always DEBUG for file logging unless explicitly overridden
+DEFAULT_FILE_LEVEL = os.getenv("FILE_LOG_LEVEL", "DEBUG").upper()
 
 # Store correlation ID (simple global variable approach)
 _CORRELATION_ID = None
@@ -108,9 +109,15 @@ def get_logger(name: str, log_dir: Optional[Path] = None) -> logging.Logger:
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     
-    # Add console handler
+    # Add console handler with UTF-8 encoding support for Windows
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(DEFAULT_CONSOLE_LEVEL)
+    # Set encoding to UTF-8 to handle emojis and Unicode characters on Windows
+    if hasattr(console_handler.stream, 'reconfigure'):
+        try:
+            console_handler.stream.reconfigure(encoding='utf-8', errors='replace')
+        except:
+            pass  # Fallback if reconfigure fails
     console_formatter = logging.Formatter(
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         '%Y-%m-%d %H:%M:%S'
@@ -121,11 +128,13 @@ def get_logger(name: str, log_dir: Optional[Path] = None) -> logging.Logger:
     # Add file handler if log_dir is provided
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
-        log_file = os.path.join(log_dir, f"{name.split('.')[-1]}.log")
+        # Use unified okta_ai_agent.log for all agents
+        log_file = os.path.join(log_dir, "okta_ai_agent.log")
         file_handler = RotatingFileHandler(
             log_file, 
             maxBytes=10*1024*1024, 
-            backupCount=5
+            backupCount=5,
+            encoding='utf-8'  # Fix for Windows Unicode/emoji logging
         )
         file_handler.setLevel(DEFAULT_FILE_LEVEL)
         file_formatter = logging.Formatter(
