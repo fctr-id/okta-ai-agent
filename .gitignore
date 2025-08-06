@@ -95,3 +95,4 @@ src/api/static/*
 docs/docker-size-optimization.md
 src/data/schemas/full_postman_collection_sfasfd.json
 docs/LLM_Optimized_API_Architecture.md
+docs/tako-v1-alternative-article.md
