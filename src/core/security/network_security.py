@@ -229,8 +229,15 @@ class NetworkSecurityValidator:
             'Pragma': 'no-cache'
         }
 
-# Create a global network security validator instance
-network_validator = NetworkSecurityValidator()
+# Create a global network security validator instance (lazy initialization)
+_network_validator = None
+
+def _get_network_validator() -> NetworkSecurityValidator:
+    """Get or create the global network security validator instance"""
+    global _network_validator
+    if _network_validator is None:
+        _network_validator = NetworkSecurityValidator()
+    return _network_validator
 
 def validate_url(url: str) -> NetworkSecurityResult:
     """
@@ -242,7 +249,7 @@ def validate_url(url: str) -> NetworkSecurityResult:
     Returns:
         NetworkSecurityResult with validation details
     """
-    return network_validator.validate_url(url)
+    return _get_network_validator().validate_url(url)
 
 def validate_request(method: str, url: str, headers: Optional[Dict] = None, 
                     data: Optional[Dict] = None) -> NetworkSecurityResult:
@@ -258,7 +265,7 @@ def validate_request(method: str, url: str, headers: Optional[Dict] = None,
     Returns:
         NetworkSecurityResult with validation details
     """
-    return network_validator.validate_request_data(method, url, headers, data)
+    return _get_network_validator().validate_request_data(method, url, headers, data)
 
 def get_security_headers() -> Dict[str, str]:
     """
@@ -267,4 +274,4 @@ def get_security_headers() -> Dict[str, str]:
     Returns:
         Dictionary of security headers
     """
-    return network_validator.get_security_headers()
+    return _get_network_validator().get_security_headers()
