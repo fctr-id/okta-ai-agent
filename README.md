@@ -6,7 +6,9 @@
 
 <h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.0-beta)</h2>
 
-Meet Tako, the **world's first  multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent SQL vs API decision-making, Tako automatically determines the optimal data source for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
+Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
+
+**NEW in v1.0-beta: Complete API-Only Operation** - No database sync required. Tako can now operate entirely through Okta's APIs, giving you real-time data without any local database dependencies.
 
 Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
 
@@ -14,12 +16,12 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 <h3>📖 Featured Articles</h3>
 <p>Learn more about Tako's journey and advanced multi-agent architecture:</p>
 <div style="margin: 20px 0;">
-  <a href="https://iamse.blog/2025/05/21/tako-okta-ai-agent-takes-a-huge-step-towards-becoming-autonomous/" style="margin-right: 20px;">
-    📚 Tako's Multi-Agent Architecture Revolution (Aug 2025)
+  <a href="https://github.com/fctr-id/okta-ai-agent/blob/main/docs/tako-v1-alternative-article.md" style="margin-right: 20px;">
+    📚 How Tako AI v1.0 Delivers Where Other Okta Tools Fall Short: A Technical Reality Check for Skeptics
   </a>
   <br>
-  <a href="https://github.com/fctr-id/okta-ai-agent/wiki/Previous-Architecture">
-    📚 Previous Architecture Documentation (Legacy v0.6.x)
+  <a href="https://github.com/fctr-id/okta-ai-agent/blob/main/docs/LLM_Optimized_API_Architecture.md">
+    📚 Platform Architecture Deep Dive - Multi-Agent Orchestration System
   </a>
 </div>
 </div>
@@ -28,7 +30,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 <h3>Revolutionary Multi-Agent Architecture</h3>
 </div>
 <p align="center">
-  <img src="docs/media/realitime-mode.gif" alt="Tako Unified Agent Demo" width="1024px" height="auto">
+  <img src="docs/media/tako-v1.gif" alt="Tako Unified Agent Demo" width="1024px" height="auto">
 </p>
 
 <div align="center">
@@ -92,7 +94,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 
 ### **🚀 Game-Changing Multi-Agent Architecture**
 - **5 Specialized Agents**: Planning, Execution Management, SQL, API, and Results Formatting working in perfect coordination
-- **Dual Data Source Mastery**: Works seamlessly with SQLite user database OR direct Okta API entities without database dependency
+- **API-Only Operation**: NEW - Complete operation without database sync, access all data in real-time through 107+ API endpoints
 - **Intelligent Data Selection**: Automatically chooses between database and API based on query requirements and data freshness
 - **Universal API Support**: **Automatic code generation across ALL 107+ Okta GET endpoints** ([complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints)) - not restricted to a few like previous versions
 
@@ -108,9 +110,9 @@ Tako leverages the power of leading AI providers with enhanced compatibility:
 
 ### **🔄 Enterprise-Grade Performance & Security**
 - **Polars DataFrames**: Lightning-fast data processing and transformation
-- **Advanced Context Engineering**: Agents coordinate with complete execution context and relationship mapping
+- **Advanced Context Engineering**: 99% token reduction through intelligent context filtering between agents
 - **Multi-layered Security**: Comprehensive validation with enterprise security framework
-- **Optimized Operations**: 99% reduction in token usage through smart filtering and parallel processing
+- **Optimized Operations**: Smart filtering and parallel processing for cost-effective operations
 
 ## 🚀 Quick Start (The No-Frills Docker Way)
 
@@ -254,125 +256,7 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 - **Cost Optimization**: Mix and match models (e.g., fast reasoning + powerful coding) for cost-effective operations
 - **Enterprise Ready**: All models support enterprise deployment scenarios
 
-## 🚀 Quick Start (The No-Frills Docker Way)
-
-<div align="left">
-  <h3>💡 Looking for alternative installation instructions?</h3>
-  <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides to get Tako running without Docker</h4>
-</div>
-
-### Prerequisites
-
-✅ Docker installed on your machine  
-✅ Okta tenant with superadmin access  
-✅ Access to any of the supported AI providers  
-
-### Docker Compose
-
-The easiest way to get started is with Docker Compose:
-
-#### Linux/macOS Instructions
-
-```bash
-# 1. Create a project directory and navigate to it
-mkdir okta-ai-agent 
-cd okta-ai-agent
-
-# 2. Create required directories for data persistence
-### Upload your own key and cert pem files to certs directory if you need them
-mkdir -p sqlite_db logs certs
-
-# 3. Download the docker-compose.yml file
-curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml
-
-# 4. Download and modify the .env file with your configuration
-curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
-mv .env.sample .env
-
-# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
-# The app will not work without properly configured environment variables
-# nano .env (or use your favorite editor)
-```
-
-#### Windows Instructions
-
-```powershell
-# 1. Create a project directory and navigate to it
-New-Item -ItemType Directory -Path okta-ai-agent
-Set-Location okta-ai-agent
-
-# 2. Create required directories for data persistence
-### Upload your own key and cert pem files to certs directory if you need them
-New-Item -ItemType Directory -Path sqlite_db, logs, certs -Force
-
-# 3. Download the docker-compose.yml file
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml" -OutFile "docker-compose.yml"
-
-# 4. Download and modify the .env file with your configuration
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample" -OutFile ".env.sample"
-Rename-Item -Path ".env.sample" -NewName ".env"
-
-# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
-# The app will not work without properly configured environment variables
-# notepad .env (or use your favorite editor)
-```
-
-### 🚨 Optimal API settings for maximum sync speed 🚨
-
-<p>
-<img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
-</p>
-
-**For fastest sync times, set your API rate limit to 100% as shown above.**
-
-If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT` in your `.env` file:
-
-| Tenant Type | API Rate Limit % | Recommended Setting | Tested Maximun (CAUTION ⚠️) |
-|-------------|------------------|---------------------|-----------------|
-| Integrator | 50% | 22 | 30 |
-| Integrator | 75% | 34 | 40 |
-| Integrator | 100% | 45 | 50 |
-| One App | 50% | 135 | 200 |
-| One App | 75% | 203 | 300 |
-| One App | 100% | 270 | 400 |
-| Enterprise | 50% | 135 | 200 |
-| Enterprise | 75% | 203 | 300 |
-| Enterprise | 100% | 270 | 400 |
-| Workforce Identity | 50% | 135 | 270 |
-| Workforce Identity | 75% | 203 | 405 |
-| Workforce Identity | 100% | 270 | 540 |
-
-### ⚠️ Important: Monitor for Errors
-
-**Check your sync logs for this warning:**
-```WARNING - Concurrent limit rate exceeded```
-
-**If you see this error frequently:**
-- Reduce your `OKTA_CONCURRENT_LIMIT` by 10-20 % and re-try
-- Cancel the sync, then try a lower value
-- Contact support@fctr.io if issues persist
-
-### 🆘 Need Help?
-If you experience frequent API rate limit errors, contact **support@fctr.io**
-
-### Launching the Application
-
-After configuring your .env file with your specific settings, launch the application:
-
-```bash
-docker compose up -d
-```
-
-### Tailing docker logs
-```bash
-docker compose logs -f
-```
-
-### Access the Unified Agent Interface
-- 🌐 Open your browser and go to: https://localhost:8001 to start using Tako's new multi-agent system 🌐
-
-
-## 🛡️ Security & Privacy
+## ️ Security & Privacy
 
 ### Tako Architecture
 
