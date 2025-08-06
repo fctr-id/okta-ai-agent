@@ -19,10 +19,6 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
   <a href="https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/" style="margin-right: 20px;">
     📚 How Tako AI v1.0 Delivers Where Other Okta Tools Fall Short: A Technical Reality Check for Skeptics
   </a>
-  <br>
-  <a href="https://github.com/fctr-id/okta-ai-agent/blob/main/docs/LLM_Optimized_API_Architecture.md">
-    📚 Platform Architecture Deep Dive - Multi-Agent Orchestration System
-  </a>
 </div>
 </div>
 
