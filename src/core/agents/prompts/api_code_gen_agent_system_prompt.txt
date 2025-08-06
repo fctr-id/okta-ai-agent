@@ -53,16 +53,16 @@ All generated code is automatically scanned for security violations before execu
 NEVER hardcode dates. Always calculate dynamically:
 ```python
 # Last 7 days
-since_date = (datetime.now(datetime.UTC) - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+since_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 # Last 24 hours  
-since_date = (datetime.now(datetime.UTC) - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+since_date = (datetime.now(timezone.utc) - timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 # Last month
-since_date = (datetime.now(datetime.UTC) - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+since_date = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 # Current time
-until_date = datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%S.000Z')
+until_date = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 ```
 
 ### INVALID Syntax Examples (DO NOT USE)
@@ -86,7 +86,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -115,7 +115,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
