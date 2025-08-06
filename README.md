@@ -60,6 +60,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
   - [Launching the Application](#launching-the-application)
   - [Tailing docker logs](#tailing-docker-logs)
   - [Access the Unified Agent Interface](#access-the-unified-agent-interface)
+- [🧠 Tested LLMs](#-tested-llms)
 - [🛡️ Security & Privacy](#️-security--privacy)
   - [Tako Architecture](#tako-architecture)
     - [Common Security Features](#common-security-features)
@@ -111,7 +112,147 @@ Tako leverages the power of leading AI providers with enhanced compatibility:
 - **Multi-layered Security**: Comprehensive validation with enterprise security framework
 - **Optimized Operations**: 99% reduction in token usage through smart filtering and parallel processing
 
-  
+## 🚀 Quick Start (The No-Frills Docker Way)
+
+<div align="left">
+  <h3>💡 Looking for alternative installation instructions?</h3>
+  <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides to get Tako running without Docker</h4>
+</div>
+
+### Prerequisites
+
+✅ Docker installed on your machine  
+✅ Okta tenant with superadmin access  
+✅ Access to any of the supported AI providers  
+
+### Docker Compose
+
+The easiest way to get started is with Docker Compose:
+
+#### Linux/macOS Instructions
+
+```bash
+# 1. Create a project directory and navigate to it
+mkdir okta-ai-agent 
+cd okta-ai-agent
+
+# 2. Create required directories for data persistence
+### Upload your own key and cert pem files to certs directory if you need them
+mkdir -p sqlite_db logs certs
+
+# 3. Download the docker-compose.yml file
+curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml
+
+# 4. Download and modify the .env file with your configuration
+curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
+mv .env.sample .env
+
+# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
+# The app will not work without properly configured environment variables
+# nano .env (or use your favorite editor)
+```
+
+#### Windows Instructions
+
+```powershell
+# 1. Create a project directory and navigate to it
+New-Item -ItemType Directory -Path okta-ai-agent
+Set-Location okta-ai-agent
+
+# 2. Create required directories for data persistence
+### Upload your own key and cert pem files to certs directory if you need them
+New-Item -ItemType Directory -Path sqlite_db, logs, certs -Force
+
+# 3. Download the docker-compose.yml file
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml" -OutFile "docker-compose.yml"
+
+# 4. Download and modify the .env file with your configuration
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample" -OutFile ".env.sample"
+Rename-Item -Path ".env.sample" -NewName ".env"
+
+# ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
+# The app will not work without properly configured environment variables
+# notepad .env (or use your favorite editor)
+```
+
+### 🚨 Optimal API settings for maximum sync speed 🚨
+
+<p>
+<img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
+</p>
+
+**For fastest sync times, set your API rate limit to 100% as shown above.**
+
+If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT` in your `.env` file:
+
+| Tenant Type | API Rate Limit % | Recommended Setting | Tested Maximun (CAUTION ⚠️) |
+|-------------|------------------|---------------------|-----------------|
+| Integrator | 50% | 22 | 30 |
+| Integrator | 75% | 34 | 40 |
+| Integrator | 100% | 45 | 50 |
+| One App | 50% | 135 | 200 |
+| One App | 75% | 203 | 300 |
+| One App | 100% | 270 | 400 |
+| Enterprise | 50% | 135 | 200 |
+| Enterprise | 75% | 203 | 300 |
+| Enterprise | 100% | 270 | 400 |
+| Workforce Identity | 50% | 135 | 270 |
+| Workforce Identity | 75% | 203 | 405 |
+| Workforce Identity | 100% | 270 | 540 |
+
+### ⚠️ Important: Monitor for Errors
+
+**Check your sync logs for this warning:**
+```WARNING - Concurrent limit rate exceeded```
+
+**If you see this error frequently:**
+- Reduce your `OKTA_CONCURRENT_LIMIT` by 10-20 % and re-try
+- Cancel the sync, then try a lower value
+- Contact support@fctr.io if issues persist
+
+### 🆘 Need Help?
+If you experience frequent API rate limit errors, contact **support@fctr.io**
+
+### Launching the Application
+
+After configuring your .env file with your specific settings, launch the application:
+
+```bash
+docker compose up -d
+```
+
+### Tailing docker logs
+```bash
+docker compose logs -f
+```
+
+### Access the Unified Agent Interface
+- 🌐 Open your browser and go to: https://localhost:8001 to start using Tako's new multi-agent system 🌐
+
+## 🧠 Tested LLMs
+
+Tako has been thoroughly tested with multiple LLM configurations to ensure optimal performance across different AI providers:
+
+### **Reasoning Models** (Planning & Analysis)
+- **O3** - Advanced reasoning capabilities
+- **O4-mini** - Fast and efficient reasoning  
+- **OpenAI GPT-OSS 120B** - Open-source high-performance reasoning
+- **Claude Sonnet 4** - Superior analytical reasoning
+- **Gemini 2.5 Pro** - Google's latest reasoning model
+
+### **Coding Models** (API Code Generation)
+- **GPT-4.1** - Reliable code generation
+- **OpenAI GPT-OSS 120B** - Open-source coding excellence
+- **Claude Sonnet 4** - Advanced code understanding
+- **Claude Sonnet 3.7** - Proven coding reliability
+- **Gemini 2.5 Pro** - Latest Google coding model
+- **Gemini 1.5 Pro** - Stable Google coding model
+
+### **Performance Notes**
+- **Dual Model Setup**: Tako uses separate reasoning and coding models for optimal performance
+- **Provider Flexibility**: Switch between providers based on your requirements and access
+- **Cost Optimization**: Mix and match models (e.g., fast reasoning + powerful coding) for cost-effective operations
+- **Enterprise Ready**: All models support enterprise deployment scenarios
 
 ## 🚀 Quick Start (The No-Frills Docker Way)
 
