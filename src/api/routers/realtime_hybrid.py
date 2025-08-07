@@ -367,6 +367,20 @@ async def execute_plan_and_stream(
         # Set the callbacks before executing
         modern_executor.plan_ready_callback = on_plan_ready
         modern_executor.step_status_callback = on_step_status
+        
+        async def on_planning_phase(phase_status: str):
+            # Map phase_status directly to status content
+            if phase_status in ("planning_start", "planning_complete"):
+                phase_event = {
+                    "type": "status",
+                    "content": {
+                        'process_id': process_id,
+                        'status': phase_status,
+                        'message': 'Planning started' if phase_status == 'planning_start' else 'Planning completed'
+                    }
+                }
+                await step_status_queue.put(json.dumps(phase_event) + "\n")
+        modern_executor.planning_phase_callback = on_planning_phase
 
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
         logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
@@ -404,11 +418,12 @@ async def execute_plan_and_stream(
             except asyncio.QueueEmpty:
                 break
         
-        # Clear the callbacks after execution
+        # Clear callbacks post-execution (still inside try)
         modern_executor.plan_ready_callback = None
         modern_executor.step_status_callback = None
-        
-        # Log comprehensive execution results (exact same as test_query_1.py)
+        modern_executor.planning_phase_callback = None
+
+        # Log execution summary
         logger.info(f"[{process_id}] EXECUTION RESULTS:")
         logger.info(f"[{process_id}] Overall Success: {result.get('success', False)}")
         logger.info(f"[{process_id}] Correlation ID: {result.get('correlation_id', process_id)}")
@@ -618,15 +633,12 @@ async def execute_plan_and_stream(
                 
                 # Extract content based on display type
                 if display_type == 'vuetify_table' and content:
-                    # For Vuetify table, keep content in formatted_response structure for frontend
-                    # Don't copy to final_result_content - frontend expects it in formatted_response.content
                     final_result_content = f"Table with {len(content)} records"
                 elif display_type == 'markdown' and isinstance(content, dict) and content.get('text'):
                     final_result_content = content['text']
                 elif isinstance(content, str):
                     final_result_content = content
                 else:
-                    # Fallback to showing summary
                     if isinstance(content, dict):
                         final_result_content = f"Results available in {display_type} format"
                     else:
@@ -635,12 +647,10 @@ async def execute_plan_and_stream(
                 # Fallback to handling final_result if no formatted response
                 final_result = result['final_result']
                 if hasattr(final_result, 'sql') and hasattr(final_result, 'explanation'):
-                    # It's a SQLExecutionResult - extract the data and explanation
                     sql_result = final_result
                     record_count = len(sql_result.data) if sql_result.data else 0
                     final_result_content = f"Query executed successfully. Found {record_count} records.\n\n**Query Details:**\n{sql_result.explanation}"
                 elif hasattr(final_result, 'code') and hasattr(final_result, 'explanation'):
-                    # It's an APIExecutionResult - handle API responses
                     api_result = final_result
                     if api_result.executed:
                         if isinstance(api_result.data, list):
@@ -652,7 +662,6 @@ async def execute_plan_and_stream(
                     else:
                         final_result_content = f"API call failed: {api_result.error or 'Unknown error'}\n\n**API Details:**\n{api_result.explanation}"
                 else:
-                    # Try to convert to string for other result types
                     try:
                         final_result_content = str(final_result)
                     except:
@@ -664,7 +673,6 @@ async def execute_plan_and_stream(
             
             if has_sql_step:
                 try:
-                    # Get last sync info similar to AIService
                     last_sync_metadata = await get_last_sync_info_for_realtime()
                     logger.info(f"[{process_id}] Retrieved last sync info for SQL results: {last_sync_metadata}")
                 except Exception as e:
@@ -676,77 +684,64 @@ async def execute_plan_and_stream(
                 'process_id': process_id,
                 'status': ProcessStatus.COMPLETED.value,
                 'result_content': final_result_content,
-                'display_type': display_type,  # Use display type from Results Formatter
+                'display_type': display_type,
                 'message': f'Successfully executed {successful_steps}/{total_steps} steps'
             }
             
-            # Add formatted response metadata if available
             if formatted_response:
                 final_result_data['formatted_response'] = formatted_response
-                
-                # Add last_sync to formatted_response metadata if we have SQL step
                 if has_sql_step and last_sync_metadata:
                     if 'metadata' not in final_result_data['formatted_response']:
                         final_result_data['formatted_response']['metadata'] = {}
                     final_result_data['formatted_response']['metadata'].update(last_sync_metadata)
             elif has_sql_step and last_sync_metadata:
-                # If no formatted_response but we have SQL with last_sync, create metadata structure
                 final_result_data['formatted_response'] = {
                     'metadata': last_sync_metadata
                 }
             
-        # Store final result in process data
-        active_processes[process_id]["final_result_data"] = final_result_data
+            active_processes[process_id]["final_result_data"] = final_result_data
 
-        # CHUNKED STREAMING: Stream large responses in chunks
-        chunks = list(_chunk_large_response(final_result_data))  # Uses RESULT_STREAM_CHUNK_SIZE env var
-        
-        if len(chunks) > 1:
-            logger.info(f"[{process_id}] CHUNKED STREAMING: Sending {len(chunks)} chunks for large response")
-            
-            # Send metadata first to inform frontend about chunking
-            metadata_event = {
-                "type": "metadata",
-                "content": {
-                    "total_batches": len(chunks),
-                    "process_id": process_id,
-                    "display_type": display_type
-                }
-            }
-            yield json.dumps(metadata_event) + "\n"
-            await asyncio.sleep(0.01)
-            
-            # Send each chunk as batch data
-            for i, chunk in enumerate(chunks):
-                batch_event = {
-                    "type": "batch",
-                    "content": chunk,
-                    "metadata": {
-                        "batch_number": i + 1,
+            # CHUNKED STREAMING
+            chunks = list(_chunk_large_response(final_result_data))
+            if len(chunks) > 1:
+                logger.info(f"[{process_id}] CHUNKED STREAMING: Sending {len(chunks)} chunks for large response")
+                metadata_event = {
+                    "type": "metadata",
+                    "content": {
                         "total_batches": len(chunks),
-                        "is_final": i == len(chunks) - 1
+                        "process_id": process_id,
+                        "display_type": display_type
                     }
                 }
-                yield json.dumps(batch_event) + "\n"
-                await asyncio.sleep(0.05)
-            
-            # Send completion event
-            completion_event = {
-                "type": "complete",
-                "content": {
-                    "total_chunks": len(chunks),
-                    "process_id": process_id
+                yield json.dumps(metadata_event) + "\n"
+                await asyncio.sleep(0.01)
+                for i, chunk in enumerate(chunks):
+                    batch_event = {
+                        "type": "batch",
+                        "content": chunk,
+                        "metadata": {
+                            "batch_number": i + 1,
+                            "total_batches": len(chunks),
+                            "is_final": i == len(chunks) - 1
+                        }
+                    }
+                    yield json.dumps(batch_event) + "\n"
+                    await asyncio.sleep(0.05)
+                completion_event = {
+                    "type": "complete",
+                    "content": {
+                        "total_chunks": len(chunks),
+                        "process_id": process_id
+                    }
                 }
-            }
-            yield json.dumps(completion_event) + "\n"
-        else:
-            # Small response - send as single complete event
-            complete_event = {
-                "type": "complete",
-                "content": final_result_data
-            }
-            yield json.dumps(complete_event) + "\n"
-            await asyncio.sleep(0.05)
+                yield json.dumps(completion_event) + "\n"
+            else:
+                complete_event = {
+                    "type": "complete",
+                    "content": final_result_data
+                }
+                yield json.dumps(complete_event) + "\n"
+                await asyncio.sleep(0.05)
 
     except Exception as e:
         logger.error(f"[{process_id}] Error during Modern Execution Manager execution: {e}", exc_info=True)
