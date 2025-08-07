@@ -716,10 +716,10 @@ class ModernExecutionManager:
                 # Post-process to put operations and columns arrays on single lines
                 import re
                 
-                # Pattern for operations arrays
-                operations_pattern = r'("operations":\s*\[\s*\n)((?:\s*"[^"]*",?\s*\n?)*?)(\s*\])'
-                # Pattern for columns arrays  
-                columns_pattern = r'("columns":\s*\[\s*\n)((?:\s*"[^"]*",?\s*\n?)*?)(\s*\])'
+                # Pattern for operations arrays - Fixed to prevent ReDoS attacks
+                operations_pattern = r'("operations":\s*\[\s*\n)((?:[^"\[\]]*"[^"]*"[^"\[\]]*\n?)*?)(\s*\])'
+                # Pattern for columns arrays - Fixed to prevent ReDoS attacks  
+                columns_pattern = r'("columns":\s*\[\s*\n)((?:[^"\[\]]*"[^"]*"[^"\[\]]*\n?)*?)(\s*\])'
                 
                 def compress_array(match):
                     prefix = match.group(1).split(':')[0] + ':'  # Get the key part
