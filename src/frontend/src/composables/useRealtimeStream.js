@@ -34,6 +34,8 @@ export function useRealtimeStream() {
         currentStepIndex: -1,
         steps: [],
         results: null,
+    planningStarted: false,
+    planningCompleted: false,
     });
 
     /**
@@ -63,13 +65,15 @@ export function useRealtimeStream() {
             isReceivingChunks: false
         };
 
-        // Initialize with only the two bookend steps
+        // Initialize with only the two sentinel steps:
+        // 1. thinking (pre-plan entity relevance selection)
+        // 2. finalizing_results (will activate after all execution steps complete)
         execution.steps = [
             {
-                id: 'generate_plan',
-                tool_name: 'generate_plan',
-                reason: 'Analyzing query and generating execution plan',
-                status: 'active', // Start with planning step active
+                id: 'thinking',
+                tool_name: 'thinking',
+                reason: 'Pre-plan analysis (entity relevance selection)',
+                status: 'active', // Start with thinking step active
             },
             {
                 id: 'finalizing_results',
@@ -78,6 +82,14 @@ export function useRealtimeStream() {
                 status: 'pending',
             }
         ];
+
+        // Internal timing flags no longer needed (thinking persists until planning_start)
+        execution._thinkingStartedAt = undefined;
+        execution._thinkingRenamed = false;
+        if (execution._pendingRenameTimeout) {
+            clearTimeout(execution._pendingRenameTimeout);
+            execution._pendingRenameTimeout = null;
+        }
 
         try {
             const response = await fetch("/api/realtime/start-process", {
@@ -238,6 +250,38 @@ export function useRealtimeStream() {
         try {
             const data = JSON.parse(event.data);
             const content = data.content;
+            // Only rename sentinel when actual planning starts
+            if (content.status === 'planning_start' && execution.steps[0] && execution.steps[0].id === 'thinking') {
+                execution.planningStarted = true;
+                execution.status = 'planning';
+                // Immediately rename on true planning start
+                execution.steps[0].id = 'generating_steps';
+                execution.steps[0].tool_name = 'generating_steps';
+                execution.steps[0].reason = 'Generating execution steps';
+                execution._thinkingRenamed = true;
+            }
+
+            // If we receive explicit planning_complete before plan event, mark sentinel completed
+            if (content.status === 'planning_complete' && execution.steps[0] && ['generating_steps','thinking','generate_plan'].includes(execution.steps[0].id)) {
+                // If rename was deferred and not yet applied, apply now before completing
+                // If still thinking (edge case), rename before marking completed
+                if (execution.steps[0].id === 'thinking') {
+                    execution.steps[0].id = 'generating_steps';
+                    execution.steps[0].tool_name = 'generating_steps';
+                    execution.steps[0].reason = 'Generating execution steps';
+                    execution._thinkingRenamed = true;
+                }
+                // Ensure it shows final planning state label
+                if (execution.steps[0].id !== 'generating_steps') {
+                    execution.steps[0].id = 'generating_steps';
+                    execution.steps[0].tool_name = 'generating_steps';
+                    execution.steps[0].reason = 'Generating execution steps';
+                }
+                if (execution.steps[0].status !== 'completed') {
+                    execution.steps[0].status = 'completed';
+                }
+                execution.planningCompleted = true;
+            }
 
             // Handle rich plan details when available
             if (content.plan_details) {
@@ -255,12 +299,18 @@ export function useRealtimeStream() {
 
             // Handle simpler plan status updates
             if (
-                content.status === "generated" ||
-                content.status === "starting_execution" ||
-                content.status === "running_execution"
+                (content.status === "generated" ||
+                 content.status === "starting_execution" ||
+                 content.status === "running_execution") &&
+                 // Avoid premature transition: require planning started + (plan data arrived or planning complete)
+                 ((execution.planningStarted && execution.planningCompleted) || execution.planGenerated)
             ) {
-                execution.planGenerated = true;
+                // Only switch to executing if we actually have a plan (plan event) OR got planning_complete
+                execution.planGenerated = execution.planGenerated || execution.planningCompleted;
                 execution.status = "executing";
+            } else if (content.status === 'running_execution' && !execution.planningStarted) {
+                // Backend may emit a generic running_execution early; treat as still planning
+                execution.status = 'planning';
             }
         } catch (err) {
             console.error("Error processing plan status event:", err);
@@ -358,8 +408,14 @@ export function useRealtimeStream() {
             if (content.steps && Array.isArray(content.steps)) {
                 execution.planGenerated = true;
                 
-                // Complete the generate_plan step
-                if (execution.steps[0] && execution.steps[0].id === 'generate_plan') {
+                // Complete the planning sentinel step (could be 'generate_plan' or 'generating_steps' after rename)
+                if (execution.steps[0] && ['generate_plan','generating_steps','thinking'].includes(execution.steps[0].id)) {
+                    // Ensure it shows as the final planning state name
+                    if (execution.steps[0].id !== 'generating_steps') {
+                        execution.steps[0].id = 'generating_steps';
+                        execution.steps[0].tool_name = 'generating_steps';
+                        execution.steps[0].reason = 'Generating execution steps';
+                    }
                     execution.steps[0].status = 'completed';
                 }
 

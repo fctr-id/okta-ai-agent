@@ -158,14 +158,20 @@
                   <v-stepper-header>
                     <transition-group name="step-fade">
                       <template v-for="(item, index) in progressSteps" :key="item.id">
-                        <v-stepper-item :value="item.id" :title="item.title" :complete="item.status === 'completed'"
-                          :error="item.status === 'error'" :disabled="item.status === 'pending'">
-                          <!-- Use the built-in icon slot for custom indicator -->
-                          <template v-slot:icon>
+                        <v-stepper-item :value="item.id" :complete="item.status === 'completed'"
+                                         :error="item.status === 'error'" :disabled="item.status === 'pending'"
+                                         class="custom-badge-step">
+                          <template #icon>
                             <div v-if="item.status === 'active'" class="step-pulse-indicator"></div>
                             <v-icon v-else-if="item.status === 'completed'" color="#38b2ac">mdi-check-circle</v-icon>
                             <v-icon v-else-if="item.status === 'error'" color="error">mdi-alert-circle</v-icon>
                             <div v-else class="step-empty-indicator"></div>
+                          </template>
+                          <template #title>
+                            <div class="step-badge-wrapper">
+                              <span class="step-badge" :class="[`badge-${item.phase}`, { 'badge-error': item.status === 'error' } ]">{{ item.badge }}</span>
+                              <div class="step-main-text" :class="{'dimmed': item.status === 'pending'}">{{ item.main }}</div>
+                            </div>
                           </template>
                         </v-stepper-item>
                         <v-divider v-if="index < progressSteps.length - 1" :key="`divider-${index}`"></v-divider>
@@ -552,35 +558,43 @@ const handleScroll = () => {
 // Stepper management using the managed step flow from useRealtimeStream
 
 const progressSteps = computed(() => {
-  // Use the managed step flow from useRealtimeStream directly
-  // This avoids Vue readonly warnings and ensures consistent state
   return rtSteps.value.map((step, index) => {
-    let title;
-    
-    // Build step title based on the data structure from backend
-    if (step.tool_name === 'api' && step.operation) {
-      // For API steps: "api_operation" format (e.g., "api_list_by_user")
-      title = `api_${step.operation}`;
+    let badge = '';
+    let main = '';
+    let phase = '';
+    const tool = step.tool_name;
+
+    if (tool === 'thinking') {
+      badge = 'CREATING';
+      main = 'Strategy';
+      phase = 'creating';
+    } else if (tool === 'generating_steps' || tool === 'generate_plan') {
+      badge = 'GENERATING';
+      main = 'Steps';
+      phase = 'generating';
+    } else if (tool === 'finalizing_results') {
+      badge = 'FORMATTING';
+      main = 'Results';
+      phase = 'formatting';
+    } else if (tool === 'api') {
+      badge = 'API';
+      main = step.operation || step.entity || '';
+      phase = 'api';
+    } else if (tool === 'sql') {
+      badge = 'SQL';
+      main = step.entity || step.operation || '';
+      phase = 'sql';
+    } else {
+      badge = (tool || step.name || `step_${index+1}`).toUpperCase();
+      main = step.operation || step.entity || '';
+      phase = 'other';
     }
-    else if (step.tool_name === 'sql' && step.entity) {
-      // For SQL steps: "sql_entity" format (e.g., "sql_users")
-      title = `sql_${step.entity}`;
-    }
-    // Handle bookend steps
-    else if (step.tool_name === 'generate_plan') {
-      title = 'generate plan';
-    }
-    else if (step.tool_name === 'finalizing_results') {
-      title = 'finalizing results';
-    }
-    // Fallback for any other step types
-    else {
-      title = step.tool_name || step.name || `Step ${index + 1}`;
-    }
-    
+
     return {
       id: step.id || `step_${index}`,
-      title: title,
+      badge,
+      main,
+      phase,
       status: step.status || 'pending'
     };
   });
@@ -1199,13 +1213,12 @@ watch(showToolsModal, (newVal) => {
 }
 
 .v-stepper :deep(.v-stepper-item__title) {
-  font-size: 0.9rem !important;
-  white-space: normal !important;
-  line-height: 1.2 !important;
-  max-width: 100% !important;
+  /* We now render custom content (badge + main), so neutralize defaults */
+  font-size: 0 !important; /* hide native text spacing */
+  line-height: 0 !important;
+  margin-top: 0 !important;
+  color: transparent !important;
   text-align: center !important;
-  color: #555 !important;
-  margin-top: 4px;
 }
 
 .v-stepper :deep(.v-stepper-item__content) {
@@ -1214,9 +1227,60 @@ watch(showToolsModal, (newVal) => {
   text-align: center !important;
 }
 
-.v-stepper :deep(.v-stepper-item__subtitle) {
-  display: none !important;
+/* Subtitle slot unused now */
+.v-stepper :deep(.v-stepper-item__subtitle) { display: none !important; }
+
+/* Custom badge + main layout */
+.custom-badge-step .step-badge-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 72px;
 }
+
+.step-badge {
+  display: inline-block;
+  padding: 3px 8px; /* slightly larger badge */
+  font-size: 0.66rem; /* tiny bump */
+  font-weight: 600;
+  letter-spacing: 0.75px; /* tighten a touch */
+  border-radius: 10px;
+  background: #eef1f5;
+  color: #44515e;
+  line-height: 1.12;
+  position: relative;
+  text-transform: uppercase;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+/* Phase color accents */
+.step-badge.badge-creating { background: #f0ecff; color: #5d3fc4; }
+.step-badge.badge-generating { background: #e9f7ff; color: #076489; }
+.step-badge.badge-formatting { background: #f5f6ff; color: #2d3c9c; }
+.step-badge.badge-api { background: #e8f9f6; color: #0f6f62; }
+.step-badge.badge-sql { background: #fff4e5; color: #9a5a00; }
+.step-badge.badge-other { background: #ececec; color: #555; }
+.step-badge.badge-error { 
+  /* Softer error styling (Option B) to align with other pastel phase badges */
+  background: #fbe9ea !important; /* light, slightly cool red */
+  color: #b3261e !important;      /* Material error primary */
+  box-shadow: 0 0 0 1px #f2b8b5 inset; /* subtle border for definition */
+}
+
+.step-main-text {
+  font-size: 0.72rem; /* slightly smaller */
+  font-weight: 500;
+  line-height: 1.18;
+  color: #4a5560; /* lighter tone */
+  text-align: center;
+  word-break: break-word;
+  max-width: 165px; /* allow longer operation names */
+  white-space: normal;
+}
+
+.step-main-text.dimmed { opacity: 0.55; }
 
 .v-stepper :deep(.v-divider) {
   align-self: center;
