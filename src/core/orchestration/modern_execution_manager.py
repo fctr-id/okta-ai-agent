@@ -716,10 +716,10 @@ class ModernExecutionManager:
                 # Post-process to put operations and columns arrays on single lines
                 import re
                 
-                # Pattern for operations arrays - Fixed to prevent ReDoS attacks
-                operations_pattern = r'("operations":\s*\[\s*\n)((?:[^"\[\]]*"[^"]*"[^"\[\]]*\n?)*?)(\s*\])'
-                # Pattern for columns arrays - Fixed to prevent ReDoS attacks  
-                columns_pattern = r'("columns":\s*\[\s*\n)((?:[^"\[\]]*"[^"]*"[^"\[\]]*\n?)*?)(\s*\])'
+                # Pattern for operations arrays
+                operations_pattern = r'("operations":\s*\[\s*\n)((?:\s*"[^"]*",?\s*\n?)*?)(\s*\])'
+                # Pattern for columns arrays  
+                columns_pattern = r'("columns":\s*\[\s*\n)((?:\s*"[^"]*",?\s*\n?)*?)(\s*\])'
                 
                 def compress_array(match):
                     prefix = match.group(1).split(':')[0] + ':'  # Get the key part
@@ -782,6 +782,35 @@ class ModernExecutionManager:
             return {'endpoints': []}
     
 
+    
+    def _get_entity_endpoints_for_entity(self, entity_name: str) -> List[Dict[str, Any]]:
+        """Get all endpoints for a specific entity, including depends_on endpoints"""
+        entity = entity_name.lower()
+        
+        # Get all endpoints for this entity
+        entity_endpoints = []
+        for endpoint in self.endpoints:
+            if endpoint.get('entity', '').lower() == entity:
+                # SECURITY VALIDATION: Validate endpoint before including
+                security_result = validate_api_endpoint(endpoint)
+                if security_result.is_valid:
+                    entity_endpoints.append(endpoint)
+                else:
+                    logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
+        
+        # Get depends_on endpoints for all matched endpoints
+        depends_on_endpoints = self._get_depends_on_endpoints(entity_endpoints)
+        
+        # Combine and return unique endpoints
+        all_endpoints = entity_endpoints + depends_on_endpoints
+        seen_ids = set()
+        unique_endpoints = []
+        for ep in all_endpoints:
+            if ep.get('id') not in seen_ids:
+                unique_endpoints.append(ep)
+                seen_ids.add(ep.get('id'))
+        
+        return unique_endpoints
     
     def _get_entity_endpoints_for_step(self, step: ExecutionStep) -> List[Dict[str, Any]]:
         """Get filtered endpoints for a specific API step, including depends_on endpoints"""
@@ -942,22 +971,114 @@ class ModernExecutionManager:
             else:
                 logger.info(f"[{correlation_id}] Query will use both SQL and API modes as planned")
             
-            # Phase 1: Use Planning Agent to generate execution plan
-            logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
+            # Phase 0: Pre-Planning - Entity and Operation Selection
+            logger.info(f"[{correlation_id}] Phase 0: Pre-Planning Agent execution")
             
-            # Create dependencies for Planning Agent (same as old executor)
-            from src.core.agents.planning_agent import PlanningDependencies
+            # Use the enhanced pre-planning agent to select relevant entities
+            from src.core.agents.preplan_agent import select_relevant_entities
             
-            # Get the lightweight reference for new entities format
-            lightweight_ref = self.simple_ref_data  # Use already loaded reference data
-            entities = lightweight_ref.get('entities', {})
+            # Get the lightweight reference data for entity selection
+            lightweight_ref = self.simple_ref_data
+            entities_dict = lightweight_ref.get('entities', {})
             
-            planning_deps = PlanningDependencies(
-                available_entities=self.available_entities,
+            preplan_result = await select_relevant_entities(
+                query=modified_query,
                 entity_summary=self.entity_summary,
                 sql_tables=self.sql_tables,
                 flow_id=correlation_id,
-                entities=entities  # Pass the new entity-grouped format
+                available_entities=list(entities_dict.keys()) if entities_dict else None,
+                entities=entities_dict
+            )
+            
+            if not preplan_result.get('success', False):
+                logger.error(f"[{correlation_id}] Pre-planning failed: {preplan_result.get('error', 'Unknown error')}")
+                return {
+                    'success': False,
+                    'error': f"Pre-planning failed: {preplan_result.get('error', 'Unknown error')}",
+                    'correlation_id': correlation_id,
+                    'query': query,
+                    'phase': 'preplan_error'
+                }
+            
+            selected_entity_operations = preplan_result['selected_entity_operations']
+            entity_op_pairs = [f"{eo.entity}::{eo.operation or 'null'}" for eo in selected_entity_operations]
+            logger.info(f"[{correlation_id}] Pre-planning completed - selected entity-operation pairs: {entity_op_pairs}")
+            
+            # Get full endpoint data for selected entity-operation pairs using existing filtering
+            logger.info(f"[{correlation_id}] Filtering endpoints for selected entity-operation pairs...")
+            selected_entity_endpoints = []
+            
+            for entity_op in selected_entity_operations:
+                entity_name = entity_op.entity.lower()
+                operation = entity_op.operation
+                
+                if operation and operation != 'null':
+                    # Create a mock ExecutionStep to use existing filtering method
+                    from src.core.agents.planning_agent import ExecutionStep
+                    mock_step = ExecutionStep(
+                        tool_name="api",
+                        entity=entity_name,
+                        operation=operation,
+                        query_context="Mock step for filtering",
+                        reasoning="Generated for endpoint filtering"
+                    )
+                    entity_endpoints = self._get_entity_endpoints_for_step(mock_step)
+                else:
+                    # Just get entity endpoints without specific operation
+                    entity_endpoints = self._get_entity_endpoints_for_entity(entity_name)
+                
+                selected_entity_endpoints.extend(entity_endpoints)
+                logger.debug(f"[{correlation_id}] Found {len(entity_endpoints)} endpoints for {entity_name}::{operation or 'all'}")
+            
+            # Remove duplicates based on endpoint ID
+            seen_ids = set()
+            unique_endpoints = []
+            for endpoint in selected_entity_endpoints:
+                if endpoint.get('id') not in seen_ids:
+                    unique_endpoints.append(endpoint)
+                    seen_ids.add(endpoint.get('id'))
+            
+            logger.info(f"[{correlation_id}] Filtered to {len(unique_endpoints)} unique endpoints from {len(selected_entity_operations)} entity-operation pairs")
+            
+            # Phase 1: Use Planning Agent to generate execution plan
+            logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
+            
+            # Create dependencies for Planning Agent with filtered endpoint data
+            from src.core.agents.planning_agent import PlanningDependencies
+            
+            # Build entity summary from filtered endpoints instead of raw entities
+            filtered_entity_summary = {}
+            endpoint_based_entities = {}
+            
+            # Group filtered endpoints by entity to create focused entity data
+            for endpoint in unique_endpoints:
+                entity_name = endpoint.get('entity', '')
+                if entity_name:
+                    if entity_name not in endpoint_based_entities:
+                        endpoint_based_entities[entity_name] = {'endpoints': []}  # ✅ Use 'endpoints' not 'operations'
+                        filtered_entity_summary[entity_name] = {'operations': [], 'methods': []}
+                    
+                    # Add the FULL endpoint details for planning agent
+                    endpoint_based_entities[entity_name]['endpoints'].append(endpoint)
+                    
+                    # Add operation and method for summary
+                    operation = endpoint.get('operation', '')
+                    method = endpoint.get('method', 'GET')
+                    
+                    if operation and operation not in filtered_entity_summary[entity_name]['operations']:
+                        filtered_entity_summary[entity_name]['operations'].append(operation)
+                    
+                    if method and method not in filtered_entity_summary[entity_name]['methods']:
+                        filtered_entity_summary[entity_name]['methods'].append(method)
+            
+            logger.info(f"[{correlation_id}] Built focused entity data: {len(endpoint_based_entities)} entities with {len(unique_endpoints)} endpoints")
+            
+            planning_deps = PlanningDependencies(
+                available_entities=list(endpoint_based_entities.keys()),  # Use filtered entity names
+                entity_summary=filtered_entity_summary,  # Use filtered entity summary
+                sql_tables=self.sql_tables,
+                flow_id=correlation_id,
+                entities=endpoint_based_entities  # Pass the filtered entity-grouped format
             )
             
             # Execute Planning Agent with dependencies - use modified query if needed

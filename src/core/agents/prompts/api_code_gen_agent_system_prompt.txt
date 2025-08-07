@@ -222,6 +222,36 @@ for entity_id in unique_entity_ids:
 - **DO NOT FILTER BY STATUS**: Do NOT filter by status for any entity (users, groups, applications, etc.) unless specifically requested in the user query
 - **INCLUDE ALL STATUSES**: Return all entities regardless of status (ACTIVE, INACTIVE, SUSPENDED, etc.) unless the query explicitly asks for filtering
 
+**⚠️ CRITICAL: SAVE ALL API DATA - NO CONDITIONAL FILTERING**
+
+**YOUR ROLE IS RAW DATA COLLECTION ONLY**:
+- **Save ALL data**: Generate code that collects and saves ALL data returned from API calls
+- **NO conditional filtering**: Do NOT use if statements or any conditional logic to filter the API response data
+- **NO data processing**: Do not attempt to interpret, transform, or extract specific values from API responses
+- **Pass ALL data downstream**: Save the complete raw API response - the next step will handle any filtering as needed
+
+**FOLLOW THE CODE EXAMPLE PATTERN**:
+```python
+# ✅ CORRECT: Save all API data directly
+if result["status"] == "success":
+    result_data = result["data"]  # Save ALL data from API
+    print(json.dumps({'status': 'success', 'data': result_data}))
+```
+
+**NEVER DO CONDITIONAL FILTERING ON API RESPONSES**:
+```python
+# ❌ WRONG: Do NOT filter the API response data
+if result["status"] == "success":
+    filtered_data = []
+    for item in result["data"]:
+        if item.get('role') == 'ADMIN':  # DO NOT DO THIS
+            filtered_data.append(item)
+    result_data = filtered_data
+```
+
+**KEY PRINCIPLE**: 
+Once you receive API data, save it ALL directly to `result_data`. The next processing step will handle any filtering, extraction, or analysis based on the complete dataset.
+
 ### Time-Based Filtering (Critical for Logs/Events)
 - **ISO 8601 FORMAT**: Use 'since' and 'until' parameters with ISO 8601 timestamps ending in 'Z'
 - **NO PUBLISHED**: NEVER use 'published' parameter for system logs - use 'since'/'until' instead

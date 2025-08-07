@@ -202,52 +202,80 @@ planning_agent = Agent(
 
 @planning_agent.instructions
 def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
-    """Dynamic instructions that include current context as clean JSON"""
+    """Dynamic instructions that include current context with full endpoint details"""
     deps = ctx.deps
     
-    # NEW: Handle entity-grouped format with entity-first naming
-    # Check if we have the new entities format
-    if hasattr(deps, 'entities') and deps.entities:
-        # New format: entity-grouped with entity-first operations
-        api_entities = deps.entities
-    elif hasattr(deps, 'available_operations') and deps.available_operations:
-        # Legacy operations list format - convert to entity-grouped
-        api_entities = {}
-        for op in deps.available_operations:
-            if '_' in op:
-                parts = op.split('_', 1)
-                if len(parts) == 2:
-                    entity, operation = parts
-                    if entity not in api_entities:
-                        api_entities[entity] = {"operations": []}
-                    api_entities[entity]["operations"].append(op)
-    else:
-        # Fallback: build from entity_summary (legacy format)
-        api_entities = {}
+    # ALWAYS extract full endpoint details for planning decisions
+    api_entities = {}
+    
+    # Primary: Use filtered entities with full endpoint details
+    if hasattr(deps, 'entities') and deps.entities and isinstance(deps.entities, dict):
+        logger.debug(f"[{deps.flow_id}] Using filtered entities with full endpoint details: {len(deps.entities)} entities")
+        # Extract full endpoint information for each entity
+        for entity_name, entity_data in deps.entities.items():
+            endpoints = entity_data.get('endpoints', [])
+            
+            # Build comprehensive endpoint details for planning
+            entity_endpoints = []
+            for endpoint in endpoints:
+                # Extract ALL endpoint information for planning decisions
+                endpoint_info = {
+                    "id": endpoint.get('id', ''),
+                    "operation": endpoint.get('operation', ''),
+                    "method": endpoint.get('method', 'GET'),
+                    "url_pattern": endpoint.get('url_pattern', ''),
+                    "name": endpoint.get('name', ''),
+                    "description": endpoint.get('description', ''),
+                    "parameters": endpoint.get('parameters', {}),
+                    "depends_on": endpoint.get('depends_on', []),
+                    "notes": endpoint.get('notes', '')  # Include FULL notes for planning
+                }
+                entity_endpoints.append(endpoint_info)
+            
+            # Store full endpoint details for this entity
+            api_entities[entity_name] = {
+                "endpoints": entity_endpoints,
+                "total_endpoints": len(endpoints)
+            }
+        logger.debug(f"[{deps.flow_id}] Built comprehensive endpoint details for {len(api_entities)} entities")
+    
+    # Fallback: Use available_entities if they have endpoint details
+    elif hasattr(deps, 'available_entities') and deps.available_entities and isinstance(deps.available_entities, dict):
+        logger.debug(f"[{deps.flow_id}] FALLBACK: Using available_entities for endpoint details")
+        for entity_name, entity_data in deps.available_entities.items():
+            if isinstance(entity_data, dict) and 'endpoints' in entity_data:
+                endpoints = entity_data.get('endpoints', [])
+                
+                # Build comprehensive endpoint details
+                entity_endpoints = []
+                for endpoint in endpoints:
+                    endpoint_info = {
+                        "id": endpoint.get('id', ''),
+                        "operation": endpoint.get('operation', ''),
+                        "method": endpoint.get('method', 'GET'),
+                        "url_pattern": endpoint.get('url_pattern', ''),
+                        "name": endpoint.get('name', ''),
+                        "description": endpoint.get('description', ''),
+                        "parameters": endpoint.get('parameters', {}),
+                        "depends_on": endpoint.get('depends_on', []),
+                        "notes": endpoint.get('notes', '')  # Include FULL notes
+                    }
+                    entity_endpoints.append(endpoint_info)
+                
+                api_entities[entity_name] = {
+                    "endpoints": entity_endpoints,
+                    "total_endpoints": len(endpoints)
+                }
+    
+    # Last resort: Extract from entity_summary with warning
+    if not api_entities and hasattr(deps, 'entity_summary') and deps.entity_summary:
+        logger.warning(f"[{deps.flow_id}] FALLBACK: Using simplified entity_summary format - endpoint details missing!")
+        # This should NOT happen in the new architecture
+        # but kept for backward compatibility
         for entity, details in deps.entity_summary.items():
             operations = details.get('operations', [])
-            
-            # Filter to most relevant operations for planning (max 8 per entity)
-            key_operations = []
-            
-            # Priority operations based on common query patterns
-            priority_ops = ['list', 'get', 'list_by_user', 'list_members', 'list_user_assignments', 'list_group_assignments', 'list_events']
-            
-            # Add priority operations first
-            for op in priority_ops:
-                if op in operations:
-                    key_operations.append(op)
-            
-            # Add other operations up to limit
-            for op in operations:
-                if op not in key_operations and len(key_operations) < 8:
-                    key_operations.append(op)
-            
-            # Convert to entity-first format: entity_operation
-            entity_operations = []
-            for op in key_operations:
-                entity_operations.append(f"{entity}_{op}")
-            
+            # Convert to simplified format only as absolute fallback
+            entity_operations = [f"{entity}_{op}" for op in operations[:8]]
             api_entities[entity] = {"operations": entity_operations}
     
     # Build SQL tables in clean JSON format
@@ -301,26 +329,73 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
         "group_list_members": "INEFFICIENT - prefer expand=stats on group_list for counts instead of fetching all members"
     }
     
-    # Create context data with API entities, SQL tables, and efficiency hints
+    # Create context data with SQL tables, detailed API endpoints, and efficiency hints
     context_data = {
         "sql_tables": sql_tables,
-        "api_entities": api_entities,
+        "api_endpoints": api_entities,  # Changed from api_entities to api_endpoints for clarity
         "parameter_efficiency_hints": parameter_hints
     }
     
-    # Custom JSON formatting: readable structure but compact arrays
-    def format_json_compact_arrays(data):
-        """Format JSON with compact arrays but readable object structure"""
+    # Debug: Log final context structure
+    logger.debug(f"[{deps.flow_id}] Final planning context: {len(context_data['sql_tables'])} SQL tables, {len(context_data['api_endpoints'])} API entities")
+    for entity_name, entity_info in context_data['api_endpoints'].items():
+        if 'endpoints' in entity_info:
+            logger.debug(f"[{deps.flow_id}]   → {entity_name}: {len(entity_info['endpoints'])} detailed endpoints")
+        else:
+            logger.debug(f"[{deps.flow_id}]   → {entity_name}: simplified format")
+    
+    # Custom JSON formatting: readable structure with proper endpoint details
+    def format_endpoint_data(data):
+        """Format JSON with detailed endpoint information"""
         result = "{\n"
         for i, (key, value) in enumerate(data.items()):
             result += f'  "{key}": {{\n'
-            for j, (sub_key, sub_value) in enumerate(value.items()):
-                # Format arrays as single lines
-                array_str = json.dumps(sub_value, separators=(', ', ': '))
-                result += f'    "{sub_key}": {array_str}'
-                if j < len(value) - 1:
-                    result += ","
-                result += "\n"
+            
+            if key == "api_endpoints":
+                # Special formatting for endpoint details
+                for j, (entity_name, entity_data) in enumerate(value.items()):
+                    result += f'    "{entity_name}": {{\n'
+                    
+                    if "endpoints" in entity_data:
+                        result += f'      "endpoints": [\n'
+                        for k, endpoint in enumerate(entity_data["endpoints"]):
+                            result += '        {\n'
+                            for attr_name, attr_value in endpoint.items():
+                                if isinstance(attr_value, str):
+                                    # Escape quotes and handle multi-line strings
+                                    escaped_value = attr_value.replace('"', '\\"').replace('\n', '\\n')
+                                    result += f'          "{attr_name}": "{escaped_value}",\n'
+                                else:
+                                    result += f'          "{attr_name}": {json.dumps(attr_value)},\n'
+                            result = result.rstrip(',\n') + '\n'  # Remove trailing comma
+                            result += '        }'
+                            if k < len(entity_data["endpoints"]) - 1:
+                                result += ','
+                            result += '\n'
+                        result += '      ],\n'
+                        result += f'      "total_endpoints": {entity_data.get("total_endpoints", 0)}\n'
+                    else:
+                        # Legacy format fallback
+                        for attr_name, attr_value in entity_data.items():
+                            array_str = json.dumps(attr_value, separators=(', ', ': '))
+                            result += f'      "{attr_name}": {array_str}'
+                            if attr_name != list(entity_data.keys())[-1]:
+                                result += ","
+                            result += "\n"
+                    
+                    result += '    }'
+                    if j < len(value) - 1:
+                        result += ","
+                    result += "\n"
+            else:
+                # Standard formatting for other sections
+                for j, (sub_key, sub_value) in enumerate(value.items()):
+                    array_str = json.dumps(sub_value, separators=(', ', ': '))
+                    result += f'    "{sub_key}": {array_str}'
+                    if j < len(value) - 1:
+                        result += ","
+                    result += "\n"
+            
             result += "  }"
             if i < len(data) - 1:
                 result += ","
@@ -328,11 +403,11 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
         result += "}"
         return result
     
-    # Return JSON context with balanced formatting - readable structure but compact arrays
+    # Return JSON context with detailed endpoint information
     return f"""
 AVAILABLE DATA SOURCES (JSON Format):
 ```json
-{format_json_compact_arrays(context_data)}
+{format_endpoint_data(context_data)}
 ```
 """
 
