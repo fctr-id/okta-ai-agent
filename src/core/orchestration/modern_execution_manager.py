@@ -175,6 +175,7 @@ class ModernExecutionManager:
         self.current_execution_plan = None
         self.plan_ready_callback = None  # Optional callback for when plan is ready
         self.step_status_callback = None  # Optional callback for step status updates (step_number, step_type, status)
+        self.planning_phase_callback = None  # Optional callback for planning lifecycle ('planning_start'/'planning_complete')
         
         # MINIMAL CANCELLATION SYSTEM: Aggressive termination on user request
         self.cancelled_queries = set()  # Just store correlation_ids that are cancelled
@@ -665,7 +666,7 @@ class ModernExecutionManager:
             schema_path = os.path.join(os.path.dirname(self.simple_ref_path), "okta_schema.json")
             sql_tables = []
             
-            with open(schema_path, 'r') as f:
+            with open(schema_path, 'r', encoding='utf-8') as f:
                 schema_data = json.load(f)
                 # Handle different schema formats
                 if 'tables' in schema_data:
@@ -709,7 +710,7 @@ class ModernExecutionManager:
             }
             
             # Save the generated file with compact formatting
-            with open(self.simple_ref_path, 'w') as f:
+            with open(self.simple_ref_path, 'w', encoding='utf-8') as f:
                 # Custom JSON formatting to keep arrays on one line
                 json_str = json.dumps(lightweight_data, indent=2)
                 
@@ -758,7 +759,7 @@ class ModernExecutionManager:
     def _load_simple_reference(self) -> Dict[str, Any]:
         """Load simple reference format for planning, generating it if missing"""
         try:
-            with open(self.simple_ref_path, 'r') as f:
+            with open(self.simple_ref_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except FileNotFoundError:
             logger.warning(f"Simple reference file not found: {self.simple_ref_path}")
@@ -772,7 +773,7 @@ class ModernExecutionManager:
     def _load_api_data(self) -> Dict[str, Any]:
         """Load full API entity data for endpoint filtering"""
         try:
-            with open(self.full_api_path, 'r') as f:
+            with open(self.full_api_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except FileNotFoundError:
             logger.warning(f"Full API data file not found: {self.full_api_path}")
@@ -1042,6 +1043,12 @@ class ModernExecutionManager:
             
             # Phase 1: Use Planning Agent to generate execution plan
             logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
+            # Notify planning start (minimal hook)
+            if self.planning_phase_callback:
+                try:
+                    await self.planning_phase_callback('planning_start')
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] planning_phase_callback planning_start error ignored: {cb_err}")
             
             # Create dependencies for Planning Agent with filtered endpoint data
             from src.core.agents.planning_agent import PlanningDependencies
@@ -1055,7 +1062,7 @@ class ModernExecutionManager:
                 entity_name = endpoint.get('entity', '')
                 if entity_name:
                     if entity_name not in endpoint_based_entities:
-                        endpoint_based_entities[entity_name] = {'endpoints': []}  # ✅ Use 'endpoints' not 'operations'
+                        endpoint_based_entities[entity_name] = {'endpoints': []}  # Use 'endpoints' not 'operations'
                         filtered_entity_summary[entity_name] = {'operations': [], 'methods': []}
                     
                     # Add the FULL endpoint details for planning agent
@@ -1120,6 +1127,12 @@ class ModernExecutionManager:
             import json
             logger.info(f"[{correlation_id}] Generated execution plan:\n{json.dumps(execution_plan.model_dump(), indent=2)}")
             logger.info(f"[{correlation_id}] Planning completed: {len(execution_plan.steps)} steps generated")
+            # Notify planning complete (after plan object finalized, before execution)
+            if self.planning_phase_callback:
+                try:
+                    await self.planning_phase_callback('planning_complete')
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] planning_phase_callback planning_complete error ignored: {cb_err}")
             
             # Phase 2: Execute steps using Modern Execution Manager
             logger.info(f"[{correlation_id}] Phase 2: Step execution with Modern Execution Manager")
@@ -1615,7 +1628,7 @@ class ModernExecutionManager:
     
     async def _execute_api_sql_step(self, step: ExecutionStep, full_data: List[Dict[str, Any]], correlation_id: str, step_number: int) -> StepResult:
         """
-        Execute API → SQL step using repeatable pattern with Internal API-SQL Agent.
+        Execute API - SQL step using repeatable pattern with Internal API-SQL Agent.
         
         REPEATABLE PATTERN:
         - Use enhanced context from all previous steps
