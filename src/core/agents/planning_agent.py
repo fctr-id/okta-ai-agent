@@ -340,9 +340,9 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
     logger.debug(f"[{deps.flow_id}] Final planning context: {len(context_data['sql_tables'])} SQL tables, {len(context_data['api_endpoints'])} API entities")
     for entity_name, entity_info in context_data['api_endpoints'].items():
         if 'endpoints' in entity_info:
-            logger.debug(f"[{deps.flow_id}]   → {entity_name}: {len(entity_info['endpoints'])} detailed endpoints")
+            logger.debug(f"[{deps.flow_id}]   {entity_name}: {len(entity_info['endpoints'])} detailed endpoints")
         else:
-            logger.debug(f"[{deps.flow_id}]   → {entity_name}: simplified format")
+            logger.debug(f"[{deps.flow_id}]   {entity_name}: simplified format")
     
     # Custom JSON formatting: readable structure with proper endpoint details
     def format_endpoint_data(data):
