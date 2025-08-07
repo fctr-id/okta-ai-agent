@@ -259,7 +259,7 @@
       "folder_path": "Application Grants",
       "parameters": { "required": ["appId"], "optional": ["expand"] },
       "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application (must be an OAuth 2.0 client).\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details in grants.\n\n## Important Notes\n*   This shows which users have consented to which OAuth scopes for this application."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application (must be an OAuth 2.0 client).\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details in grants.\n\n## Important Notes\n*   This shows which users have consented to which OAuth scopes for this application.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns grant data with application IDs but lacks human-readable application details (name, label, status). Planning agent must add a follow-up step to fetch application details for meaningful results."
     },
     {
       "id": "get-application-grant",
@@ -272,7 +272,7 @@
       "folder_path": "Application Grants",
       "parameters": { "required": ["appId", "grantId"], "optional": ["expand"] },
       "depends_on": ["list-applications", "list-application-grants"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-application-grants`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details for specific grant."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-application-grants`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details for specific grant.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns grant data with application ID but lacks human-readable application details (name, label, status). Planning agent must add a follow-up step to fetch application details for meaningful results."
     },
     {
       "id": "list-application-group-assignments",
@@ -454,7 +454,7 @@
       "folder_path": "Application Tokens",
       "parameters": { "required": ["appId"], "optional": ["expand", "after", "limit"] },
       "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the OAuth 2.0 application.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details in token listings."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the OAuth 2.0 application.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details in token listings.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns token data with application IDs but lacks human-readable application details (name, label, status). Planning agent must add a follow-up step to fetch application details for meaningful results."
     },
     {
       "id": "get-application-token",
@@ -467,7 +467,7 @@
       "folder_path": "Application Tokens",
       "parameters": { "required": ["appId", "tokenId"], "optional": ["expand"] },
       "depends_on": ["list-applications", "list-application-tokens"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`tokenId`** (String, Required): The ID of the token, obtained from `list-application-tokens`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details for specific token."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application.\n*   **`tokenId`** (String, Required): The ID of the token, obtained from `list-application-tokens`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=scope` to include scope details for specific token.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns token data with application ID but lacks human-readable application details (name, label, status). Planning agent must add a follow-up step to fetch application details for meaningful results."
     },
     {
       "id": "list-application-user-assignments",
@@ -636,7 +636,7 @@
       "folder_path": "Device Assurance Policies",
       "parameters": { "required": [], "optional": [] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   Device assurance policies are used to ensure a device meets certain criteria (e.g., OS version) before allowing access."
+      "notes": "## Important Notes\n*   Device assurance policies are used to ensure a device meets certain criteria (e.g., OS version) before allowing access.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device assurance policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
     },
     {
       "id": "get-device-assurance-policy",
@@ -649,7 +649,7 @@
       "folder_path": "Device Assurance Policies",
       "parameters": { "required": ["deviceAssuranceId"], "optional": [] },
       "depends_on": ["list-device-assurance-policies"],
-      "notes": "## Path Parameters\n*   **`deviceAssuranceId`** (String, Required): The ID of the policy, obtained from `list-device-assurance-policies`."
+      "notes": "## Path Parameters\n*   **`deviceAssuranceId`** (String, Required): The ID of the policy, obtained from `list-device-assurance-policies`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device assurance policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
     },
     {
       "id": "list-device-integrations",
@@ -688,7 +688,7 @@
       "folder_path": "Device Posture Checks",
       "parameters": { "required": [], "optional": [] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   Device posture checks are specific queries run against a device, e.g., 'Is disk encryption enabled?'"
+      "notes": "## Important Notes\n*   Device posture checks are specific queries run against a device, e.g., 'Is disk encryption enabled?'\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device posture check data but may lack comprehensive human-readable details. Planning agent should consider if additional check details are needed for meaningful results."
     },
     {
       "id": "list-default-device-posture-checks",
@@ -714,7 +714,7 @@
       "folder_path": "Device Posture Checks",
       "parameters": { "required": ["postureCheckId"], "optional": [] },
       "depends_on": ["list-device-posture-checks"],
-      "notes": "## Path Parameters\n*   **`postureCheckId`** (String, Required): The ID of the posture check, obtained from `list-device-posture-checks`."
+      "notes": "## Path Parameters\n*   **`postureCheckId`** (String, Required): The ID of the posture check, obtained from `list-device-posture-checks`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device posture check data but may lack comprehensive human-readable details. Planning agent should consider if additional check details are needed for meaningful results."
     },
     {
       "id": "list-groups",
@@ -792,7 +792,7 @@
       "folder_path": "Group Rules",
       "parameters": { "required": [], "optional": ["limit", "after", "search", "expand"] },
       "depends_on": [],
-      "notes": "## Query Parameters\n*   **`expand`** (String, Optional): Include additional rule details in the response.\n\n## Important Notes\n*   Group rules allow you to dynamically assign users to groups based on their profile attributes."
+      "notes": "## Query Parameters\n*   **`expand`** (String, Optional): Include additional rule details in the response.\n\n## Important Notes\n*   Group rules allow you to dynamically assign users to groups based on their profile attributes.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns group rule data with group IDs but lacks human-readable group details (name, description). Planning agent must add a follow-up step to fetch group details for meaningful results."
     },
     {
       "id": "get-group-rule",
@@ -805,7 +805,7 @@
       "folder_path": "Group Rules",
       "parameters": { "required": ["groupRuleId"], "optional": ["expand"] },
       "depends_on": ["list-group-rules"],
-      "notes": "## Path Parameters\n*   **`groupRuleId`** (String, Required): The ID of the group rule, obtained from `list-group-rules`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include additional rule details in the response."
+      "notes": "## Path Parameters\n*   **`groupRuleId`** (String, Required): The ID of the group rule, obtained from `list-group-rules`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include additional rule details in the response.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns group rule data with group IDs but lacks human-readable group details (name, description). Planning agent must add a follow-up step to fetch group details for meaningful results."
     },
     {
       "id": "list-log-streams",
@@ -883,7 +883,7 @@
       "folder_path": "Policies",
       "parameters": { "required": ["type"], "optional": ["status", "q", "expand", "sortBy", "limit", "resourceId", "after"] },
       "depends_on": ["list-policy-rules"],
-      "notes": "## Critical Parameters\n*   **`type`** (String, Required): This parameter is **mandatory**. You must specify the type of policy to list. Common values include:\n    *   `OKTA_SIGN_ON`: For Global Session Policies.\n    *   `PASSWORD`: For Password Policies.\n    *   `MFA_ENROLL`: For Multifactor Enrollment Policies.\n    *   `ACCESS_POLICY`: For Authentication Policies.\n    *   `OAUTH_AUTHORIZATION_POLICY`: For OAuth Authorization Server Policies.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=rules` to include all policies with their rules in the same response."
+      "notes": "## Critical Parameters\n*   **`type`** (String, Required): This parameter is **mandatory**. You must specify the type of policy to list. Common values include:\n    *   `OKTA_SIGN_ON`: For Global Session Policies.\n    *   `PASSWORD`: For Password Policies.\n    *   `MFA_ENROLL`: For Multifactor Enrollment Policies.\n    *   `ACCESS_POLICY`: For Authentication Policies.\n    *   `OAUTH_AUTHORIZATION_POLICY`: For OAuth Authorization Server Policies.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=rules` to include all policies with their rules in the same response.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
     },
     {
       "id": "get-policy",
@@ -896,7 +896,7 @@
       "folder_path": "Policies",
       "parameters": { "required": ["policyId"], "optional": ["expand"] },
       "depends_on": ["list-policies"],
-      "notes": "## Path Parameters\n*   **`policyId`** (String, Required): The unique ID for the policy, obtained from a `list-policies` call.\n\n## Query Parameters\n*   **`expand`**: Use `expand=rules` to include all of the policy's rules in the same response."
+      "notes": "## Path Parameters\n*   **`policyId`** (String, Required): The unique ID for the policy, obtained from a `list-policies` call.\n\n## Query Parameters\n*   **`expand`**: Use `expand=rules` to include all of the policy's rules in the same response.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
     },
     {
       "id": "list-apps-for-policy",
@@ -922,7 +922,7 @@
       "folder_path": "Policies",
       "parameters": { "required": ["policyId"], "optional": [] },
       "depends_on": ["list-policies"],
-      "notes": "## Path Parameters\n*   **`policyId`** (String, Required): The ID of the policy."
+      "notes": "## Path Parameters\n*   **`policyId`** (String, Required): The ID of the policy.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns policy resource mapping data with policy and resource IDs but lacks human-readable details. Planning agent must add follow-up steps to fetch policy and resource details for meaningful results."
     },
     {
       "id": "get-policy-resource-mapping",
@@ -935,7 +935,7 @@
       "folder_path": "Policies",
       "parameters": { "required": ["policyId", "mappingId"], "optional": [] },
       "depends_on": ["list-policies", "list-policy-resource-mappings"],
-      "notes": "## Path Parameters\n*   **`policyId`** (String, Required): The ID of the policy.\n*   **`mappingId`** (String, Required): The ID of the mapping, obtained from `list-policy-resource-mappings`."
+      "notes": "## Path Parameters\n*   **`policyId`** (String, Required): The ID of the policy.\n*   **`mappingId`** (String, Required): The ID of the mapping, obtained from `list-policy-resource-mappings`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns policy resource mapping data with policy and resource IDs but lacks human-readable details. Planning agent must add follow-up steps to fetch policy and resource details for meaningful results."
     },
     {
       "id": "list-policy-rules",
@@ -974,7 +974,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": [], "optional": ["after", "limit"] },
       "depends_on": ["list-user-roles"],
-      "notes": "## Important Notes\n*   This is a quick way to find all users who have been assigned any type of admin role. MUST use the `list-user-roles` endpoint to get detailed role information like role names ."
+      "notes": "## Important Notes\n*   This is a quick way to find all users who have been assigned any type of admin role. MUST use the `list-user-roles` endpoint to get detailed role information like role names .\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns user role data with user IDs but lacks human-readable user details (email, name, login). Planning agent must add a follow-up step to fetch user details for meaningful results."
     },
     {
       "id": "list-user-roles",
@@ -987,7 +987,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId"], "optional": ["expand"] },
       "depends_on": ["list-users", "list-app-targets-for-user-role", "list-group-targets-for-user-role"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user for whom to list roles.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include targets configured for role assignments in `_embedded` property. Supported values: `targets/groups` (group targets) or `targets/catalog/apps` (application targets).\n\n## Important Notes\n*   To understand what the user can actually manage, also check role targets using `list-app-targets-for-user-role` and `list-group-targets-for-user-role`.\n*   Use expand parameter to get targets in same response instead of separate API calls."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user for whom to list roles.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include targets configured for role assignments in `_embedded` property. Supported values: `targets/groups` (group targets) or `targets/catalog/apps` (application targets).\n\n## Important Notes\n*   To understand what the user can actually manage, also check role targets using `list-app-targets-for-user-role` and `list-group-targets-for-user-role`.\n*   Use expand parameter to get targets in same response instead of separate API calls.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns user role data with user IDs but lacks human-readable user details (email, name, login). Planning agent must add a follow-up step to fetch user details for meaningful results."
     },
     {
       "id": "get-user-role",
@@ -1000,7 +1000,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId", "roleAssignmentId"], "optional": [] },
       "depends_on": ["list-users", "list-user-roles"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment, obtained from `list-user-roles`."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment, obtained from `list-user-roles`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns user role data with user ID but lacks human-readable user details (email, name, login). Planning agent must add a follow-up step to fetch user details for meaningful results."
     },
     {
       "id": "list-governance-sources-for-user-role",
@@ -1013,7 +1013,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId", "roleAssignmentId"], "optional": [] },
       "depends_on": ["list-users", "list-user-roles"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns governance source data with user and role IDs but lacks human-readable details. Planning agent must add follow-up steps to fetch user and governance source details for meaningful results."
     },
     {
       "id": "get-governance-source-for-user-role",
@@ -1026,7 +1026,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId", "roleAssignmentId", "grantId"], "optional": [] },
       "depends_on": ["list-users", "list-user-roles", "list-governance-sources-for-user-role"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-governance-sources-for-user-role`."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-governance-sources-for-user-role`.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch the actual user details (name, email, login) using the user ID since the governance source response typically contains only technical IDs without human-readable user information."
     },
     {
       "id": "list-governance-source-resources-for-user-role",
@@ -1039,7 +1039,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId", "roleAssignmentId", "grantId"], "optional": [] },
       "depends_on": ["list-users", "list-user-roles", "list-governance-sources-for-user-role"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch the actual user details (name, email, login) using the user ID since governance source resource responses typically contain only technical IDs without human-readable user information."
     },
     {
       "id": "list-app-targets-for-user-role",
@@ -1221,7 +1221,7 @@
       "folder_path": "Resource Set Resources",
       "parameters": { "required": ["resourceSetIdOrLabel"], "optional": [] },
       "depends_on": ["list-resource-sets"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the resources (apps, groups, etc.) using their specific endpoints since resource set responses typically contain only basic IDs and may not include human-readable names or detailed resource information."
     },
     {
       "id": "get-resource-set-resource",
@@ -1234,7 +1234,7 @@
       "folder_path": "Resource Set Resources",
       "parameters": { "required": ["resourceSetIdOrLabel", "resourceId"], "optional": [] },
       "depends_on": ["list-resource-sets", "list-resource-set-resources"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`resourceId`** (String, Required): The ID of the resource within the set."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`resourceId`** (String, Required): The ID of the resource within the set.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the specific resource (app, group, etc.) using its dedicated endpoint since resource responses may contain only basic information without human-readable names or detailed configuration."
     },
     {
       "id": "list-resource-set-bindings",
@@ -1247,7 +1247,7 @@
       "folder_path": "Role Resource Set Bindings",
       "parameters": { "required": ["resourceSetIdOrLabel"], "optional": ["after"] },
       "depends_on": ["list-resource-sets", "list-resource-set-binding-members"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n## Important Notes\n*   A 'binding' connects a custom role to a resource set."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n## Important Notes\n*   A 'binding' connects a custom role to a resource set.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the roles and users/groups in the bindings using their specific endpoints since binding responses typically contain only IDs without human-readable names."
     },
     {
       "id": "get-resource-set-binding",
@@ -1260,7 +1260,7 @@
       "folder_path": "Role Resource Set Bindings",
       "parameters": { "required": ["resourceSetIdOrLabel", "roleIdOrLabel"], "optional": [] },
       "depends_on": ["list-resource-sets", "list-custom-roles"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the role and associated users/groups using their specific endpoints since binding responses typically contain only IDs without human-readable names or detailed role information."
     },
     {
       "id": "list-resource-set-binding-members",
@@ -1273,7 +1273,7 @@
       "folder_path": "Role Resource Set Binding Members",
       "parameters": { "required": ["resourceSetIdOrLabel", "roleIdOrLabel"], "optional": ["after"] },
       "depends_on": ["list-resource-sets", "list-custom-roles"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the users and groups in the binding using their specific endpoints since member responses typically contain only IDs without human-readable names (user login, email, group names)."
     },
     {
       "id": "get-resource-set-binding-member",
@@ -1286,7 +1286,7 @@
       "folder_path": "Role Resource Set Binding Members",
       "parameters": { "required": ["resourceSetIdOrLabel", "roleIdOrLabel", "memberId"], "optional": [] },
       "depends_on": ["list-resource-sets", "list-custom-roles", "list-resource-set-binding-members"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n*   **`memberId`** (String, Required): The ID of the member (user or group)."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n*   **`memberId`** (String, Required): The ID of the member (user or group).\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the specific user or group using their dedicated endpoints since member responses typically contain only basic IDs without human-readable names (user login, email, group names)."
     },
     {
       "id": "list-custom-roles",
@@ -1429,7 +1429,7 @@
       "folder_path": "User Factors",
       "parameters": { "required": [], "optional": ["after", "expand", "filter", "forDownload", "limit", "sortBy", "sortOrder"] },
       "depends_on": [],
-      "notes": "## Query Parameters\n*   **`expand`** (String, Optional): Include additional token details in the response.\n\n## Important Notes\n*   This endpoint lists the hardware tokens themselves, not user enrollments."
+      "notes": "## Query Parameters\n*   **`expand`** (String, Optional): Include additional token details in the response.\n\n## Important Notes\n*   This endpoint lists the hardware tokens themselves, not user enrollments.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch user details for any associated user IDs since YubiKey token responses typically contain only user IDs without human-readable user information (login, email, name)."
     },
     {
       "id": "get-yubikey-token",
@@ -1442,7 +1442,7 @@
       "folder_path": "User Factors",
       "parameters": { "required": ["tokenId"], "optional": [] },
       "depends_on": ["list-yubikey-tokens"],
-      "notes": "## Path Parameters\n*   **`tokenId`** (String, Required): The ID of the YubiKey token, obtained from `list-yubikey-tokens`."
+      "notes": "## Path Parameters\n*   **`tokenId`** (String, Required): The ID of the YubiKey token, obtained from `list-yubikey-tokens`.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch user details for any associated user ID since YubiKey token responses typically contain only user IDs without human-readable user information (login, email, name)."
     },
     {
       "id": "list-user-factors",
@@ -1546,7 +1546,7 @@
       "folder_path": "User Resources",
       "parameters": { "required": ["userId"], "optional": [] },
       "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch user details (name, email, login) using the user ID since client responses typically contain only user IDs without human-readable user information."
     },
     {
       "id": "list-user-devices",
