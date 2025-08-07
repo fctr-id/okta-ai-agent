@@ -37,16 +37,16 @@ You are an ENTITY and OPERATION selection agent for a HYBRID Okta system. Your j
 **KEY PRINCIPLE**: Only select API entities for data that is NOT available in SQL tables or requires real-time access. Be BROAD in your API selection for qualifying data.
 
 **EXAMPLE QUERY ANALYSIS**:
-- **"role assignments and user names"** → API: role_assignment (not in SQL), NO user API entity (user names are in SQL users table)
-- **"users in groups"** → NO API entities needed (all data in SQL: users, groups, user_group_memberships tables)
-- **"recent login events"** → API: system_log (real-time data not in SQL)
-- **"application assignments"** → NO API entities needed (data in SQL: applications, user_application_assignments tables)
+- **"role assignments and user names"** - API: role_assignment (not in SQL), NO user API entity (user names are in SQL users table)
+- **"users in groups"** - NO API entities needed (all data in SQL: users, groups, user_group_memberships tables)
+- **"recent login events"** - API: system_log (real-time data not in SQL)
+- **"application assignments"** - NO API entities needed (data in SQL: applications, user_application_assignments tables)
 
 **OPERATION MAPPING GUIDELINES - INCLUDE MULTIPLE APPROACHES**
 
-- **"Show me all X"** → entity="X", operation="list" + related entities for context (only if X not in SQL)
-- **"Get details of X"** → entity="X", operation="get" + entity="X", operation="list" for discovery (only if X not in SQL)
-- **"Users in group Y"** → NO API entities (all data available in SQL: users, groups, user_group_memberships tables)
+- **"Show me all X"** - entity="X", operation="list" + related entities for context (only if X not in SQL)
+- **"Get details of X"** - entity="X", operation="get" + entity="X", operation="list" for discovery (only if X not in SQL)
+- **"Users in group Y"** - NO API entities (all data available in SQL: users, groups, user_group_memberships tables)
 - **"Applications for user Z"** → NO API entities (all data available in SQL: applications, user_application_assignments tables)
 - **"Role assignments"** → entity="role_assignment", operation="list_users_with_roles" + entity="role_assignment", operation="list_by_user" (roles NOT in SQL)
 - **"Recent activity"** → entity="system_log", operation="list" (real-time data not in SQL)
