@@ -117,14 +117,14 @@ Instead of generating temp table specifications, generate direct SQL queries wit
 - `estimated_records`: Expected number of results
 
 **ID EXTRACTION PATHS** (Dynamic - works with ANY API structure):
-- Raw string data: `"identity"` or `"self"` → extracts string directly (for simple ID lists)
-- Simple field: `"id"` → extracts record["id"]
-- Nested field: `"profile.login"` → extracts record["profile"]["login"]  
-- Deep nesting: `"actor.alternateId"` → extracts record["actor"]["alternateId"]
-- Array extraction: `"user_ids.*"` → extracts all items from record["user_ids"] array
-- Application data: `"settings.app.authURL"` → extracts record["settings"]["app"]["authURL"]
-- Group info: `"profile.name"` → extracts record["profile"]["name"]
-- Log data: `"target.id"` → extracts record["target"]["id"]
+- Raw string data: `"identity"` or `"self"` - extracts string directly (for simple ID lists)
+- Simple field: `"id"` - extracts record["id"]
+- Nested field: `"profile.login"` - extracts record["profile"]["login"]  
+- Deep nesting: `"actor.alternateId"` - extracts record["actor"]["alternateId"]
+- Array extraction: `"user_ids.*"` - extracts all items from record["user_ids"] array
+- Application data: `"settings.app.authURL"` - extracts record["settings"]["app"]["authURL"]
+- Group info: `"profile.name"` - extracts record["profile"]["name"]
+- Log data: `"target.id"` - extracts record["target"]["id"]
 
 **EXAMPLE FOR API ARRAY DATA** (API returns {'user_ids': [...], ...}):
 ```json
