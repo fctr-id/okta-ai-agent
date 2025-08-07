@@ -145,7 +145,7 @@ async def test_preplan_agent_data_flow():
                 step_endpoints = em._get_entity_endpoints_for_step(mock_step)
                 selected_entity_endpoints.extend(step_endpoints)
                 
-                print(f"     - {entity_op.entity}::{entity_op.operation} → {len(step_endpoints)} endpoints")
+                print(f"     - {entity_op.entity}::{entity_op.operation} - {len(step_endpoints)} endpoints")
             
             # Remove duplicates based on endpoint ID
             seen_ids = set()
@@ -265,20 +265,20 @@ async def test_preplan_agent_data_flow():
                             total_notes_length += len(notes)
                     print(f"         - Notes Verification: {notes_count}/{len(endpoints)} endpoints have notes (avg {total_notes_length//max(notes_count,1)} chars)")
             
-            print(f"\n   • 🎯 FIXED ISSUE - PLANNING AGENT NOW RECEIVES COMPLETE DATA:")
-            print(f"     ✅ The planning agent now gets full endpoint specifications including:")
+            print(f"\n   • FIXED ISSUE - PLANNING AGENT NOW RECEIVES COMPLETE DATA:")
+            print(f"     The planning agent now gets full endpoint specifications including:")
             print(f"       * Complete URL patterns (e.g., /api/v1/iam/assignees/users)")
             print(f"       * Detailed parameter specifications (required/optional)")
             print(f"       * Comprehensive endpoint descriptions")
             print(f"       * Dependency mappings between endpoints")
             print(f"       * Detailed notes and API usage guidelines")
-            print(f"     ✅ This enables the LLM to make informed decisions about:")
+            print(f"     This enables the LLM to make informed decisions about:")
             print(f"       * Optimal endpoint selection")
             print(f"       * Proper parameter usage")
             print(f"       * Correct API call sequencing")
             
             try:
-                # ✅ Use MODERN planning approach (same as execution manager)
+                # Use MODERN planning approach (same as execution manager)
                 from src.core.agents.planning_agent import planning_agent, PlanningDependencies
                 
                 planning_deps = PlanningDependencies(
@@ -286,7 +286,7 @@ async def test_preplan_agent_data_flow():
                     entity_summary=filtered_entity_summary,
                     sql_tables=em.sql_tables,
                     flow_id=flow_id,
-                    entities=endpoint_based_entities  # ✅ CRITICAL: Include endpoint details
+                    entities=endpoint_based_entities  # CRITICAL: Include endpoint details
                 )
                 
                 planning_result = await planning_agent.run(test_query, deps=planning_deps)
