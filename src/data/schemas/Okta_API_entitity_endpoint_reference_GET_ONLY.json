@@ -180,7 +180,7 @@
       "description": "Lists all apps in the org.",
       "folder_path": "Applications",
       "parameters": { "required": [], "optional": ["q", "after", "useOptimization", "limit", "filter", "expand", "includeNonDeleted"] },
-      "depends_on": [],
+      "depends_on": ["list-application-keys"],
       "notes": "## Query Parameters\n*   **`q`** (String): Searches for apps with name or label properties that start with the specified value.\n*   **`filter`** (String): Filters apps by status, user.id, group.id, credentials.signing.kid or name expression. Examples: `status eq \"ACTIVE\"` or `signOnMode eq \"SAML_2_0\"`.\n*   **`expand`** (String): Use `expand=user/{userId}` to include assigned application user details in the `_embedded` property. Must be used with `user.id eq \"{userId}\"` filter.\n*   **`limit`** (Integer): Number of results per page (default: 20, max: 200).\n*   **`after`** (String): Pagination cursor for the next page of results.\n*   **`useOptimization`** (Boolean): Set to true to return a subset of app properties for better performance.\n*   **`includeNonDeleted`** (Boolean): Include non-active but not deleted apps in results."
     },
     {
@@ -596,7 +596,7 @@
       "description": "Lists all devices in the Okta Device Trust inventory.",
       "folder_path": "Devices",
       "parameters": { "required": [], "optional": ["after", "limit", "search", "expand"] },
-      "depends_on": ["list-device-assurance-policies", "list-device-posture-checks"],
+      "depends_on": ["list-device-assurance-policies", "list-device-posture-checks", "list-users-for-device"],
       "notes": "## Query Parameters\n*   **`search`** (String): A SCIM filter to find devices based on properties. Example: `profile.platform eq \"IOS\"`.\n*   **`expand`** (String, Optional): Use `expand=user` to include associated user details and management status in `_embedded` property.\n\n## Important Notes\n*   For device compliance analysis, also check `list-device-assurance-policies` and `list-device-posture-checks`."
     },
     {
@@ -882,7 +882,7 @@
       "description": "Lists policies of a specified type.",
       "folder_path": "Policies",
       "parameters": { "required": ["type"], "optional": ["status", "q", "expand", "sortBy", "limit", "resourceId", "after"] },
-      "depends_on": [],
+      "depends_on": ["list-policy-rules"],
       "notes": "## Critical Parameters\n*   **`type`** (String, Required): This parameter is **mandatory**. You must specify the type of policy to list. Common values include:\n    *   `OKTA_SIGN_ON`: For Global Session Policies.\n    *   `PASSWORD`: For Password Policies.\n    *   `MFA_ENROLL`: For Multifactor Enrollment Policies.\n    *   `ACCESS_POLICY`: For Authentication Policies.\n    *   `OAUTH_AUTHORIZATION_POLICY`: For OAuth Authorization Server Policies.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=rules` to include all policies with their rules in the same response."
     },
     {
@@ -973,8 +973,8 @@
       "description": "Lists all users that have at least one role assignment.",
       "folder_path": "User Role Assignments",
       "parameters": { "required": [], "optional": ["after", "limit"] },
-      "depends_on": [],
-      "notes": "## Important Notes\n*   This is a quick way to find all users who have been assigned any type of admin role."
+      "depends_on": ["list-user-roles"],
+      "notes": "## Important Notes\n*   This is a quick way to find all users who have been assigned any type of admin role. MUST use the `list-user-roles` endpoint to get detailed role information like role names ."
     },
     {
       "id": "list-user-roles",
@@ -1194,7 +1194,7 @@
       "description": "Lists all resource sets.",
       "folder_path": "Resource Sets",
       "parameters": { "required": [], "optional": ["after"] },
-      "depends_on": [],
+      "depends_on": ["list-resource-set-resources", "list-resource-set-bindings"],
       "notes": "## Important Notes\n*   Resource sets are collections of resources (like groups or apps) to which a custom admin role can be constrained."
     },
     {
@@ -1246,7 +1246,7 @@
       "description": "Lists all role bindings for a resource set.",
       "folder_path": "Role Resource Set Bindings",
       "parameters": { "required": ["resourceSetIdOrLabel"], "optional": ["after"] },
-      "depends_on": ["list-resource-sets"],
+      "depends_on": ["list-resource-sets", "list-resource-set-binding-members"],
       "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n## Important Notes\n*   A 'binding' connects a custom role to a resource set."
     },
     {
@@ -1298,7 +1298,7 @@
       "description": "Lists all custom admin roles.",
       "folder_path": "Custom Roles",
       "parameters": { "required": [], "optional": ["after"] },
-      "depends_on": [],
+      "depends_on": ["list-custom-role-permissions"],
       "notes": "## Important Notes\n*   This lists the custom roles you have created, not the standard, built-in Okta admin roles."
     },
     {
@@ -1363,7 +1363,7 @@
       "description": "Lists users in your organization.",
       "folder_path": "Users",
       "parameters": { "required": [], "optional": ["search", "filter", "q", "after", "limit", "sortBy", "sortOrder", "expand"] },
-      "depends_on": ["list-user-authenticator-enrollments"],
+      "depends_on": ["list-user-authenticator-enrollments", "list-user-app-links"],
       "notes": "## Query Parameters\n*   **`search`** (String): Most powerful method using SCIM expressions for optimal search performance. Searches profile attributes (prefix with `profile.`), status, created, activated, etc. Example: `profile.lastName eq \"Smith\" and status eq \"ACTIVE\"`.\n*   **`filter`** (String): SCIM expressions for limited properties: status, lastUpdated, id, profile.login, profile.email, profile.firstName, profile.lastName. Example: `status eq \"LOCKED_OUT\"`.\n*   **`q`** (String): Simple search matching firstName, lastName, or email (startsWith match). Note: Omits DEPROVISIONED users.\n*   **`expand`** (String): Use `expand=classification` to include user classification metadata in `_embedded` property.\n*   **`limit`** (Integer): Number of results returned (default: 10 for q parameter, 200 max).\n*   **`sortBy`** (String): Field to sort by (search queries only). Example: `sortBy=profile.lastName`.\n*   **`sortOrder`** (String): Sort direction: `asc` or `desc` (search queries only).\n*   **`after`** (String): Pagination cursor for next page.\n\n## Search Parameter Details\n*   **Case Sensitivity**: Property names are case sensitive, operators and string values are case insensitive.\n*   **Supported Properties**: Any user profile attribute (custom attributes included), top-level properties (id, status, created, activated, statusChanged, lastUpdated), user type (type.id), classification.type (Early Access).\n*   **Operators**: eq (equals), sw (starts with), co (contains - limited to profile.firstName, profile.lastName, profile.email, profile.login), gt (greater than), lt (less than).\n*   **Array Properties**: Searches return entire object if any array element matches the search term. Follows SCIM Protocol Specification for array searching.\n*   **Logical Operators**: Use 'and', 'or' for combining conditions. Use parentheses for grouping.\n*   **Sorting**: Use `sortBy` and `sortOrder` parameters with search queries.\n*   **Not Equal Alternative**: The ne (not equal) operator is not supported; use `lt ... or ... gt` combinations instead. Example: to exclude STAGED users use `(status lt \"STAGED\" or status gt \"STAGED\")`.\n\n## Search Examples\n*   **Status Filter**: `search=status eq \"STAGED\"`\n*   **Time-based**: `search=lastUpdated gt \"2014-01-01T00:00:00.000Z\"`\n*   **Specific ID**: `search=id eq \"00u1ero7vZFVEIYLWPBN\"`\n*   **Complex Query**: `search=profile.department eq \"Engineering\" and (created lt \"2014-01-01T00:00:00.000Z\" or status eq \"ACTIVE\")`\n*   **Custom Attribute**: `search=profile.employeeNumber eq \"12345\"`\n*   **Array Property (Custom Attributes)**: `search=profile.arrayAttr eq \"arrayAttrVal1\"` - if user has custom attribute \"arrayAttr\" containing [\"arrayAttrVal1\", \"arrayAttrVal2\"], this user is returned\n*   **Multiple Array Values**: `search=profile.certifications eq \"AWS\" or profile.certifications eq \"Azure\"` - matches users with either certification\n*   **Classification**: `search=classification.type eq \"LITE\"` (supported values: STANDARD, LITE)\n*   **Exclude Status**: `search=(status lt \"STAGED\" or status gt \"STAGED\")` - finds all users except STAGED\n\n## Filter Parameter Examples\n*   **Co Operator**: Only use `co` with profile.firstName, profile.lastName, profile.email, and profile.login\n*   **Supported Operators**: sw (starts with), eq (equals), co (contains - limited attributes only)\n\n## Important Notes\n*   To find users in a `DEPROVISIONED` state, you must explicitly use filter/search: `filter=status eq \"DEPROVISIONED\"`.\n*   For MFA status analysis, use `list-user-authenticator-enrollments` to check enrollment details.\n*   Complex or overly long search queries may result in errors.\n*   Returned users include DEPROVISIONED status when using search parameter.\n*   Use ID lookup for updated records to ensure latest data.\n*   The ne (not equal) operator is not supported; use lt/gt combinations instead.\n*   You can search multiple arrays, multiple values in an array, and use standard logical and filtering operators."
     },
     {
