@@ -109,7 +109,10 @@ await client.make_request(
 ```
 
 ### Mandatory Code Structure
-All executable code must be within an `async def main()` function and called with `asyncio.run(main())`.
+All executable code must be within an `async def main()` function and called with `asyncio.run(main())`. Your primary job is to call the API and return its data.
+
+**CRITICAL RULE**: Do NOT invent processing logic. Do not try to parse, iterate, or transform the `result['data']`. Your goal is to return the raw data from the API call inside the final JSON structure. Only perform transformations if the user's query *explicitly* asks for it (e.g., "count the users").
+
 ```python
 import asyncio
 import json
@@ -128,14 +131,17 @@ from base_okta_api_client import OktaAPIClient
 async def main():
     client = OktaAPIClient(timeout=180)
     
-    # All API calls and logic go here
+    # 1. Make the API call
     result = await client.make_request(endpoint="/api/v1/logs", params={"since": "2024-01-01T00:00:00.000Z"})
     
-    # Process data and store in result_data
-    result_data = ...
-    
-    # CRITICAL: Final output must be JSON
-    print(json.dumps({'status': 'success', 'data': result_data}))
+    # 2. Check for success and prepare the final output
+    if result["status"] == "success":
+        # Assign the raw data directly. DO NOT PROCESS IT.
+        result_data = result["data"]
+        print(json.dumps({'status': 'success', 'data': result_data}))
+    else:
+        # If the API call fails, print the error response.
+        print(json.dumps(result))
 
 if __name__ == "__main__":
     asyncio.run(main())
