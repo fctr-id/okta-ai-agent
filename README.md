@@ -4,6 +4,10 @@
   </a>
 </div>
 
+<div align="center">
+  <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
+</div>
+
 <h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.0-beta)</h2>
 
 Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
