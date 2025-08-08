@@ -100,3 +100,5 @@ RELEASE_NOTES_v1.0-beta.md
 PR_DESCRIPTION_v1.0-beta.md
 docs/current_workflow.md
 src/data/suggested_endpoint_dependencies.md
+src/api/static/*/*
+src/api/static/assets/*
