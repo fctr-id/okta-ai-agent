@@ -212,6 +212,7 @@ You may **ONLY** use these pre-approved methods in your generated code:
 6.  Does my `processing_code` process ALL records without truncation?
 7.  Does my `processing_code` end with the required `print(json.dumps(...))` statement?
 8.  **CRITICAL**: Does my `processing_code` use a set() to deduplicate by Okta ID?
+9. **IMPORTANT**: Is my data provind the attributes the user is asking for ? Does my data contain any non-human friendly output like json or lists . each column MUST only contain human friendly text.
 
 ** IF ANY CHECK FAILS, YOUR RESPONSE WILL CRASH THE SYSTEM 
 
