@@ -21,7 +21,7 @@ Fixes:
 - Improved stepper component handling for mixed-mode database and API operations
 
 Maintenance:
-- Removed deprecated openai_compatible.py module (end-of-life March 2025)
+- Removed deprecated openai_compatible.py module
 - Streamlined data source detection architecture for improved system maintainability
 
 ## v1.0-beta (08-06-2025)
