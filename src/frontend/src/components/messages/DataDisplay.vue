@@ -8,14 +8,30 @@
             <pre>{{ formattedJson }}</pre>
         </div>
 
+        <!-- Empty streaming table - show loading state -->
+        <div v-else-if="shouldShowEmptyStreamingTable" class="table-content">
+            <div class="d-flex justify-center align-center" style="min-height: 200px;">
+                <div class="text-center">
+                    <v-progress-circular
+                        indeterminate
+                        color="primary"
+                        size="64"
+                        class="mb-4"
+                    ></v-progress-circular>
+                    <p class="text-subtitle-1 mb-0">Preparing results...</p>
+                    <p class="text-caption text-grey">Table will appear when data arrives</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Error Message Display -->
         <div v-if="isError" class="error-content">
             {{ getErrorContent }}
         </div>
 
         <!-- Data Table Display -->
-        <div v-else-if="displayedItems.length > 0" class="table-content">
-            <v-data-table :key="`table-${displayedItems.length}`" :headers="formattedHeaders" :items="displayedItems"
+        <div v-else-if="displayedItems.length > 0 || (isStreaming && (props.type === MessageType.TABLE || props.type === MessageType.STREAM))" class="table-content">
+            <v-data-table :headers="formattedHeaders" :items="displayedItems"
                 :loading="loading" :items-per-page="10" :search="search" :sort-by="sortBy" density="compact" hover>
                 <template v-slot:top>
                     <div class="table-header-container pb-6">
@@ -29,9 +45,9 @@
 
                                     <div class="sync-info">
                                         <v-icon class="sync-icon" size="small">mdi-update</v-icon>
-                                        <span v-if="hasLastSyncTimestamp">Last Updated: {{ getLastSyncTime }}</span>
-                                        <span v-else-if="isRealtimeMode">Realtime Mode</span>
-                                        <span v-else>Last Updated: {{ getLastSyncTime }}</span>
+                                        <span v-if="getDataSourceDisplay.showRealtime">{{ getDataSourceDisplay.text }}</span>
+                                        <span v-else-if="metadata?.data_source_type === 'hybrid'">{{ getDataSourceDisplay.text }}: {{ getLastSyncTime }} & Realtime API</span>
+                                        <span v-else>{{ getDataSourceDisplay.text }}: {{ getLastSyncTime }}</span>
                                     </div>
                                 </div>
 
@@ -63,7 +79,7 @@
         </div>
 
         <!-- No Results Message -->
-        <div v-else-if="!loading && !displayedItems.length && !isTextData && !isJsonData && !isError"
+        <div v-else-if="!loading && !displayedItems.length && !isTextData && !isJsonData && !isError && !isStreaming"
             class="no-results">
             <v-icon icon="mdi-information-outline" color="#4C64E2" size="large" class="mb-3"></v-icon>
             <div class="no-results-message">No results found</div>
@@ -76,11 +92,6 @@
 import { marked } from 'marked'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
-import { isRealtimeMode } from '@/state/chatMode.js'
-
-const clearSearch = () => {
-    search.value = ''
-}
 
 marked.setOptions({
     breaks: true,    // Translate line breaks to <br>
@@ -124,29 +135,90 @@ const props = defineProps({
     }
 })
 
+// Debug logging for props
+// console.log('📊 DataDisplay: Props received:', {
+//     type: props.type,
+//     contentType: typeof props.content,
+//     contentIsArray: Array.isArray(props.content),
+//     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
+//     content: props.content,
+//     metadata: props.metadata,
+//     loading: props.loading
+// });
+
 // State management
 
 const search = ref('')
 const sortBy = ref([{ key: 'email', order: 'asc' }])
 
 // Type checks with simplified logic
-const isStreamData = computed(() => props.type === MessageType.STREAM)
-const isJsonData = computed(() => props.type === MessageType.JSON)
-const isError = computed(() => props.type === MessageType.ERROR)
-const isMetadata = computed(() => props.type === MessageType.METADATA)
+const isJsonData = computed(() => {
+    const result = props.type === MessageType.JSON;
+    // console.log('🔧 DataDisplay: isJsonData:', result, 'type:', props.type);
+    return result;
+});
+const isError = computed(() => {
+    const result = props.type === MessageType.ERROR;
+    // console.log('❌ DataDisplay: isError:', result, 'type:', props.type);
+    return result;
+});
 
-const isTextData = computed(() =>
-    props.type === 'text' ||
-    props.type === MessageType.MARKDOWN ||
-    (typeof props.content === 'object' && props.content?.type === 'text')
-)
+const isTextData = computed(() => {
+    const result = props.type === 'text' ||
+        props.type === MessageType.MARKDOWN ||
+        (typeof props.content === 'object' && props.content?.type === 'text');
+    // console.log('📝 DataDisplay: isTextData:', result, 'type:', props.type, 'contentType:', typeof props.content);
+    return result;
+});
 
 const displayedItems = computed(() => {
+    // console.log('📋 DataDisplay: displayedItems computed called:', {
+    //     propsType: props.type,
+    //     contentIsArray: Array.isArray(props.content),
+    //     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
+    //     isStreamingValue: isStreaming.value,
+    //     lastDisplayedItemsLength: lastDisplayedItems.value?.length || 0
+    // });
+    
     if (props.type === MessageType.STREAM || props.type === MessageType.BATCH || props.type === MessageType.TABLE) {
-        return Array.isArray(props.content) ? props.content : [];
+        // Handle both direct array content and nested content structure
+        let items = [];
+        
+        if (Array.isArray(props.content)) {
+            // Direct array of items (most common case during streaming)
+            items = props.content;
+        } else if (props.content && Array.isArray(props.content.content)) {
+            // Nested content structure
+            items = props.content.content;
+        }
+        
+        // console.log('📋 DataDisplay: Table type processing:', {
+        //     itemsLength: items.length,
+        //     isStreaming: isStreaming.value,
+        //     lastDisplayedLength: lastDisplayedItems.value?.length || 0
+        // });
+        
+        // Keep a reference to the last known items to prevent table disappearing
+        if (items.length > 0) {
+            lastDisplayedItems.value = items;
+        }
+        
+        // If items are empty but we were displaying items before and not streaming,
+        // show the old items briefly to avoid flicker
+        if (items.length === 0 && !isStreaming.value && lastDisplayedItems.value.length > 0) {
+            // console.log('📋 DataDisplay: Using fallback lastDisplayedItems');
+            return lastDisplayedItems.value;
+        }
+        
+        // console.log('📋 DataDisplay: Returning', items.length, 'items');
+        return items;
     }
+    // console.log('📋 DataDisplay: Not a table type, returning empty array');
     return [];
 });
+
+// Keep track of last displayed items to prevent blank table
+const lastDisplayedItems = ref([]);
 
 
 
@@ -189,7 +261,22 @@ const formattedJson = computed(() => {
 
 // Streaming support computed properties
 const isStreaming = computed(() => {
-    return props.metadata?.isStreaming === true
+    // Check both locations where streaming status might be stored
+    const directStreaming = props.metadata?.isStreaming === true;
+    const nestedStreaming = props.metadata?.streamingProgress?.isStreaming === true;
+    const contentMetadataStreaming = props.content?.metadata?.isStreaming === true;
+    
+    const result = directStreaming || nestedStreaming || contentMetadataStreaming;
+    
+    // console.log('🔄 DataDisplay: isStreaming computed:', {
+    //     result: result,
+    //     metadata: props.metadata,
+    //     directStreaming,
+    //     nestedStreaming,
+    //     contentMetadataStreaming,
+    //     isStreamingValue: props.metadata?.isStreaming
+    // });
+    return result;
 })
 
 const streamingProgress = computed(() => {
@@ -202,10 +289,75 @@ const streamingProgressPercent = computed(() => {
     return total > 0 ? Math.round((current / total) * 100) : 0
 })
 
-const streamingProgressText = computed(() => {
-    if (!streamingProgress.value) return ''
-    const { current, total, chunksReceived, totalChunks } = streamingProgress.value
-    return `${current.toLocaleString()}/${total.toLocaleString()} records (${chunksReceived}/${totalChunks} chunks)`
+// Debug computed for empty streaming table condition
+const shouldShowEmptyStreamingTable = computed(() => {
+    const condition = displayMode.value === 'table' && displayedItems.value.length === 0 && isStreaming.value;
+    // console.log('🚨 DataDisplay: shouldShowEmptyStreamingTable debug:', {
+    //     condition: condition,
+    //     displayMode: displayMode.value,
+    //     displayedItemsLength: displayedItems.value.length,
+    //     isStreaming: isStreaming.value,
+    //     metadata: props.metadata,
+    //     metadataIsStreaming: props.metadata?.isStreaming
+    // });
+    return condition;
+});
+
+// Add computed to track what should be displayed
+const displayMode = computed(() => {
+    const hasDisplayedItems = displayedItems.value.length > 0;
+    const isText = isTextData.value;
+    const isJson = isJsonData.value;
+    const isErr = isError.value;
+    const isLoad = props.loading;
+    const isStream = isStreaming.value;
+    
+    let mode = 'unknown';
+    if (isText) mode = 'text';
+    else if (isJson) mode = 'json';
+    else if (isErr) mode = 'error';
+    else if (hasDisplayedItems) mode = 'table';
+    else if (props.type === 'table' && isStream) mode = 'table'; // Show empty table during streaming
+    else if (!isLoad && !hasDisplayedItems && !isText && !isJson && !isErr && !isStream) mode = 'no-results';
+    else mode = 'loading-or-hidden';
+    
+    // console.log('🎯 DataDisplay: displayMode computed:', {
+    //     mode: mode,
+    //     hasDisplayedItems: hasDisplayedItems,
+    //     displayedItemsLength: displayedItems.value.length,
+    //     isTextData: isText,
+    //     isJsonData: isJson,
+    //     isError: isErr,
+    //     loading: isLoad,
+    //     isStreaming: isStream,
+    //     propsType: props.type
+    // });
+    
+    return mode;
+})
+
+const getDataSourceDisplay = computed(() => {
+    // Get data source type from metadata
+    const dataSourceType = props.metadata?.data_source_type || 'realtime';
+    
+    switch (dataSourceType) {
+        case 'sql':
+            return {
+                showRealtime: false,
+                text: 'DB Last Updated'
+            };
+        case 'hybrid':
+            return {
+                showRealtime: false,
+                text: 'DB Last Synced'
+            };
+        case 'realtime':
+        default:
+            return {
+                showRealtime: true,
+                text: 'Realtime Mode'
+            };
+    }
 })
 
 const getLastSyncTime = computed(() => {
@@ -250,43 +402,6 @@ const getLastSyncTime = computed(() => {
 
     return timestampStr;
 });
-
-// Check if we have a valid last sync timestamp in metadata
-const hasLastSyncTimestamp = computed(() => {
-    try {
-        // Ensure props and metadata exist
-        if (!props || !props.metadata) {
-            return false;
-        }
-        
-        // Check for last_sync data in metadata
-        if (props.metadata.last_sync) {
-            const lastSync = props.metadata.last_sync;
-            
-            // Check if it's a valid timestamp (not error states)
-            if (typeof lastSync === 'object' && lastSync && lastSync.last_sync) {
-                const timestampValue = lastSync.last_sync;
-                const result = timestampValue && 
-                       timestampValue !== 'Never' && 
-                       timestampValue !== 'Error' && 
-                       timestampValue !== 'No data';
-                return result;
-            } else if (typeof lastSync === 'string') {
-                const result = lastSync && 
-                       lastSync !== 'Never' && 
-                       lastSync !== 'Error' && 
-                       lastSync !== 'No data';
-                return result;
-            }
-        }
-        
-        return false;
-    } catch (error) {
-        console.warn('Error in hasLastSyncTimestamp computed:', error);
-        return false;
-    }
-});
-
 // Helper function to format timestamps consistently
 const formatTimestamp = (timestamp) => {
     if (!timestamp || timestamp === 'Never' || timestamp === 'Error') {
@@ -343,6 +458,56 @@ onBeforeUnmount(() => {
     //displayedContent.value = []
     //headerCache.value = []
 })
+
+// Add watchers for debugging race conditions
+watch(() => props.content, (newContent, oldContent) => {
+    // console.log('👀 DataDisplay: props.content changed:', {
+    //     newLength: Array.isArray(newContent) ? newContent.length : 'N/A',
+    //     oldLength: Array.isArray(oldContent) ? oldContent.length : 'N/A',
+    //     newIsArray: Array.isArray(newContent),
+    //     oldIsArray: Array.isArray(oldContent),
+    //     newContent: newContent,
+    //     oldContent: oldContent
+    // });
+}, { deep: true });
+
+watch(() => props.metadata, (newMetadata, oldMetadata) => {
+    // console.log('👀 DataDisplay: props.metadata changed:', {
+    //     newIsStreaming: newMetadata?.isStreaming,
+    //     oldIsStreaming: oldMetadata?.isStreaming,
+    //     newProgress: newMetadata?.streamingProgress,
+    //     oldProgress: oldMetadata?.streamingProgress,
+    //     newMetadata: newMetadata,
+    //     oldMetadata: oldMetadata
+    // });
+}, { deep: true });
+
+watch(displayedItems, (newItems, oldItems) => {
+    // console.log('👀 DataDisplay: displayedItems changed:', {
+    //     newLength: newItems?.length || 0,
+    //     oldLength: oldItems?.length || 0,
+    //     newItems: newItems,
+    //     oldItems: oldItems
+    // });
+});
+
+watch(isStreaming, (newIsStreaming, oldIsStreaming) => {
+    // console.log('👀 DataDisplay: isStreaming changed:', {
+    //     newIsStreaming: newIsStreaming,
+    //     oldIsStreaming: oldIsStreaming,
+    //     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A'
+    // });
+});
+
+watch(displayMode, (newMode, oldMode) => {
+    // console.log('👀 DataDisplay: displayMode changed:', {
+    //     newMode: newMode,
+    //     oldMode: oldMode,
+    //     displayedItemsLength: displayedItems.value.length,
+    //     isStreaming: isStreaming.value,
+    //     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A'
+    // });
+});
 
 
 // Add CSV download functionality
