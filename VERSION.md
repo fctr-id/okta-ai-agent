@@ -2,7 +2,29 @@
 
 
 
-## Current latest: v1.0-beta (08-06-2025)
+## Current latest: v1.1-beta (08-08-2025)
+
+Enhancements:
+- Introduced advanced strategy agent for enhanced query planning and execution step optimization
+- Redesigned stepper interface with improved user experience and visual progress tracking
+- Implemented high-performance streaming architecture delivering 5x faster results processing
+- Enhanced contextual intelligence providing comprehensive entity details across all query types
+- Added intelligent data source indicators distinguishing between database, real-time API, and hybrid operations
+- Refined user interface terminology with professional AI-focused language throughout execution flow
+- Multi-architecture Docker support for both AMD64 and ARM64 platforms (Apple Silicon, AWS Graviton)
+
+Fixes:
+- Resolved frontend rendering issues affecting batch streaming result display
+- Addressed critical ReDOS security vulnerability identified through CodeQL static analysis
+- Corrected Azure OpenAI configuration variables in model selection framework
+- Fixed hybrid query detection logic ensuring accurate API+SQL step combination identification
+- Improved stepper component handling for mixed-mode database and API operations
+
+Maintenance:
+- Removed deprecated openai_compatible.py module (end-of-life March 2025)
+- Streamlined data source detection architecture for improved system maintainability
+
+## v1.0-beta (08-06-2025)
 
 Revolutionary Multi-Agent Architecture:
 - 5 specialized agents working in perfect coordination

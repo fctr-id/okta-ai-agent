@@ -8,11 +8,11 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.0-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1-beta)</h2>
 
 Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
 
-**NEW in v1.0-beta: Complete API-Only Operation** - No database sync required. Tako can now operate entirely through Okta's APIs, giving you real-time data without any local database dependencies.
+**NEW in v1.1-beta: Enhanced Performance & User Experience** - Introducing advanced strategy agents for optimized query planning, 5x faster results streaming, and intelligent hybrid data source indicators. Building on v1.0's complete API-only operation capabilities, v1.1 delivers enterprise-grade performance with refined user interface and enhanced security.
 
 Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
 
@@ -84,7 +84,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 &nbsp;
 
 ## ⚠️ MAJOR ARCHITECTURE UPGRADE
-> **IMPORTANT**: Version 1.0-beta introduces a **completely new multi-agent architecture** with advanced context engineering and intelligent data source selection. This represents a fundamental evolution from previous versions.
+> **IMPORTANT**: Version 1.1-beta builds upon the revolutionary multi-agent architecture introduced in v1.0, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
 > 
 > **Previous v0.6.x users:** This version uses an entirely different approach. Your existing setup will work, but to access the new unified agent capabilities, follow the new installation process.
 > 
@@ -93,10 +93,11 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 ## 🆕 What Makes Tako Revolutionary?
 
 ### **🚀 Game-Changing Multi-Agent Architecture**
-- **5 Specialized Agents**: Planning, Execution Management, SQL, API, and Results Formatting working in perfect coordination
-- **API-Only Operation**: NEW - Complete operation without database sync, access all data in real-time through 107+ API endpoints
-- **Intelligent Data Selection**: Automatically chooses between database and API based on query requirements and data freshness
+- **5 Specialized Agents**: Enhanced Planning with new Strategy Agent, Execution Management, SQL, API, and Results Formatting working in perfect coordination
+- **API-Only Operation**: Complete operation without database sync, access all data in real-time through 107+ API endpoints
+- **Intelligent Data Selection**: Automatically chooses between database and API based on query requirements and data freshness with enhanced hybrid indicators
 - **Universal API Support**: **Automatic code generation across ALL 107+ Okta GET endpoints** ([complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints)) - not restricted to a few like previous versions
+- **Performance Optimized**: 5x faster results streaming with intelligent batch processing and enhanced user interface
 
 ### **⚡ Multiple AI Provider Support**
 Tako leverages the power of leading AI providers with enhanced compatibility:
@@ -129,7 +130,7 @@ Tako leverages the power of leading AI providers with enhanced compatibility:
 
 ### Docker Compose
 
-The easiest way to get started is with Docker Compose:
+The easiest way to get started is with Docker Compose. **Tako supports multi-architecture deployment** with native images for both **AMD64** (Intel/AMD) and **ARM64** (Apple Silicon, AWS Graviton) platforms.
 
 #### Linux/macOS Instructions
 
@@ -236,8 +237,9 @@ docker compose logs -f
 Tako has been thoroughly tested with multiple LLM configurations to ensure optimal performance across different AI providers:
 
 ### **Reasoning Models** (Planning & Analysis)
-- **O3** - Advanced reasoning capabilities
-- **O4-mini** - Fast and efficient reasoning  
+- **O3** - Advanced reasoning capabilities (very expensive)
+- **GPT-5-mini** - Works but is very slow (leaset expensive but needs more testing)
+- **GPT-o4-mini** - Fast and efficient reasoning  
 - **OpenAI GPT-OSS 120B** - Open-source high-performance reasoning
 - **Claude Sonnet 4** - Superior analytical reasoning
 - **Gemini 2.5 Pro** - Google's latest reasoning model
