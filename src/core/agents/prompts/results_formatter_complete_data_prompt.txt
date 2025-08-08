@@ -141,7 +141,7 @@ FOR TABLE:
 - **CRITICAL: AGGREGATE DATA BY USER/ENTITY** - Don't show repetitive rows!
 - **For user queries: Group by user_id and concatenate groups/apps into comma-separated lists**
 - **ENSURE ALL UNIQUE USERS ARE REPRESENTED**: Create one row per distinct user_id/email, never merge different users
-- **Example: 2 users with groups → 2 rows: User1 with "Group1, Group2", User2 with "Group3, Group4"**
+- **Example: 2 users with groups - 2 rows: User1 with "Group1, Group2", User2 with "Group3, Group4"**
 - **Applications**: Concatenate all application labels for each user: "App1, App2, App3" (ignore None/null values)
 - Provide comprehensive metadata headers for frontend display
 - **SHOW ALL DATA COMPLETELY** - Never truncate or limit any information

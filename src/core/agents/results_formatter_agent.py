@@ -576,7 +576,7 @@ async def _process_complete_data(query: str, results: Dict[str, Any], original_p
     if total_records >= 1000:
         dataset_size_context = f"""
 
-🚀 LARGE DATASET DETECTED ({total_records} records):
+LARGE DATASET DETECTED ({total_records} records):
 - Use efficient Python JSON processing patterns for reliable data transformation
 - Use efficient aggregation patterns to avoid memory issues
 - Focus on user-centric aggregation to reduce output size"""

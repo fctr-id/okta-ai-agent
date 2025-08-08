@@ -137,9 +137,9 @@ Sort data
    - Another has detailed attributes (configurations, policies, metadata)
    - **Join ALL related dataframes for complete data enrichment**
 3. **Choose Processing Pattern**: 
-   - Multiple related dataframes → Use left_join to combine (match ID fields), then flatten
-   - Single complex dataset → Use auto_detect_and_flatten first
-   - Simple data → Use select_columns or smart_dataframe_selection
+   - Multiple related dataframes - Use left_join to combine (match ID fields), then flatten
+   - Single complex dataset - Use auto_detect_and_flatten first
+   - Simple data - Use select_columns or smart_dataframe_selection
 4. **Validate Columns**: Only reference columns that exist in sample data
 5. **Create User-Friendly Mappings**: Convert technical names to readable labels
 

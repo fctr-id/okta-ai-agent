@@ -1,5 +1,5 @@
 # Stage 1: Build the frontend
-FROM node:24-slim AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:24-slim AS frontend-builder
 
 WORKDIR /app/frontend
 
@@ -13,7 +13,7 @@ RUN mkdir -p ../api/static
 RUN npm ci && \
     npm run build
 
-# Stage 2: Python application with built frontend
+# Stage 2: Python application with built frontend  
 FROM python:3.13-slim
 
 WORKDIR /app

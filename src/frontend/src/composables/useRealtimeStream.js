@@ -16,7 +16,8 @@ export function useRealtimeStream() {
         expectedChunks: 0,
         receivedChunks: 0,
         totalRecords: 0,
-        isReceivingChunks: false
+        isReceivingChunks: false,
+        baseData: null // Store metadata for final assembly
     });
 
     // Connection state
@@ -34,6 +35,8 @@ export function useRealtimeStream() {
         currentStepIndex: -1,
         steps: [],
         results: null,
+    planningStarted: false,
+    planningCompleted: false,
     });
 
     /**
@@ -43,6 +46,14 @@ export function useRealtimeStream() {
      */
     const startProcess = async (query) => {
         if (!query?.trim()) return null;
+
+        // console.log("🔄 startProcess: Starting new query - RESETTING ALL STATE");
+        // console.log("🔄 startProcess: Previous state before reset:", {
+        //     hasResults: !!execution.results,
+        //     previousStatus: execution.status,
+        //     isProcessing: isProcessing.value,
+        //     isStreaming: isStreaming.value
+        // });
 
         // Reset state
         isLoading.value = true;
@@ -63,18 +74,34 @@ export function useRealtimeStream() {
             isReceivingChunks: false
         };
 
-        // Initialize with only the two bookend steps
+        // console.log("🔄 startProcess: State after reset:", {
+        //     hasResults: !!execution.results,
+        //     newStatus: execution.status,
+        //     isProcessing: isProcessing.value,
+        //     isStreaming: isStreaming.value
+        // });
+
+        // Initialize with three sentinel steps:
+        // 1. thinking (pre-plan entity relevance selection)
+        // 2. generating_steps (plan generation)
+        // 3. finalizing_results (will activate after all execution steps complete)
         execution.steps = [
             {
-                id: 'generate_plan',
-                tool_name: 'generate_plan',
-                reason: 'Analyzing query and generating execution plan',
-                status: 'active', // Start with planning step active
+                id: 'thinking',
+                tool_name: 'thinking',
+                reason: 'Crafting optimal execution strategy',
+                status: 'active', // Start with thinking step active
+            },
+            {
+                id: 'generating_steps',
+                tool_name: 'generating_steps',
+                reason: 'Generating detailed execution plan',
+                status: 'pending',
             },
             {
                 id: 'finalizing_results',
                 tool_name: 'finalizing_results', 
-                reason: 'Processing and formatting final results',
+                reason: 'Finalizing and formatting results',
                 status: 'pending',
             }
         ];
@@ -194,7 +221,6 @@ export function useRealtimeStream() {
                             handleErrorEvent(event);
                             break;
                         case 'metadata':
-                            // console.log("Handling metadata event - start of chunked streaming");
                             handleChunkedMetadata(event);
                             break;
                         case 'batch':
@@ -238,6 +264,31 @@ export function useRealtimeStream() {
         try {
             const data = JSON.parse(event.data);
             const content = data.content;
+            // Only activate generating_steps when actual planning starts
+            if (content.status === 'planning_start' && execution.steps[0] && execution.steps[0].id === 'thinking') {
+                execution.planningStarted = true;
+                execution.status = 'planning';
+                // Complete thinking step and activate generating_steps
+                execution.steps[0].status = 'completed';
+                if (execution.steps[1] && execution.steps[1].id === 'generating_steps') {
+                    execution.steps[1].status = 'active';
+                }
+                execution._thinkingRenamed = true; // Keep flag for compatibility
+            }
+
+            // If we receive explicit planning_complete before plan event, mark generating_steps completed
+            if (content.status === 'planning_complete' && execution.steps[1] && execution.steps[1].id === 'generating_steps') {
+                // If thinking is still active (edge case), complete it first
+                if (execution.steps[0] && execution.steps[0].id === 'thinking' && execution.steps[0].status === 'active') {
+                    execution.steps[0].status = 'completed';
+                    execution.steps[1].status = 'active';
+                }
+                // Complete the generating_steps step
+                if (execution.steps[1].status !== 'completed') {
+                    execution.steps[1].status = 'completed';
+                }
+                execution.planningCompleted = true;
+            }
 
             // Handle rich plan details when available
             if (content.plan_details) {
@@ -255,12 +306,18 @@ export function useRealtimeStream() {
 
             // Handle simpler plan status updates
             if (
-                content.status === "generated" ||
-                content.status === "starting_execution" ||
-                content.status === "running_execution"
+                (content.status === "generated" ||
+                 content.status === "starting_execution" ||
+                 content.status === "running_execution") &&
+                 // Avoid premature transition: require planning started + (plan data arrived or planning complete)
+                 ((execution.planningStarted && execution.planningCompleted) || execution.planGenerated)
             ) {
-                execution.planGenerated = true;
+                // Only switch to executing if we actually have a plan (plan event) OR got planning_complete
+                execution.planGenerated = execution.planGenerated || execution.planningCompleted;
                 execution.status = "executing";
+            } else if (content.status === 'running_execution' && !execution.planningStarted) {
+                // Backend may emit a generic running_execution early; treat as still planning
+                execution.status = 'planning';
             }
         } catch (err) {
             console.error("Error processing plan status event:", err);
@@ -280,11 +337,11 @@ export function useRealtimeStream() {
             // Handle Modern Execution Manager format
             if (content.step_number !== undefined && content.step_name && content.status) {
                 // console.log(`Processing step ${content.step_number}: ${content.step_name} - ${content.status}`);
-                // Map step numbers to our inserted steps (accounting for generate_plan at index 0)
-                // Backend step 1 -> frontend index 1 (after generate_plan)
-                const stepIndex = content.step_number; // Keep 1-based since generate_plan is at index 0
+                // Map step numbers to our inserted steps (accounting for thinking at index 0 and generating_steps at index 1)
+                // Backend step 1 -> frontend index 2 (after thinking and generating_steps)
+                const stepIndex = content.step_number + 1; // Offset by 2 (thinking + generating_steps), but step_number is 1-based
                 
-                if (stepIndex >= 1 && stepIndex < execution.steps.length - 1) { // Exclude finalizing_results (last step)
+                if (stepIndex >= 2 && stepIndex < execution.steps.length - 1) { // Exclude finalizing_results (last step)
                     // Map backend status to frontend status
                     const statusMap = {
                         'running': 'active',
@@ -328,7 +385,7 @@ export function useRealtimeStream() {
                     
                     // Check if all execution steps are completed (excluding bookends)
                     if (content.status === 'completed') {
-                        const executionSteps = execution.steps.slice(1, -1); // Exclude generate_plan and finalizing_results
+                        const executionSteps = execution.steps.slice(2, -1); // Exclude thinking, generating_steps and finalizing_results
                         const allExecutionStepsCompleted = executionSteps.every(step => step.status === 'completed');
                         
                         if (allExecutionStepsCompleted) {
@@ -358,9 +415,12 @@ export function useRealtimeStream() {
             if (content.steps && Array.isArray(content.steps)) {
                 execution.planGenerated = true;
                 
-                // Complete the generate_plan step
-                if (execution.steps[0] && execution.steps[0].id === 'generate_plan') {
+                // Complete the thinking and generating_steps sentinel steps
+                if (execution.steps[0] && execution.steps[0].id === 'thinking') {
                     execution.steps[0].status = 'completed';
+                }
+                if (execution.steps[1] && execution.steps[1].id === 'generating_steps') {
+                    execution.steps[1].status = 'completed';
                 }
 
                 // Create the new execution steps from the plan
@@ -377,12 +437,14 @@ export function useRealtimeStream() {
                     return newStep;
                 });
 
-                // Insert the new steps between generate_plan (index 0) and finalizing_results (last)
-                const generatePlanStep = execution.steps[0];
+                // Insert the new steps between generating_steps (index 1) and finalizing_results (last)
+                const thinkingStep = execution.steps[0];
+                const generatingStepsStep = execution.steps[1];
                 const finalizingResultsStep = execution.steps[execution.steps.length - 1];
                 
                 execution.steps = [
-                    generatePlanStep,
+                    thinkingStep,
+                    generatingStepsStep,
                     ...newExecutionSteps,
                     finalizingResultsStep
                 ];
@@ -403,19 +465,25 @@ export function useRealtimeStream() {
      * Handle final result events - Activate finalizing_results step and then complete
      */
     const handleFinalResultEvent = (event) => {
-        // console.log("handleFinalResultEvent called with:", event.data);
+        // console.log("🎯 handleFinalResultEvent called with:", event.data);
+        // console.log("🎯 chunkedResults.value.isReceivingChunks:", chunkedResults.value.isReceivingChunks);
+        // console.log("🎯 execution.results exists:", !!execution.results);
         try {
             const data = JSON.parse(event.data);
             const content = data.content;
-            // console.log("Final result content:", content);
+            // console.log("🎯 Final result content:", content);
             
             // If we're receiving chunks, this might be the final completion signal
-            if (chunkedResults.value.isReceivingChunks) {
-                // console.log("Received final_result during chunked streaming - completing");
+            if (chunkedResults.value.isReceivingChunks || 
+                (execution.results && execution.results.display_type === 'table' && Array.isArray(execution.results.content) && execution.results.content.length > 0)) {
+                // console.log("🎯 handleFinalResultEvent: Detected table data exists - completing without overwriting results");
 
-                // Force completion of chunked streaming
-                execution.results.metadata.isStreaming = false;
-                delete execution.results.metadata.streamingProgress;
+                // Force completion of chunked streaming WITHOUT overwriting execution.results
+                // The chunked data is already properly set in execution.results
+                if (execution.results && execution.results.metadata) {
+                    execution.results.metadata.isStreaming = false;
+                    delete execution.results.metadata.streamingProgress;
+                }
                 
                 // Complete the finalizing step
                 const finalizingStepIndex = execution.steps.length - 1;
@@ -427,6 +495,8 @@ export function useRealtimeStream() {
                 isProcessing.value = false;
                 isStreaming.value = false;
                 chunkedResults.value.isReceivingChunks = false;
+                
+                // console.log("🎯 handleFinalResultEvent: Table data preserved, streaming completed");
                 
                 // Close EventSource
                 if (activeEventSource.value) {
@@ -546,44 +616,44 @@ export function useRealtimeStream() {
     const handleChunkedMetadata = (event) => {
         try {
             const data = JSON.parse(event.data);
-            const content = data.content || {};
+            const content = data.content;
             
-            // console.log(`[handleChunkedMetadata] Starting chunked streaming with ${content.total_batches} batches`);
-            
-            // Initialize chunked result state
-            chunkedResults.value = {
-                chunks: [],
-                expectedChunks: content.total_batches || 0,
-                receivedChunks: 0,
-                totalRecords: 0, // Will be updated when we get first batch
-                isReceivingChunks: true,
-                baseData: data // Store metadata for final assembly
-            };
-            
-            // Activate the finalizing_results step
-            const finalizingStepIndex = execution.steps.length - 1;
-            if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                execution.steps[finalizingStepIndex].status = 'active';
-                execution.currentStepIndex = finalizingStepIndex;
+            // console.log("📦 handleChunkedMetadata received:", content);
+
+            chunkedResults.value.isReceivingChunks = true;
+            chunkedResults.value.expectedChunks = content.total_batches || content.total_chunks || 0;
+            chunkedResults.value.totalRecords = content.total_records || 0;
+            chunkedResults.value.baseData = content.base_data; // Store base for final assembly
+
+            // --- KEY CHANGE: Initialize results object immediately ---
+            // This makes the table appear right away
+            if (!execution.results) {
+                // Handle case where base_data might be undefined
+                const baseData = content.base_data || {};
+                
+                execution.results = {
+                    display_type: content.display_type || 'table',
+                    content: [], // Start with empty content
+                    // Add streaming metadata for the UI - CRITICAL: Make this reactive
+                    metadata: {
+                        ...(baseData.metadata || {}),
+                        isStreaming: true, // This should trigger table to show
+                        streamingProgress: {
+                            current: 0,
+                            total: content.total_records || 0,
+                            chunksReceived: 0,
+                            totalChunks: content.total_batches || content.total_chunks || 0,
+                        }
+                    },
+                    // Include any other properties from base_data if available
+                    ...(baseData || {})
+                };
+                // console.log("📦 Initialized execution.results for streaming with isStreaming=true:", execution.results);
             }
-            
-            // Show initial empty table with streaming indicator
-            execution.results = {
-                content: [], // Start with empty array
-                display_type: content.display_type || "table",
-                headers: [], // Will be updated when we get first batch
-                metadata: {
-                    isStreaming: true,
-                    streamingProgress: {
-                        current: 0,
-                        total: 0, // Will be updated
-                        chunksReceived: 0,
-                        totalChunks: content.total_batches || 0
-                    }
-                }
-            };
+            // ---------------------------------------------------------
+
         } catch (err) {
-            // console.error("[handleChunkedMetadata] Error processing metadata:", err);
+            console.error("Error handling chunked metadata:", err);
         }
     };
 
@@ -593,76 +663,102 @@ export function useRealtimeStream() {
     const handleChunkedBatch = (event) => {
         try {
             const data = JSON.parse(event.data);
-            const content = data.content || {};
+            const content = data.content;
             const metadata = data.metadata || {};
             
-            // console.log(`[handleChunkedBatch] Received batch ${metadata.batch_number}/${metadata.total_batches}`);
+            // Handle batch number from metadata
+            const batchNumber = metadata.batch_number || (chunkedResults.value.receivedChunks + 1);
             
-            // Add chunk data to existing results
-            if (content.formatted_response?.content) {
-                // First batch - set up headers and total records
-                if (metadata.batch_number === 1) {
-                    const formattedResponse = content.formatted_response;
-                    execution.results.headers = formattedResponse.headers || [];
-                    chunkedResults.value.totalRecords = content.chunk_info?.total_size || 0;
-                    
-                    // Update total in streaming progress
-                    execution.results.metadata.streamingProgress.total = chunkedResults.value.totalRecords;
-                }
-                
-                chunkedResults.value.chunks.push(...content.formatted_response.content);
-                chunkedResults.value.receivedChunks++;
-                
-                // Update the table content in real-time
-                execution.results.content = [...chunkedResults.value.chunks]; // Spread to trigger reactivity
-                
-                // Update streaming progress
-                execution.results.metadata.streamingProgress = {
-                    current: chunkedResults.value.chunks.length,
-                    total: chunkedResults.value.totalRecords,
-                    chunksReceived: chunkedResults.value.receivedChunks,
-                    totalChunks: chunkedResults.value.expectedChunks
+            // console.log(`📦 handleChunkedBatch received: batch ${batchNumber}/${chunkedResults.value.expectedChunks}`);
+
+            // Ensure results object is initialized
+            if (!execution.results) {
+                console.warn("📦 Received batch before metadata. Initializing fallback structure.");
+                execution.results = {
+                    display_type: 'table',
+                    content: [],
+                    metadata: { 
+                        isStreaming: true, 
+                        streamingProgress: {
+                            current: 0,
+                            total: 0,
+                            chunksReceived: 0,
+                            totalChunks: 0
+                        }
+                    }
                 };
+            }
+
+            // --- KEY CHANGE: Extract data from formatted_response structure ---
+            let dataToAdd = [];
+            
+            // The backend sends the entire chunk object with formatted_response
+            if (content && content.formatted_response && Array.isArray(content.formatted_response.content)) {
+                dataToAdd = content.formatted_response.content;
                 
-                console.log(`[handleChunkedBatch] Updated table: ${chunkedResults.value.chunks.length}/${chunkedResults.value.totalRecords} records`);
+                // If this is the first chunk and we haven't set up the base structure, do it now
+                // BUT preserve the streaming metadata we set up in handleChunkedMetadata
+                if (execution.results.content.length === 0 && content.formatted_response) {
+                    const { content: chunkContent, metadata: baseMetadata, ...baseStructure } = content.formatted_response;
+                    
+                    // Preserve our streaming metadata while merging base structure
+                    const currentStreamingMetadata = execution.results.metadata;
+                    Object.assign(execution.results, baseStructure);
+                    execution.results.content = []; // Ensure content starts as empty array
+                    
+                    // Merge base metadata but preserve streaming status
+                    execution.results.metadata = {
+                        ...(baseMetadata || {}),
+                        ...currentStreamingMetadata, // Keep our streaming metadata
+                        isStreaming: true, // Ensure streaming stays true
+                    };
+                    
+                    // console.log("📦 Merged base structure while preserving streaming metadata:", execution.results.metadata);
+                }
+            } else if (Array.isArray(content)) {
+                // Fallback for direct array content
+                dataToAdd = content;
             }
             
-            // Check if this is the final batch
-            if (metadata.is_final || chunkedResults.value.receivedChunks >= chunkedResults.value.expectedChunks) {
-                // console.log(`[handleChunkedBatch] All batches received, completing streaming`);
-                
-                // Mark streaming as complete
-                execution.results.metadata.isStreaming = false;
-                delete execution.results.metadata.streamingProgress;
-                
-                // Complete the finalizing_results step
-                setTimeout(() => {
-                    const finalizingStepIndex = execution.steps.length - 1;
-                    if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                        execution.steps[finalizingStepIndex].status = 'completed';
-                    }
-                    
-                    execution.status = "completed";
-                    isProcessing.value = false;
-                    isStreaming.value = false;
-                    
-                    // Close EventSource after completion
-                    if (activeEventSource.value) {
-                        activeEventSource.value.close();
-                        activeEventSource.value = null;
-                    }
-                }, 300);
-                
-                // Reset chunk state
+            if (dataToAdd.length > 0) {
+                // CRITICAL: Force Vue reactivity by creating a new array reference
+                // This ensures Vue detects the change and re-renders the table
+                const newContent = [...execution.results.content, ...dataToAdd];
+                execution.results.content = newContent;
+                // console.log(`📦 Added ${dataToAdd.length} records to results. Total: ${execution.results.content.length}`);
+            } else {
+                console.warn("📦 No data found in batch:", content);
+            }
+            // ---------------------------------------------------------------------
+
+            // Update progress - Create new object for Vue reactivity
+            if (execution.results.metadata?.streamingProgress) {
+                execution.results.metadata.streamingProgress = {
+                    ...execution.results.metadata.streamingProgress,
+                    current: execution.results.content.length,
+                    chunksReceived: batchNumber,
+                };
+                // console.log(`📦 Progress updated: ${execution.results.content.length}/${execution.results.metadata.streamingProgress.total} (${Math.round((execution.results.content.length / execution.results.metadata.streamingProgress.total) * 100)}%)`);
+            }
+
+            // CRITICAL: Ensure streaming status is maintained during batching
+            if (execution.results.metadata) {
+                execution.results.metadata.isStreaming = true; // Keep streaming true until all chunks received
+            }
+
+            // Update chunk tracking
+            chunkedResults.value.receivedChunks = batchNumber;
+
+            // If all chunks are received, mark streaming as complete in the metadata
+            if (chunkedResults.value.receivedChunks >= chunkedResults.value.expectedChunks) {
+                // console.log("📦 All chunks received, updating streaming status.");
+                if (execution.results.metadata) {
+                    execution.results.metadata.isStreaming = false;
+                }
                 chunkedResults.value.isReceivingChunks = false;
             }
         } catch (err) {
-            // console.error("[handleChunkedBatch] Error processing batch:", err);
-            
-            // Reset chunk state on error
-            chunkedResults.value.isReceivingChunks = false;
-            execution.status = "error";
-            error.value = "Failed to process chunked response";
+            console.error("Error handling chunked batch:", err);
         }
     };
 
@@ -811,6 +907,20 @@ export function useRealtimeStream() {
             }
         }
     );
+
+    // Add watcher to track execution.results changes
+    watch(() => execution.results, (newResults, oldResults) => {
+        // console.log("🎯 execution.results changed:", {
+        //     newExists: !!newResults,
+        //     oldExists: !!oldResults,
+        //     newType: newResults?.display_type,
+        //     oldType: oldResults?.display_type,
+        //     newContentLength: Array.isArray(newResults?.content) ? newResults.content.length : 'N/A',
+        //     oldContentLength: Array.isArray(oldResults?.content) ? oldResults.content.length : 'N/A',
+        //     newResults: newResults,
+        //     oldResults: oldResults
+        // });
+    }, { deep: true });
 
     return {
         // State

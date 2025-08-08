@@ -23,10 +23,20 @@ if ([string]::IsNullOrEmpty($Version)) {
     } while ($true)
 }
 
+# Ask if this should also be tagged as 'latest'
+$tagAsLatest = Read-Host "Tag this version as 'latest' as well? (y/n)"
+$latestTag = $tagAsLatest -eq "y"
+
 Write-Host "========================================="
-Write-Host "Docker Image Build and Publish Script"
+Write-Host "Docker Multi-Architecture Build Script"
 Write-Host "Image: $Registry/$ImageName"
 Write-Host "Version: $Version"
+if ($latestTag) {
+    Write-Host "Tags: $Version, latest"
+} else {
+    Write-Host "Tags: $Version"
+}
+Write-Host "Platforms: linux/amd64, linux/arm64"
 Write-Host "========================================="
 
 # Check if Docker is running
@@ -40,65 +50,54 @@ try {
 # Get parent directory for context
 $contextPath = (Get-Item -Path "../").FullName
 
-# Build the image with version tag - pointing to parent directory
-Write-Host "Building Docker image: $Registry/$ImageName`:$Version"
-Write-Host "Using Dockerfile from: $contextPath"
-docker build --pull --rm -f "../Dockerfile" -t "$Registry/$ImageName`:$Version" $contextPath
+# Build multi-architecture images (but don't push yet)
+Write-Host "Building multi-architecture Docker images (linux/amd64, linux/arm64)..."
+if ($latestTag) {
+    Write-Host "Tags: $Registry/$ImageName`:$Version, $Registry/$ImageName`:latest"
+} else {
+    Write-Host "Tags: $Registry/$ImageName`:$Version"
+}
 
+# Build multi-architecture images using buildx
+if ($latestTag) {
+    docker buildx build --pull --rm `
+        --platform linux/amd64,linux/arm64 `
+        --file "../Dockerfile" `
+        --tag "$Registry/$ImageName`:$Version" `
+        --tag "$Registry/$ImageName`:latest" `
+        --push `
+        $contextPath
+} else {
+    docker buildx build --pull --rm `
+        --platform linux/amd64,linux/arm64 `
+        --file "../Dockerfile" `
+        --tag "$Registry/$ImageName`:$Version" `
+        --push `
+        $contextPath
+}
+    
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Docker build failed with exit code $LASTEXITCODE"
+    Write-Error "Multi-architecture build failed with exit code $LASTEXITCODE"
     exit $LASTEXITCODE
 }
 
-# Always tag as latest, even for beta versions
-Write-Host "Tagging as latest"
-docker tag "$Registry/$ImageName`:$Version" "$Registry/$ImageName`:latest"
+Write-Host "Multi-architecture images built successfully."
 
-# Ask user if they want to push
-$pushConfirm = Read-Host "Do you want to push the images to Docker registry? (y/n)"
+# Ask user if they want to keep them published
+$pushConfirm = Read-Host "Images were built and pushed to registry (buildx requirement). Keep them published? (y/n)"
 if ($pushConfirm -ne "y") {
-    Write-Host "Image push canceled."
+    Write-Host "Note: You'll need to manually remove tags from Docker Hub if desired:"
+    Write-Host "Go to: https://hub.docker.com/r/$Registry/$ImageName/tags"
     exit 0
 }
-
-# Check if user is logged in
-#$loginStatus = docker info 2>&1 | Select-String "Username"
-#if (!$loginStatus) {
-#    Write-Host "Not logged into Docker Hub. Please login:"
-#    docker login
-#    if ($LASTEXITCODE -ne 0) {
-#        Write-Error "Login failed. Aborting publish."
-#        exit 1
-#    }
-#}
-
-# Push versioned tag
-Write-Host "Pushing image with version tag: $Registry/$ImageName`:$Version"
-docker push "$Registry/$ImageName`:$Version"
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to push versioned image."
-    exit $LASTEXITCODE
-}
-
-# Always push latest tag
-Write-Host "Pushing image with latest tag: $Registry/$ImageName`:latest"
-docker push "$Registry/$ImageName`:latest"
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to push latest image."
-    exit $LASTEXITCODE
-}
-
-# Create VERSION.md in the parent directory with proper formatting
-#$versionFile = Join-Path -Path $contextPath -ChildPath "VERSION.md"
-#$releaseType = if ($Version -match '-') { "Beta" } else { "Stable" }
-#$versionContent = "# Version History`r`n`r`n## Current Latest: v$Version ($releaseType, $(Get-Date -Format 'yyyy-MM-dd'))"
-#$versionContent | Out-File -FilePath $versionFile -Encoding utf8
-
+    
 Write-Host "=========== Success ============"
-Write-Host "Images successfully published:"
-Write-Host "- $Registry/$ImageName`:$Version"
-Write-Host "- $Registry/$ImageName`:latest"
-Write-Host "Version file created at: $versionFile"
+if ($latestTag) {
+    Write-Host "Multi-architecture images successfully published:"
+    Write-Host "- $Registry/$ImageName`:$Version (linux/amd64, linux/arm64)"
+    Write-Host "- $Registry/$ImageName`:latest (linux/amd64, linux/arm64)"
+} else {
+    Write-Host "Multi-architecture image successfully published:"
+    Write-Host "- $Registry/$ImageName`:$Version (linux/amd64, linux/arm64)"
+}
 Write-Host "================================="

@@ -98,3 +98,9 @@ docs/LLM_Optimized_API_Architecture.md
 docs/tako-v1-alternative-article.md
 RELEASE_NOTES_v1.0-beta.md
 PR_DESCRIPTION_v1.0-beta.md
+docs/current_workflow.md
+src/data/suggested_endpoint_dependencies.md
+src/api/static/*/*
+src/api/static/assets/*
+src/core/agents/prompts/api_sql_code_gen_agent_system_prompt_backup.txt
+src/core/orchestration/moder_execution_manager_yesterday.py

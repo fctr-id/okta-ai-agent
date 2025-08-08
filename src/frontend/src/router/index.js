@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ChatInterface from '@/components/ChatInterface.vue'
 import ChatInterfaceV2 from '@/components/ChatInterfaceV2.vue'
 import ChatContainer from '@/components/views/chatContainer.vue'
 import { useAuth } from '@/composables/useAuth'
@@ -26,12 +25,6 @@ const routes = [
     alias: ['/agentChat', '/agentUI'],
     name: 'Home',
     component: ChatContainer,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/agentChat_v1',
-    name: 'ChatV2',
-    component: ChatInterface,
     meta: { requiresAuth: true }
   },
   // Catch-all route for 404

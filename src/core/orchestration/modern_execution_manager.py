@@ -19,7 +19,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 # Import existing agents from agents directory
 from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
 from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
-from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent
+from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent, PlanningDependencies
 from src.core.agents.results_formatter_agent import format_results as process_results_formatter  # Unified token-based results formatting
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 
@@ -175,6 +175,7 @@ class ModernExecutionManager:
         self.current_execution_plan = None
         self.plan_ready_callback = None  # Optional callback for when plan is ready
         self.step_status_callback = None  # Optional callback for step status updates (step_number, step_type, status)
+        self.planning_phase_callback = None  # Optional callback for planning lifecycle ('planning_start'/'planning_complete')
         
         # MINIMAL CANCELLATION SYSTEM: Aggressive termination on user request
         self.cancelled_queries = set()  # Just store correlation_ids that are cancelled
@@ -444,15 +445,35 @@ class ModernExecutionManager:
         
         # FULL POLARS: Convert to DataFrame for all operations
         if isinstance(data, list) and data:
-            # Convert list of dicts to Polars DataFrame
-            df = pl.DataFrame(data)
-            self.polars_dataframes[variable_name] = df
-            logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+            # Check if it's a list of empty lists/arrays
+            if all(isinstance(item, list) and not item for item in data):
+                # All items are empty lists - treat as empty data
+                df = pl.DataFrame()
+                self.polars_dataframes[variable_name] = df
+                logger.warning(f"Created empty Polars DataFrame for {variable_name}: all API results were empty arrays")
+            else:
+                try:
+                    # Convert list of dicts to Polars DataFrame with schema handling
+                    df = pl.DataFrame(data, infer_schema_length=None)
+                    self.polars_dataframes[variable_name] = df
+                    logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+                except Exception as e:
+                    logger.error(f"Failed to create DataFrame from data: {e}")
+                    # Fallback: create empty DataFrame
+                    df = pl.DataFrame()
+                    self.polars_dataframes[variable_name] = df
+                    logger.warning(f"Created empty Polars DataFrame for {variable_name}: DataFrame creation failed")
         elif isinstance(data, dict):
             # Single record - convert to DataFrame
-            df = pl.DataFrame([data])
-            self.polars_dataframes[variable_name] = df
-            logger.debug(f"Created Polars DataFrame from single record: {df.shape[0]} rows × {df.shape[1]} columns")
+            try:
+                df = pl.DataFrame([data])
+                self.polars_dataframes[variable_name] = df
+                logger.debug(f"Created Polars DataFrame from single record: {df.shape[0]} rows × {df.shape[1]} columns")
+            except Exception as e:
+                logger.error(f"Failed to create DataFrame from single record: {e}")
+                df = pl.DataFrame()
+                self.polars_dataframes[variable_name] = df
+                logger.warning(f"Created empty Polars DataFrame for {variable_name}: single record creation failed")
         else:
             # Empty or invalid data
             df = pl.DataFrame()
@@ -665,7 +686,7 @@ class ModernExecutionManager:
             schema_path = os.path.join(os.path.dirname(self.simple_ref_path), "okta_schema.json")
             sql_tables = []
             
-            with open(schema_path, 'r') as f:
+            with open(schema_path, 'r', encoding='utf-8') as f:
                 schema_data = json.load(f)
                 # Handle different schema formats
                 if 'tables' in schema_data:
@@ -709,7 +730,7 @@ class ModernExecutionManager:
             }
             
             # Save the generated file with compact formatting
-            with open(self.simple_ref_path, 'w') as f:
+            with open(self.simple_ref_path, 'w', encoding='utf-8') as f:
                 # Custom JSON formatting to keep arrays on one line
                 json_str = json.dumps(lightweight_data, indent=2)
                 
@@ -758,7 +779,7 @@ class ModernExecutionManager:
     def _load_simple_reference(self) -> Dict[str, Any]:
         """Load simple reference format for planning, generating it if missing"""
         try:
-            with open(self.simple_ref_path, 'r') as f:
+            with open(self.simple_ref_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except FileNotFoundError:
             logger.warning(f"Simple reference file not found: {self.simple_ref_path}")
@@ -772,7 +793,7 @@ class ModernExecutionManager:
     def _load_api_data(self) -> Dict[str, Any]:
         """Load full API entity data for endpoint filtering"""
         try:
-            with open(self.full_api_path, 'r') as f:
+            with open(self.full_api_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except FileNotFoundError:
             logger.warning(f"Full API data file not found: {self.full_api_path}")
@@ -782,6 +803,35 @@ class ModernExecutionManager:
             return {'endpoints': []}
     
 
+    
+    def _get_entity_endpoints_for_entity(self, entity_name: str) -> List[Dict[str, Any]]:
+        """Get all endpoints for a specific entity, including depends_on endpoints"""
+        entity = entity_name.lower()
+        
+        # Get all endpoints for this entity
+        entity_endpoints = []
+        for endpoint in self.endpoints:
+            if endpoint.get('entity', '').lower() == entity:
+                # SECURITY VALIDATION: Validate endpoint before including
+                security_result = validate_api_endpoint(endpoint)
+                if security_result.is_valid:
+                    entity_endpoints.append(endpoint)
+                else:
+                    logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
+        
+        # Get depends_on endpoints for all matched endpoints
+        depends_on_endpoints = self._get_depends_on_endpoints(entity_endpoints)
+        
+        # Combine and return unique endpoints
+        all_endpoints = entity_endpoints + depends_on_endpoints
+        seen_ids = set()
+        unique_endpoints = []
+        for ep in all_endpoints:
+            if ep.get('id') not in seen_ids:
+                unique_endpoints.append(ep)
+                seen_ids.add(ep.get('id'))
+        
+        return unique_endpoints
     
     def _get_entity_endpoints_for_step(self, step: ExecutionStep) -> List[Dict[str, Any]]:
         """Get filtered endpoints for a specific API step, including depends_on endpoints"""
@@ -942,22 +992,124 @@ class ModernExecutionManager:
             else:
                 logger.info(f"[{correlation_id}] Query will use both SQL and API modes as planned")
             
-            # Phase 1: Use Planning Agent to generate execution plan
-            logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
+            # Phase 0: Pre-Planning - Entity and Operation Selection
+            logger.info(f"[{correlation_id}] Phase 0: Pre-Planning Agent execution")
             
-            # Create dependencies for Planning Agent (same as old executor)
-            from src.core.agents.planning_agent import PlanningDependencies
+            # Use the enhanced pre-planning agent to select relevant entities
+            from src.core.agents.preplan_agent import select_relevant_entities
             
-            # Get the lightweight reference for new entities format
-            lightweight_ref = self.simple_ref_data  # Use already loaded reference data
-            entities = lightweight_ref.get('entities', {})
+            # Get the lightweight reference data for entity selection
+            lightweight_ref = self.simple_ref_data
+            entities_dict = lightweight_ref.get('entities', {})
             
-            planning_deps = PlanningDependencies(
-                available_entities=self.available_entities,
+            preplan_result = await select_relevant_entities(
+                query=modified_query,
                 entity_summary=self.entity_summary,
                 sql_tables=self.sql_tables,
                 flow_id=correlation_id,
-                entities=entities  # Pass the new entity-grouped format
+                available_entities=list(entities_dict.keys()) if entities_dict else None,
+                entities=entities_dict
+            )
+            
+            if not preplan_result.get('success', False):
+                logger.error(f"[{correlation_id}] Pre-planning failed: {preplan_result.get('error', 'Unknown error')}")
+                return {
+                    'success': False,
+                    'error': f"Pre-planning failed: {preplan_result.get('error', 'Unknown error')}",
+                    'correlation_id': correlation_id,
+                    'query': query,
+                    'phase': 'preplan_error'
+                }
+            
+            selected_entity_operations = preplan_result['selected_entity_operations']
+            entity_op_pairs = [f"{eo.entity}::{eo.operation or 'null'}" for eo in selected_entity_operations]
+            logger.info(f"[{correlation_id}] Pre-planning completed - selected entity-operation pairs: {entity_op_pairs}")
+            
+            # CHECK FOR SQL-ONLY SCENARIO: No API entities needed
+            if not selected_entity_operations:
+                logger.info(f"[{correlation_id}] Pre-planning determined SQL-only query - bypassing API endpoint filtering")
+                unique_endpoints = []
+                endpoint_based_entities = {}
+                filtered_entity_summary = {}
+            else:
+                # Get full endpoint data for selected entity-operation pairs using existing filtering
+                logger.info(f"[{correlation_id}] Filtering endpoints for selected entity-operation pairs...")
+                selected_entity_endpoints = []
+                
+                for entity_op in selected_entity_operations:
+                    entity_name = entity_op.entity.lower()
+                    operation = entity_op.operation
+                    
+                    if operation and operation != 'null':
+                        # Create a mock ExecutionStep to use existing filtering method
+                        mock_step = ExecutionStep(
+                            tool_name="api",
+                            entity=entity_name,
+                            operation=operation,
+                            query_context="Mock step for filtering",
+                            reasoning="Generated for endpoint filtering"
+                        )
+                        entity_endpoints = self._get_entity_endpoints_for_step(mock_step)
+                    else:
+                        # Just get entity endpoints without specific operation
+                        entity_endpoints = self._get_entity_endpoints_for_entity(entity_name)
+                    
+                    selected_entity_endpoints.extend(entity_endpoints)
+                    logger.debug(f"[{correlation_id}] Found {len(entity_endpoints)} endpoints for {entity_name}::{operation or 'all'}")
+                
+                # Remove duplicates based on endpoint ID
+                seen_ids = set()
+                unique_endpoints = []
+                for endpoint in selected_entity_endpoints:
+                    if endpoint.get('id') not in seen_ids:
+                        unique_endpoints.append(endpoint)
+                        seen_ids.add(endpoint.get('id'))
+                
+                logger.info(f"[{correlation_id}] Filtered to {len(unique_endpoints)} unique endpoints from {len(selected_entity_operations)} entity-operation pairs")
+                
+                # Build entity summary from filtered endpoints instead of raw entities
+                filtered_entity_summary = {}
+                endpoint_based_entities = {}
+                
+                # Group filtered endpoints by entity to create focused entity data
+                for endpoint in unique_endpoints:
+                    entity_name = endpoint.get('entity', '')
+                    if entity_name:
+                        if entity_name not in endpoint_based_entities:
+                            endpoint_based_entities[entity_name] = {'endpoints': []}  # Use 'endpoints' not 'operations'
+                            filtered_entity_summary[entity_name] = {'operations': [], 'methods': []}
+                        
+                        # Add the FULL endpoint details for planning agent
+                        endpoint_based_entities[entity_name]['endpoints'].append(endpoint)
+                        
+                        # Add operation and method for summary
+                        operation = endpoint.get('operation', '')
+                        method = endpoint.get('method', 'GET')
+                        
+                        if operation and operation not in filtered_entity_summary[entity_name]['operations']:
+                            filtered_entity_summary[entity_name]['operations'].append(operation)
+                        
+                        if method and method not in filtered_entity_summary[entity_name]['methods']:
+                            filtered_entity_summary[entity_name]['methods'].append(method)
+            
+            # Phase 1: Use Planning Agent to generate execution plan
+            logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
+            # Notify planning start (minimal hook)
+            if self.planning_phase_callback:
+                try:
+                    await self.planning_phase_callback('planning_start')
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] planning_phase_callback planning_start error ignored: {cb_err}")
+            
+            # Create dependencies for Planning Agent with filtered endpoint data
+            logger.info(f"[{correlation_id}] Built focused entity data: {len(endpoint_based_entities)} entities with {len(unique_endpoints)} endpoints")
+            
+            planning_deps = PlanningDependencies(
+                available_entities=list(endpoint_based_entities.keys()),  # Use filtered entity names
+                entity_summary=filtered_entity_summary,  # Use filtered entity summary
+                sql_tables=self.sql_tables,
+                flow_id=correlation_id,
+                entities=endpoint_based_entities  # Pass the filtered entity-grouped format
             )
             
             # Execute Planning Agent with dependencies - use modified query if needed
@@ -999,6 +1151,12 @@ class ModernExecutionManager:
             import json
             logger.info(f"[{correlation_id}] Generated execution plan:\n{json.dumps(execution_plan.model_dump(), indent=2)}")
             logger.info(f"[{correlation_id}] Planning completed: {len(execution_plan.steps)} steps generated")
+            # Notify planning complete (after plan object finalized, before execution)
+            if self.planning_phase_callback:
+                try:
+                    await self.planning_phase_callback('planning_complete')
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] planning_phase_callback planning_complete error ignored: {cb_err}")
             
             # Phase 2: Execute steps using Modern Execution Manager
             logger.info(f"[{correlation_id}] Phase 2: Step execution with Modern Execution Manager")
@@ -1474,13 +1632,14 @@ class ModernExecutionManager:
         has_meaningful_data = isinstance(db_data, list) and len(db_data) > 0
         sql_executed_successfully = bool(sql_dict and sql_dict.get('sql'))
         
-        step_success = has_meaningful_data and sql_executed_successfully
+        # SQL step is successful if SQL was generated and executed, regardless of result count
+        # "No results found" is a valid successful outcome, not an error
+        step_success = sql_executed_successfully
         
-        if not step_success:
-            if not has_meaningful_data:
-                logger.warning(f"[{correlation_id}] SQL step marked as FAILED: no data returned from database")
-            if not sql_executed_successfully:
-                logger.warning(f"[{correlation_id}] SQL step marked as FAILED: SQL generation or execution failed")
+        if not sql_executed_successfully:
+            logger.warning(f"[{correlation_id}] SQL step marked as FAILED: SQL generation or execution failed")
+        elif not has_meaningful_data:
+            logger.info(f"[{correlation_id}] SQL step completed successfully: no results found (query returned 0 records)")
         
         # Create result with SQL execution data
         result_data = SQLExecutionResult(sql_dict['sql'], sql_dict['explanation'], db_data)
@@ -1494,7 +1653,7 @@ class ModernExecutionManager:
     
     async def _execute_api_sql_step(self, step: ExecutionStep, full_data: List[Dict[str, Any]], correlation_id: str, step_number: int) -> StepResult:
         """
-        Execute API → SQL step using repeatable pattern with Internal API-SQL Agent.
+        Execute API - SQL step using repeatable pattern with Internal API-SQL Agent.
         
         REPEATABLE PATTERN:
         - Use enhanced context from all previous steps
@@ -2202,8 +2361,6 @@ except Exception as e:
             
             for i, record in enumerate(api_records):
                 try:
-                    logger.debug(f"[{correlation_id}] Processing record {i}: {type(record)} = {record}")
-                    
                     # Handle special case where API data is simple strings (like user IDs)
                     if isinstance(record, str) and id_extraction_path in ['identity', 'self', '']:
                         extracted_ids.append(record)
@@ -2212,13 +2369,11 @@ except Exception as e:
                     # Handle normal dictionary records with path navigation
                     if isinstance(record, dict):
                         extracted_values = self._extract_values_from_record(record, id_extraction_path)
-                        logger.debug(f"[{correlation_id}] Extracted from record {i}: {extracted_values}")
                         extracted_ids.extend(extracted_values)
                     else:
                         # For other data types, try to convert to string if it's a simple value
                         if id_extraction_path in ['identity', 'self', '']:
                             extracted_ids.append(str(record))
-                        logger.debug(f"[{correlation_id}] Record {i} not a dict, type: {type(record)}")
                 except Exception as e:
                     logger.debug(f"[{correlation_id}] Failed to extract from record {i} using path '{id_extraction_path}': {e}")
                     continue
@@ -2252,8 +2407,26 @@ except Exception as e:
                         # Handle non-dict records
                         normalized_api_records.append({'value': str(record)})
                 
-                api_df = pl.DataFrame(normalized_api_records)
-                logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                # Check if all normalized records are empty or problematic
+                if not normalized_api_records:
+                    api_df = pl.DataFrame()
+                    logger.debug(f"[{correlation_id}] Created empty API DataFrame: no records to normalize")
+                elif all(not record or (isinstance(record, dict) and not record) for record in normalized_api_records):
+                    api_df = pl.DataFrame()
+                    logger.debug(f"[{correlation_id}] Created empty API DataFrame: all normalized records were empty")
+                else:
+                    try:
+                        api_df = pl.DataFrame(normalized_api_records, infer_schema_length=None)
+                        logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Could not create API DataFrame with full schema, trying with limited inference: {e}")
+                        try:
+                            # Try with limited schema inference to handle mixed types
+                            api_df = pl.DataFrame(normalized_api_records, infer_schema_length=100)
+                            logger.debug(f"[{correlation_id}] Created API DataFrame with limited schema inference: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                        except Exception as e2:
+                            logger.warning(f"[{correlation_id}] Could not create API DataFrame at all: {e2}")
+                            api_df = None
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not create API DataFrame: {e}")
                 api_df = None
@@ -2275,25 +2448,46 @@ except Exception as e:
                 logger.warning(f"[{correlation_id}] No database records found for extracted user IDs")
                 return []
             
-            # Step 4: Create database DataFrame - skip NULL values to avoid schema issues
+            # Step 4: Create database DataFrame - comprehensive NULL and schema handling
             try:
-                # Filter out rows with NULL values that cause schema conflicts
+                # Clean and normalize database results
                 clean_results = []
                 for row in db_results:
-                    # Skip rows where critical fields are NULL
-                    if row.get('application_okta_id') is not None or 'application_okta_id' not in row:
-                        clean_results.append(row)
+                    # Create a clean copy of the row
+                    clean_row = {}
+                    for key, value in row.items():
+                        # Handle NULL values
+                        if value is None:
+                            clean_row[key] = ""  # Convert NULL to empty string
+                        elif isinstance(value, (list, dict)):
+                            clean_row[key] = str(value)  # Convert complex types to strings
+                        else:
+                            clean_row[key] = value
+                    clean_results.append(clean_row)
                 
                 if clean_results:
-                    db_df = pl.DataFrame(clean_results)
-                    logger.debug(f"[{correlation_id}] Created database DataFrame (filtered {len(db_results) - len(clean_results)} NULL rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                    try:
+                        # Try creating DataFrame with full schema inference
+                        db_df = pl.DataFrame(clean_results, infer_schema_length=None)
+                        logger.debug(f"[{correlation_id}] Created database DataFrame (cleaned {len(db_results)} rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Full schema inference failed, trying limited: {e}")
+                        try:
+                            # Try with limited schema inference
+                            db_df = pl.DataFrame(clean_results, infer_schema_length=100)
+                            logger.debug(f"[{correlation_id}] Created database DataFrame with limited schema inference: {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                        except Exception as e2:
+                            logger.error(f"[{correlation_id}] All DataFrame creation attempts failed: {e2}")
+                            # Fallback: return raw database results
+                            logger.warning(f"[{correlation_id}] Falling back to raw database results due to DataFrame creation error")
+                            return db_results
                 else:
-                    logger.warning(f"[{correlation_id}] All rows had NULL values, returning original data")
+                    logger.warning(f"[{correlation_id}] No clean results after processing, returning raw data")
                     return db_results
             except Exception as e:
-                logger.error(f"[{correlation_id}] Failed to create database DataFrame: {e}")
+                logger.error(f"[{correlation_id}] Unexpected error in database DataFrame processing: {e}")
                 # Fallback: return raw database results
-                logger.warning(f"[{correlation_id}] Falling back to raw database results due to DataFrame creation error")
+                logger.warning(f"[{correlation_id}] Falling back to raw database results due to unexpected error")
                 return db_results
             
             # Prepare API DataFrame with only needed fields

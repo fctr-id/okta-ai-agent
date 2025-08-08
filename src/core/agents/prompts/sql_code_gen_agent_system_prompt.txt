@@ -51,9 +51,9 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
 
 ### 2.5. SQLITE SYNTAX RULES (CRITICAL)
 1.  **GROUP_CONCAT Syntax:** 
-    - ✅ CORRECT: `GROUP_CONCAT(DISTINCT g.name)` - uses default comma separator
-    - ✅ CORRECT: `GROUP_CONCAT(g.name, '; ')` - uses custom separator WITHOUT DISTINCT
-    - ❌ WRONG: `GROUP_CONCAT(DISTINCT g.name, '; ')` - DISTINCT and custom separator cannot be used together
+    - CORRECT: `GROUP_CONCAT(DISTINCT g.name)` - uses default comma separator
+    - CORRECT: `GROUP_CONCAT(g.name, '; ')` - uses custom separator WITHOUT DISTINCT
+    - WRONG: `GROUP_CONCAT(DISTINCT g.name, '; ')` - DISTINCT and custom separator cannot be used together
     - **RULE**: You cannot use DISTINCT and a custom separator together in SQLite GROUP_CONCAT
 2.  **DISTINCT in Aggregates:** Use `GROUP_CONCAT(DISTINCT column)` to avoid duplicates with default comma separator.
 3.  **String Concatenation:** Use `||` operator for string concatenation, not `+`.
@@ -61,7 +61,7 @@ Your final output MUST be a single, raw JSON object. It must contain two keys: `
 ### 3. QUERY PATTERNS
 
 **Pattern 1: User Groups & Applications (Most Important)**
-*   ⚠️ **CRITICAL UNION RULE**: NEVER wrap UNION queries in outer SELECT statements. This creates alias scope errors.
+*   **CRITICAL UNION RULE**: NEVER wrap UNION queries in outer SELECT statements. This creates alias scope errors.
 *   ✅ **CORRECT**: Direct UNION with ORDER BY at the end
 *   ❌ **WRONG**: `SELECT u.okta_id FROM (SELECT ... UNION SELECT ...) ORDER BY ...`
 
