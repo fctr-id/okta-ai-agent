@@ -283,7 +283,6 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 **Local Storage & Privacy**
 - **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
 - **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
-- **No Okta Data to LLMs**: Only user queries and system prompts are sent to AI providers
 - **Limited Data Sampling**: Small samples of query results are sent to AI providers for processing
 - **Sandboxed Execution**: All code runs in a secure, isolated environment
 - **Data Minimization**: Only data necessary to fulfill specific queries is processed
