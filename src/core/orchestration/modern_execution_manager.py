@@ -19,7 +19,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 # Import existing agents from agents directory
 from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
 from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
-from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent
+from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent, PlanningDependencies
 from src.core.agents.results_formatter_agent import format_results as process_results_formatter  # Unified token-based results formatting
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 
@@ -1005,41 +1005,72 @@ class ModernExecutionManager:
             entity_op_pairs = [f"{eo.entity}::{eo.operation or 'null'}" for eo in selected_entity_operations]
             logger.info(f"[{correlation_id}] Pre-planning completed - selected entity-operation pairs: {entity_op_pairs}")
             
-            # Get full endpoint data for selected entity-operation pairs using existing filtering
-            logger.info(f"[{correlation_id}] Filtering endpoints for selected entity-operation pairs...")
-            selected_entity_endpoints = []
-            
-            for entity_op in selected_entity_operations:
-                entity_name = entity_op.entity.lower()
-                operation = entity_op.operation
+            # CHECK FOR SQL-ONLY SCENARIO: No API entities needed
+            if not selected_entity_operations:
+                logger.info(f"[{correlation_id}] Pre-planning determined SQL-only query - bypassing API endpoint filtering")
+                unique_endpoints = []
+                endpoint_based_entities = {}
+                filtered_entity_summary = {}
+            else:
+                # Get full endpoint data for selected entity-operation pairs using existing filtering
+                logger.info(f"[{correlation_id}] Filtering endpoints for selected entity-operation pairs...")
+                selected_entity_endpoints = []
                 
-                if operation and operation != 'null':
-                    # Create a mock ExecutionStep to use existing filtering method
-                    from src.core.agents.planning_agent import ExecutionStep
-                    mock_step = ExecutionStep(
-                        tool_name="api",
-                        entity=entity_name,
-                        operation=operation,
-                        query_context="Mock step for filtering",
-                        reasoning="Generated for endpoint filtering"
-                    )
-                    entity_endpoints = self._get_entity_endpoints_for_step(mock_step)
-                else:
-                    # Just get entity endpoints without specific operation
-                    entity_endpoints = self._get_entity_endpoints_for_entity(entity_name)
+                for entity_op in selected_entity_operations:
+                    entity_name = entity_op.entity.lower()
+                    operation = entity_op.operation
+                    
+                    if operation and operation != 'null':
+                        # Create a mock ExecutionStep to use existing filtering method
+                        mock_step = ExecutionStep(
+                            tool_name="api",
+                            entity=entity_name,
+                            operation=operation,
+                            query_context="Mock step for filtering",
+                            reasoning="Generated for endpoint filtering"
+                        )
+                        entity_endpoints = self._get_entity_endpoints_for_step(mock_step)
+                    else:
+                        # Just get entity endpoints without specific operation
+                        entity_endpoints = self._get_entity_endpoints_for_entity(entity_name)
+                    
+                    selected_entity_endpoints.extend(entity_endpoints)
+                    logger.debug(f"[{correlation_id}] Found {len(entity_endpoints)} endpoints for {entity_name}::{operation or 'all'}")
                 
-                selected_entity_endpoints.extend(entity_endpoints)
-                logger.debug(f"[{correlation_id}] Found {len(entity_endpoints)} endpoints for {entity_name}::{operation or 'all'}")
-            
-            # Remove duplicates based on endpoint ID
-            seen_ids = set()
-            unique_endpoints = []
-            for endpoint in selected_entity_endpoints:
-                if endpoint.get('id') not in seen_ids:
-                    unique_endpoints.append(endpoint)
-                    seen_ids.add(endpoint.get('id'))
-            
-            logger.info(f"[{correlation_id}] Filtered to {len(unique_endpoints)} unique endpoints from {len(selected_entity_operations)} entity-operation pairs")
+                # Remove duplicates based on endpoint ID
+                seen_ids = set()
+                unique_endpoints = []
+                for endpoint in selected_entity_endpoints:
+                    if endpoint.get('id') not in seen_ids:
+                        unique_endpoints.append(endpoint)
+                        seen_ids.add(endpoint.get('id'))
+                
+                logger.info(f"[{correlation_id}] Filtered to {len(unique_endpoints)} unique endpoints from {len(selected_entity_operations)} entity-operation pairs")
+                
+                # Build entity summary from filtered endpoints instead of raw entities
+                filtered_entity_summary = {}
+                endpoint_based_entities = {}
+                
+                # Group filtered endpoints by entity to create focused entity data
+                for endpoint in unique_endpoints:
+                    entity_name = endpoint.get('entity', '')
+                    if entity_name:
+                        if entity_name not in endpoint_based_entities:
+                            endpoint_based_entities[entity_name] = {'endpoints': []}  # Use 'endpoints' not 'operations'
+                            filtered_entity_summary[entity_name] = {'operations': [], 'methods': []}
+                        
+                        # Add the FULL endpoint details for planning agent
+                        endpoint_based_entities[entity_name]['endpoints'].append(endpoint)
+                        
+                        # Add operation and method for summary
+                        operation = endpoint.get('operation', '')
+                        method = endpoint.get('method', 'GET')
+                        
+                        if operation and operation not in filtered_entity_summary[entity_name]['operations']:
+                            filtered_entity_summary[entity_name]['operations'].append(operation)
+                        
+                        if method and method not in filtered_entity_summary[entity_name]['methods']:
+                            filtered_entity_summary[entity_name]['methods'].append(method)
             
             # Phase 1: Use Planning Agent to generate execution plan
             logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
@@ -1051,33 +1082,6 @@ class ModernExecutionManager:
                     logger.debug(f"[{correlation_id}] planning_phase_callback planning_start error ignored: {cb_err}")
             
             # Create dependencies for Planning Agent with filtered endpoint data
-            from src.core.agents.planning_agent import PlanningDependencies
-            
-            # Build entity summary from filtered endpoints instead of raw entities
-            filtered_entity_summary = {}
-            endpoint_based_entities = {}
-            
-            # Group filtered endpoints by entity to create focused entity data
-            for endpoint in unique_endpoints:
-                entity_name = endpoint.get('entity', '')
-                if entity_name:
-                    if entity_name not in endpoint_based_entities:
-                        endpoint_based_entities[entity_name] = {'endpoints': []}  # Use 'endpoints' not 'operations'
-                        filtered_entity_summary[entity_name] = {'operations': [], 'methods': []}
-                    
-                    # Add the FULL endpoint details for planning agent
-                    endpoint_based_entities[entity_name]['endpoints'].append(endpoint)
-                    
-                    # Add operation and method for summary
-                    operation = endpoint.get('operation', '')
-                    method = endpoint.get('method', 'GET')
-                    
-                    if operation and operation not in filtered_entity_summary[entity_name]['operations']:
-                        filtered_entity_summary[entity_name]['operations'].append(operation)
-                    
-                    if method and method not in filtered_entity_summary[entity_name]['methods']:
-                        filtered_entity_summary[entity_name]['methods'].append(method)
-            
             logger.info(f"[{correlation_id}] Built focused entity data: {len(endpoint_based_entities)} entities with {len(unique_endpoints)} endpoints")
             
             planning_deps = PlanningDependencies(
@@ -1608,13 +1612,14 @@ class ModernExecutionManager:
         has_meaningful_data = isinstance(db_data, list) and len(db_data) > 0
         sql_executed_successfully = bool(sql_dict and sql_dict.get('sql'))
         
-        step_success = has_meaningful_data and sql_executed_successfully
+        # SQL step is successful if SQL was generated and executed, regardless of result count
+        # "No results found" is a valid successful outcome, not an error
+        step_success = sql_executed_successfully
         
-        if not step_success:
-            if not has_meaningful_data:
-                logger.warning(f"[{correlation_id}] SQL step marked as FAILED: no data returned from database")
-            if not sql_executed_successfully:
-                logger.warning(f"[{correlation_id}] SQL step marked as FAILED: SQL generation or execution failed")
+        if not sql_executed_successfully:
+            logger.warning(f"[{correlation_id}] SQL step marked as FAILED: SQL generation or execution failed")
+        elif not has_meaningful_data:
+            logger.info(f"[{correlation_id}] SQL step completed successfully: no results found (query returned 0 records)")
         
         # Create result with SQL execution data
         result_data = SQLExecutionResult(sql_dict['sql'], sql_dict['explanation'], db_data)
