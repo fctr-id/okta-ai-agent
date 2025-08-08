@@ -102,3 +102,5 @@ docs/current_workflow.md
 src/data/suggested_endpoint_dependencies.md
 src/api/static/*/*
 src/api/static/assets/*
+src/core/agents/prompts/api_sql_code_gen_agent_system_prompt_backup.txt
+src/core/orchestration/moder_execution_manager_yesterday.py
