@@ -61,6 +61,8 @@ Your response **MUST** be a single JSON object matching this structure precisely
 **YOU MUST DEDUPLICATE BY OKTA ID**: Every Okta entity has a unique ID (user: "00u...", app: "0oa...", group: "00g..."). 
 **NO DUPLICATES ALLOWED**: If the same Okta ID appears multiple times in the data, include it only ONCE in final results.
 **DEDUPLICATION LOGIC**: Use a set or dictionary to track seen Okta IDs and skip duplicates.
+**OUTPUT FIELDS** : You MUST look at the fields that user is requesting in the query and if possible only output those fields. If they are not present, present only the critical information.
+**HUMAN FRIENDLY**: Always make sure the output only consists on human friendly text. NO jsons or arrays or any other data structures
 
 ```json
 {

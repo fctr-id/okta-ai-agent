@@ -66,11 +66,11 @@ class EntityOperation(BaseModel):
 class PrePlanResult(BaseModel):
     """Result from pre-planning agent - focused entity and operation selection"""
     selected_entity_operations: List[EntityOperation] = Field(
-        description='List of entity and operation pairs relevant to the query',
-        min_items=1
+        description='List of entity and operation pairs relevant to the query (empty list if only SQL is needed)',
+        min_items=0
     )
     reasoning: str = Field(
-        description='Explanation of why these entities and operations were selected',
+        description='Explanation of why these entities and operations were selected, or why only SQL is sufficient',
         min_length=10
     )
 
@@ -139,6 +139,7 @@ SELECTION CRITERIA FOR HYBRID APPROACH:
 - FIRST: Check if data exists in SQL tables - if YES, DO NOT select API entities for that data
 - ONLY select API entities for data NOT available in SQL or requiring real-time access
 - SQL tables contain: users, groups, applications, user_group_memberships, user_application_assignments, etc.
+- If ALL required data is in SQL tables, return EMPTY selected_entity_operations array
 - Be BROAD and INCLUSIVE in your API selection for qualifying data (data not in SQL)
 - Include entity-operation pairs that might provide context or supporting data
 - NEVER select API entities if the same data is available in SQL tables
