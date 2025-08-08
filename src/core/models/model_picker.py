@@ -244,11 +244,11 @@ class ModelConfig:
             
             return {
                 ModelType.REASONING: OpenAIModel(
-                    model_name=os.getenv('AZURE_OPENAI_REASONING_DEPLOYMENT', 'gpt-4'),
+                    model_name=os.getenv('AZURE_OPENAI_REASONING_MODEL', 'gpt-4'),
                     provider=azure_provider
                 ),
                 ModelType.CODING: OpenAIModel(
-                    model_name=os.getenv('AZURE_OPENAI_CODING_DEPLOYMENT', 'gpt-4'),
+                    model_name=os.getenv('AZURE_OPENAI_CODING_MODEL', 'gpt-4'),
                     provider=azure_provider
                 )
             }
