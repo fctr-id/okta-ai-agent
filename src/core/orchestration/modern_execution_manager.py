@@ -445,15 +445,35 @@ class ModernExecutionManager:
         
         # FULL POLARS: Convert to DataFrame for all operations
         if isinstance(data, list) and data:
-            # Convert list of dicts to Polars DataFrame
-            df = pl.DataFrame(data)
-            self.polars_dataframes[variable_name] = df
-            logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+            # Check if it's a list of empty lists/arrays
+            if all(isinstance(item, list) and not item for item in data):
+                # All items are empty lists - treat as empty data
+                df = pl.DataFrame()
+                self.polars_dataframes[variable_name] = df
+                logger.warning(f"Created empty Polars DataFrame for {variable_name}: all API results were empty arrays")
+            else:
+                try:
+                    # Convert list of dicts to Polars DataFrame with schema handling
+                    df = pl.DataFrame(data, infer_schema_length=None)
+                    self.polars_dataframes[variable_name] = df
+                    logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+                except Exception as e:
+                    logger.error(f"Failed to create DataFrame from data: {e}")
+                    # Fallback: create empty DataFrame
+                    df = pl.DataFrame()
+                    self.polars_dataframes[variable_name] = df
+                    logger.warning(f"Created empty Polars DataFrame for {variable_name}: DataFrame creation failed")
         elif isinstance(data, dict):
             # Single record - convert to DataFrame
-            df = pl.DataFrame([data])
-            self.polars_dataframes[variable_name] = df
-            logger.debug(f"Created Polars DataFrame from single record: {df.shape[0]} rows × {df.shape[1]} columns")
+            try:
+                df = pl.DataFrame([data])
+                self.polars_dataframes[variable_name] = df
+                logger.debug(f"Created Polars DataFrame from single record: {df.shape[0]} rows × {df.shape[1]} columns")
+            except Exception as e:
+                logger.error(f"Failed to create DataFrame from single record: {e}")
+                df = pl.DataFrame()
+                self.polars_dataframes[variable_name] = df
+                logger.warning(f"Created empty Polars DataFrame for {variable_name}: single record creation failed")
         else:
             # Empty or invalid data
             df = pl.DataFrame()
@@ -2341,8 +2361,6 @@ except Exception as e:
             
             for i, record in enumerate(api_records):
                 try:
-                    logger.debug(f"[{correlation_id}] Processing record {i}: {type(record)} = {record}")
-                    
                     # Handle special case where API data is simple strings (like user IDs)
                     if isinstance(record, str) and id_extraction_path in ['identity', 'self', '']:
                         extracted_ids.append(record)
@@ -2351,13 +2369,11 @@ except Exception as e:
                     # Handle normal dictionary records with path navigation
                     if isinstance(record, dict):
                         extracted_values = self._extract_values_from_record(record, id_extraction_path)
-                        logger.debug(f"[{correlation_id}] Extracted from record {i}: {extracted_values}")
                         extracted_ids.extend(extracted_values)
                     else:
                         # For other data types, try to convert to string if it's a simple value
                         if id_extraction_path in ['identity', 'self', '']:
                             extracted_ids.append(str(record))
-                        logger.debug(f"[{correlation_id}] Record {i} not a dict, type: {type(record)}")
                 except Exception as e:
                     logger.debug(f"[{correlation_id}] Failed to extract from record {i} using path '{id_extraction_path}': {e}")
                     continue
@@ -2391,8 +2407,26 @@ except Exception as e:
                         # Handle non-dict records
                         normalized_api_records.append({'value': str(record)})
                 
-                api_df = pl.DataFrame(normalized_api_records)
-                logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                # Check if all normalized records are empty or problematic
+                if not normalized_api_records:
+                    api_df = pl.DataFrame()
+                    logger.debug(f"[{correlation_id}] Created empty API DataFrame: no records to normalize")
+                elif all(not record or (isinstance(record, dict) and not record) for record in normalized_api_records):
+                    api_df = pl.DataFrame()
+                    logger.debug(f"[{correlation_id}] Created empty API DataFrame: all normalized records were empty")
+                else:
+                    try:
+                        api_df = pl.DataFrame(normalized_api_records, infer_schema_length=None)
+                        logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Could not create API DataFrame with full schema, trying with limited inference: {e}")
+                        try:
+                            # Try with limited schema inference to handle mixed types
+                            api_df = pl.DataFrame(normalized_api_records, infer_schema_length=100)
+                            logger.debug(f"[{correlation_id}] Created API DataFrame with limited schema inference: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                        except Exception as e2:
+                            logger.warning(f"[{correlation_id}] Could not create API DataFrame at all: {e2}")
+                            api_df = None
             except Exception as e:
                 logger.warning(f"[{correlation_id}] Could not create API DataFrame: {e}")
                 api_df = None
@@ -2414,25 +2448,46 @@ except Exception as e:
                 logger.warning(f"[{correlation_id}] No database records found for extracted user IDs")
                 return []
             
-            # Step 4: Create database DataFrame - skip NULL values to avoid schema issues
+            # Step 4: Create database DataFrame - comprehensive NULL and schema handling
             try:
-                # Filter out rows with NULL values that cause schema conflicts
+                # Clean and normalize database results
                 clean_results = []
                 for row in db_results:
-                    # Skip rows where critical fields are NULL
-                    if row.get('application_okta_id') is not None or 'application_okta_id' not in row:
-                        clean_results.append(row)
+                    # Create a clean copy of the row
+                    clean_row = {}
+                    for key, value in row.items():
+                        # Handle NULL values
+                        if value is None:
+                            clean_row[key] = ""  # Convert NULL to empty string
+                        elif isinstance(value, (list, dict)):
+                            clean_row[key] = str(value)  # Convert complex types to strings
+                        else:
+                            clean_row[key] = value
+                    clean_results.append(clean_row)
                 
                 if clean_results:
-                    db_df = pl.DataFrame(clean_results)
-                    logger.debug(f"[{correlation_id}] Created database DataFrame (filtered {len(db_results) - len(clean_results)} NULL rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                    try:
+                        # Try creating DataFrame with full schema inference
+                        db_df = pl.DataFrame(clean_results, infer_schema_length=None)
+                        logger.debug(f"[{correlation_id}] Created database DataFrame (cleaned {len(db_results)} rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Full schema inference failed, trying limited: {e}")
+                        try:
+                            # Try with limited schema inference
+                            db_df = pl.DataFrame(clean_results, infer_schema_length=100)
+                            logger.debug(f"[{correlation_id}] Created database DataFrame with limited schema inference: {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                        except Exception as e2:
+                            logger.error(f"[{correlation_id}] All DataFrame creation attempts failed: {e2}")
+                            # Fallback: return raw database results
+                            logger.warning(f"[{correlation_id}] Falling back to raw database results due to DataFrame creation error")
+                            return db_results
                 else:
-                    logger.warning(f"[{correlation_id}] All rows had NULL values, returning original data")
+                    logger.warning(f"[{correlation_id}] No clean results after processing, returning raw data")
                     return db_results
             except Exception as e:
-                logger.error(f"[{correlation_id}] Failed to create database DataFrame: {e}")
+                logger.error(f"[{correlation_id}] Unexpected error in database DataFrame processing: {e}")
                 # Fallback: return raw database results
-                logger.warning(f"[{correlation_id}] Falling back to raw database results due to DataFrame creation error")
+                logger.warning(f"[{correlation_id}] Falling back to raw database results due to unexpected error")
                 return db_results
             
             # Prepare API DataFrame with only needed fields
