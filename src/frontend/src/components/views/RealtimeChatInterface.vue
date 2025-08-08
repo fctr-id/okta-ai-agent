@@ -313,12 +313,6 @@ const CONFIG = {
 const messageHistory = ref([]);
 const historyIndex = ref(-1);
 
-const exampleQueries = ref([
-  'Find user dan@fctr.io and fetch factors',
-  'List all users created last month',
-  'Show groups for user test.user@example.com',
-]);
-
 // Comprehensive query suggestions for users (copied from ChatInterfaceV2.vue)
 const suggestions = ref([
   'List all users along with their creation dates',
@@ -499,9 +493,9 @@ const getFailedStepName = () => {
 
 const hasStepperExpanded = computed(() => {
   // Expand the stepper container when:
-  // 1. We have received execution steps from step_plan_info (more than just the 2 bookend steps)
+  // 1. We have received execution steps from step_plan_info (more than just the 3 bookend steps)
   // 2. OR we have an error condition
-  return (rtSteps.value?.length > 2) || rtExecutionStatus.value === 'error';
+  return (rtSteps.value?.length > 3) || rtExecutionStatus.value === 'error';
 });
 
 const resetInterface = async () => {
@@ -565,17 +559,17 @@ const progressSteps = computed(() => {
     const tool = step.tool_name;
 
     if (tool === 'thinking') {
-      badge = 'CREATING';
+      badge = 'CRAFTING';
       main = 'Strategy';
-      phase = 'creating';
+      phase = 'crafting';
     } else if (tool === 'generating_steps' || tool === 'generate_plan') {
       badge = 'GENERATING';
-      main = 'Steps';
+      main = 'Plan';
       phase = 'generating';
     } else if (tool === 'finalizing_results') {
-      badge = 'FORMATTING';
+      badge = 'FINALIZING';
       main = 'Results';
-      phase = 'formatting';
+      phase = 'finalizing';
     } else if (tool === 'api') {
       badge = 'API';
       main = step.operation || step.entity || '';
@@ -584,6 +578,10 @@ const progressSteps = computed(() => {
       badge = 'SQL';
       main = step.entity || step.operation || '';
       phase = 'sql';
+    } else if (tool === 'API_SQL') {
+      badge = 'HYBRID';
+      main = step.entity || step.operation || '';
+      phase = 'hybrid';
     } else {
       badge = (tool || step.name || `step_${index+1}`).toUpperCase();
       main = step.operation || step.entity || '';
@@ -629,14 +627,6 @@ const showFinalOutcomeArea = computed(() =>
   messages.value.length > 0 &&
   (rtResults.value || rtExecutionStatus.value === 'error' || rtExecutionStatus.value === 'cancelled')
 );
-
-// Keep this for backwards compatibility but we're not displaying it anymore
-const progressAreaTitle = computed(() => {
-  if (rtExecutionStatus.value === 'planning' && !rtPlanGenerated.value) return "Understanding Your Query";
-  if (rtPlanGenerated.value && (rtExecutionStatus.value === 'planning' || rtExecutionStatus.value === 'executing')) return "Executing Plan";
-  if (rtExecutionStatus.value === 'processing_final_results') return "Preparing Your Results";
-  return "";
-});
 
 watch([rtExecutionStatus, rtSteps, rtResults, rtError, rtPlanGenerated, rtCurrentStepIndexVal, isProcessing], () => {
   scrollToBottom();
@@ -1109,7 +1099,7 @@ watch(showToolsModal, (newVal) => {
 }
 
 .stepper-container-wrapper {
-  width: 380px;
+  width: 480px;
   max-width: 100%;
   margin: 0 auto;
   transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1161,9 +1151,9 @@ watch(showToolsModal, (newVal) => {
 
 .v-stepper :deep(.v-stepper-header) {
   flex-wrap: nowrap;
-  padding: 16px 20px;
+  padding: 16px 32px;
   overflow-x: auto;
-  justify-content: space-around !important;
+  justify-content: space-between !important;
   border-radius: 8px;
   background-color: transparent;
 }
@@ -1176,9 +1166,9 @@ watch(showToolsModal, (newVal) => {
 
 .v-stepper-item {
   flex-basis: auto !important;
-  min-width: 120px;
+  min-width: 140px;
   flex-shrink: 0;
-  padding: 0 4px;
+  padding: 0 12px;
 }
 
 /* Custom column layout for step item */
