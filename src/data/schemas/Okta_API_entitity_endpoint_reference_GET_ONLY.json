@@ -146,7 +146,25 @@
     },
     "role_assignment": {
       "aliases": ["roles", "permissions", "admin role"],
-      "operations": ["list_users_with_roles", "list_by_user", "get_for_user", "list_governance_sources_for_user_role", "get_governance_source_for_user_role", "list_governance_source_resources_for_user_role", "list_app_targets_for_user_role", "list_group_targets_for_user_role", "get_role_targets_by_assignment_type", "list_by_group", "get_for_group", "list_by_client", "get_for_client", "list_app_targets_for_group_role", "list_group_targets_for_group_role", "list_app_targets_for_client_role", "list_group_targets_for_client_role"],
+      "operations": [
+        "list_users_with_roles",
+        "list_by_user",
+        "get_for_user",
+        "list_governance_sources_for_user_role",
+        "get_governance_source_for_user_role",
+        "list_governance_source_resources_for_user_role",
+        "list_app_targets_for_user_role",
+        "list_group_targets_for_user_role",
+        "get_role_targets_by_assignment_type",
+        "list_by_group",
+        "get_for_group",
+        "list_by_client",
+        "get_for_client",
+        "list_app_targets_for_group_role",
+        "list_group_targets_for_group_role",
+        "list_app_targets_for_client_role",
+        "list_group_targets_for_client_role"
+      ],
       "methods": ["GET"],
       "endpoint_count": 17
     },
@@ -164,7 +182,17 @@
     },
     "user_authenticator": {
       "aliases": ["user factor", "mfa enrollment"],
-      "operations": ["list_enrollments", "get_enrollment", "list_yubikey_tokens", "get_yubikey_token", "list_factors", "list_supported_factors", "list_supported_security_questions", "get_factor", "get_factor_transaction_status"],
+      "operations": [
+        "list_enrollments",
+        "get_enrollment",
+        "list_yubikey_tokens",
+        "get_yubikey_token",
+        "list_factors",
+        "list_supported_factors",
+        "list_supported_security_questions",
+        "get_factor",
+        "get_factor_transaction_status"
+      ],
       "methods": ["GET"],
       "endpoint_count": 9
     }
@@ -181,7 +209,7 @@
       "folder_path": "Applications",
       "parameters": { "required": [], "optional": ["q", "after", "useOptimization", "limit", "filter", "expand", "includeNonDeleted"] },
       "depends_on": ["list-application-keys"],
-      "notes": "## Query Parameters\n*   **`q`** (String): Searches for apps with name or label properties that start with the specified value.\n*   **`filter`** (String): Filters apps by status, user.id, group.id, credentials.signing.kid or name expression. Examples: `status eq \"ACTIVE\"` or `signOnMode eq \"SAML_2_0\"`.\n*   **`expand`** (String): Use `expand=user/{userId}` to include assigned application user details in the `_embedded` property. Must be used with `user.id eq \"{userId}\"` filter.\n*   **`limit`** (Integer): Number of results per page (default: 20, max: 200).\n*   **`after`** (String): Pagination cursor for the next page of results.\n*   **`useOptimization`** (Boolean): Set to true to return a subset of app properties for better performance.\n*   **`includeNonDeleted`** (Boolean): Include non-active but not deleted apps in results."
+      "notes": "## Query Parameters\n*   **`q`** (String, Optional): Searches for apps with name or label properties that start with the specified value. Example: `q=Office` finds \"Office 365\", \"Office Mobile\".\n*   **`filter`** (String, Optional): SCIM filter expression for status, user assignments, group assignments, credentials. Examples: `status eq \"ACTIVE\"`, `user.id eq \"userId\"`, `group.id eq \"groupId\"`, `signOnMode eq \"SAML_2_0\"`, `credentials.signing.kid eq \"keyId\"`.\n*   **`expand`** (String, Optional): Use `expand=user/{userId}` to include assigned application user details in the `_embedded` property. Must be used with `user.id eq \"{userId}\"` filter.\n*   **`limit`** (Integer, Optional): Number of results per page (default: 20, max: 200).\n*   **`after`** (String, Optional): Pagination cursor for the next page of results.\n*   **`useOptimization`** (Boolean, Optional): Set to true to return a subset of app properties for better performance.\n*   **`includeNonDeleted`** (Boolean, Optional): Include non-active but not deleted apps in results.\n\n## Parameter Usage Notes\n*   **CRITICAL**: Use `q` for searching by application name/label (simple text matching), use `filter` for structured queries (status, assignments, authentication modes).\n*   Filter expressions must be URL encoded.\n*   Common filters: `status eq \"ACTIVE\"` (active apps), `user.id eq \"userId\"` (user assignments), `group.id eq \"groupId\"` (group assignments).\n*   For access analysis, combine with user/group assignment endpoints."
     },
     {
       "id": "get-application",
@@ -194,7 +222,7 @@
       "folder_path": "Applications",
       "parameters": { "required": ["appId"], "optional": ["expand"] },
       "depends_on": ["list-applications", "list-application-keys", "list-application-secrets"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The unique ID of the application, obtained from an endpoint like `list-applications`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=user/{userId}` to include a specific user's assignment details in the `_embedded` property.\n\n## Important Notes\n*   This endpoint will **NOT** return sensitive credentials like `client_secret`. The secret is only available upon application creation.\n*   For security analysis, use `list-application-keys` for certificates and `list-application-secrets` for OAuth secrets."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The unique ID of the application, obtained from an endpoint like `list-applications`.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=user/{userId}` to include a specific user's assignment details in the `_embedded` property.\n\n## Parameter Usage Notes\n*   **CRITICAL**: The `expand=user/{userId}` parameter requires a specific user ID and only works when retrieving application details for that specific user context.\n*   This expand pattern is primarily used when checking application configuration from a specific user's perspective.\n*   For general application details without user-specific context, omit the expand parameter.\n\n## Important Notes\n*   This endpoint will **NOT** return sensitive credentials like `client_secret`. The secret is only available upon application creation.\n*   For security analysis, use `list-application-keys` for certificates and `list-application-secrets` for OAuth secrets."
     },
     {
       "id": "get-default-application-connection",
@@ -285,7 +313,7 @@
       "folder_path": "Application Groups",
       "parameters": { "required": ["appId"], "optional": ["q", "after", "limit", "expand"] },
       "depends_on": ["list-applications", "list-application-user-assignments", "list-policies"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list group assignments.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=group` to include full group objects instead of just assignments.\n\n## Important Notes\n*   This endpoint is used to discover which groups have been granted access to a specific application.\n*   For complete access analysis, also check `list-application-user-assignments` and policy mappings."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list group assignments.\n\n## Query Parameters\n*   **`q`** (String, Optional): Filter groups by name. Matches against group name with startsWith behavior.\n*   **`expand`** (String, Optional): Use `expand=group` to include full group objects instead of just assignments.\n*   **`after`** (String, Optional): Pagination cursor for next page of results.\n*   **`limit`** (Integer, Optional): Number of objects per page.\n\n## Parameter Usage Notes\n*   **CRITICAL**: The `q` parameter only supports simple text matching against group names with startsWith behavior - no SCIM expressions supported.\n*   Use `expand=group` to get full group details instead of just assignment information.\n\n## Important Notes\n*   This endpoint is used to discover which groups have been granted access to a specific application.\n*   For complete access analysis, also check `list-application-user-assignments` and policy mappings."
     },
     {
       "id": "get-application-group-assignment",
@@ -480,7 +508,7 @@
       "folder_path": "Application Users",
       "parameters": { "required": ["appId"], "optional": ["after", "limit", "q", "expand"] },
       "depends_on": ["list-applications"],
-      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list user assignments.\n\n## Query Parameters\n*   **`q`** (String, Optional): Filter users by profile attributes. Matches against beginning of `userName`, `firstName`, `lastName`, and `email`. Supports startsWith operation only. For OIDC apps, only matches `userName` and `email`.\n*   **`expand`** (String, Optional): Include full User object in `_embedded` property. Valid value: `user`.\n*   **`limit`** (Integer, Optional): Number of objects per page. Use Link header for pagination.\n*   **`after`** (String, Optional): Pagination cursor for next page. Use value from previous response's next link.\n\n## Important Notes\n*   Returns only directly assigned users, not users assigned through group membership.\n*   For complete user access analysis, also check group assignments and role mappings."
+      "notes": "## Path Parameters\n*   **`appId`** (String, Required): The ID of the application for which to list user assignments.\n\n## Query Parameters\n*   **`q`** (String, Optional): Filter users by profile attributes. Matches against beginning of `userName`, `firstName`, `lastName`, and `email`. Supports startsWith operation only. For OIDC apps, only matches `userName` and `email`.\n*   **`expand`** (String, Optional): Include full User object in `_embedded` property. Valid value: `user`.\n*   **`limit`** (Integer, Optional): Number of objects per page. Use Link header for pagination.\n*   **`after`** (String, Optional): Pagination cursor for next page. Use value from previous response's next link.\n\n## Parameter Usage Notes\n*   **CRITICAL**: The `q` parameter only supports startsWith matching and is limited to specific profile fields (`userName`, `firstName`, `lastName`, `email`).\n*   For OIDC applications, `q` parameter is further restricted to `userName` and `email` only.\n*   No SCIM expressions or complex filtering supported - use simple text matching only.\n*   Use `expand=user` to get full user details instead of just assignment information.\n\n## Important Notes\n*   Returns only directly assigned users, not users assigned through group membership.\n*   For complete user access analysis, also check group assignments and role mappings."
     },
     {
       "id": "get-application-user-assignment",
@@ -571,7 +599,7 @@
       "folder_path": "Behavior Rules",
       "parameters": { "required": [], "optional": [] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   Behavior rules detect unusual activity, like a login from a new device or location."
+      "notes": "## Parameter Usage Notes\n*   **SIMPLE ENDPOINT**: No query parameters available - this is a simple list endpoint returning all behavior detection rules.\n*   No filtering, searching, or pagination parameters supported.\n*   Returns all behavior rules configured in the organization.\n*   Use individual rule retrieval (`get-behavior-rule`) for specific rule details.\n\n## Important Notes\n*   Behavior rules detect unusual activity, like a login from a new device or location.\n*   This endpoint provides a complete inventory of all behavior detection rules."
     },
     {
       "id": "get-behavior-rule",
@@ -597,7 +625,7 @@
       "folder_path": "Devices",
       "parameters": { "required": [], "optional": ["after", "limit", "search", "expand"] },
       "depends_on": ["list-device-assurance-policies", "list-device-posture-checks", "list-users-for-device"],
-      "notes": "## Query Parameters\n*   **`search`** (String): A SCIM filter to find devices based on properties. Example: `profile.platform eq \"IOS\"`.\n*   **`expand`** (String, Optional): Use `expand=user` to include associated user details and management status in `_embedded` property.\n\n## Important Notes\n*   For device compliance analysis, also check `list-device-assurance-policies` and `list-device-posture-checks`."
+      "notes": "## Query Parameters\n*   **`search`** (String, Optional): SCIM filter expression for device properties. Searchable fields: `status`, `lastUpdated`, `id`, `profile.displayName`, `profile.serialNumber`, `profile.platform`, `profile.model`.\n*   **`expand`** (String, Optional): Use `expand=user` to include associated user details and management status in `_embedded` property.\n*   **`after`** (String, Optional): Pagination cursor for next page of results.\n*   **`limit`** (Integer, Optional): Number of results per page.\n\n## Parameter Usage Notes\n*   **CRITICAL**: Use `search` parameter for SCIM filtering on device properties - supports operators: `eq` (equals), `co` (contains) for select profile attributes.\n*   Searchable device fields: `status` (ACTIVE, SUSPENDED), `profile.platform` (IOS, ANDROID, WINDOWS, MACOS), `profile.displayName`, `profile.serialNumber`.\n*   Filter expressions must be URL encoded.\n*   Use `expand=user` to get user ownership and management details.\n\n## Example Searches\n*   Active devices: `search=status eq \"ACTIVE\"`\n*   iOS devices: `search=profile.platform eq \"IOS\"`\n*   Device by name: `search=profile.displayName co \"iPhone\"`\n*   Specific device: `search=profile.serialNumber eq \"ABC123\"`\n\n## Important Notes\n*   For device compliance analysis, also check `list-device-assurance-policies` and `list-device-posture-checks`."
     },
     {
       "id": "get-device",
@@ -636,7 +664,7 @@
       "folder_path": "Device Assurance Policies",
       "parameters": { "required": [], "optional": [] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   Device assurance policies are used to ensure a device meets certain criteria (e.g., OS version) before allowing access.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device assurance policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
+      "notes": "## Important Notes\n*   Device assurance policies are used to ensure a device meets certain criteria (e.g., OS version) before allowing access.\n\n## PLANNING AGENT NOTICE: REQUIRES_CONTEXTUAL_ANALYSIS\nThis endpoint returns the definition of a Device Assurance Policy. To understand its impact, you must find where it is enforced. Check the rules of Authentication Policies (type `ACCESS_POLICY`) to see which ones require this policy for user access."
     },
     {
       "id": "get-device-assurance-policy",
@@ -649,7 +677,7 @@
       "folder_path": "Device Assurance Policies",
       "parameters": { "required": ["deviceAssuranceId"], "optional": [] },
       "depends_on": ["list-device-assurance-policies"],
-      "notes": "## Path Parameters\n*   **`deviceAssuranceId`** (String, Required): The ID of the policy, obtained from `list-device-assurance-policies`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device assurance policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
+      "notes": "## Path Parameters\n*   **`deviceAssuranceId`** (String, Required): The ID of the policy, obtained from `list-device-assurance-policies`.\n\n## PLANNING AGENT NOTICE: REQUIRES_CONTEXTUAL_ANALYSIS\nThis endpoint returns the definition of a Device Assurance Policy. To understand its impact, you must find where it is enforced. Check the rules of Authentication Policies (type `ACCESS_POLICY`) to see which ones require this policy for user access."
     },
     {
       "id": "list-device-integrations",
@@ -688,7 +716,7 @@
       "folder_path": "Device Posture Checks",
       "parameters": { "required": [], "optional": [] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   Device posture checks are specific queries run against a device, e.g., 'Is disk encryption enabled?'\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device posture check data but may lack comprehensive human-readable details. Planning agent should consider if additional check details are needed for meaningful results."
+      "notes": "## Important Notes\n*   Device posture checks are specific queries run against a device, e.g., 'Is disk encryption enabled?'\n\n## PLANNING AGENT NOTICE: REQUIRES_CONTEXTUAL_ANALYSIS\nThis endpoint defines a specific device check. To understand its effect, you must first find which Device Assurance Policy uses this check, and then determine which Authentication Policy (type `ACCESS_POLICY`) enforces that assurance policy."
     },
     {
       "id": "list-default-device-posture-checks",
@@ -714,7 +742,7 @@
       "folder_path": "Device Posture Checks",
       "parameters": { "required": ["postureCheckId"], "optional": [] },
       "depends_on": ["list-device-posture-checks"],
-      "notes": "## Path Parameters\n*   **`postureCheckId`** (String, Required): The ID of the posture check, obtained from `list-device-posture-checks`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns device posture check data but may lack comprehensive human-readable details. Planning agent should consider if additional check details are needed for meaningful results."
+      "notes": "## Path Parameters\n*   **`postureCheckId`** (String, Required): The ID of the posture check, obtained from `list-device-posture-checks`.\n\n## PLANNING AGENT NOTICE: REQUIRES_CONTEXTUAL_ANALYSIS\nThis endpoint defines a specific device check. To understand its effect, you must first find which Device Assurance Policy uses this check, and then determine which Authentication Policy (type `ACCESS_POLICY`) enforces that assurance policy."
     },
     {
       "id": "list-groups",
@@ -727,7 +755,7 @@
       "folder_path": "Groups",
       "parameters": { "required": [], "optional": ["search", "filter", "q", "after", "limit", "expand", "sortBy", "sortOrder"] },
       "depends_on": ["list-group-members", "list-groups-assigned-apps", "list-group-roles"],
-      "notes": "## Query Parameters\n*   **`search`** (String, Optional): Advanced filtering using expressions. Example: `search=type eq \"OKTA_GROUP\"`. Supports `sw` (starts with), `eq` (equals), `co` (contains) operators. URL encoding required.\n*   **`filter`** (String, Optional): Basic filter expression. Similar to search but simpler syntax. Example: `filter=id eq \"groupId\"`.\n*   **`q`** (String, Optional): Quick search matching group name property. Example: `q=Sales`. Default limit 300 results.\n*   **`expand`** (String, Optional): Include metadata in response. Values: `stats` (user count in `_embedded.stats.usersCount`) or `app` (application details).\n*   **`limit`** (Integer, Optional): Number of results per page. Recommended ≤200. Default varies based on query type.\n*   **`after`** (String, Optional): Pagination cursor for next page. Use value from previous response's next link.\n*   **`sortBy`** (String, Optional): Sort field (search queries only). Example: `sortBy=profile.name`.\n*   **`sortOrder`** (String, Optional): Sort direction `asc` or `desc` (search queries only). Requires `sortBy`.\n\n## Parameter Usage Notes\n*   Search and pagination are mutually exclusive - cannot page search results.\n*   Query (`q`) has different limit behavior than search/filter.\n*   All filter expressions must be URL encoded.\n*   For access analysis, also check `list-group-members`, `list-groups-assigned-apps`, and `list-group-roles`."
+      "notes": "## Query Parameters\n*   **`search`** (String, Optional): Advanced filtering using expressions for profile attributes. Example: `search=profile.name eq \"West Coast users\"`. Supports `sw` (starts with), `eq` (equals), `co` (contains) operators. URL encoding required.\n*   **`filter`** (String, Optional): Basic filter expression for system attributes only (id, type, lastUpdated, lastMembershipUpdated). Example: `filter=type eq \"OKTA_GROUP\"`.\n*   **`q`** (String, Optional): Quick search matching group name property. Example: `q=Sales`. Default limit 300 results.\n*   **`expand`** (String, Optional): Include metadata in response. Values: `stats` (user count in `_embedded.stats.usersCount`) or `app` (application details).\n*   **`limit`** (Integer, Optional): Number of results per page. Recommended ≤200. Default varies based on query type.\n*   **`after`** (String, Optional): Pagination cursor for next page. Use value from previous response's next link.\n*   **`sortBy`** (String, Optional): Sort field (search queries only). Example: `sortBy=profile.name`.\n*   **`sortOrder`** (String, Optional): Sort direction `asc` or `desc` (search queries only). Requires `sortBy`.\n\n## Parameter Usage Notes\n*   **CRITICAL**: Use `search` for profile attributes (profile.name, profile.description), use `filter` for system attributes (id, type, lastUpdated) - mixing these causes \"Invalid search criteria\" errors.\n*   Search and pagination are mutually exclusive - cannot page search results.\n*   Query (`q`) has different limit behavior than search/filter.\n*   All filter expressions must be URL encoded.\n*   For access analysis, also check `list-group-members`, `list-groups-assigned-apps`, and `list-group-roles`."
     },
     {
       "id": "get-group",
@@ -818,7 +846,7 @@
       "folder_path": "Log Streaming",
       "parameters": { "required": [], "optional": ["after", "limit", "filter"] },
       "depends_on": [],
-      "notes": "## Important Notes\n*   Log streams are used to send Okta System Log events to external services like Splunk or Amazon EventBridge."
+      "notes": "## Query Parameters\n*   **`filter`** (String, Optional): SCIM filter expression for log stream attributes. Common filterable fields: `status`, `type`, `name`.\n*   **`after`** (String, Optional): Pagination cursor for next page of results.\n*   **`limit`** (Integer, Optional): Number of results per page.\n\n## Parameter Usage Notes\n*   **BASIC FILTERING**: Use `filter` for basic log stream filtering by status (ACTIVE/INACTIVE), type, or name.\n*   Filter expressions must be URL encoded.\n*   Common filters: `status eq \"ACTIVE\"`, `type eq \"aws_eventbridge\"`, `name sw \"Splunk\"`.\n\n## Important Notes\n*   Log streams are used to send Okta System Log events to external services like Splunk or Amazon EventBridge."
     },
     {
       "id": "get-log-stream",
@@ -844,7 +872,7 @@
       "folder_path": "Network Zones",
       "parameters": { "required": [], "optional": ["after", "limit", "filter"] },
       "depends_on": [],
-      "notes": "## Query Parameters\n*   **`filter`** (String): Supports filtering on `id`, `usage`, and `system` properties. Example: `filter=usage eq \"POLICY\"`."
+      "notes": "## Query Parameters\n*   **`filter`** (String, Optional): SCIM filter expression for zone attributes. Filterable fields: `id`, `usage`, `system`.\n*   **`after`** (String, Optional): Pagination cursor for next page of results.\n*   **`limit`** (Integer, Optional): Number of results per page.\n\n## Parameter Usage Notes\n*   **CRITICAL**: Use `filter` for structured filtering on zone attributes: `usage eq \"POLICY\"`, `usage eq \"BLOCKLIST\"`, `system eq false`.\n*   Filter expressions must be URL encoded.\n*   Common usage values: `POLICY` (zones used in policies), `BLOCKLIST` (blocked IP ranges).\n*   System zones (`system eq true`) are Okta-managed, custom zones (`system eq false`) are user-created.\n\n## Example Filters\n*   Policy zones: `filter=usage eq \"POLICY\"`\n*   Custom zones only: `filter=system eq false`\n*   Specific zone: `filter=id eq \"zoneId\"`"
     },
     {
       "id": "get-network-zone",
@@ -883,7 +911,7 @@
       "folder_path": "Policies",
       "parameters": { "required": ["type"], "optional": ["status", "q", "expand", "sortBy", "limit", "resourceId", "after"] },
       "depends_on": ["list-policy-rules"],
-      "notes": "## Critical Parameters\n*   **`type`** (String, Required): This parameter is **mandatory**. You must specify the type of policy to list. Common values include:\n    *   `OKTA_SIGN_ON`: For Global Session Policies.\n    *   `PASSWORD`: For Password Policies.\n    *   `MFA_ENROLL`: For Multifactor Enrollment Policies.\n    *   `ACCESS_POLICY`: For Authentication Policies.\n    *   `OAUTH_AUTHORIZATION_POLICY`: For OAuth Authorization Server Policies.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Use `expand=rules` to include all policies with their rules in the same response.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
+      "notes": "## Query Parameters\n*   **`type`** (String, REQUIRED): Mandatory parameter specifying policy type. Must be one of: `OKTA_SIGN_ON`, `PASSWORD`, `MFA_ENROLL`, `ACCESS_POLICY`, `OAUTH_AUTHORIZATION_POLICY`, `PROFILE_ENROLLMENT`, `ACCESS_POLICY_RULE`, `RESOURCE_ACCESS`.\n*   **`status`** (String, Optional): Filter by policy status. Values: `ACTIVE`, `INACTIVE`.\n*   **`q`** (String, Optional): Search by policy name (prefix matching). Example: `q=Sales` finds policies starting with \"Sales\".\n*   **`expand`** (String, Optional): Use `expand=rules` to include policy rules in response.\n*   **`sortBy`** (String, Optional): Sort field. Common values: `name`, `priority`, `lastUpdated`.\n*   **`limit`** (Integer, Optional): Number of results per page (default: 20, max: 200).\n*   **`resourceId`** (String, Optional): Filter policies by associated resource ID.\n*   **`after`** (String, Optional): Pagination cursor for next page of results.\n\n## Parameter Usage Notes\n*   **CRITICAL**: The `type` parameter is REQUIRED - requests without it will fail. Always specify the policy type you want to retrieve.\n*   Use `q` for name-based searching (prefix matching).\n*   Use `status` to filter by ACTIVE/INACTIVE policies.\n*   Common policy types: `OKTA_SIGN_ON` (session), `PASSWORD` (password), `MFA_ENROLL` (MFA), `ACCESS_POLICY` (authentication).\n*   For comprehensive analysis, use `expand=rules` to include policy rules.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns policy data but may lack comprehensive human-readable details. Planning agent should consider if additional policy details are needed for meaningful results."
     },
     {
       "id": "get-policy",
@@ -987,7 +1015,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId"], "optional": ["expand"] },
       "depends_on": ["list-users", "list-app-targets-for-user-role", "list-group-targets-for-user-role"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user for whom to list roles.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include targets configured for role assignments in `_embedded` property. Supported values: `targets/groups` (group targets) or `targets/catalog/apps` (application targets).\n\n## Important Notes\n*   To understand what the user can actually manage, also check role targets using `list-app-targets-for-user-role` and `list-group-targets-for-user-role`.\n*   Use expand parameter to get targets in same response instead of separate API calls.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns user role data with user IDs but lacks human-readable user details (email, name, login). Planning agent must add a follow-up step to fetch user details for meaningful results."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user for whom to list roles.\n\n## Query Parameters\n*   **`expand`** (String, Optional): Include targets configured for role assignments in `_embedded` property. Supported values: `targets/groups` (group targets) or `targets/catalog/apps` (application targets).\n\n## Parameter Usage Notes\n*   **CRITICAL**: The `expand` parameter has specific values for different target types - use `expand=targets/groups` for group administration targets or `expand=targets/catalog/apps` for application administration targets.\n*   Cannot combine multiple expand values in a single request - choose the specific target type needed.\n*   Use expand parameter to get targets in same response instead of separate API calls.\n\n## Important Notes\n*   To understand what the user can actually manage, also check role targets using `list-app-targets-for-user-role` and `list-group-targets-for-user-role`.\n*   For complete administrative scope analysis, may need separate calls with different expand values.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns user role data with user IDs but lacks human-readable user details (email, name, login). Planning agent must add a follow-up step to fetch user details for meaningful results."
     },
     {
       "id": "get-user-role",
@@ -1026,7 +1054,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId", "roleAssignmentId", "grantId"], "optional": [] },
       "depends_on": ["list-users", "list-user-roles", "list-governance-sources-for-user-role"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-governance-sources-for-user-role`.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch the actual user details (name, email, login) using the user ID since the governance source response typically contains only technical IDs without human-readable user information."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant, obtained from `list-governance-sources-for-user-role`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nAfter using this endpoint, the planning agent must fetch the full user details (name, email, login) using the `get-user` endpoint with the user ID, as this response contains only technical IDs."
     },
     {
       "id": "list-governance-source-resources-for-user-role",
@@ -1039,7 +1067,7 @@
       "folder_path": "User Role Assignments",
       "parameters": { "required": ["userId", "roleAssignmentId", "grantId"], "optional": [] },
       "depends_on": ["list-users", "list-user-roles", "list-governance-sources-for-user-role"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch the actual user details (name, email, login) using the user ID since governance source resource responses typically contain only technical IDs without human-readable user information."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n*   **`roleAssignmentId`** (String, Required): The ID of the role assignment.\n*   **`grantId`** (String, Required): The ID of the grant.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nAfter using this endpoint, the planning agent must fetch the full user details (name, email, login) using the `get-user` endpoint with the user ID, as this response contains only technical IDs."
     },
     {
       "id": "list-app-targets-for-user-role",
@@ -1221,7 +1249,7 @@
       "folder_path": "Resource Set Resources",
       "parameters": { "required": ["resourceSetIdOrLabel"], "optional": [] },
       "depends_on": ["list-resource-sets"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the resources (apps, groups, etc.) using their specific endpoints since resource set responses typically contain only basic IDs and may not include human-readable names or detailed resource information."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns a list of resource IDs (e.g., for apps or groups). To get human-readable details like names and descriptions, the planning agent must perform follow-up queries to the specific endpoints for those resources (e.g., `get-application` or `get-group`)."
     },
     {
       "id": "get-resource-set-resource",
@@ -1234,7 +1262,7 @@
       "folder_path": "Resource Set Resources",
       "parameters": { "required": ["resourceSetIdOrLabel", "resourceId"], "optional": [] },
       "depends_on": ["list-resource-sets", "list-resource-set-resources"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`resourceId`** (String, Required): The ID of the resource within the set.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the specific resource (app, group, etc.) using its dedicated endpoint since resource responses may contain only basic information without human-readable names or detailed configuration."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`resourceId`** (String, Required): The ID of the resource within the set.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns a resource with only a basic ID. To get full details, the planning agent must perform a follow-up query to the specific endpoint for that resource type (e.g., `get-application` or `get-group`)."
     },
     {
       "id": "list-resource-set-bindings",
@@ -1247,7 +1275,7 @@
       "folder_path": "Role Resource Set Bindings",
       "parameters": { "required": ["resourceSetIdOrLabel"], "optional": ["after"] },
       "depends_on": ["list-resource-sets", "list-resource-set-binding-members"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n## Important Notes\n*   A 'binding' connects a custom role to a resource set.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the roles and users/groups in the bindings using their specific endpoints since binding responses typically contain only IDs without human-readable names."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n\n## Important Notes\n*   A 'binding' connects a custom role to a resource set.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns bindings with role and member IDs. The planning agent must perform follow-up queries to fetch human-readable details for the roles (`get-custom-role`) and members (`get-user` or `get-group`)."
     },
     {
       "id": "get-resource-set-binding",
@@ -1260,7 +1288,7 @@
       "folder_path": "Role Resource Set Bindings",
       "parameters": { "required": ["resourceSetIdOrLabel", "roleIdOrLabel"], "optional": [] },
       "depends_on": ["list-resource-sets", "list-custom-roles"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the role and associated users/groups using their specific endpoints since binding responses typically contain only IDs without human-readable names or detailed role information."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns a binding with a role ID. The planning agent must perform a follow-up query to `get-custom-role` to get the full role details. To find the members of this binding, use the `list-resource-set-binding-members` endpoint."
     },
     {
       "id": "list-resource-set-binding-members",
@@ -1273,7 +1301,7 @@
       "folder_path": "Role Resource Set Binding Members",
       "parameters": { "required": ["resourceSetIdOrLabel", "roleIdOrLabel"], "optional": ["after"] },
       "depends_on": ["list-resource-sets", "list-custom-roles"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the users and groups in the binding using their specific endpoints since member responses typically contain only IDs without human-readable names (user login, email, group names)."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns a list of member IDs (users or groups). For human-readable details, the planning agent must perform follow-up queries to `get-user` or `get-group` for each member."
     },
     {
       "id": "get-resource-set-binding-member",
@@ -1286,7 +1314,7 @@
       "folder_path": "Role Resource Set Binding Members",
       "parameters": { "required": ["resourceSetIdOrLabel", "roleIdOrLabel", "memberId"], "optional": [] },
       "depends_on": ["list-resource-sets", "list-custom-roles", "list-resource-set-binding-members"],
-      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n*   **`memberId`** (String, Required): The ID of the member (user or group).\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch additional details for the specific user or group using their dedicated endpoints since member responses typically contain only basic IDs without human-readable names (user login, email, group names)."
+      "notes": "## Path Parameters\n*   **`resourceSetIdOrLabel`** (String, Required): The ID or label of the resource set.\n*   **`roleIdOrLabel`** (String, Required): The ID or label of the custom role.\n*   **`memberId`** (String, Required): The ID of the member (user or group).\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns a single member ID. For human-readable details, the planning agent must perform a follow-up query to `get-user` or `get-group` with this ID."
     },
     {
       "id": "list-custom-roles",
@@ -1351,7 +1379,7 @@
       "folder_path": "System Log",
       "parameters": { "required": [], "optional": ["since", "until", "after", "filter", "q", "sortOrder", "limit"] },
       "depends_on": [],
-      "notes": "## Critical Parameters\n*   **`filter`** (String): A SCIM-like filter expression. You MUST pass multiple event types so it is a broader search for events like login activity. This is the most powerful way to find specific events. The value being filtered must be in double quotes. Example: `eventType eq \"user.session.start\"`\n*   **`since`** & **`until`** (String): ISO 8601 timestamps to define a time window, e.g., `2024-01-01T00:00:00.000Z`.\n\n## Common `eventType` Filters\n*   **Login/Session**: `user.session.start`, `user.authentication.sso`, `user.authentication.auth_via_mfa`\n*   **User Lifecycle**: `user.lifecycle.create`, `user.lifecycle.activate`, `user.lifecycle.deactivate`\n\n## Example Query\n`?since=YYYY-MM-DDTHH:MM:SS.fffZ&limit=1000&filter=(eventType eq \"user.session.start\" or eventType eq \"user.authentication.sso\")`"
+      "notes": "## Query Parameters\n*   **`since`** (String, Optional): Start time in ISO 8601 format. Example: `since=2024-01-01T00:00:00.000Z`. Strongly recommended for bounded queries.\n*   **`until`** (String, Optional): End time in ISO 8601 format. Example: `until=2024-01-31T23:59:59.999Z`. Use with `since` for time ranges.\n*   **`filter`** (String, Optional): SCIM filter expression for structured event filtering. Example: `eventType eq \"user.authentication.auth\" and outcome.result eq \"SUCCESS\"`.\n*   **`q`** (String, Optional): Free text search across event data. Searches event descriptions, usernames, IP addresses.\n*   **`after`** (String, Optional): Pagination cursor for next page of results.\n*   **`limit`** (Integer, Optional): Number of results per page (default: 100, max: 1000).\n*   **`sortOrder`** (String, Optional): Sort order `ASCENDING` or `DESCENDING` (default: `DESCENDING`).\n\n## Parameter Usage Notes\n*   **CRITICAL**: Use `since` and `until` parameters for efficient queries - unbounded queries may timeout or return incomplete results.\n*   Use `filter` for structured queries with event types, outcomes, actors: `eventType eq \"user.authentication.auth\"`, `outcome.result eq \"SUCCESS\"`, `actor.id eq \"userId\"`.\n*   Use `q` for free-text search across event details, usernames, IP addresses.\n*   All filter expressions must be URL encoded.\n*   Maximum time range: 180 days.\n\n## Common Event Types\n*   **Authentication**: `user.authentication.auth`, `user.authentication.sso`, `user.session.start`\n*   **User Lifecycle**: `user.lifecycle.create`, `user.lifecycle.activate`, `user.lifecycle.deactivate`\n*   **Application Access**: `application.user_membership.add`, `application.user_membership.remove`\n\n## Example Queries\n*   Recent logins: `since=2024-01-01T00:00:00.000Z&filter=eventType eq \"user.authentication.auth\"`\n*   Failed authentications: `filter=eventType eq \"user.authentication.auth\" and outcome.result eq \"FAILURE\"`"
     },
     {
       "id": "list-users",
@@ -1364,7 +1392,7 @@
       "folder_path": "Users",
       "parameters": { "required": [], "optional": ["search", "filter", "q", "after", "limit", "sortBy", "sortOrder", "expand"] },
       "depends_on": ["list-user-authenticator-enrollments", "list-user-app-links", "list-user-roles"],
-      "notes": "## Query Parameters\n*   **`search`** (String): Most powerful method using SCIM expressions for optimal search performance. Searches profile attributes (prefix with `profile.`), status, created, activated, etc. Example: `profile.lastName eq \"Smith\" and status eq \"ACTIVE\"`.\n*   **`filter`** (String): SCIM expressions for limited properties: status, lastUpdated, id, profile.login, profile.email, profile.firstName, profile.lastName. Example: `status eq \"LOCKED_OUT\"`.\n*   **`q`** (String): Simple search matching firstName, lastName, or email (startsWith match). Note: Omits DEPROVISIONED users.\n*   **`expand`** (String): Use `expand=classification` to include user classification metadata in `_embedded` property.\n*   **`limit`** (Integer): Number of results returned (default: 10 for q parameter, 200 max).\n*   **`sortBy`** (String): Field to sort by (search queries only). Example: `sortBy=profile.lastName`.\n*   **`sortOrder`** (String): Sort direction: `asc` or `desc` (search queries only).\n*   **`after`** (String): Pagination cursor for next page.\n\n## Search Parameter Details\n*   **Case Sensitivity**: Property names are case sensitive, operators and string values are case insensitive.\n*   **Supported Properties**: Any user profile attribute (custom attributes included), top-level properties (id, status, created, activated, statusChanged, lastUpdated), user type (type.id), classification.type (Early Access).\n*   **Operators**: eq (equals), sw (starts with), co (contains - limited to profile.firstName, profile.lastName, profile.email, profile.login), gt (greater than), lt (less than).\n*   **Array Properties**: Searches return entire object if any array element matches the search term. Follows SCIM Protocol Specification for array searching.\n*   **Logical Operators**: Use 'and', 'or' for combining conditions. Use parentheses for grouping.\n*   **Sorting**: Use `sortBy` and `sortOrder` parameters with search queries.\n*   **Not Equal Alternative**: The ne (not equal) operator is not supported; use `lt ... or ... gt` combinations instead. Example: to exclude STAGED users use `(status lt \"STAGED\" or status gt \"STAGED\")`.\n\n## Search Examples\n*   **Status Filter**: `search=status eq \"STAGED\"`\n*   **Time-based**: `search=lastUpdated gt \"2014-01-01T00:00:00.000Z\"`\n*   **Specific ID**: `search=id eq \"00u1ero7vZFVEIYLWPBN\"`\n*   **Complex Query**: `search=profile.department eq \"Engineering\" and (created lt \"2014-01-01T00:00:00.000Z\" or status eq \"ACTIVE\")`\n*   **Custom Attribute**: `search=profile.employeeNumber eq \"12345\"`\n*   **Array Property (Custom Attributes)**: `search=profile.arrayAttr eq \"arrayAttrVal1\"` - if user has custom attribute \"arrayAttr\" containing [\"arrayAttrVal1\", \"arrayAttrVal2\"], this user is returned\n*   **Multiple Array Values**: `search=profile.certifications eq \"AWS\" or profile.certifications eq \"Azure\"` - matches users with either certification\n*   **Classification**: `search=classification.type eq \"LITE\"` (supported values: STANDARD, LITE)\n*   **Exclude Status**: `search=(status lt \"STAGED\" or status gt \"STAGED\")` - finds all users except STAGED\n\n## Filter Parameter Examples\n*   **Co Operator**: Only use `co` with profile.firstName, profile.lastName, profile.email, and profile.login\n*   **Supported Operators**: sw (starts with), eq (equals), co (contains - limited attributes only)\n\n## Important Notes\n*   To find users in a `DEPROVISIONED` state, you must explicitly use filter/search: `filter=status eq \"DEPROVISIONED\"`.\n*   For MFA status analysis, use `list-user-authenticator-enrollments` to check enrollment details.\n*   Complex or overly long search queries may result in errors.\n*   Returned users include DEPROVISIONED status when using search parameter.\n*   Use ID lookup for updated records to ensure latest data.\n*   The ne (not equal) operator is not supported; use lt/gt combinations instead.\n*   You can search multiple arrays, multiple values in an array, and use standard logical and filtering operators."
+      "notes": "## Query Parameters\n*   **`search`** (String, Optional): Most powerful method using SCIM expressions for optimal search performance. Searches profile attributes (prefix with `profile.`), status, created, activated, etc. Example: `profile.lastName eq \"Smith\" and status eq \"ACTIVE\"`.\n*   **`filter`** (String, Optional): SCIM expressions for limited properties: status, lastUpdated, id, profile.login, profile.email, profile.firstName, profile.lastName. Example: `status eq \"LOCKED_OUT\"`.\n*   **`q`** (String, Optional): Simple search matching firstName, lastName, or email (startsWith match). Note: Omits DEPROVISIONED users.\n*   **`expand`** (String, Optional): Use `expand=classification` to include user classification metadata in `_embedded` property.\n*   **`limit`** (Integer, Optional): Number of results returned (default: 10 for q parameter, 200 max).\n*   **`sortBy`** (String, Optional): Field to sort by (search queries only). Example: `sortBy=profile.lastName`.\n*   **`sortOrder`** (String, Optional): Sort direction: `asc` or `desc` (search queries only).\n*   **`after`** (String, Optional): Pagination cursor for next page.\n\n## Parameter Usage Notes\n*   **CRITICAL**: Use `search` for advanced SCIM filtering (profile attributes, status, dates), use `filter` for limited system properties, use `q` for simple name/email matching - mixing search and filter parameters causes errors.\n*   The `q` parameter automatically excludes DEPROVISIONED users; use search/filter for complete results.\n*   Search parameter supports all profile attributes including custom fields, filter parameter has limited field support.\n*   Search queries can be sorted with sortBy/sortOrder, filter/q queries use default sorting.\n*   All SCIM expressions must be URL encoded.\n\n## Search Parameter Details\n*   **Case Sensitivity**: Property names are case sensitive, operators and string values are case insensitive.\n*   **Supported Properties**: Any user profile attribute (custom attributes included), top-level properties (id, status, created, activated, statusChanged, lastUpdated), user type (type.id), classification.type (Early Access).\n*   **Operators**: eq (equals), sw (starts with), co (contains - limited to profile.firstName, profile.lastName, profile.email, profile.login), gt (greater than), lt (less than).\n*   **Array Properties**: Searches return entire object if any array element matches the search term. Follows SCIM Protocol Specification for array searching.\n*   **Logical Operators**: Use 'and', 'or' for combining conditions. Use parentheses for grouping.\n*   **Sorting**: Use `sortBy` and `sortOrder` parameters with search queries.\n*   **Not Equal Alternative**: The ne (not equal) operator is not supported; use `lt ... or ... gt` combinations instead. Example: to exclude STAGED users use `(status lt \"STAGED\" or status gt \"STAGED\")`.\n\n## Search Examples\n*   **Status Filter**: `search=status eq \"STAGED\"`\n*   **Time-based**: `search=lastUpdated gt \"2014-01-01T00:00:00.000Z\"`\n*   **Specific ID**: `search=id eq \"00u1ero7vZFVEIYLWPBN\"`\n*   **Complex Query**: `search=profile.department eq \"Engineering\" and (created lt \"2014-01-01T00:00:00.000Z\" or status eq \"ACTIVE\")`\n*   **Custom Attribute**: `search=profile.employeeNumber eq \"12345\"`\n*   **Array Property (Custom Attributes)**: `search=profile.arrayAttr eq \"arrayAttrVal1\"` - if user has custom attribute \"arrayAttr\" containing [\"arrayAttrVal1\", \"arrayAttrVal2\"], this user is returned\n*   **Multiple Array Values**: `search=profile.certifications eq \"AWS\" or profile.certifications eq \"Azure\"` - matches users with either certification\n*   **Classification**: `search=classification.type eq \"LITE\"` (supported values: STANDARD, LITE)\n*   **Exclude Status**: `search=(status lt \"STAGED\" or status gt \"STAGED\")` - finds all users except STAGED\n\n## Filter Parameter Examples\n*   **Co Operator**: Only use `co` with profile.firstName, profile.lastName, profile.email, and profile.login\n*   **Supported Operators**: sw (starts with), eq (equals), co (contains - limited attributes only)\n\n## Important Notes\n*   To find users in a `DEPROVISIONED` state, you must explicitly use filter/search: `filter=status eq \"DEPROVISIONED\"`.\n*   For MFA status analysis, use `list-user-authenticator-enrollments` to check enrollment details.\n*   Complex or overly long search queries may result in errors.\n*   Returned users include DEPROVISIONED status when using search parameter.\n*   Use ID lookup for updated records to ensure latest data.\n*   The ne (not equal) operator is not supported; use lt/gt combinations instead.\n*   You can search multiple arrays, multiple values in an array, and use standard logical and filtering operators."
     },
     {
       "id": "get-user",
@@ -1403,7 +1431,7 @@
       "folder_path": "User Authenticator Enrollments",
       "parameters": { "required": ["userId"], "optional": [] },
       "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n## Important Notes\n*   This is the modern, recommended endpoint for listing a user's enrolled authenticators and provides more detail than the legacy Factors API (`list-user-factors`)."
     },
     {
       "id": "get-authenticator-enrollment",
@@ -1429,7 +1457,7 @@
       "folder_path": "User Factors",
       "parameters": { "required": [], "optional": ["after", "expand", "filter", "forDownload", "limit", "sortBy", "sortOrder"] },
       "depends_on": [],
-      "notes": "## Query Parameters\n*   **`expand`** (String, Optional): Include additional token details in the response.\n\n## Important Notes\n*   This endpoint lists the hardware tokens themselves, not user enrollments.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch user details for any associated user IDs since YubiKey token responses typically contain only user IDs without human-readable user information (login, email, name)."
+      "notes": "## Query Parameters\n*   **`filter`** (String, Optional): SCIM filter expression for token attributes. Filterable fields: `profile.email`, `profile.serial`, `status`, `user.id`, `created`, `activated`, `lastVerified`.\n*   **`after`** (String, Optional): Pagination cursor for next page of results.\n*   **`expand`** (String, Optional): Use `expand=user` to include user details for associated tokens.\n*   **`forDownload`** (Boolean, Optional): Format response for CSV download when true.\n*   **`limit`** (Integer, Optional): Number of results per page.\n*   **`sortBy`** (String, Optional): Sort field. Values: `id`, `status`, `created`, `activated`, `lastVerified`.\n*   **`sortOrder`** (String, Optional): Sort direction `asc` or `desc`.\n\n## Parameter Usage Notes\n*   **CRITICAL**: Use `filter` for token-specific filtering with SCIM expressions on profile, status, and user attributes.\n*   Filter expressions must be URL encoded.\n*   Use `expand=user` to include user details instead of just user IDs.\n*   Common filters: `status eq \"ACTIVE\"`, `user.id eq \"userId\"`, `profile.email eq \"user@company.com\"`.\n\n## Example Filters\n*   Active tokens: `filter=status eq \"ACTIVE\"`\n*   User's tokens: `filter=user.id eq \"userId\"`\n*   By email: `filter=profile.email eq \"user@company.com\"`\n*   By serial: `filter=profile.serial eq \"12345\"`\n\n## Important Notes\n*   This endpoint lists the hardware tokens themselves, not user enrollments.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThe response for this endpoint contains user IDs associated with each YubiKey token. For human-readable user details like name, email, and login, the planning agent must perform a follow-up query to the `get-user` endpoint for each user ID."
     },
     {
       "id": "get-yubikey-token",
@@ -1442,7 +1470,7 @@
       "folder_path": "User Factors",
       "parameters": { "required": ["tokenId"], "optional": [] },
       "depends_on": ["list-yubikey-tokens"],
-      "notes": "## Path Parameters\n*   **`tokenId`** (String, Required): The ID of the YubiKey token, obtained from `list-yubikey-tokens`.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch user details for any associated user ID since YubiKey token responses typically contain only user IDs without human-readable user information (login, email, name)."
+      "notes": "## Path Parameters\n*   **`tokenId`** (String, Required): The ID of the YubiKey token, obtained from `list-yubikey-tokens`.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThe response for this endpoint contains a user ID. For human-readable user details like name, email, and login, the planning agent must perform a follow-up query to the `get-user` endpoint using this ID."
     },
     {
       "id": "list-user-factors",
@@ -1455,7 +1483,7 @@
       "folder_path": "User Factors",
       "parameters": { "required": ["userId"], "optional": [] },
       "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n## Important Notes\n*   This is the primary endpoint to see which MFA factors a user has set up."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n## Important Notes\n*   This is the primary endpoint to see which MFA factors a user has set up.\n*   **Note**: This is a legacy endpoint. For new development, it is recommended to use the `list-user-authenticator-enrollments` endpoint, which provides a more detailed representation of a user's authenticators."
     },
     {
       "id": "list-supported-factors",
@@ -1546,7 +1574,7 @@
       "folder_path": "User Resources",
       "parameters": { "required": ["userId"], "optional": [] },
       "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n**REQUIRES_ADDITIONAL_ENTITY_DETAILS**: After using this endpoint, you should fetch user details (name, email, login) using the user ID since client responses typically contain only user IDs without human-readable user information."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n## PLANNING AGENT NOTICE: REQUIRES_ADDITIONAL_ENTITY_DETAILS\nThis endpoint returns a list of OAuth clients associated with a user, but not the user's details. The planning agent should fetch the user's details using the `get-user` endpoint if human-readable context is needed."
     },
     {
       "id": "list-user-devices",

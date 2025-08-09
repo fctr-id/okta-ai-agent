@@ -8,7 +8,7 @@ def get_okta_database_schema() -> str:
     
     # Get custom attributes dynamically
     try:
-        from config.settings import settings
+        from src.config.settings import settings
         custom_attrs = settings.okta_user_custom_attributes_list
     except (ImportError, AttributeError):
         custom_attrs = []
@@ -34,7 +34,7 @@ def get_okta_database_schema() -> str:
             - first_name (String)
             - last_name (String)
             - login (String, INDEX)
-            - status (String, INDEX)  #STAGED, PROVISIONED, ACTIVE, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT, SUSPENDED, DEPROVISIONED
+            - status (String, INDEX)  # Values: STAGED, PROVISIONED, ACTIVE, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT, SUSPENDED, DEPROVISIONED
             - mobile_phone (String)
             - primary_phone (String)
             - employee_number (String, INDEX)
@@ -102,18 +102,18 @@ def get_okta_database_schema() -> str:
             - name (String, INDEX)
             - label (String)
             - status (String, INDEX)
-            - sign_on_mode (String, INDEX)  #can be AUTO_LOGIN, BASIC_AUTH, BOOKMARK, BROWSER_PLUGIN, OPENID_CONNECT, SAML_2_0, WS_FEDERATION
+            - sign_on_mode (String, INDEX)  # Values: AUTO_LOGIN, BASIC_AUTH, BOOKMARK, BROWSER_PLUGIN, OPENID_CONNECT, SAML_2_0, WS_FEDERATION
             - metadata_url (String, NULL)
             - policy_id (String, ForeignKey -> policies.okta_id, NULL, INDEX)
             - sign_on_url (String, NULL)
             - audience (String, NULL)
             - destination (String, NULL)
             - signing_kid (String, NULL)
-            - username_template (String, NULL) #types: BUILT_IN, CUSTOM, NONE
-            - username_template_type (String, NULL)  #Use LIKE to search. Also known as nameid attribute. This can be source. or custom. and then any user profile attribute after the dot
+            - username_template (String, NULL) # Template for username generation - Values: BUILT_IN, CUSTOM, NONE
+            - username_template_type (String, NULL)  # Template type for username - Use LIKE to search. Format: 'source.attribute' or 'custom.attribute'
             - implicit_assignment (Boolean)
             - admin_note (Text, NULL)
-            - attribute_statements (JSON, NULL)  #Use LIKE to search. This is a an array of JSON objects . Must include '{' in the LIKE search
+            - attribute_statements (JSON, NULL)  # SAML attribute statements as JSON array - Use LIKE with '{' to search JSON content
             - honor_force_authn (Boolean)
             - hide_ios (Boolean)
             - hide_web (Boolean)
@@ -165,17 +165,17 @@ def get_okta_database_schema() -> str:
             - id (Integer, PrimaryKey)
             - tenant_id (String, INDEX)
             - okta_id (String, INDEX)
-            - status (String, INDEX)  # ACTIVE, INACTIVE, etc.
+            - status (String, INDEX)  # Values: ACTIVE, INACTIVE, SUSPENDED, etc.
             - display_name (String, INDEX)  # Device display name
-            - platform (String, INDEX)  # ANDROID, iOS, WINDOWS, etc.
-            - manufacturer (String, INDEX)  # samsung, AZW, Apple, etc.
+            - platform (String, INDEX)  # Values: ANDROID, iOS, WINDOWS, MACOS, etc.
+            - manufacturer (String, INDEX)  # Device manufacturer - Values: samsung, Apple, Dell, HP, Microsoft, etc.
             - model (String)  # Device model
             - os_version (String)  # Operating system version
             - serial_number (String, INDEX)  # Device serial number
             - udid (String, INDEX)  # Unique device identifier
             - registered (Boolean)  # Device registration status
             - secure_hardware_present (Boolean)  # TPM/secure hardware availability
-            - disk_encryption_type (String)  # USER, NONE, etc.
+            - disk_encryption_type (String)  # Values: USER, FULL, NONE, etc.
             - created_at (DateTime)      # From Okta 'created' field
             - last_updated_at (DateTime) # From Okta 'lastUpdated' field
             - updated_at (DateTime)      # Local record update time
@@ -201,8 +201,8 @@ def get_okta_database_schema() -> str:
             - tenant_id (String, INDEX)
             - user_okta_id (String, ForeignKey -> users.okta_id)
             - device_okta_id (String, ForeignKey -> devices.okta_id)
-            - management_status (String)  # NOT_MANAGED, MANAGED, etc.
-            - screen_lock_type (String)  # BIOMETRIC, PIN, PASSWORD, etc.
+            - management_status (String)  # Values: NOT_MANAGED, MANAGED, UNKNOWN, etc.
+            - screen_lock_type (String)  # Values: BIOMETRIC, PIN, PASSWORD, PATTERN, NONE, etc.
             - user_device_created_at (DateTime)  # When user was associated with device
             - created_at (DateTime)
             - last_updated_at (DateTime)
@@ -229,7 +229,7 @@ def get_okta_database_schema() -> str:
             - tenant_id (String, INDEX)
             - okta_id (String, INDEX)
             - user_okta_id (String, ForeignKey -> users.okta_id)
-            - factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce(fastpass), password, webauthn(FIDO2), security_question, token, push(okta verify), totp
+            - factor_type (String, INDEX)  # Values: sms, email, signed_nonce (FastPass/Okta FastPass), password, webauthn (FIDO2), security_question, token:software:totp (TOTP apps), push (Okta Verify)
             - provider (String, INDEX)
             - status (String, INDEX)
             - authenticator_name (String, INDEX)  # Human-readable authenticator name like "Google Authenticator", "Okta Verify"
@@ -313,7 +313,7 @@ def get_okta_database_schema() -> str:
             - entity_type (String, INDEX)
             - sync_start_time (DateTime)
             - sync_end_time (DateTime)
-            - status (ENUM: STARTED/SUCCESS/FAILED)
+            - status (ENUM: STARTED/SUCCESS/FAILED/ERROR)
             - records_processed (Integer)
             - last_successful_sync (DateTime)
             - error_message (String)
