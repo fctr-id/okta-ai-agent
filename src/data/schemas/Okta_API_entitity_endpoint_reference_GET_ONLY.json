@@ -1431,7 +1431,7 @@
       "folder_path": "User Authenticator Enrollments",
       "parameters": { "required": ["userId"], "optional": [] },
       "depends_on": ["list-users"],
-      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n## Important Notes\n*   This is the modern, recommended endpoint for listing a user's enrolled authenticators and provides more detail than the legacy Factors API (`list-user-factors`)."
+      "notes": "## Path Parameters\n*   **`userId`** (String, Required): The ID of the user.\n\n## Important Notes\n* USET list_factors  This is the modern, recommended endpoint for listing a user's enrolled authenticators and provides more detail than the legacy Factors API (`list-user-factors`)."
     },
     {
       "id": "get-authenticator-enrollment",

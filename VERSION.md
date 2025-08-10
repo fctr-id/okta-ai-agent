@@ -2,7 +2,26 @@
 
 
 
-## Current latest: v1.1.1-beta (08-10-2025) - "Brain Boost"
+## Current latest: v1.1.2-beta (08-10-2025) - "API Etiquette School"
+
+API Code Generation & Rate Limiting Enhancements:
+- **MAX LIMIT RULE Implementation**: API Code Generation Agent now properly handles `max_results` parameter when users request specific quantities
+- **Configurable Concurrent Limits**: Added `API_CODE_CONCURRENT_LIMIT` environment variable with intelligent defaults based on Okta plan types
+- **Race Condition Prevention**: Implemented random jitter for concurrent rate limit retries to prevent API conflicts
+- **Enhanced Security**: Strengthened variable access patterns in generated code - direct variable access only, no `globals()` usage
+- **Performance Optimization**: Reduced inter-chunk delays from 0.5s to 0.1s while maintaining API stability
+
+Documentation & Configuration Updates:
+- **Corrected Okta Rate Limits**: Updated README with accurate concurrent transaction limits per Okta plan type
+- **Settings Class Integration**: Enhanced base API client to use centralized Settings class with proper fallbacks
+
+
+Critical Fixes:
+- **Concurrent Rate Limit Handling**: Distinguished between concurrent vs org-wide rate limits with appropriate retry strategies
+- **API Client Architecture**: Proper Settings class integration ensuring consistent configuration loading
+- **Code Generation Security**: Eliminated unsafe variable access patterns in generated Python code
+
+## v1.1.1-beta (08-10-2025) - "Brain Boost"
 
 Agent Intelligence & Prompt Engineering Enhancements:
 - **Enhanced Field Value Translation**: Improved SQL agents' schema-grounded translation of user-friendly terms (e.g., "fastpass" → "signed_nonce") 

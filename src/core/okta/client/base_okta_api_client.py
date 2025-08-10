@@ -1,11 +1,20 @@
 import os
+import sys
 import asyncio
 import aiohttp
 import re
 import logging
+import random
 from typing import Dict, Any, Optional
 from urllib.parse import urlencode
 from datetime import datetime
+
+# Import settings for configuration
+try:
+    from src.config.settings import settings
+except ImportError:
+    # Fallback for different execution contexts
+    settings = None
 
 
 class OktaAPIClient:
@@ -54,8 +63,15 @@ class OktaAPIClient:
         # Get API token
         self.api_token = os.getenv('OKTA_API_TOKEN') or os.getenv('SSWS_API_KEY')
         
-        # Get concurrent limit for chunked processing
-        self.concurrent_limit = int(os.getenv('OKTA_CONCURRENT_LIMIT', '15'))
+        # Get concurrent limit for chunked processing  
+        # Based on testing: Trial accounts can handle ~3 concurrent, free accounts ~15
+        # Your account consistently hits rate limits at 5+ concurrent requests
+        # Setting conservative default based on account testing results
+        # Use API_CODE_CONCURRENT_LIMIT for fine-tuning generated code behavior
+        if settings:
+            self.concurrent_limit = settings.OKTA_CONCURRENT_LIMIT
+        else:
+            self.concurrent_limit = int(os.getenv('OKTA_CONCURRENT_LIMIT', '3'))
         
         if not self.okta_domain or not self.api_token:
             self.logger.error("Missing Okta configuration. Required: OKTA_CLIENT_ORGURL and OKTA_API_TOKEN environment variables")
@@ -110,7 +126,8 @@ class OktaAPIClient:
                           endpoint: str,
                           method: str = "GET", 
                           params: Optional[Dict] = None,
-                          body: Optional[Dict] = None) -> Dict[str, Any]:
+                          body: Optional[Dict] = None,
+                          max_results: Optional[int] = None) -> Dict[str, Any]:
         """
         Make an API request with automatic pagination detection and rate limit optimization.
         
@@ -119,19 +136,26 @@ class OktaAPIClient:
             method: HTTP method (GET, POST, PUT, DELETE)
             params: Query parameters
             body: Request body for POST/PUT requests
+            max_results: Maximum total results to return (stops pagination early)
             
         Returns:
             Dict with status and data/error
         """
+        print(f"API: {method} {endpoint}", file=sys.stderr)
+        if max_results:
+            print(f"Max results limit: {max_results}", file=sys.stderr)
+        self.logger.info(f"API: {method} {endpoint}")
         self.logger.info(f"Making {method} request to endpoint: {endpoint}")
         if params:
             self.logger.debug(f"Request parameters: {params}")
+        if max_results:
+            self.logger.debug(f"Max results limit: {max_results}")
         
         try:
             # Optimize parameters for better rate limit efficiency
             if method.upper() == "GET":
                 params = self._optimize_params(endpoint, params)
-                return await self._handle_get_request(endpoint, params)
+                return await self._handle_get_request(endpoint, params, max_results)
             else:
                 return await self._handle_single_request(endpoint, method, params, body)
                 
@@ -143,7 +167,7 @@ class OktaAPIClient:
                 "error_code": "REQUEST_FAILED"
             }
     
-    async def _handle_get_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict[str, Any]:
+    async def _handle_get_request(self, endpoint: str, params: Optional[Dict] = None, max_results: Optional[int] = None) -> Dict[str, Any]:
         """Handle GET request with automatic pagination detection."""
         
         # Start with the first request
@@ -161,7 +185,8 @@ class OktaAPIClient:
             return first_result
         
         # Pagination detected, collect all pages
-        self.logger.info(f"Pagination detected for {endpoint}, collecting all pages...")
+        print(f"Paginating {endpoint}", file=sys.stderr)
+        self.logger.info(f"Paginating {endpoint} - collecting all pages...")
         all_data = []
         
         # Add first page data
@@ -176,6 +201,18 @@ class OktaAPIClient:
         
         self.logger.debug(f"Page 1: Retrieved {len(first_data) if isinstance(first_data, list) else 1} items")
         
+        # Check if max_results is reached after first page
+        if max_results and len(all_data) >= max_results:
+            print(f"Max results reached: {len(all_data[:max_results])}/{max_results}", file=sys.stderr)
+            self.logger.info(f"Max results reached after page 1: returning {max_results} items")
+            return {
+                "status": "success",
+                "data": all_data[:max_results],
+                "pages": page_count,
+                "total_items": max_results,
+                "limited_by_max_results": True
+            }
+        
         # Continue paginating
         while current_link and page_count < self.max_pages:
             next_url = self._extract_next_url(current_link)
@@ -183,6 +220,7 @@ class OktaAPIClient:
                 break
             
             page_count += 1
+            print(f"Page {page_count}", file=sys.stderr)
             self.logger.debug(f"Fetching page {page_count} from: {next_url}")
             
             page_result = await self._single_request(next_url, "GET")
@@ -205,6 +243,18 @@ class OktaAPIClient:
             else:
                 all_data.append(page_data)
                 self.logger.debug(f"Page {page_count}: Added 1 item (total: {len(all_data)})")
+            
+            # Check if max_results is reached
+            if max_results and len(all_data) >= max_results:
+                print(f"Max results reached: {max_results} items after {page_count} pages", file=sys.stderr)
+                self.logger.info(f"Max results reached after page {page_count}: returning {max_results} items")
+                return {
+                    "status": "success",
+                    "data": all_data[:max_results],
+                    "pages": page_count,
+                    "total_items": max_results,
+                    "limited_by_max_results": True
+                }
             
             # Get next link for next iteration
             current_link = page_result.get("link_header", "")
@@ -283,11 +333,13 @@ class OktaAPIClient:
                             
                             if is_concurrent:
                                 # Concurrent rate limit - shorter retry with backoff
-                                retry_after = min(int(response.headers.get('Retry-After', '5')), 30)
+                                retry_after = min(int(response.headers.get('Retry-After', '15')), 30)
+                                print(f"Rate limit hit, waiting {retry_after}s", file=sys.stderr)
                                 self.logger.warning(f"Concurrent rate limit exceeded on {endpoint}. Waiting {retry_after} seconds for retry {retry_count + 1}/{max_retries}")
                             else:
                                 # Org-wide rate limit - use Retry-After header
                                 retry_after = int(response.headers.get('Retry-After', '60'))
+                                print(f"Rate limit hit, waiting {retry_after}s", file=sys.stderr)
                                 self.logger.warning(f"Org-wide rate limit exceeded on {endpoint}. Waiting {retry_after} seconds for retry {retry_count + 1}/{max_retries}")
                                 self.logger.info(f"Rate limit details: {rate_limit_remaining}/{rate_limit_limit} remaining, resets at epoch {rate_limit_reset}")
                             
@@ -296,7 +348,16 @@ class OktaAPIClient:
                                 # Okta's rate limits reset at specific times, so we trust their timing
                                 actual_wait = min(retry_after, 300)  # Max 5 min wait for safety
                                 
-                                self.logger.info(f"Waiting {actual_wait} seconds as specified by Okta Retry-After header")
+                                # Add jitter to prevent retry storms for concurrent rate limits
+                                # Concurrent limits don't reset by time - they reset when requests complete
+                                # Stagger retries to avoid all requests hitting the same concurrent slots
+                                if is_concurrent:
+                                    jitter = random.uniform(0, 3)  # 0-3 second random delay for concurrent limits
+                                    actual_wait += jitter
+                                    self.logger.info(f"Concurrent rate limit: Waiting {actual_wait:.1f}s (base: {retry_after}s + jitter: {jitter:.1f}s)")
+                                else:
+                                    self.logger.info(f"Org-wide rate limit: Waiting {actual_wait} seconds as specified by Okta Retry-After header")
+                                
                                 await asyncio.sleep(actual_wait)
                                 retry_count += 1
                                 continue
