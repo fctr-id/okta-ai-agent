@@ -355,6 +355,28 @@ Your tasks:
 
 Include performance optimizations and processing recommendations in your metadata."""
 
+def _requires_aggregation(query: str) -> bool:
+    """
+    Check if the user's query explicitly requests grouping, aggregation, or summarization.
+    If so, we should use LLM formatting instead of direct SQL formatting.
+    """
+    query_lower = query.lower()
+    
+    # Keywords that indicate the user wants data grouped/aggregated
+    aggregation_keywords = [
+        'group by', 'group them by', 'grouped by', 'organize by',
+        'aggregate', 'summarize', 'summary', 'breakdown',
+        'collapse', 'consolidate', 'merge', 'combine',
+        'unique users', 'distinct users', 'each user',
+        'per user', 'by user', 'for each user'
+    ]
+    
+    for keyword in aggregation_keywords:
+        if keyword in query_lower:
+            return True
+    
+    return False
+
 def _is_single_sql_query(results: Dict[str, Any], original_plan: Optional[str] = None) -> bool:
     """
     Check if this is a single SQL query that can be formatted directly without LLM processing.
@@ -502,9 +524,12 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
     logger.debug(f"[{flow_id}] Original Plan: {original_plan}")
     
     # SINGLE SQL OPTIMIZATION: Check if this is a simple single SQL query
-    if _is_single_sql_query(results, original_plan):
+    # BUT skip the optimization if user explicitly requests grouping/aggregation
+    if _is_single_sql_query(results, original_plan) and not _requires_aggregation(query):
         logger.info(f"[{flow_id}] SINGLE SQL OPTIMIZATION: Detected single SQL query - using direct formatting")
         return _format_single_sql_directly(results, flow_id, total_records)
+    elif _is_single_sql_query(results, original_plan):
+        logger.info(f"[{flow_id}] SINGLE SQL OPTIMIZATION: Detected single SQL query but user requested grouping/aggregation - using LLM formatting")
     
     # Log the input data structure for debugging
     if 'raw_results' in results:
