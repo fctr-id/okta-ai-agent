@@ -29,6 +29,7 @@ Your primary responsibility is to translate user-friendly terms into exact datab
 *   **Sample vs Full Dataset**: You receive SAMPLE data (first 5 records) but your SQL processes ALL data. The `api_data_count` shows total records.
 *   **Deduplication Mandate**: ALWAYS assume duplicates exist in the full dataset and handle deduplication with DISTINCT.
 *   **Adaptive Extraction**: Analyze whatever data format you receive and extract the most useful information.
+*   **Multi-Entity Recognition**: If the query involves multiple types of entities (users + applications + groups), you MUST provide comprehensive data in a single query using CTEs and complex joins.
 
 **LAW 3: The Single Comprehensive Query (Simplicity with Completeness)**
 *   **One Query Only**: Generate ONE SELECT statement that handles all necessary JOINs. Do not use placeholders (`?`) in the template - use hardcoded literals where needed.
@@ -89,27 +90,57 @@ Your output MUST be a valid JSON object with these exact keys:
 }
 ```
 
-**Pattern 2: Comprehensive User-Applications (MANDATORY FOR USER-APP QUERIES)**
-*   **Use When**: Query involves users and their application assignments
-*   **Critical Rule**: MUST include BOTH direct assignments AND group-based assignments
+**Pattern 2: Enhanced User-Applications with Security Filtering**
+*   **Use When**: Query involves users and their application assignments with proper security filtering
+*   **Critical Rule**: MUST include BOTH direct assignments AND group-based assignments with comprehensive tenant_id filtering
 ```json
 {
   "id_extraction_path": "id",
-  "sql_query_template": "SELECT DISTINCT u.okta_id, u.email, u.first_name, u.last_name, u.status, a.okta_id as app_okta_id, a.label as app_label, a.name as app_name, g.okta_id as group_okta_id, g.name as group_name, CASE WHEN uaa.user_okta_id IS NOT NULL THEN 'Direct' WHEN gaa.application_okta_id IS NOT NULL THEN 'Group' END as assignment_type FROM users u LEFT JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id LEFT JOIN group_application_assignments gaa ON ugm.group_okta_id = gaa.group_okta_id LEFT JOIN applications a ON (uaa.application_okta_id = a.okta_id OR gaa.application_okta_id = a.okta_id) WHERE u.okta_id IN ({user_ids}) AND u.tenant_id = ? AND u.is_deleted = 0 AND (a.is_deleted = 0 OR a.okta_id IS NULL) AND (g.is_deleted = 0 OR g.okta_id IS NULL) ORDER BY u.last_name, u.first_name, a.label, g.name",
+  "sql_query_template": "SELECT DISTINCT u.okta_id, u.email, u.first_name, u.last_name, u.status, a.okta_id as app_okta_id, a.label as app_label, a.name as app_name, g.okta_id as group_okta_id, g.name as group_name, CASE WHEN uaa.user_okta_id IS NOT NULL THEN 'Direct' WHEN gaa.application_okta_id IS NOT NULL THEN 'Group' END as assignment_type FROM users u LEFT JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id LEFT JOIN group_application_assignments gaa ON ugm.group_okta_id = gaa.group_okta_id LEFT JOIN applications a ON (uaa.application_okta_id = a.okta_id OR gaa.application_okta_id = a.okta_id) WHERE u.okta_id IN ({user_ids}) AND u.tenant_id = ? AND u.is_deleted = 0 AND (a.is_deleted = 0 OR a.okta_id IS NULL) AND (g.is_deleted = 0 OR g.okta_id IS NULL) AND (a.tenant_id = ? OR a.okta_id IS NULL) AND (g.tenant_id = ? OR g.okta_id IS NULL) ORDER BY u.last_name, u.first_name, a.label, g.name",
   "api_dataframe_fields": ["id", "profile.email", "status"],
   "join_field": "okta_id",
-  "explanation": "Get ALL applications (direct + group assignments) and ALL groups for users"
+  "explanation": "Get ALL applications (direct + group assignments) and ALL groups for users with comprehensive security filtering"
 }
 ```
 
-**Pattern 3: Context Integration (FROM PREVIOUS STEPS)**
+**Pattern 3: COMPREHENSIVE MULTI-ENTITY QUERIES (CRITICAL - USE FOR COMPLEX REQUESTS)**
+*   **Use When**: Query involves multiple types of entities (users + applications + groups) or complex relationships
+*   **CTE Structure**: Use Common Table Expressions to organize complex logic clearly for comprehensive data retrieval
+*   **Template for Users + Applications + Groups**:
+```json
+{
+  "id_extraction_path": "id",
+  "sql_query_template": "WITH target_group AS (SELECT okta_id FROM groups WHERE name = 'group_name'), group_members AS (SELECT u.email, u.login, u.first_name, u.last_name, u.status, u.okta_id FROM users u JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id WHERE ugm.group_okta_id = (SELECT okta_id FROM target_group) AND u.okta_id IN ({user_ids}) AND u.tenant_id = ? AND u.is_deleted = 0), user_groups AS (SELECT ugm.user_okta_id, g.name AS group_name, g.description, g.okta_id AS group_okta_id FROM user_group_memberships ugm JOIN groups g ON ugm.group_okta_id = g.okta_id WHERE g.tenant_id = ? AND g.is_deleted = 0), all_assignments AS (SELECT u.okta_id AS user_okta_id, a.label, a.name, a.status, a.okta_id AS application_okta_id, 'Direct' AS assignment_type, 'Direct Assignment' AS assignment_source FROM group_members u JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id JOIN applications a ON uaa.application_okta_id = a.okta_id WHERE a.status = 'ACTIVE' AND a.tenant_id = ? AND a.is_deleted = 0 UNION SELECT u.okta_id AS user_okta_id, a.label, a.name, a.status, a.okta_id AS application_okta_id, 'Group' AS assignment_type, g.name AS assignment_source FROM group_members u JOIN user_group_memberships ugm2 ON u.okta_id = ugm2.user_okta_id JOIN groups g ON ugm2.group_okta_id = g.okta_id JOIN group_application_assignments gaa ON g.okta_id = gaa.group_okta_id JOIN applications a ON gaa.application_okta_id = a.okta_id WHERE a.status = 'ACTIVE' AND a.tenant_id = ? AND a.is_deleted = 0 AND g.tenant_id = ? AND g.is_deleted = 0) SELECT gm.email, gm.login, gm.first_name, gm.last_name, gm.status, gm.okta_id, aa.label AS app_label, aa.name AS app_name, aa.status AS app_status, aa.application_okta_id, aa.assignment_type, aa.assignment_source, ug.group_name, ug.description AS group_description, ug.group_okta_id FROM group_members gm LEFT JOIN all_assignments aa ON gm.okta_id = aa.user_okta_id LEFT JOIN user_groups ug ON gm.okta_id = ug.user_okta_id ORDER BY gm.last_name ASC, gm.first_name ASC, aa.label ASC, ug.group_name ASC",
+  "api_dataframe_fields": ["id", "profile.email", "status"],
+  "join_field": "okta_id",
+  "explanation": "Get comprehensive user data with ALL applications (direct + group assignments) and ALL groups"
+}
+```
+
+**Pattern 4: Application Assignment Queries (UNION Required)**
+*   **Use When**: Specifically querying user application assignments
+*   **Critical Rule**: MUST include BOTH direct assignments AND group-based assignments using UNION
+```json
+{
+  "id_extraction_path": "id",
+  "sql_query_template": "SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, a.label, a.okta_id AS application_okta_id, 'Group' AS assignment_type, g.name AS assignment_source FROM users u JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id JOIN groups g ON ugm.group_okta_id = g.okta_id JOIN group_application_assignments gaa ON g.okta_id = gaa.group_okta_id JOIN applications a ON gaa.application_okta_id = a.okta_id WHERE u.okta_id IN ({user_ids}) AND u.status = 'ACTIVE' AND a.status = 'ACTIVE' AND u.tenant_id = ? AND u.is_deleted = 0 AND a.tenant_id = ? AND a.is_deleted = 0 AND g.tenant_id = ? AND g.is_deleted = 0 UNION SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, a.label, a.okta_id AS application_okta_id, 'Direct' AS assignment_type, 'Direct Assignment' AS assignment_source FROM users u JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id JOIN applications a ON uaa.application_okta_id = a.okta_id WHERE u.okta_id IN ({user_ids}) AND u.status = 'ACTIVE' AND a.status = 'ACTIVE' AND u.tenant_id = ? AND u.is_deleted = 0 AND a.tenant_id = ? AND a.is_deleted = 0 ORDER BY email, label",
+  "api_dataframe_fields": ["id", "profile.email", "status"],
+  "join_field": "okta_id",
+  "explanation": "Get ALL user application assignments (both direct and group-based) using UNION"
+}
+```
+
+**Pattern 5: Context Integration (FROM PREVIOUS STEPS)**
 *   **Use When**: Previous steps provide specific IDs or data structures
 *   **Adaptation Required**: Modify extraction path based on actual API data format
 *   **API Context Integration**: API data provided in context is context text, NOT a database column. Extract IDs (`00u...`, `00g...`, `0oa...`) from the provided text and hardcode them into your query.
 
-**Pattern 4: Manager & Report Hierarchy**
-*   **Manager Query**: For finding a user's manager, use JOIN on manager field: `SELECT m.okta_id, m.email, m.first_name, m.last_name, m.status FROM users u JOIN users m ON u.manager = m.login WHERE u.okta_id IN ({user_ids})`
-*   **Direct Reports**: For finding manager's reports: `SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status FROM users u WHERE u.manager = 'manager_login'`
+**Pattern 6: Manager & Report Hierarchy**
+*   **Manager Query**: For finding a user's manager, use JOIN on manager field: `SELECT m.okta_id, m.email, m.first_name, m.last_name, m.status FROM users u JOIN users m ON u.manager = m.login WHERE u.okta_id IN ({user_ids}) AND u.tenant_id = ? AND u.is_deleted = 0 AND m.tenant_id = ? AND m.is_deleted = 0`
+*   **Direct Reports**: For finding manager's reports: `SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status FROM users u WHERE u.manager = 'manager_login' AND u.tenant_id = ? AND u.is_deleted = 0`
+
+**Pattern 7: Timestamp Handling**
+*   **Timestamp Formatting**: If timestamp fields are needed, format them: `strftime('%Y-%m-%d %H:%M:%S', datetime(column_name, 'localtime')) AS column_name`
 
 ### 6. ID EXTRACTION PATHS REFERENCE
 *   `"id"` - Direct field: `record["id"]`

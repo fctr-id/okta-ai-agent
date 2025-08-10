@@ -71,16 +71,16 @@ If you cannot create a valid plan because the user's request cannot be fulfilled
 **STEP STRUCTURE REQUIREMENTS**
 
 - **tool_name**: "sql" or "api" 
-- **entity**: MUST be exact entity/table name from AVAILABLE DATA SOURCES - NO EXCEPTIONS, NO GUESSING
-- **operation**: MUST be exact operation name from AVAILABLE DATA SOURCES for API steps (NO invention allowed), null for SQL steps  
+- **entity**: MUST use the EXACT `entity` field from the endpoint definition in AVAILABLE DATA SOURCES - NO INFERENCE FROM OPERATION NAMES
+- **operation**: MUST use the EXACT `operation` field from the endpoint definition in AVAILABLE DATA SOURCES for API steps, null for SQL steps  
 - **query_context**: What data to collect + required limits + specific guidance + parameter usage + note that pagination is automatically handled
 - **critical**: true/false
 - **reasoning**: Why this step is needed + which specific endpoint/table from AVAILABLE DATA SOURCES provides this capability
 
 **ENTITY/OPERATION VALIDATION CHECKLIST**:
 Before adding ANY step, you MUST perform this validation sequence:
-1. **SOURCE VERIFICATION**: Entity name appears EXACTLY in AVAILABLE DATA SOURCES  
-2. **OPERATION VERIFICATION**: Operation name appears EXACTLY in the entity's available operations list
+1. **SOURCE VERIFICATION**: Entity name appears EXACTLY in the endpoint definition `entity` field from AVAILABLE DATA SOURCES  
+2. **OPERATION VERIFICATION**: Operation name appears EXACTLY in the endpoint definition `operation` field from AVAILABLE DATA SOURCES
 3. **ZERO API CHECK**: If 0 API entities provided, use ONLY SQL steps - NO EXCEPTIONS
 4. **API-ONLY CONFLICT CHECK**: If user requests API-only but 0 API entities available, return the ERROR HANDLING JSON response instead of hallucinating
 5. **EXACT MATCH VERIFICATION**: No variations, abbreviations, or "similar" names allowed - must be character-for-character identical
@@ -102,7 +102,7 @@ Follow this mandatory sequence when building your plan:
 - NOT: "Join users, user_group_memberships, groups, user_application_assignments, applications"
 
 **SPECIAL CASES**
-When the query is about users assigned to appplications and that is from the database, you must output  "fetch ALL the applications assigned to the user by user or group assignments"
+When the query is about users assigned to applications and that is from the database, you must output  "fetch ALL the applications assigned to the user by user or group assignments"
 
 **API LIMIT REQUIREMENTS (CRITICAL)**:
 - **SYSTEM_LOG ENDPOINTS**: MUST specify "Use limit=1000 for system_log API calls" in query_context
@@ -120,7 +120,7 @@ When the query is about users assigned to appplications and that is from the dat
   - **Policy rules**: use `expand=rules` on policy_get/policy_list to include rules in same response
 - **Filter Requirements**: Some expand parameters require specific filters (e.g., `expand=user/{userId}` needs `user.id eq "{userId}"`)
 - **Bulk operations**: Always prioritize parameter options that reduce total API calls
-- **Attributes Output*** : Do NOT output the query to extract all attributes for all entities unless requested by the user. You MUST only specify the ones requested by user or if not bare minimum needed for that entity
+- **Attributes Output**: Do NOT output queries to extract all attributes for all entities unless requested by the user. You MUST only specify the ones requested by user or if not specified, the bare minimum needed for that entity
 
 **CRITICAL: ADDITIONAL ENTITY DETAILS REQUIREMENT**
 

@@ -295,9 +295,34 @@ filter_expr = 'eventType eq "user.authentication.auth" or eventType eq "user.aut
 - **ERROR FORMAT**: For errors: `print(json.dumps({"status": "error", "error": str(e)}))`
 
 ### Performance Considerations
-- **CONCURRENT CALLS**: Use `asyncio.gather()` for concurrent API calls when beneficial
-- **MEMORY EFFICIENT**: Process large datasets appropriately
-- **CLIENT EFFICIENCY**: OktaAPIClient optimizes batch operations automatically
+- **SINGLE API CALLS**: For fresh queries with NO previous step data, make ONE call only. The OktaAPIClient handles pagination automatically:
+  ```python
+  # CORRECT: Fresh query - single API call
+  users = await client.make_request("GET", "/api/v1/users")
+  # The client automatically follows pagination links
+  ```
+- **CHUNKED CONCURRENT CALLS**: ONLY when you have previous step results and need to make follow-up calls for each item:
+  ```python
+  # CORRECT: Follow-up calls using previous step data - use chunked batching
+  if step_1_sample:  # Previous step data exists
+      user_ids = [user['id'] for user in step_1_sample]
+      concurrent_limit = client.concurrent_limit
+      
+      results = []
+      for i in range(0, len(user_ids), concurrent_limit):
+          chunk = user_ids[i:i + concurrent_limit]
+          tasks = [client.make_request("GET", f"/api/v1/users/{uid}/roles") for uid in chunk]
+          chunk_results = await asyncio.gather(*tasks)
+          results.extend(chunk_results)
+          # Small delay between chunks to prevent overwhelming the API
+          if i + concurrent_limit < len(user_ids):
+              await asyncio.sleep(0.5)
+  ```
+- **DECISION RULE**: 
+  - **No previous step data** → Single API call
+  - **Has previous step data** → Chunked concurrent calls for follow-ups
+- **NEVER use unlimited concurrent calls** with `asyncio.gather(*all_tasks)` - this violates Okta rate limits
+- **CLIENT EFFICIENCY**: OktaAPIClient handles pagination and rate limiting automatically for individual requests
 
 ### Final Output Requirements
 - **MANDATORY JSON OUTPUT**: Generated Python code MUST output valid JSON format ONLY
