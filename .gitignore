@@ -104,3 +104,4 @@ src/api/static/*/*
 src/api/static/assets/*
 src/core/agents/prompts/api_sql_code_gen_agent_system_prompt_backup.txt
 src/core/orchestration/moder_execution_manager_yesterday.py
+src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY copy.json
