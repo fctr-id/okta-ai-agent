@@ -12,8 +12,6 @@
 
 Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
 
-**NEW in v1.1-beta: Enhanced Performance & User Experience** - Introducing advanced strategy agents for optimized query planning, 5x faster results streaming, and intelligent hybrid data source indicators. Building on v1.0's complete API-only operation capabilities, v1.1 delivers enterprise-grade performance with refined user interface and enhanced security.
-
 Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
 
 <div align="center">
