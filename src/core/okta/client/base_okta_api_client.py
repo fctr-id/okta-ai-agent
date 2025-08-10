@@ -54,6 +54,9 @@ class OktaAPIClient:
         # Get API token
         self.api_token = os.getenv('OKTA_API_TOKEN') or os.getenv('SSWS_API_KEY')
         
+        # Get concurrent limit for chunked processing
+        self.concurrent_limit = int(os.getenv('OKTA_CONCURRENT_LIMIT', '15'))
+        
         if not self.okta_domain or not self.api_token:
             self.logger.error("Missing Okta configuration. Required: OKTA_CLIENT_ORGURL and OKTA_API_TOKEN environment variables")
             raise ValueError("Missing Okta configuration. Set OKTA_CLIENT_ORGURL and OKTA_API_TOKEN environment variables.")
@@ -67,7 +70,7 @@ class OktaAPIClient:
         
         self.base_url = f"https://{self.okta_domain}"
         self.logger.info(f"Okta API client configured for domain: {self.okta_domain}")
-        self.logger.debug(f"Client settings - Timeout: {self.timeout}s, Max Pages: {self.max_pages}")
+        self.logger.debug(f"Client settings - Timeout: {self.timeout}s, Max Pages: {self.max_pages}, Concurrent Limit: {self.concurrent_limit}")
     
     def _optimize_params(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
         """
@@ -551,6 +554,5 @@ class OktaAPIClient:
         # Fallback: return as-is (similar to Okta SDK approach)
         self.logger.debug(f"Response format not recognized, returning as-is: {type(data)}")
         return data
-
 
 
