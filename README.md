@@ -186,22 +186,22 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 
 **Important: Okta states that "Even large bulk loads rarely require more than 10 simultaneous transactions."**
 
-Use this table to set the optimal `OKTA_CONCURRENT_LIMIT` in your `.env` file based on your Okta plan and rate limit allocation:
+If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT` in your `.env` file:
 
-| Tenant Type | API Rate Limit % | Recommended Setting |
-|-------------|------------------|---------------------|
-| Integrator (Free Plan) | 50% | 7 |
-| Integrator (Free Plan) | 75% | 11 |
-| Integrator (Free Plan) | 100% | 15 |
-| One App | 50% | 17 |
-| One App | 75% | 26 |
-| One App | 100% | 35 |
-| Enterprise | 50% | 37 |
-| Enterprise | 75% | 56 |
-| Enterprise | 100% | 75 |
-| Workforce Identity | 50% | 37 |
-| Workforce Identity | 75% | 56 |
-| Workforce Identity | 100% | 75 |
+| Tenant Type | API Rate Limit % | Recommended Setting | Tested Maximum (CAUTION ⚠️) |
+|-------------|------------------|---------------------|------------------------------|
+| Integrator | 50% | 22 | 30 |
+| Integrator | 75% | 34 | 40 |
+| Integrator | 100% | 45 | 50 |
+| One App | 50% | 135 | 200 |
+| One App | 75% | 203 | 300 |
+| One App | 100% | 270 | 400 |
+| Enterprise | 50% | 135 | 200 |
+| Enterprise | 75% | 203 | 300 |
+| Enterprise | 100% | 270 | 400 |
+| Workforce Identity | 50% | 135 | 270 |
+| Workforce Identity | 75% | 203 | 405 |
+| Workforce Identity | 100% | 270 | 540 |
 
 ### ⚠️ Important: Monitor for Errors
 
