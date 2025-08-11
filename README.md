@@ -184,7 +184,6 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 
 **For fastest sync times, set your API rate limit to 100% as shown above.**
 
-**Important: Okta states that "Even large bulk loads rarely require more than 10 simultaneous transactions."**
 
 If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT` in your `.env` file:
 
