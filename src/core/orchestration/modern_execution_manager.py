@@ -1902,22 +1902,17 @@ class ModernExecutionManager:
                 logger.warning(f"[{correlation_id}] API step failed: empty results stored as {variable_name}")
             
             # Determine if step should be considered successful
-            has_meaningful_data = False
+            has_meaningful_data = True  # 0 results is a valid successful outcome
             execution_successful = False
             
-            # Check if the APIExecutionResult has meaningful data
+            # API step is successful if it executed properly, regardless of result count
+            # 0 results should NOT be considered a failure - it's a valid query result
             if hasattr(result_data, 'data'):
-                # result_data is an APIExecutionResult object
-                if isinstance(result_data.data, list) and len(result_data.data) > 0:
-                    has_meaningful_data = True
-                elif isinstance(result_data.data, dict) and result_data.data:
-                    has_meaningful_data = True
+                # result_data is an APIExecutionResult object - any structure is valid
+                has_meaningful_data = True
             else:
                 # Fallback for raw data (shouldn't happen with current code)
-                if isinstance(result_data, list) and len(result_data) > 0:
-                    has_meaningful_data = True
-                elif isinstance(result_data, dict) and result_data:
-                    has_meaningful_data = True
+                has_meaningful_data = True
             
             # Check if code executed without critical errors
             if execution_result.get('error'):
@@ -1936,7 +1931,7 @@ class ModernExecutionManager:
             
             if not step_success:
                 if not has_meaningful_data:
-                    logger.warning(f"[{correlation_id}] API step marked as FAILED: no meaningful data returned")
+                    logger.warning(f"[{correlation_id}] API step marked as FAILED: execution structure invalid")
                 if not execution_successful:
                     logger.warning(f"[{correlation_id}] API step marked as FAILED: critical execution error")
             
