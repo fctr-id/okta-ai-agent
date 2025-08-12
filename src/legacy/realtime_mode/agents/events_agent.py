@@ -60,7 +60,7 @@ EventResult = Union[EventResponse, RateLimited, EntityError]
 event_agent = Agent(
     model=ModelConfig.get_model(ModelType.REASONING),
     deps_type=OktaRealtimeDeps,
-    result_type=EventResult,
+    output_type=EventResult,
     system_prompt="""
     You are a specialized agent for querying Okta event logs in real-time.
     
