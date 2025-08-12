@@ -3,6 +3,8 @@ import sys
 import os
 # Add parent directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Change working directory to root so .env file can be found
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone
 from src.config.settings import settings
 from src.core.okta.sync.engine import SyncOrchestrator
