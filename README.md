@@ -246,10 +246,8 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 ### **Coding Models** (API Code Generation)
 - **GPT-4.1** - Reliable code generation
 - **OpenAI GPT-OSS 120B** - Open-source coding excellence
-- **Claude Sonnet 4** - Advanced code understanding
-- **Claude Sonnet 3.7** - Proven coding reliability
+- **Claude Sonnet 4** - Advanced code understanding (works mostly)
 - **Gemini 2.5 Pro** - Latest Google coding model
-- **Gemini 1.5 Pro** - Stable Google coding model
 
 ### **Performance Notes**
 - **Dual Model Setup**: Tako uses separate reasoning and coding models for optimal performance
