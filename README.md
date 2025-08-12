@@ -8,7 +8,7 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1.3-beta)</h2>
 
 Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
 
@@ -19,7 +19,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 <p>Learn more about Tako's journey and advanced multi-agent architecture:</p>
 <div style="margin: 20px 0;">
   <a href="https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/" style="margin-right: 20px;">
-    📚 How Tako AI v1.0 Delivers Where Other Okta Tools Fall Short: A Technical Reality Check for Skeptics
+    📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short: A Technical Reality Check for Skeptics
   </a>
 </div>
 </div>
@@ -82,7 +82,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 &nbsp;
 
 ## ⚠️ MAJOR ARCHITECTURE UPGRADE
-> **IMPORTANT**: Version 1.1-beta builds upon the revolutionary multi-agent architecture introduced in v1.0, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
+> **IMPORTANT**: Version 1.1-beta builds upon the revolutionary multi-agent architecture, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
 > 
 > **Previous v0.6.x users:** This version uses an entirely different approach. Your existing setup will work, but to access the new unified agent capabilities, follow the new installation process.
 > 
