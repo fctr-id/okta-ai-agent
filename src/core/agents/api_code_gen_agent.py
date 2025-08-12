@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from pydantic import BaseModel, Field, ConfigDict
 from pydantic_ai import Agent, RunContext
+from pydantic_ai.toolsets import FunctionToolset
+
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
 from dotenv import load_dotenv
 
@@ -88,6 +90,75 @@ class CodeGenerationOutput(BaseModel):
         default="Standard Okta rate limits apply"
     )
 
+# Load event types for enhanced toolset
+EVENT_TYPES_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "data", "schemas", "Okta_eventTypes.json")
+OKTA_EVENT_TYPES = {}
+
+try:
+    with open(EVENT_TYPES_PATH, 'r', encoding='utf-8') as f:
+        OKTA_EVENT_TYPES = json.load(f)
+    logger.info(f"Loaded {len(OKTA_EVENT_TYPES)} event type categories")
+except FileNotFoundError:
+    logger.warning(f"Event types file not found at {EVENT_TYPES_PATH}")
+except json.JSONDecodeError as e:
+    logger.error(f"Error parsing event types JSON: {e}")
+
+# Create event types toolset for intelligent event selection
+event_types_toolset = FunctionToolset()
+
+@event_types_toolset.tool
+def get_detailed_events_from_keys(category_keys: List[str]) -> Dict[str, List[str]]:
+    """
+    Get detailed event types for selected categories.
+    
+    Args:
+        category_keys: List of event category keys to retrieve
+        
+    Returns:
+        Dict mapping category keys to their event type lists
+    """
+    result = {}
+    all_event_types = []  # Flattened list for convenience
+    
+    logger.debug(f"Tool called with category_keys: {category_keys}")
+    
+    for key in category_keys:
+        if key in OKTA_EVENT_TYPES:
+            result[key] = OKTA_EVENT_TYPES[key]
+            all_event_types.extend(OKTA_EVENT_TYPES[key])  # Add to flattened list
+            logger.debug(f"Category '{key}': {len(OKTA_EVENT_TYPES[key])} event types")
+        else:
+            logger.warning(f"Category key '{key}' not found in event types schema")
+    
+    # Add flattened list for convenience
+    if all_event_types:
+        result['_all_event_types'] = all_event_types
+    
+    total_events = sum(len(events) for events in result.values() if not events == all_event_types)
+    logger.info(f"Retrieved {total_events} total event types across {len(result)-1 if all_event_types else len(result)} categories")
+    
+    # Debug: Log the complete tool response
+    logger.debug("=== TOOL RESPONSE DEBUG START ===")
+    logger.debug(f"Tool: get_detailed_events_from_keys")
+    logger.debug(f"Input category_keys: {category_keys}")
+    logger.debug(f"Output structure:")
+    for category, events in result.items():
+        if category == '_all_event_types':
+            logger.debug(f"  {category}: [{len(events)} flattened event types]")
+            if len(events) <= 5:
+                logger.debug(f"    Sample events: {events}")
+            else:
+                logger.debug(f"    Sample events: {events[:5]}... (+{len(events)-5} more)")
+        else:
+            logger.debug(f"  {category}: [{len(events)} event types]")
+            if len(events) <= 3:
+                logger.debug(f"    Events: {events}")
+            else:
+                logger.debug(f"    Events: {events[:3]}... (+{len(events)-3} more)")
+    logger.debug("=== TOOL RESPONSE DEBUG END ===")
+    
+    return result
+
 # Load system prompt from file
 SYSTEM_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "prompts", "api_code_gen_agent_system_prompt.txt")
 
@@ -98,7 +169,7 @@ except FileNotFoundError:
     logger.warning(f"System prompt file not found at {SYSTEM_PROMPT_PATH}, using fallback")
     BASE_SYSTEM_PROMPT = """You are an expert Python code generator for Okta API operations.
 
-🚨 **GOLDEN RULES - NON-NEGOTIABLE** 🚨
+**GOLDEN RULES - NON-NEGOTIABLE**
 1. **`limit=100` ON ALL API CALLS**: Every single API call MUST include `limit=100`. No exceptions.
 2. **USE PROVIDED ENDPOINTS ONLY**: Use ONLY the exact API endpoints and methods provided in the context.
 3. **FOLLOW THE PLAN**: Implement the execution plan EXACTLY as described.
@@ -106,18 +177,23 @@ except FileNotFoundError:
 
 Generate practical, executable Python code that combines SQL data with API calls to solve the user's query."""
 
-# Create the PydanticAI agent
+# Create the PydanticAI agent with event types toolset
 api_code_gen_agent = Agent(
     model,
-    system_prompt=BASE_SYSTEM_PROMPT,
+    instructions=BASE_SYSTEM_PROMPT,  # Static base instructions
     output_type=CodeGenerationOutput,
+    deps_type=ApiCodeGenDependencies,
+    toolsets=[event_types_toolset],  # Add the event types toolset
     retries=0  # No retries to avoid wasting money on failed attempts
 )
 
-@api_code_gen_agent.system_prompt
-def create_dynamic_system_prompt(ctx: RunContext[ApiCodeGenDependencies]) -> str:
-    """Create dynamic system prompt with context from dependencies"""
+@api_code_gen_agent.instructions
+def create_dynamic_instructions(ctx: RunContext[ApiCodeGenDependencies]) -> str:
+    """Create dynamic instructions with context from dependencies"""
     deps = ctx.deps
+    
+    # Get available event type categories for the dynamic prompt
+    event_type_categories = list(OKTA_EVENT_TYPES.keys()) if OKTA_EVENT_TYPES else ['No event types loaded']
     
     # Build dynamic context
     dynamic_context = f"""
@@ -134,45 +210,22 @@ ENHANCED CONTEXT - PREVIOUS STEP DATA:
 AVAILABLE API ENDPOINTS WITH COMPLETE DOCUMENTATION:
 {json.dumps(deps.available_endpoints, indent=2)}
 
-🚨 CRITICAL API GUIDELINES - FOLLOW STRICTLY:
+**AVAILABLE TOOLS FOR EVENT TYPE SELECTION**:
+- get_detailed_events_from_keys(category_keys): Get specific event types for selected categories
 
-1. **PARAMETER COMPLIANCE**:
-   - ALWAYS use ONLY the parameters listed in 'parameters.required' and 'parameters.optional'
-   - NEVER use parameters not in the API specification (like 'published' for system logs)
-   - For system_log endpoints, use 'since', 'until', 'filter', 'q', 'limit', 'sortOrder' ONLY
-   
-2. **URL CONSTRUCTION**:
-   - Use the exact 'url_pattern' provided
-   - Replace :paramName with actual values (e.g., :userId with actual user ID)
-   - Build full URLs: https://{{{{okta_domain}}}}/api/v1/...
-   
-3. **METHOD COMPLIANCE**:
-   - Use the exact HTTP method specified ('method' field)
-   - GET for retrieving data, POST for creating, PUT for updating, DELETE for removing
-   
-4. **NOTES ADHERENCE**:
-   - Read the 'notes' field carefully for API-specific guidance
-   - Follow any special notes, limitations, or requirements mentioned
-   - Pay attention to default values, pagination, and rate limits
-   
-5. **TIME FILTERING** (Critical for logs/events):
-   - Use 'since' and 'until' parameters for time-based filtering
-   - Format: ISO 8601 with Z suffix (e.g., "2025-07-09T00:00:00.000Z")
-   - NEVER use 'published' in filter expressions - use 'since'/'until' instead
-   
-6. **FILTER EXPRESSIONS**:
-   - Follow SCIM filter syntax as documented
-   - Use correct operators: eq, ne, gt, lt, sw, co, ew
-   - Quote string values properly
-   
-7. **ERROR HANDLING**:
-   - Include proper error handling for API calls
-   - Handle rate limits, timeouts, and authentication errors
-   - Provide meaningful error messages
+**AVAILABLE EVENT TYPE CATEGORIES** (for system_log queries):
+{event_type_categories}
+
+**WORKFLOW FOR SYSTEM LOG QUERIES**:
+1. Review the available event type categories above
+2. Select 1-3 MOST relevant categories based on the user's query (e.g., "user-authentication-session" for login queries)
+3. Call get_detailed_events_from_keys with your selected category keys
+4. From the returned event types, choose only the 5-15 MOST RELEVANT ones for the user's specific query
+5. Do NOT use all returned event types - be selective and focus on what the user actually needs
 
 Generate practical, executable code that solves the user's query: {deps.query}"""
     
-    return BASE_SYSTEM_PROMPT + dynamic_context
+    return dynamic_context
 
 async def generate_api_code(
     query: str,
