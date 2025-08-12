@@ -2,7 +2,24 @@
 
 
 
-## Current latest: v1.1.2-beta (08-10-2025) - "API Etiquette School"
+## Current latest: v1.1.3-beta (08-12-2025) - "Context Crafting"
+
+Major Framework & Intelligence Upgrades:
+- **PydanticAI v0.6.2 Migration**: Successfully upgraded from v0.4.11 to v0.6.2 with full breaking changes compatibility
+- **Event Type Intelligence Tool**: Added sophisticated event type selection tool for precise Okta system log filtering
+- **Multi-Provider AI Testing**: Extensively tested prompts across multiple AI providers (OpenAI, Anthropic, Google) for consistent results
+- **Model Compatibility Verification**: Updated and validated AI model configurations across providers
+- **ARM64 Support**: Migrated from polars to polars-lts-cpu for enhanced ARM64/Apple Silicon compatibility
+
+Framework & Encoding Fixes:
+- **Deprecated API Cleanup**: Removed GoogleVertexProvider, migrated result_type→output_type, updated .data→.output properties
+- **Windows Unicode Support**: Fixed Windows cp1252 encoding issues preventing server startup with Unicode characters
+- **Emoji Cleanup**: Removed Unicode emojis from code comments to prevent Windows encoding conflicts
+- **Subprocess Encoding**: Added UTF-8 encoding with error handling for cross-platform compatibility
+
+Previous Updates:
+
+## v1.1.2-beta (08-10-2025) - "API Etiquette School"
 
 API Code Generation & Rate Limiting Enhancements:
 - **MAX LIMIT RULE Implementation**: API Code Generation Agent now properly handles `max_results` parameter when users request specific quantities
