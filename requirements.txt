@@ -1,6 +1,6 @@
 # Core dependencies
 pydantic~=2.11.7
-pydantic-ai~=0.4.11
+pydantic-ai~=0.6.2
 openai~=1.97.0
 python-dotenv~=1.1.1
 okta~=2.9.13
@@ -15,4 +15,5 @@ python-jose[cryptography]~=3.5.0
 python-multipart~=0.0.20
 html-sanitizer~=2.5.0
 dateparser~=1.2.2
-polars~=1.31.0
+#polars~=1.31.0
+polars-lts-cpu~=1.32.2
