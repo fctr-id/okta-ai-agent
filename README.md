@@ -268,6 +268,8 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 #### API Token
 - **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
 - **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
+- ℹ️ **Additional Permissions**: Some entities (e.g., listing Okta admin roles) will need additional permissions on the token
+- **Custom Role Example**: You will need a custom role created with Permission: "View roles, resources, and admin assignments" and Resources: "All Identity and Access Management resources" assigned in addition to READ-ONLY administrator
 
 #### AI Provider Options
 - **LLM Flexibility**: 
