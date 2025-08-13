@@ -343,7 +343,7 @@
     "policy.rule.action.execute",
     "core.el.evaluate"
   ],
-  "directory-integration-active-directory-ad)": [
+  "directory-integration-active-directory-ad": [
     "system.agent.ad.connect",
     "system.agent.ad.start",
     "system.agent.ad.deactivate",
