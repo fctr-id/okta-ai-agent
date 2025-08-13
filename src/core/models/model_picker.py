@@ -3,7 +3,6 @@ from typing import Optional, Dict
 from pydantic import BaseModel
 from pydantic_ai.models.gemini import GeminiModel
 from pydantic_ai.models.openai import OpenAIModel
-from pydantic_ai.providers.google_vertex import GoogleVertexProvider  
 from pydantic_ai.providers.openai import OpenAIProvider
 from openai import AsyncAzureOpenAI
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -162,29 +161,20 @@ class ModelConfig:
         provider = os.getenv('AI_PROVIDER', 'vertex_ai').lower()
         
         if provider == AIProvider.VERTEX_AI:
-            service_account = os.getenv('GOOGLE_APPLICATION_CREDENTIALS') or os.getenv('VERTEX_AI_SERVICE_ACCOUNT_FILE')
-            project_id = os.getenv('VERTEX_AI_PROJECT')
-            region = os.getenv('VERTEX_AI_LOCATION', 'us-central1')
+            # Set environment variables for Vertex AI configuration
+            if os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            if os.getenv('VERTEX_AI_PROJECT'):
+                os.environ['GOOGLE_CLOUD_PROJECT'] = os.getenv('VERTEX_AI_PROJECT')
+            if os.getenv('VERTEX_AI_LOCATION'):
+                os.environ['GOOGLE_CLOUD_LOCATION'] = os.getenv('VERTEX_AI_LOCATION', 'us-central1')
             
             reasoning_model_name = os.getenv('VERTEX_AI_REASONING_MODEL', 'gemini-1.5-pro')
             coding_model_name = os.getenv('VERTEX_AI_CODING_MODEL', 'gemini-1.5-pro')
             
-            vertex_provider = GoogleVertexProvider(
-                service_account_file=service_account,
-                project_id=project_id,
-                region=region
-            )
-            
             return {
-                ModelType.REASONING: GeminiModel(
-                    reasoning_model_name,
-                    provider=vertex_provider
-                    
-                ),
-                ModelType.CODING: GeminiModel(
-                    coding_model_name,
-                    provider=vertex_provider,
-                )
+                ModelType.REASONING: GeminiModel(reasoning_model_name),
+                ModelType.CODING: GeminiModel(coding_model_name)
             }
         
         elif provider == AIProvider.OPENAI_COMPATIBLE:

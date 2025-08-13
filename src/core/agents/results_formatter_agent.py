@@ -221,10 +221,8 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
         sample_size = total_records  # Send all if very small
     elif total_records <= 100:
         sample_size = min(10, total_records)  # Sample 10 records
-    elif total_records <= 1000:
-        sample_size = min(20, total_records)  # Sample 20 records  
     else:
-        sample_size = min(50, total_records)  # Sample 50 records for large datasets
+        sample_size = min(20, total_records)  # Sample 20 records for all larger datasets
     
     print(f"[STATS] Creating samples: {sample_size} records from {total_records} total")
     
@@ -620,7 +618,7 @@ LARGE DATASET DETECTED ({total_records} records):
             result = await complete_data_formatter.run(prompt)
             
             # Since we're not using structured output, result should be a string
-            raw_response = str(result.data) if hasattr(result, 'data') else str(result)
+            raw_response = str(result.output) if hasattr(result, 'output') else str(result)
             
             # Parse the raw response manually
             formatted_result = _parse_raw_llm_response(raw_response, flow_id)
@@ -678,7 +676,7 @@ async def _process_sample_data(query: str, sampled_results: Dict[str, Any], orig
             result = await sample_data_formatter.run(prompt)
             
             # Since we're not using structured output, result should be a string
-            raw_response = str(result.data) if hasattr(result, 'data') else str(result)
+            raw_response = str(result.output) if hasattr(result, 'output') else str(result)
             
             # Parse the raw response manually
             formatted_result = _parse_raw_llm_response(raw_response, flow_id)

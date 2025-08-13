@@ -8,7 +8,7 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1.3-beta)</h2>
 
 Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
 
@@ -19,7 +19,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 <p>Learn more about Tako's journey and advanced multi-agent architecture:</p>
 <div style="margin: 20px 0;">
   <a href="https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/" style="margin-right: 20px;">
-    📚 How Tako AI v1.0 Delivers Where Other Okta Tools Fall Short: A Technical Reality Check for Skeptics
+    📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short: A Technical Reality Check for Skeptics
   </a>
 </div>
 </div>
@@ -82,7 +82,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 &nbsp;
 
 ## ⚠️ MAJOR ARCHITECTURE UPGRADE
-> **IMPORTANT**: Version 1.1-beta builds upon the revolutionary multi-agent architecture introduced in v1.0, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
+> **IMPORTANT**: Version 1.1-beta builds upon the revolutionary multi-agent architecture, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
 > 
 > **Previous v0.6.x users:** This version uses an entirely different approach. Your existing setup will work, but to access the new unified agent capabilities, follow the new installation process.
 > 
@@ -237,19 +237,17 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 
 ### **Reasoning Models** (Planning & Analysis)
 - **O3** - Advanced reasoning capabilities (very expensive)
-- **GPT-5-mini** - Works but is very slow (leaset expensive but needs more testing)
-- **GPT-o4-mini** - Fast and efficient reasoning  
+- **GPT-5-mini** - Works but is very slow (least expensive but needs more testing)
+- **GPT-o4-mini** - Fast and efficient reasoning  (preferred)
 - **OpenAI GPT-OSS 120B** - Open-source high-performance reasoning
 - **Claude Sonnet 4** - Superior analytical reasoning
 - **Gemini 2.5 Pro** - Google's latest reasoning model
 
 ### **Coding Models** (API Code Generation)
-- **GPT-4.1** - Reliable code generation
+- **GPT-4.1** - Reliable code generation (preferred)
 - **OpenAI GPT-OSS 120B** - Open-source coding excellence
-- **Claude Sonnet 4** - Advanced code understanding
-- **Claude Sonnet 3.7** - Proven coding reliability
+- **Claude Sonnet 4** - Advanced code understanding (works mostly)
 - **Gemini 2.5 Pro** - Latest Google coding model
-- **Gemini 1.5 Pro** - Stable Google coding model
 
 ### **Performance Notes**
 - **Dual Model Setup**: Tako uses separate reasoning and coding models for optimal performance
@@ -270,6 +268,8 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 #### API Token
 - **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
 - **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
+- ℹ️ **Additional Permissions**: Some entities (e.g., listing Okta admin roles) will need additional permissions on the token
+- **Custom Role Example**: You will need a custom role created with Permission: "View roles, resources, and admin assignments" and Resources: "All Identity and Access Management resources" assigned in addition to READ-ONLY administrator
 
 #### AI Provider Options
 - **LLM Flexibility**: 

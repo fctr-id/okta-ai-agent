@@ -194,7 +194,7 @@ def load_base_system_prompt() -> str:
 # Create the Planning Agent with PydanticAI
 planning_agent = Agent(
     model,
-    output_type=PlanningOutput,  # ✅ MODERN: Use output_type not deprecated result_type
+    output_type=PlanningOutput,  # MODERN: Use output_type not deprecated result_type
     deps_type=PlanningDependencies,
     retries=0,  # No retries to avoid wasting money on failed attempts
     instructions=load_base_system_prompt()  # Static base instruction from file
