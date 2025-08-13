@@ -237,14 +237,14 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 
 ### **Reasoning Models** (Planning & Analysis)
 - **O3** - Advanced reasoning capabilities (very expensive)
-- **GPT-5-mini** - Works but is very slow (leaset expensive but needs more testing)
-- **GPT-o4-mini** - Fast and efficient reasoning  
+- **GPT-5-mini** - Works but is very slow (least expensive but needs more testing)
+- **GPT-o4-mini** - Fast and efficient reasoning  (preferred)
 - **OpenAI GPT-OSS 120B** - Open-source high-performance reasoning
 - **Claude Sonnet 4** - Superior analytical reasoning
 - **Gemini 2.5 Pro** - Google's latest reasoning model
 
 ### **Coding Models** (API Code Generation)
-- **GPT-4.1** - Reliable code generation
+- **GPT-4.1** - Reliable code generation (preferred)
 - **OpenAI GPT-OSS 120B** - Open-source coding excellence
 - **Claude Sonnet 4** - Advanced code understanding (works mostly)
 - **Gemini 2.5 Pro** - Latest Google coding model
