@@ -1,19 +1,19 @@
 # Core dependencies
 pydantic~=2.11.7
 pydantic-ai~=0.6.2
-openai~=1.97.0
+openai~=1.99.9
 python-dotenv~=1.1.1
 okta~=2.9.13
-sqlalchemy~=2.0.41
+sqlalchemy~=2.0.43
 aiosqlite~=0.21.0
-pydantic-settings~=2.9.1
+pydantic-settings~=2.10.1
 pytz~=2025.2
 fastapi~=0.116.1
-uvicorn~=0.34.3
-argon2-cffi~=23.1.0
+uvicorn~=0.35.0
+argon2-cffi~=25.1.0
 python-jose[cryptography]~=3.5.0
 python-multipart~=0.0.20
-html-sanitizer~=2.5.0
+html-sanitizer~=2.6.0
 dateparser~=1.2.2
 #polars~=1.31.0
 polars-lts-cpu~=1.32.2
