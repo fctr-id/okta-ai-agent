@@ -221,10 +221,8 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
         sample_size = total_records  # Send all if very small
     elif total_records <= 100:
         sample_size = min(10, total_records)  # Sample 10 records
-    elif total_records <= 1000:
-        sample_size = min(20, total_records)  # Sample 20 records  
     else:
-        sample_size = min(50, total_records)  # Sample 50 records for large datasets
+        sample_size = min(20, total_records)  # Sample 20 records for all larger datasets
     
     print(f"[STATS] Creating samples: {sample_size} records from {total_records} total")
     
