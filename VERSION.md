@@ -5,10 +5,11 @@
 ## Current latest: v1.1.3-beta (08-12-2025) - "Octo Morph"
 
 Major Framework & Intelligence Upgrades:
+- **ARM64 Support**: Migrated from polars to polars-lts-cpu for enhanced ARM64/Apple Silicon compatibility
 - **New Okta EventTypes Tool**: Added sophisticated event type selection tool for precise Okta system log filtering
 - **Multi-Provider AI Testing**: Extensively tested prompts across multiple AI providers (OpenAI, Anthropic, Google) for consistent results
 - **Model Compatibility Verification**: Updated and validated AI model configurations across providers
-- **ARM64 Support**: Migrated from polars to polars-lts-cpu for enhanced ARM64/Apple Silicon compatibility
+
 
 Framework & Encoding Fixes:
 - **PydanticAI v0.6.2 Migration**: Successfully upgraded from v0.4.11 to v0.6.2 with full breaking changes compatibility
