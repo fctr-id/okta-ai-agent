@@ -170,7 +170,8 @@
                           <template #title>
                             <div class="step-badge-wrapper">
                               <span class="step-badge" :class="[`badge-${item.phase}`, { 'badge-error': item.status === 'error' } ]">{{ item.badge }}</span>
-                              <div class="step-main-text" :class="{'dimmed': item.status === 'pending'}">{{ item.main }}</div>
+                              <div class="step-main-text" :class="{'dimmed': item.status === 'pending'}">{{ item.entity }}</div>
+                              <div class="step-operation-text" :class="{'dimmed': item.status === 'pending'}">{{ item.operation }}</div>
                             </div>
                           </template>
                         </v-stepper-item>
@@ -554,44 +555,53 @@ const handleScroll = () => {
 const progressSteps = computed(() => {
   return rtSteps.value.map((step, index) => {
     let badge = '';
-    let main = '';
+    let entity = '';
+    let operation = '';
     let phase = '';
     const tool = step.tool_name;
 
     if (tool === 'thinking') {
       badge = 'CRAFTING';
-      main = 'Strategy';
+      entity = 'Strategy';
+      operation = '';
       phase = 'crafting';
     } else if (tool === 'generating_steps' || tool === 'generate_plan') {
       badge = 'GENERATING';
-      main = 'Plan';
+      entity = 'Plan';
+      operation = '';
       phase = 'generating';
     } else if (tool === 'finalizing_results') {
       badge = 'FINALIZING';
-      main = 'Results';
+      entity = 'Results';
+      operation = '';
       phase = 'finalizing';
     } else if (tool === 'api') {
       badge = 'API';
-      main = step.operation || step.entity || '';
+      entity = step.entity || '';
+      operation = step.operation || '';
       phase = 'api';
     } else if (tool === 'sql') {
       badge = 'SQL';
-      main = step.entity || step.operation || '';
+      entity = step.entity || '';
+      operation = step.operation || '';
       phase = 'sql';
     } else if (tool === 'API_SQL') {
       badge = 'HYBRID';
-      main = step.entity || step.operation || '';
+      entity = step.entity || '';
+      operation = step.operation || '';
       phase = 'hybrid';
     } else {
       badge = (tool || step.name || `step_${index+1}`).toUpperCase();
-      main = step.operation || step.entity || '';
+      entity = step.entity || '';
+      operation = step.operation || '';
       phase = 'other';
     }
 
     return {
       id: step.id || `step_${index}`,
       badge,
-      main,
+      entity,
+      operation,
       phase,
       status: step.status || 'pending'
     };
@@ -1263,7 +1273,7 @@ watch(showToolsModal, (newVal) => {
   font-size: 0.72rem; /* slightly smaller */
   font-weight: 500;
   line-height: 1.18;
-  color: #4a5560; /* lighter tone */
+  color: #6b7280; /* Lighter gray for entity (same as operation for balance) */
   text-align: center;
   word-break: break-word;
   max-width: 165px; /* allow longer operation names */
@@ -1271,6 +1281,20 @@ watch(showToolsModal, (newVal) => {
 }
 
 .step-main-text.dimmed { opacity: 0.55; }
+
+.step-operation-text {
+  font-size: 0.65rem; /* smaller than entity */
+  font-weight: 400;
+  line-height: 1.15;
+  color: #6b7280; /* Lighter gray for operation */
+  text-align: center;
+  word-break: break-word;
+  max-width: 165px;
+  white-space: normal;
+  margin-top: 2px; /* small gap between entity and operation */
+}
+
+.step-operation-text.dimmed { opacity: 0.55; }
 
 .v-stepper :deep(.v-divider) {
   align-self: center;
