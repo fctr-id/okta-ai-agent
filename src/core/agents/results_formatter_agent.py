@@ -189,125 +189,97 @@ def _parse_raw_llm_response(raw_response: str, flow_id: str) -> Dict[str, Any]:
         }
 
 def _count_total_records(results: Dict[str, Any]) -> int:
-    """Count total records across all data sources"""
+    """Count total records across all data sources - NEW structure only"""
     total = 0
     
-    # NEW: Handle direct step data structure from Modern Execution Manager
+    # Handle direct step data structure from Modern Execution Manager
     # Modern Execution Manager passes step_results_for_processing directly as results
     for step_name, step_data in results.items():
         if isinstance(step_data, list):
             total += len(step_data)
-            continue
-    
-    # LEGACY: Keep old structure support for backward compatibility
-    if 'raw_results' in results:
-        raw_results = results['raw_results']
-        sql_data = raw_results.get('sql_execution', {}).get('data', [])
-        total += len(sql_data)
-        
-        # Count API records
-        step_results = raw_results.get('step_results', [])
-        for step in step_results:
-            if step.get('step_type') == 'api' and step.get('data'):
-                total += len(step.get('data', []))
     
     return total
 
+def _simplify_sample_record(record: Any) -> Any:
+    """Simplify individual records to reduce token usage in samples"""
+    if not isinstance(record, dict):
+        return record
+    
+    simplified = {}
+    for key, value in record.items():
+        # Remove heavy nested metadata that's not essential for analysis
+        if key == '_links':
+            simplified[key] = '[removed_for_sampling]'
+        elif isinstance(value, dict) and len(str(value)) > 200:
+            simplified[key] = '[large_object_simplified]'
+        elif isinstance(value, list) and len(value) > 5:
+            # Keep first few items in lists
+            simplified[key] = value[:3] + ['[...truncated]']
+        else:
+            simplified[key] = value
+    
+    return simplified
+
 def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> Dict[str, Any]:
-    """Create intelligent samples from each step's output instead of sending all data"""
+    """Create intelligent samples from each step's output - NEW structure only"""
+    import random
     
-    # Determine sample size based on total records
+    # Determine total sample target based on dataset size
     if total_records <= 10:
-        sample_size = total_records  # Send all if very small
+        target_samples = total_records  # Send all if very small
     elif total_records <= 100:
-        sample_size = min(10, total_records)  # Sample 10 records
+        target_samples = min(10, total_records)  # Sample 10 records
     else:
-        sample_size = min(20, total_records)  # Sample 20 records for all larger datasets
+        target_samples = min(20, total_records)  # Sample 20 records for large datasets
     
-    print(f"[STATS] Creating samples: {sample_size} records from {total_records} total")
+    # Detect step keys (format: "1_api", "2_sql", "3_api", etc.)
+    step_keys = [key for key in results.keys() if key.split('_')[0].isdigit()]
+    
+    if not step_keys:
+        print(f"[STATS] No step keys found in results: {list(results.keys())}")
+        return results  # Return as-is if no step structure detected
+    
+    print(f"[STATS] Creating samples: {target_samples} total from {total_records} records across {len(step_keys)} steps")
+    print(f"[STATS] Detected step keys: {step_keys}")
+    
+    # Distribute samples across steps
+    samples_per_step = max(1, target_samples // len(step_keys))
+    remaining_samples = target_samples % len(step_keys)
     
     sampled_results = {}
     
-    # Copy non-data fields as-is
+    for i, step_key in enumerate(step_keys):
+        step_data = results[step_key]
+        
+        if isinstance(step_data, list) and len(step_data) > 0:
+            # Calculate samples for this step (distribute remainder to first steps)
+            step_sample_count = samples_per_step + (1 if i < remaining_samples else 0)
+            step_sample_count = min(step_sample_count, len(step_data))
+            
+            if len(step_data) <= step_sample_count:
+                # Use all records if step has few records
+                sampled_data = step_data
+            else:
+                # Random sampling from this step
+                sampled_data = random.sample(step_data, step_sample_count)
+            
+            # Simplify the sampled records to reduce token usage
+            simplified_samples = [_simplify_sample_record(record) for record in sampled_data]
+            sampled_results[step_key] = simplified_samples
+            
+            print(f"   [STATS] {step_key}: {len(simplified_samples)} simplified samples from {len(step_data)} records")
+        else:
+            # Copy non-list data as-is
+            sampled_results[step_key] = step_data
+            print(f"   [STATS] {step_key}: copied non-list data as-is")
+    
+    # Copy any non-step keys as-is
     for key, value in results.items():
-        if key != 'raw_results':
+        if key not in step_keys:
             sampled_results[key] = value
     
-    # Sample from raw_results if it exists
-    if 'raw_results' in results:
-        raw_results = results['raw_results']
-        sampled_raw = {}
-        
-        # Copy non-data fields from raw_results
-        for key, value in raw_results.items():
-            if key not in ['sql_execution', 'step_results']:
-                sampled_raw[key] = value
-        
-        # Sample SQL execution data
-        if 'sql_execution' in raw_results:
-            sql_exec = raw_results['sql_execution']
-            sampled_sql = {}
-            
-            # Copy metadata
-            for key, value in sql_exec.items():
-                if key != 'data':
-                    sampled_sql[key] = value
-            
-            # Sample the data
-            if 'data' in sql_exec and sql_exec['data']:
-                original_data = sql_exec['data']
-                if len(original_data) <= sample_size:
-                    sampled_sql['data'] = original_data
-                else:
-                    # Take first few, last few, and some middle records for variety
-                    first_records = original_data[:sample_size//3]
-                    last_records = original_data[-sample_size//3:]
-                    middle_start = len(original_data) // 2 - (sample_size//3)//2
-                    middle_records = original_data[middle_start:middle_start + (sample_size//3)]
-                    
-                    sampled_sql['data'] = first_records + middle_records + last_records
-                    sampled_sql['sample_info'] = {
-                        'total_records': len(original_data),
-                        'sampled_records': len(sampled_sql['data']),
-                        'sampling_strategy': 'first_middle_last'
-                    }
-                print(f"   [STATS] SQL data: {len(sampled_sql.get('data', []))} samples from {len(sql_exec.get('data', []))} records")
-            
-            sampled_raw['sql_execution'] = sampled_sql
-        
-        # Sample step_results data
-        if 'step_results' in raw_results:
-            sampled_steps = []
-            for step in raw_results['step_results']:
-                sampled_step = {}
-                
-                # Copy metadata
-                for key, value in step.items():
-                    if key != 'data':
-                        sampled_step[key] = value
-                
-                # Sample the data if it exists
-                if 'data' in step and step['data']:
-                    original_data = step['data']
-                    if len(original_data) <= sample_size:
-                        sampled_step['data'] = original_data
-                    else:
-                        # Take diverse samples
-                        step_sample_size = min(sample_size, len(original_data))
-                        import random
-                        sampled_step['data'] = random.sample(original_data, step_sample_size)
-                        sampled_step['sample_info'] = {
-                            'total_records': len(original_data),
-                            'sampled_records': len(sampled_step['data']),
-                            'sampling_strategy': 'random'
-                        }
-                    print(f"   [STATS] {step.get('step_type', 'Unknown')} step: {len(sampled_step.get('data', []))} samples from {len(step.get('data', []))} records")
-                
-                sampled_steps.append(sampled_step)
-            
-            sampled_raw['step_results'] = sampled_steps
-        
-        sampled_results['raw_results'] = sampled_raw
+    total_sampled = sum(len(data) for data in sampled_results.values() if isinstance(data, list))
+    print(f"[STATS] Final sample result: {total_sampled} records total")
     
     return sampled_results
 
@@ -336,6 +308,17 @@ def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], orig
     
     plan_reasoning = original_plan if original_plan else "No plan provided"
     results_str = json.dumps(sampled_results, default=str)
+    
+    # CRITICAL: Aggressively truncate to ensure we stay under token limits
+    # Even with samples and simplification, complex nested data can be large
+    max_results_chars = 20000  # Conservative limit for sample data
+    if len(results_str) > max_results_chars:
+        results_str = results_str[:max_results_chars] + "... [sample data truncated to fit context]"
+        print(f"[STATS] Sample prompt truncated from {len(json.dumps(sampled_results, default=str))} to {max_results_chars} chars")
+    
+    # Also truncate plan if very long
+    if len(plan_reasoning) > 3000:
+        plan_reasoning = plan_reasoning[:3000] + "... [plan truncated]"
     
     return f"""Query: {query}
 Dataset Size: {total_records} total records (LARGE DATASET - you're seeing samples)
