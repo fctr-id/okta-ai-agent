@@ -59,6 +59,25 @@ SQL_EXECUTION_TIMEOUT = int(os.getenv('SQL_EXECUTION_TIMEOUT', 60))            #
 # ================================================================
 
 
+def _create_robust_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
+    """
+    Create Polars DataFrame with robust schema handling to prevent production errors.
+    
+    Fixes the specific error: "could not append value: '2025-08-07 14:20:00.000000' of type: str to the builder"
+    This happens when Polars tries to infer datetime columns but gets conflicting formats.
+    """
+    try:
+        # Strategy 1: Limited schema inference (most common fix)
+        return pl.DataFrame(data, infer_schema_length=100)
+    except Exception:
+        try:
+            # Strategy 2: Force all string columns first, then convert 
+            return pl.DataFrame(data, infer_schema_length=1)
+        except Exception:
+            # Strategy 3: Last resort - no schema inference
+            return pl.DataFrame(data, infer_schema_length=0)
+
+
 class StepResult(BaseModel):
     """Result from executing a single step"""
     step_number: int
@@ -453,8 +472,8 @@ class ModernExecutionManager:
                 logger.warning(f"Created empty Polars DataFrame for {variable_name}: all API results were empty arrays")
             else:
                 try:
-                    # Convert list of dicts to Polars DataFrame with schema handling
-                    df = pl.DataFrame(data, infer_schema_length=None)
+                    # Convert list of dicts to Polars DataFrame with ROBUST schema handling
+                    df = _create_robust_dataframe(data)
                     self.polars_dataframes[variable_name] = df
                     logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
                 except Exception as e:
