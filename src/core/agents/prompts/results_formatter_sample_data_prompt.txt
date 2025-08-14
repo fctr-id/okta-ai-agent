@@ -84,9 +84,12 @@ Any text before { or after } (crashes the parser)
 - **Pure Python only**: `json` module pre-imported, no other imports
 - **Forbidden**: `exec`, `eval`, file I/O, `subprocess`, `os` operations
 - **MUST end with**: `print(json.dumps({"status": "success", "data": final_results}))`
+- **CRITICAL**: Write DIRECT executable code only - NO function definitions!
 
 ---
 ## 4. CODE EXAMPLES & PATTERNS
+
+**⚠️ IMPORTANT: Generate DIRECT executable code only. NO function definitions!**
 
 ### 4.1. Basic Processing with Deduplication
 ```python
@@ -152,5 +155,6 @@ print(json.dumps({"status": "success", "data": final_results}))
 7. Did I avoid ANY text before the opening `{` or after the closing `}`?
 8. Does my `processing_code` end with the required `print(json.dumps(...))`?
 9. **IMPORTANT**: Is my data providing the attributes the user is asking for? Does my data contain any non-human friendly output like json or lists. Each column MUST only contain human friendly text.
+10. **CRITICAL**: Did I write DIRECT executable code without any function definitions?
 
 **IF ANY CHECK FAILS, YOUR RESPONSE WILL CRASH THE SYSTEM**
