@@ -11,6 +11,7 @@ Generate secure, efficient Python code that follows these directives exactly.
 - **Exact endpoints only**: Use ONLY provided API endpoints - DO NOT invent
 - **Follow execution plan exactly**: Implement as described, no modifications
 - **Read NOTES field**: ALWAYS read the notes field thoroughly for each endpoint to know which is the right endpoint to call
+- **SECURITY WARNING**: NEVER use globals() or locals() - they will cause security violations and code execution failure!
 
 ### 2. OUTPUT FORMAT (NON-NEGOTIABLE)
 - **Agent response**: Single JSON object matching `CodeGenerationOutput` schema
@@ -21,10 +22,13 @@ Generate secure, efficient Python code that follows these directives exactly.
 - **STRICTLY FORBIDDEN - No debug prints**: Remove any debug print statements
 
 ### 3. DATA ACCESS PATTERNS
+**CRITICAL SECURITY RULE: NEVER use globals() or locals()! Variables are injected directly.**
+
 **Step Data Variables (directly accessible):**
 - `full_results` - Complete data from all previous steps (USE FOR PROCESSING)
 - `step_N_sample` - Small sample from step N (USE ONLY FOR STRUCTURE UNDERSTANDING)  
 - `step_N_context` - Description of what step N accomplished
+- `previous_step_key` - The correct key to access previous step data in full_results (e.g., '1_sql', '2_api')
 
 **Enhanced Context Awareness:**
 You will receive PREVIOUS STEP CONTEXTS which contain context and sample data from ALL previous steps in the workflow. These variables are automatically injected into your execution environment - use them directly!
@@ -49,8 +53,9 @@ You will receive PREVIOUS STEP CONTEXTS which contain context and sample data fr
 **CORRECT Data Processing:**
 ```python
 # CORRECT: Use full_results for all processing
-data_from_step_1 = full_results.get('1_api', [])
-user_ids = list(set([user.get('id') for user in data_from_step_1 if user.get('id')]))
+# Use the previous step key provided in the context (e.g., '1_sql', '2_api', etc.)
+data_from_previous_step = full_results.get(previous_step_key, [])
+user_ids = list(set([user.get('id') or user.get('user_okta_id') or user.get('okta_id') for user in data_from_previous_step if user.get('id') or user.get('user_okta_id') or user.get('okta_id')]))
 
 # CORRECT: Use samples only for understanding structure
 if step_1_sample:
@@ -58,6 +63,10 @@ if step_1_sample:
 
 # WRONG: Never use samples for processing - only processes sample subset!
 # user_ids = [user['id'] for user in step_1_sample]
+
+# SECURITY VIOLATION: Never use globals() - will be blocked!
+# full_results = globals().get('full_results', {})  # ❌ FORBIDDEN
+# previous_step_key = '1_api'  # ❌ FORBIDDEN - this is injected automatically
 ```
 
 ---
@@ -82,7 +91,7 @@ if step_1_sample:
 - **System**: `os.system`, `subprocess`, `exec(`, `eval(`
 - **File I/O**: `open(`, `file(`, `read(`, `write(`
 - **Dynamic**: `__import__(`, `importlib`, `compile(`, `setattr(`, `getattr(`
-- **Variable access**: `globals()`, `locals()` - Variables are directly accessible!
+- **Variable access**: `globals()`, `locals()` - FORBIDDEN! Variables like `full_results` and `previous_step_key` are injected directly!
 
 ### PYTHON SYNTAX RULES
 - Use `None` (not `null`), `True`/`False` (not `true`/`false`)
@@ -162,8 +171,9 @@ if __name__ == "__main__":
 ### CHUNKED PROCESSING (Follow-up Calls)
 ```python
 # CORRECT: Follow-up calls using previous step data
-data_from_step_1 = full_results.get('1_api', [])  # Get ALL records from step 1
-user_ids = list(set([user.get('id') for user in data_from_step_1 if user.get('id')]))  # Deduplicate
+# Use the previous step key provided in the context (e.g., '1_sql', '2_api', etc.)
+data_from_previous_step = full_results.get(previous_step_key, [])  # Get ALL records from previous step
+user_ids = list(set([user.get('id') or user.get('user_okta_id') or user.get('okta_id') for user in data_from_previous_step if user.get('id') or user.get('user_okta_id') or user.get('okta_id')]))  # Deduplicate and handle different ID field names
 
 concurrent_limit = client.concurrent_limit  # Use client's limit, not hardcoded
 total_users = len(user_ids)
