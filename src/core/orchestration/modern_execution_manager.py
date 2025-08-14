@@ -591,7 +591,7 @@ class ModernExecutionManager:
         
         return None
     
-    def _generate_data_injection_code(self, current_step_number: int, correlation_id: str) -> str:
+    def _generate_data_injection_code(self, current_step_number: int, correlation_id: str, previous_step_key: str = None) -> str:
         """
         Generate Python code that injects previous step data as variables.
         This creates the missing link between enhanced context and execution environment.
@@ -617,6 +617,12 @@ class ModernExecutionManager:
         injection_lines.append("# Create full_results structure for Results Formatter Agent")
         injection_lines.append("full_results = {}")
         injection_lines.append("")
+        
+        # Inject previous step key if provided
+        if previous_step_key:
+            injection_lines.append("# Previous step key for dynamic data access")
+            injection_lines.append(f"previous_step_key = {repr(previous_step_key)}")
+            injection_lines.append("")
         
         # Inject data from all previous steps
         for step_num in range(1, current_step_number):
@@ -1817,6 +1823,14 @@ class ModernExecutionManager:
             else:
                 logger.debug(f"[{correlation_id}] No endpoints available!")
             
+            # Calculate previous step's full_results key for API agent
+            previous_step_num = step_number - 1
+            previous_step_key = f"step_{previous_step_num}"
+            previous_full_results_key = None
+            if previous_step_key in self.step_metadata:
+                previous_step_type = self.step_metadata[previous_step_key].get("type", "unknown").lower()
+                previous_full_results_key = f"{previous_step_num}_{previous_step_type}"
+            
             # Use the entity field from the new format
             entity_name = step.entity or "users"
             api_result_dict = await generate_api_code(
@@ -1826,7 +1840,8 @@ class ModernExecutionManager:
                 entities_involved=[entity_name],
                 step_description=step.reasoning if hasattr(step, 'reasoning') else step.query_context,
                 correlation_id=correlation_id,
-                all_step_contexts=all_step_contexts  # Enhanced context from all previous steps
+                all_step_contexts=all_step_contexts,  # Enhanced context from all previous steps
+                previous_step_key=previous_full_results_key  # NEW: Pass explicit step key
             )
             
             # Check if the wrapper function was successful
@@ -2012,7 +2027,16 @@ class ModernExecutionManager:
                     logger.warning(f"[{correlation_id}] base_okta_api_client.py not found at {api_client_source}")
                 
                 # CRITICAL FIX: Inject previous step data into execution environment
-                data_injection_code = self._generate_data_injection_code(current_step_number, correlation_id)
+                # Calculate previous step key for dynamic access
+                previous_step_key = None
+                if current_step_number and current_step_number > 1:
+                    previous_step_num = current_step_number - 1
+                    prev_step_key = f"step_{previous_step_num}"
+                    if prev_step_key in self.step_metadata:
+                        previous_step_type = self.step_metadata[prev_step_key].get("type", "unknown").lower()
+                        previous_step_key = f"{previous_step_num}_{previous_step_type}"
+                
+                data_injection_code = self._generate_data_injection_code(current_step_number, correlation_id, previous_step_key)
                 
                 # Create the main execution file
                 temp_file_path = os.path.join(temp_dir, 'generated_code.py')
