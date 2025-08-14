@@ -234,7 +234,8 @@ async def generate_api_code(
     entities_involved: List[str],
     step_description: str,
     correlation_id: str,
-    all_step_contexts: Dict[str, Any] = None
+    all_step_contexts: Dict[str, Any] = None,
+    previous_step_key: str = None
 ) -> Dict[str, Any]:
     """
     Generate Python code for Okta API operations using PydanticAI
@@ -247,6 +248,7 @@ async def generate_api_code(
         step_description: Description of the step to implement
         correlation_id: Correlation ID for logging
         all_step_contexts: Enhanced context from all previous steps
+        previous_step_key: Explicit key for previous step data (e.g., '1_sql')
         
     Returns:
         Dict containing success status, generated code, and metadata
@@ -310,7 +312,12 @@ async def generate_api_code(
                     sample_str = str(value)[:100] + "..." if len(str(value)) > 100 else str(value)
                     context_info += f"- {key}: {sample_str}\n"
         
-        user_message = f"Generate Python code for: {step_description}\n\nCurrent Step Data Structure: {data_structure}\nAPI Endpoints: {len(available_endpoints)} available{context_info}"
+        # Add explicit step key information if provided
+        step_key_info = ""
+        if previous_step_key:
+            step_key_info = f"\n\nPREVIOUS STEP KEY: Use '{previous_step_key}' to access data from the previous step in full_results dict."
+        
+        user_message = f"Generate Python code for: {step_description}\n\nCurrent Step Data Structure: {data_structure}\nAPI Endpoints: {len(available_endpoints)} available{context_info}{step_key_info}"
         
         logger.debug(f"[{correlation_id}] Running API code generation with PydanticAI agent")
         # Log enhanced context information
