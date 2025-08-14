@@ -42,6 +42,45 @@ htmlcov/
 # Legacy code not needed in production
 src/legacy/
 
+# Testing directories not needed in production
+src/core/data/testing/
+src/data/testing/
+src/data/results/
+src/data/documentation/
+
+# Environment and config files not needed in production
+.env
+.env.local
+okta.yaml
+
+# Results and generated files
+results/
+src/core/orchestration/results/
+src/data/final_generated_code_*.py
+
+# Documentation and development files
+docs/
+mcp.txt
+*.md
+!README.md
+
+# Backend static files (API static handled separately)
+src/backend/app/static/
+
+# Script development files
+scripts/*.json
+scripts/okta_sdk_client_code_tests.py
+
+# Specific development files
+src/data/entity_analysis.txt
+src/data/test_entities.py
+src/data/test_no_legacy_tools.py
+src/data/test_unified_logging.py
+src/data/suggested_endpoint_dependencies.md
+src/core/agents/prompts/*backup*.txt
+src/core/orchestration/moder_execution_manager_yesterday.py
+src/data/schemas/*copy*.json
+
 # Only ignore node_modules - we need the rest for the build
 src/frontend/node_modules/
 
