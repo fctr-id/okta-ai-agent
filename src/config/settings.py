@@ -69,10 +69,12 @@ class Settings(BaseSettings):
         self.SQLITE_PATH = str(db_path)
         self.DATABASE_URL = f"sqlite+aiosqlite:///{db_path}"
         
-        # Log the actual database location for debugging
+        # Log the actual database location for debugging  
         log_level = os.getenv("LOG_LEVEL", "").upper()
         if log_level == "DEBUG":
-            print(f"Database location: {db_path}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Database location: {db_path}")
             
         # Validate deprovisioned user sync settings
         self._validate_deprovisioned_user_settings()
