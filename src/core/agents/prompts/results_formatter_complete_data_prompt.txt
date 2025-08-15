@@ -51,6 +51,7 @@ Transform complete hybrid AI agent execution results into clear, user-friendly J
 - Return ONLY valid JSON object - no markdown code blocks around JSON
 - Choose ONLY ONE format type (markdown OR table) - do NOT use combined type
 - When using markdown, use <br> for line breaks in the content
+- **CRITICAL FOR TABLES: content must be a direct array of objects, NEVER wrap in {"rows": [...]}**
 - The response must contain ONLY the JSON object, nothing else
 - Use PURE PYTHON only - no external libraries except json module
 
@@ -70,9 +71,10 @@ Transform complete hybrid AI agent execution results into clear, user-friendly J
 ```
 
 ### **TABLE Format** (`"display_type": "table"`)
-- **content**: ARRAY of data objects (the actual rows)
+- **content**: ARRAY of data objects (the actual rows) - NOT an object with a "rows" property
 - **metadata.headers**: ARRAY of column definitions for Vuetify table
 - **Each header MUST have** "value" (property key) and "text" (display name)
+- **CRITICAL: content must be a direct array, never wrap in {"rows": [...]}**
 - **Example:**
 ```json
 {
@@ -191,4 +193,5 @@ Transform complete hybrid AI agent execution results into clear, user-friendly J
 - Aggregate related information logically while preserving all details
 - Provide context and explanations when needed
 - Include actionable insights from the complete dataset analysis
-- For tables, ensure content is an array of data objects and metadata contains proper headers
+- **CRITICAL: For tables, ensure content is an array of data objects and metadata contains proper headers**
+- **NEVER wrap table content in {"rows": [...]} - content must be the direct array**

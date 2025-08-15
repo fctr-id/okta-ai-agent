@@ -173,7 +173,7 @@ When the query is about users assigned to applications and that is from the data
 
 **FAILURE TO ADD THESE STEPS**: Results in technical data with only IDs that are not human-readable and fail to answer the user's question effectively.
 
-**OUTPUT RESPONSE FORMAT** - EXACTLY this JSON structure:
+**OUTPUT RESPONSE FORMAT** - EXACTLY this JSON structure . The steps array MUST be encloed in a plan object:
 {
   "plan": {
     "steps": [
