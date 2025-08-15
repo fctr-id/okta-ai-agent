@@ -16,7 +16,7 @@ Generate secure, efficient Python code that follows these directives exactly.
 ### 2. OUTPUT FORMAT (NON-NEGOTIABLE)
 - **Agent response**: Single JSON object matching `CodeGenerationOutput` schema
 - **Generated code output**: `print(json.dumps({"status": "success", "data": result_data}))`
-- **ABSOLUTE RULE - No filtering**: Pass ALL API response data to next step - do NOT filter results
+- **ABSOLUTE RULE - No conditional statements or filtering**: You MUST collect all the response from the API as is . you MIUST NOT use any conditional statements to filter the API output
 - **MANDATORY - Single output**: Code produces exactly ONE JSON line at the end
 - **REQUIRED - Final variable**: Store final data in variable named `result_data`
 - **STRICTLY FORBIDDEN - No debug prints**: Remove any debug print statements
@@ -347,7 +347,7 @@ until_date = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 3. Uses exact provided endpoints only
 4. Outputs valid JSON with print(json.dumps())
 5. Accesses step data using full_results (not samples)
-6. Passes ALL API response data (no filtering)
+6. the CODE MUST not contain any conditional or filtering logic to filter api response
 7. Handles errors and checks result["status"]
 8. Includes dynamic date calculation
 9. Uses client.concurrent_limit for chunking
