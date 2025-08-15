@@ -196,7 +196,7 @@ planning_agent = Agent(
     model,
     output_type=PlanningOutput,  # MODERN: Use output_type not deprecated result_type
     deps_type=PlanningDependencies,
-    retries=0,  # No retries to avoid wasting money on failed attempts
+    retries=1,  # No retries to avoid wasting money on failed attempts
     instructions=load_base_system_prompt()  # Static base instruction from file
 )
 
