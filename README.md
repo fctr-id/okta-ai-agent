@@ -15,7 +15,7 @@
 > **🚨 CRITICAL UPDATE: v1.1.4-beta "Bug Buster" fixes critical API correlation and token overflow issues. Update immediately!** [📋 Changelog →](VERSION.md)
 
 </div>
-
+<br/>
 
 
 Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
