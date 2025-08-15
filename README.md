@@ -8,11 +8,25 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1.3-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1.4-beta)</h2>
+
+<div align="center">
+
+> **🚨 CRITICAL UPDATE: v1.1.4-beta "Bug Buster" fixes critical API correlation and token overflow issues. Update immediately!** [📋 Changelog →](VERSION.md)
+
+</div>
 
 Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
 
 Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
+
+<div align="center">
+<h3>Revolutionary Multi-Agent Architecture</h3>
+<p align="center">
+  <img src="docs/media/tako-v1.gif" alt="Tako Unified Agent Demo" width="1024px" height="auto">
+</p>
+<p><em>Demo shows agent coordination - processing wait times trimmed for brevity</em></p>
+</div>
 
 <div align="center">
 <h3>📖 Featured Articles</h3>
@@ -25,13 +39,6 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 </div>
 
 <div align="center">
-<h3>Revolutionary Multi-Agent Architecture</h3>
-</div>
-<p align="center">
-  <img src="docs/media/tako-v1.gif" alt="Tako Unified Agent Demo" width="1024px" height="auto">
-</p>
-
-<div align="center">
 <h3>Installation and Demo Video</h3>
 <p>Watch our step-by-step installation guide and Tako feature demonstration:</p>
 <div align="center">
@@ -39,8 +46,6 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
          <img src="https://img.youtube.com/vi/PC8arYq5kZk/0.jpg" style="width:500px">
       </a>
 </div>
-</div>
-
 ## 📋 Table of Contents
 
 - [📋 Table of Contents](#-table-of-contents)
