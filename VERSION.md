@@ -1,6 +1,24 @@
 # Version History
 
 
+## Current latest: v1.1.4-beta (08-14-2025) - "Bug Buster"
+
+Major Bugs Fixed: (update immediately)
+- **Fixed API Response Correlation**: Resolved critical issue with API responses failing SQL co-relation that was preventing proper data joins (appreciate all of you who worked with us on this)
+- **Fixed Results Formatter Sampling**: Completely rewrote sampling logic to handle Modern Execution Manager's NEW data structure, eliminating token overflow errors (thanks again here!)
+- **Fixed Sample Data Key Names**: Corrected sample data structure to include proper step key names (`1_api`, `2_api`, etc.) instead of sending anonymous sample sets
+
+UI Updates:
+- **Enhanced Step Clarity**: The stepper now displays entity name along with operation name for improved execution visibility
+
+Framework Improvements:
+- **Intelligent Sampling**: Implemented per-step sampling with data simplification for large datasets
+- **Token Optimization**: Reduced sample prompts from 698k to ~17k characters through aggressive data truncation
+- **Environment Configuration**: Updated .env.sample file with current model names across all AI providers for better setup guidance
+
+Community Contributions:
+- **AWS Session Token Support**: Added support for AWS session tokens in Bedrock configuration for enhanced security with temporary credentials and STS assume role scenarios ([PR #12](https://github.com/fctr-id/okta-ai-agent/pull/12) - Thanks @Kittzus!)
+
 
 ## Current latest: v1.1.3-beta (08-12-2025) - "Octo Morph"
 
