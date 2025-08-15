@@ -266,9 +266,17 @@ class ModelConfig:
             region_name = os.getenv('AWS_DEFAULT_REGION', 'us-east-1')
             aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
             aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+            aws_session_token = os.getenv('AWS_SESSION_TOKEN')
             
             # Create provider with credentials if provided, otherwise use default AWS credential chain
-            if aws_access_key_id and aws_secret_access_key:
+            if aws_access_key_id and aws_secret_access_key and aws_session_token:
+                bedrock_provider = BedrockProvider(
+                    region_name=region_name,
+                    aws_access_key_id=aws_access_key_id,
+                    aws_secret_access_key=aws_secret_access_key,
+                    aws_session_token=aws_session_token
+                )
+            elif aws_access_key_id and aws_secret_access_key:
                 bedrock_provider = BedrockProvider(
                     region_name=region_name,
                     aws_access_key_id=aws_access_key_id,
