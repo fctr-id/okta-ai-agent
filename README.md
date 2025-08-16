@@ -12,7 +12,7 @@
 
 <div align="center">
 
-> **🚨 CRITICAL UPDATE: v1.1.4-beta "Bug Buster" fixes critical API correlation and token overflow issues. Update immediately!** [📋 Changelog →](VERSION.md)🚨
+> **🚨 CRITICAL UPDATE: v1.1.4-beta fixes critical API correlation and token overflow issues. Update immediately!** [📋 Changelog →](VERSION.md)🚨
 
 </div>
 <br/>
