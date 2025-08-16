@@ -12,7 +12,7 @@
 
 <div align="center">
 
-> **🚨 CRITICAL UPDATE: v1.1.4-beta "Bug Buster" fixes critical API correlation and token overflow issues. Update immediately!** [📋 Changelog →](VERSION.md)
+> **🚨 CRITICAL UPDATE: v1.1.4-beta "Bug Buster" fixes critical API correlation and token overflow issues. Update immediately!** [📋 Changelog →](VERSION.md)🚨
 
 </div>
 <br/>
@@ -48,6 +48,8 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
          <img src="https://img.youtube.com/vi/PC8arYq5kZk/0.jpg" style="width:500px">
       </a>
 </div>
+</div>
+
 ## 📋 Table of Contents
 
 - [📋 Table of Contents](#-table-of-contents)
@@ -122,10 +124,8 @@ Tako leverages the power of leading AI providers with enhanced compatibility:
 
 ## 🚀 Quick Start (The No-Frills Docker Way)
 
-<div align="left">
-  <h3>💡 Looking for alternative installation instructions?</h3>
+<h3>💡 Looking for alternative installation instructions?</h3>
   <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides to get Tako running without Docker</h4>
-</div>
 
 ### Prerequisites
 
@@ -266,10 +266,8 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 
 ### Tako Architecture
 
-<div align="center">
-  <img src="docs/media/unified-architecture.png" alt="Tako Unified Multi-Datasource Architecture" width="800px" height="auto">
+<img src="docs/media/unified-architecture.png" alt="Tako Unified Multi-Datasource Architecture" width="800px" height="auto">
   <p><em>Tako's revolutionary multi-agent architecture with intelligent data source selection</em></p>
-</div>
 
 #### Common Security Features
 #### API Token
