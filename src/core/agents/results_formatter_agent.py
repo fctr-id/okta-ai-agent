@@ -303,11 +303,25 @@ You are processing the COMPLETE dataset. Create a comprehensive, user-friendly r
 Focus on clear presentation and include performance recommendations in your metadata if this is a large dataset."""
 
 def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], original_plan: Optional[str], 
-                              total_records: int) -> str:
+                              total_records: int, step_schemas: Optional[Dict[str, Any]] = None) -> str:
     """Create prompt for processing sample data and generating code"""
     
     plan_reasoning = original_plan if original_plan else "No plan provided"
-    results_str = json.dumps(sampled_results, default=str)
+    
+    # Combine schema information with sample data for each step
+    if step_schemas:
+        enhanced_results = {}
+        for step_key, step_data in sampled_results.items():
+            if step_key in step_schemas and isinstance(step_data, list):
+                enhanced_results[step_key] = {
+                    "schema": step_schemas[step_key],
+                    "data": step_data
+                }
+            else:
+                enhanced_results[step_key] = step_data
+        results_str = json.dumps(enhanced_results, default=str)
+    else:
+        results_str = json.dumps(sampled_results, default=str)
     
     # CRITICAL: Aggressively truncate to ensure we stay under token limits
     # Even with samples and simplification, complex nested data can be large
@@ -320,19 +334,31 @@ def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], orig
     if len(plan_reasoning) > 3000:
         plan_reasoning = plan_reasoning[:3000] + "... [plan truncated]"
     
+    schema_info = ""
+    if step_schemas:
+        schema_info = "\n\nDATA STRUCTURE INFORMATION:\nEach step now includes both 'schema' (data structure details) and 'data' (sample records).\nUse the schema information to understand column types, record counts, and whether data has nested structures."
+    
+    # Critical: Tell LLM the exact data keys available in full_results
+    available_keys = list(sampled_results.keys())
+    if 'metadata' in available_keys:
+        available_keys.remove('metadata')  # Don't include metadata in processing
+    
+    available_keys_info = f"\n\nAVAILABLE DATA KEYS IN full_results:\nThe exact keys you must use in your processing_code are: {available_keys}\nExample usage: full_results.get('{available_keys[0] if available_keys else 'step_key'}', [])"
+    
     return f"""Query: {query}
 Dataset Size: {total_records} total records (LARGE DATASET - you're seeing samples)
 Plan Context: {plan_reasoning}
-Sample Data: {results_str}
+Sample Data with Schema: {results_str}{schema_info}{available_keys_info}
 
 IMPORTANT: You are seeing SAMPLES from a large dataset of {total_records} records.
 
 Your tasks:
-1. Analyze the data structure and patterns from these samples
+1. Analyze the data structure and patterns from these samples AND schema information
 2. Create a user-friendly response based on the samples
 3. For large datasets, include processing_code that can handle the full dataset efficiently
 4. Use pure Python JSON processing for reliable and compatible data transformation
 5. Focus on user-centric aggregation to reduce output complexity
+6. Pay attention to schema 'has_nested_data' flags to use correct iteration patterns
 
 Include performance optimizations and processing recommendations in your metadata."""
 
@@ -644,7 +670,12 @@ async def _process_sample_data(query: str, sampled_results: Dict[str, Any], orig
             # Log complete first 2 records for debugging (not truncated fields)
             logger.debug(f"[{flow_id}] Complete first 2 SQL sample records: {sql_data[:2]}")
     
-    prompt = _create_sample_data_prompt(query, sampled_results, original_plan, total_records)
+    # Extract step schemas from metadata if available
+    step_schemas = sampled_results.get('metadata', {}).get('step_schemas', {})
+    if step_schemas:
+        logger.debug(f"[{flow_id}] Schema information available for {len(step_schemas)} steps")
+    
+    prompt = _create_sample_data_prompt(query, sampled_results, original_plan, total_records, step_schemas)
     
     # Debug logging for prompt being sent
     logger.debug(f"[{flow_id}] Sample Data Prompt (length: {len(prompt)} chars):")

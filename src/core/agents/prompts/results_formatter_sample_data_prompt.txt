@@ -42,6 +42,7 @@ Any text before { or after } (crashes the parser)
 
 - **Input**: Pre-populated Python dictionary named `full_results` (**DO NOT** attempt to read from files. All necessary data is in this variable)
 - **Data Keys**: Steps are keyed as `{STEP_NUM}_{STEP_TYPE}` (e.g., `full_results['1_api']`, `full_results['2_sql']`)
+- **Data Structure**: Each step contains a LIST of records (never assume dict format - always iterate with `for record in step_data:`)
 - **Mission**: 
   1. **Analyze Input**: Dynamically examine the structure of the `full_results` variable
   2. **Generate Python Code**: Write efficient, pure Python code to process the complete dataset
@@ -54,24 +55,20 @@ Any text before { or after } (crashes the parser)
 - **CRITICAL**: Deduplicate by Okta ID (`00u...`, `00g...`, `0oa...`) using `set()` to track seen IDs
 - **NO DUPLICATE OKTA IDS**: Each unique Okta entity (user: 00u..., app: 0oa..., group: 00g...) should appear exactly once
 - **AGGREGATE RELATIONSHIPS**: Combine related data (user-groups, user-apps) into readable lists instead of duplicate rows
-- **DEDUPLICATION LOGIC**: Use a set or dictionary to track seen Okta IDs and skip duplicates
+- **PRESERVE ALL INFORMATION**: Ensure every piece of data is faithfully represented
 
 ### **RULE #2: NO DATA TRUNCATION. EVER.**
 - **For critical audit/reporting data**
 - **MUST process EVERY SINGLE RECORD** from `full_results`
 - **NEVER** use logic that summarizes, shortens, or truncates (e.g., `list[:5]`, `if len > max`)
 - **Any `"... (and X more)"` is a CRITICAL FAILURE**
-- **NEVER TRUNCATE DATA**: The code must process and show ALL records. This is for reporting and analytics where complete data is mandatory
 - **NO SUMMARIES LIKE "(and X more)"**: All items in lists must be included
 
-### **RULE #3: MANDATORY DEDUPLICATION**  
-- **Deduplicate by Okta ID** (`00u...`, `00g...`, `0oa...`) using `set()` to track seen IDs
-- **Each unique entity appears only once**
-- **NO DUPLICATES ALLOWED**: If the same Okta ID appears multiple times in the data, include it only ONCE in final results
-- **DEDUPLICATION LOGIC**: Use a set or dictionary to track seen Okta IDs and skip duplicates
-- **NO DUPLICATE OKTA IDS**: Each unique Okta entity (user: 00u..., app: 0oa..., group: 00g...) should appear exactly once
-- **Aggregate relationships** (user-groups, user-apps) into readable lists rather than showing repetitive rows
-- **PRESERVE ALL INFORMATION**: Ensure every piece of data is faithfully represented
+### **RULE #3: DATA STRUCTURE HANDLING**
+- **NEVER assume data is a dict**: Always treat step data as `list` first
+- **Use list iteration**: `for record in step_data:` (NOT `for key, value in step_data.items():`)
+- **Nested data access**: If record contains complex objects, access via column names (e.g., `record.get('data', [])`)
+- **API steps often have nested structures**: Check for columns like `'data'` containing lists of objects
 
 ### **RULE #4: FIELD SELECTION & OUTPUT**
 - **Basic fields default**: Unless user's original query explicitly requested detailed profile information (e.g., "show custom attributes", "include phone numbers"), focus on basic identification fields (name, email, login, status)
@@ -110,31 +107,28 @@ for record in data:
 print(json.dumps({"status": "success", "data": final_results}))
 ```
 
-### 4.2. Merging Data from Multiple Steps
+### 4.2. Handling API Steps with Nested Data (Common Pattern)
 ```python
 users = full_results.get('1_api', [])
-user_groups = full_results.get('2_sql', [])
+user_roles_api = full_results.get('3_api', [])  # ALWAYS a list, never a dict
 
-# Build group lookup map
-user_group_map = {}
-for ug in user_groups:
-    user_id = ug.get('user_okta_id')
-    if user_id:
-        if user_id not in user_group_map:
-            user_group_map[user_id] = []
-        group_name = ug.get('group_name')
-        if group_name and group_name not in user_group_map[user_id]:
-            user_group_map[user_id].append(group_name)
+# Build user roles map from API response
+user_roles_map = {}
+for record in user_roles_api:  # Iterate over list of records
+    user_id = record.get('user_id')
+    if user_id and record.get('status') == 'success':
+        roles_data = record.get('data', [])  # Nested role objects
+        user_roles_map[user_id] = [role.get('label') for role in roles_data if role.get('label')]
 
-# Process users with groups
+# Process and merge
 final_results = []
 for user in users:
     user_id = user.get('okta_id')
-    groups = user_group_map.get(user_id, [])
+    roles = user_roles_map.get(user_id, [])
     final_results.append({
         'user_id': user_id,
         'email': user.get('email', ''),
-        'groups': ', '.join(groups) if groups else 'No Groups'
+        'roles': ', '.join(roles) if roles else 'No Roles'
     })
 
 print(json.dumps({"status": "success", "data": final_results}))
@@ -148,13 +142,14 @@ print(json.dumps({"status": "success", "data": final_results}))
 **Pre-Submission Checklist:**
 1. **CRITICAL**: Does my `processing_code` use a set() to deduplicate by Okta ID?
 2. **CRITICAL**: Does my `processing_code` process ALL records without truncation?
-3. Does my response start with `{` and end with `}`?
-4. Can I copy-paste my entire response into json.loads() without errors?
-5. Did I search for and remove ALL instances of `//` from my response?
-6. Did I search for and remove ALL instances of `...` from my response?
-7. Did I avoid ANY text before the opening `{` or after the closing `}`?
-8. Does my `processing_code` end with the required `print(json.dumps(...))`?
-9. **IMPORTANT**: Is my data providing the attributes the user is asking for? Does my data contain any non-human friendly output like json or lists. Each column MUST only contain human friendly text.
-10. **CRITICAL**: Did I write DIRECT executable code without any function definitions?
+3. **CRITICAL**: Do I use `for record in step_data:` instead of `.items()` for all step data?
+4. Does my response start with `{` and end with `}`?
+5. Can I copy-paste my entire response into json.loads() without errors?
+6. Did I search for and remove ALL instances of `//` from my response?
+7. Did I search for and remove ALL instances of `...` from my response?
+8. Did I avoid ANY text before the opening `{` or after the closing `}`?
+9. Does my `processing_code` end with the required `print(json.dumps(...))`?
+10. **IMPORTANT**: Is my data providing the attributes the user is asking for? Does my data contain any non-human friendly output like json or lists. Each column MUST only contain human friendly text.
+11. **CRITICAL**: Did I write DIRECT executable code without any function definitions?
 
 **IF ANY CHECK FAILS, YOUR RESPONSE WILL CRASH THE SYSTEM**

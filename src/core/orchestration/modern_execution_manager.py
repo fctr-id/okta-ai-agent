@@ -59,23 +59,103 @@ SQL_EXECUTION_TIMEOUT = int(os.getenv('SQL_EXECUTION_TIMEOUT', 60))            #
 # ================================================================
 
 
-def _create_robust_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
+def _create_sql_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
     """
-    Create Polars DataFrame with robust schema handling to prevent production errors.
+    Create Polars DataFrame from SQL query results with enhanced robustness.
     
-    Fixes the specific error: "could not append value: '2025-08-07 14:20:00.000000' of type: str to the builder"
-    This happens when Polars tries to infer datetime columns but gets conflicting formats.
+    Uses native Polars json_normalize first for consistent handling, then falls back
+    to traditional schema inference strategies for simpler SQL results.
+    
+    Handles complex SQL scenarios including:
+    - CTE queries with multiple result sets
+    - UNION queries with mixed schemas (direct vs group assignments)
+    - Complex joins with duplicate/null columns  
+    - JSON columns (custom_attributes) with mixed data types
+    - Datetime columns with inconsistent formats
+    
+    Args:
+        data: List of dictionaries from SQL query results (SQLAlchemy models)
+        
+    Returns:
+        Polars DataFrame with proper schema handling for SQL data
     """
+    if not data:
+        return pl.DataFrame()
+        
     try:
-        # Strategy 1: Limited schema inference (most common fix)
-        return pl.DataFrame(data, infer_schema_length=100)
-    except Exception:
+        # Strategy 1: Try json_normalize first - handles mixed schemas beautifully
+        # Benefits: UNION queries, JSON columns, complex CTE results
+        return pl.json_normalize(
+            data,
+            separator='_',           # Flatten any nested structures
+            max_level=2,            # SQL is less nested than APIs, so limit levels
+            infer_schema_length=None # Scan all records for consistent schema
+        )
+    except Exception as e:
+        logger.debug(f"SQL json_normalize failed, trying traditional approach: {e}")
         try:
-            # Strategy 2: Force all string columns first, then convert 
-            return pl.DataFrame(data, infer_schema_length=1)
+            # Strategy 2: Enhanced schema inference for complex SQL results
+            # Scan more records to handle UNION queries with mixed schemas
+            return pl.DataFrame(data, infer_schema_length=500)
+        except Exception as e2:
+            logger.warning(f"SQL DataFrame creation failed with full inference: {e2}")
+            try:
+                # Strategy 3: Conservative inference for datetime conflicts
+                # Common issue: mixed datetime formats from different tables
+                return pl.DataFrame(data, infer_schema_length=100)
+            except Exception as e3:
+                logger.warning(f"SQL DataFrame creation failed with limited inference: {e3}")
+                try:
+                    # Strategy 4: Minimal inference - force string types first
+                    # Handles complex CTEs with inconsistent column types
+                    return pl.DataFrame(data, infer_schema_length=1)
+                except Exception as e4:
+                    logger.warning(f"SQL DataFrame creation failed with minimal inference: {e4}")
+                    try:
+                        # Strategy 5: No inference - all columns as strings
+                        # Last resort for highly complex UNION/CTE results
+                        return pl.DataFrame(data, infer_schema_length=0)
+                    except Exception as e5:
+                        logger.error(f"All SQL DataFrame creation strategies failed: {e5}")
+                        # Absolute last resort - empty DataFrame
+                        return pl.DataFrame()
+
+
+def _create_api_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
+    """
+    Create Polars DataFrame from complex nested API responses using native json_normalize.
+    
+    Optimized for Okta and other REST API responses with deep nesting, mixed types,
+    and inconsistent schemas across records.
+    
+    Args:
+        data: List of dictionaries from API response
+        
+    Returns:
+        Flattened Polars DataFrame with nested fields as separate columns
+        
+    Examples:
+        Input: [{"profile": {"email": "user@domain.com"}}]
+        Output: DataFrame with column "profile_email"
+    """
+    if not data:
+        return pl.DataFrame()
+        
+    try:
+        # Use Polars native JSON normalization - purpose-built for nested APIs
+        return pl.json_normalize(
+            data,
+            separator='_',           # profile.email becomes profile_email
+            max_level=4,            # Capture 95% of useful fields without column explosion
+            infer_schema_length=None # Scan all records for consistent schema
+        )
+    except Exception as e:
+        # Fallback to existing robust function for compatibility
+        try:
+            return _create_sql_dataframe(data)
         except Exception:
-            # Strategy 3: Last resort - no schema inference
-            return pl.DataFrame(data, infer_schema_length=0)
+            # Absolute last resort - empty DataFrame
+            return pl.DataFrame()
 
 
 class StepResult(BaseModel):
@@ -472,10 +552,17 @@ class ModernExecutionManager:
                 logger.warning(f"Created empty Polars DataFrame for {variable_name}: all API results were empty arrays")
             else:
                 try:
-                    # Convert list of dicts to Polars DataFrame with ROBUST schema handling
-                    df = _create_robust_dataframe(data)
+                    # Choose DataFrame creation method based on step type
+                    if step_type in ('api', 'api_sql'):
+                        # Use native Polars json_normalize for complex API responses and API_SQL (which contains API-like nested data)
+                        df = _create_api_dataframe(data)
+                        logger.debug(f"Created API Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+                    else:
+                        # Use robust handling for SQL and other step types
+                        df = _create_sql_dataframe(data)
+                        logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+                    
                     self.polars_dataframes[variable_name] = df
-                    logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
                 except Exception as e:
                     logger.error(f"Failed to create DataFrame from data: {e}")
                     # Fallback: create empty DataFrame
@@ -552,6 +639,86 @@ class ModernExecutionManager:
                 all_contexts[f"step_{step_num}_sample"] = step_sample
         
         return all_contexts
+
+    def _analyze_step_data_structures(self, step_results_for_processing: Dict[str, List[Dict[str, Any]]]) -> Dict[str, Dict[str, Any]]:
+        """
+        Analyze data structures using Polars to provide schema information to Results Formatter.
+        
+        Args:
+            step_results_for_processing: Dictionary mapping step names to their data
+            
+        Returns:
+            Dictionary mapping step names to their schema information
+        """
+        step_schemas = {}
+        
+        for step_name, data in step_results_for_processing.items():
+            try:
+                if not data:
+                    step_schemas[step_name] = {
+                        "step_name": step_name,
+                        "record_count": 0,
+                        "columns": [],
+                        "data_type": "empty",
+                        "sample_keys": []
+                    }
+                    continue
+                
+                # Create Polars DataFrame to analyze structure
+                df = pl.DataFrame(data)
+                
+                # Get column information
+                column_info = []
+                for col in df.columns:
+                    col_type = str(df[col].dtype)
+                    # Get sample non-null value
+                    sample_val = df[col].drop_nulls().head(1)
+                    sample = sample_val.to_list()[0] if len(sample_val) > 0 else None
+                    
+                    # Convert sample to JSON-serializable format for large objects
+                    if sample is not None:
+                        if isinstance(sample, list) and len(sample) > 3:
+                            sample = f"[List with {len(sample)} items]"
+                        elif isinstance(sample, dict) and len(str(sample)) > 200:
+                            sample = f"{{Complex object with {len(sample)} keys}}"
+                        elif hasattr(sample, '__dict__'):  # Handle objects
+                            sample = str(sample)[:100] + "..." if len(str(sample)) > 100 else str(sample)
+                    
+                    column_info.append({
+                        "name": col,
+                        "type": col_type,
+                        "sample_value": sample
+                    })
+                
+                # Analyze content type
+                key_columns = [col for col in df.columns if 'id' in col.lower()]
+                
+                step_schemas[step_name] = {
+                    "step_name": step_name,
+                    "record_count": len(data),
+                    "columns": column_info,
+                    "data_type": "flattened_dataframe",
+                    "key_columns": key_columns,
+                    "sample_keys": list(data[0].keys()) if data else [],
+                    "is_user_data": any('user' in col.lower() for col in df.columns),
+                    "is_group_data": any('group' in col.lower() for col in df.columns),
+                    "is_app_data": any('app' in col.lower() for col in df.columns),
+                    "is_role_data": any('role' in col.lower() or 'label' in col.lower() for col in df.columns),
+                    "has_nested_data": any('List' in str(df[col].dtype) or 'Struct' in str(df[col].dtype) for col in df.columns)
+                }
+                
+            except Exception as e:
+                # Fallback to simple analysis
+                step_schemas[step_name] = {
+                    "step_name": step_name,
+                    "record_count": len(data),
+                    "columns": [],
+                    "data_type": "raw_list",
+                    "error": str(e),
+                    "sample_keys": list(data[0].keys()) if data else []
+                }
+        
+        return step_schemas
 
     def _get_polars_data_from_previous_step(self, current_step_number: int) -> List[Dict[str, Any]]:
         """
@@ -1215,7 +1382,9 @@ class ModernExecutionManager:
             
             # Build step results for processing with ACTUAL DATA (Generic for all step types)
             for i, step_result in enumerate(execution_results.steps, 1):
-                step_name = f"{i}_{step_result.step_type.lower()}"
+                # Preserve original step type for consistent key usage throughout pipeline
+                step_type_key = step_result.step_type.lower()
+                step_name = f"{i}_{step_type_key}"
                 
                 if step_result.success and step_result.result:
                     # Generic approach: Try multiple variable name patterns for any step type
@@ -1263,6 +1432,10 @@ class ModernExecutionManager:
             total_records = sum(len(data) for data in step_results_for_processing.values() if isinstance(data, list))
             logger.info(f"[{correlation_id}] Passing {total_records} total records to Results Formatter")
             
+            # Analyze data structure using Polars for Results Formatter
+            step_schemas = self._analyze_step_data_structures(step_results_for_processing)
+            logger.debug(f"[{correlation_id}] Generated data structure schemas for Results Formatter: {list(step_schemas.keys())}")
+            
             # Call Results Formatter Agent like backup executor - let it decide complete vs sample processing
             try:
                 formatted_response = await process_results_formatter(
@@ -1270,7 +1443,7 @@ class ModernExecutionManager:
                     results=step_results_for_processing,
                     is_sample=False,  # Pattern-based approach handles all data
                     original_plan=json.dumps(execution_plan.model_dump()),
-                    metadata={"flow_id": correlation_id}
+                    metadata={"flow_id": correlation_id, "step_schemas": step_schemas}
                 )
                 
                 logger.info(f"[{correlation_id}] Results formatting completed with {formatted_response.get('display_type', 'unknown')} format")

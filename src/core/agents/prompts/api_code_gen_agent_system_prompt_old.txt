@@ -324,23 +324,46 @@ Once you receive API data, save it ALL directly to `result_data`. The next proce
 - **QUOTED STRINGS**: Properly quote string values in filter expressions
 - **LOGICAL OPERATORS**: Use 'and', 'or' for combining conditions
 
-### Intelligent Event Type Selection (Critical for System Log Queries)
-For system log queries, use the get_detailed_events_from_keys tool to find exact event types, then SELECT ONLY the most relevant ones for the user's specific query.
+### Intelligent Event Type Selection (MANDATORY for System Log)
 
-**Selection Strategy**:
-- Choose 5-10 most relevant event types (not all returned types)
-- Prioritize event types that directly match the user's intent
-- For broad queries like "login events", select core authentication and session event types
+**CRITICAL RULE: For complex user actions like "login", you MUST select a comprehensive set of related event types.** A single event type is often insufficient and will lead to incomplete data, which is a critical failure.
 
-**Common Event Types for Login Queries**:
-- `user.authentication.auth` (authentication attempts)
-- `user.authentication.sso` (SSO events)  
-- `user.session.start` (session starts)
-- `user.session.end` (session ends)
+**Why this is important:** An action like a user logging in can trigger multiple distinct events in Okta's System Log (e.g., an authentication attempt, an SSO event, MFA verification, and a session start). To provide a complete and accurate answer, you must query for all of them together.
+
+**Strategy for "user login" and similar broad queries:**
+1.  **Identify Core Concepts**: Break down the user's query ("user login") into its technical components: authentication, session management, and SSO.
+2.  **Select Multiple Event Types**: Choose a group of event types that cover these concepts. Do not just pick one.
+3.  **Combine with 'or'**: Construct a filter string that combines these event types using the `or` operator.
+
+**MANDATORY EXAMPLE for "user login" queries:**
+When the user asks for "login events", "who logged in", or similar, your filter **MUST** be constructed like this:
+
+```python
+# CORRECT: Combine multiple relevant event types for a complete view of login activity.
+login_event_types = [
+    'user.authentication.auth',      # Covers direct authentication attempts
+    'user.authentication.sso',       # Covers Single Sign-On
+    'user.session.start',            # Covers session creation
+    'user.authentication.verify'     # Covers MFA verification steps
+]
+filter_expr = ' or '.join([f'eventType eq "{etype}"' for etype in login_event_types])
+
+# Then use this filter in the API call:
+params = {
+    "since": "...",
+    "filter": filter_expr
+}
+result = await client.make_request("/api/v1/logs", params=params)
+```
+
+**General Selection Strategy**:
+- **Use the `get_detailed_events_from_keys` tool** to discover all relevant event types for the user's query.
+- **Prioritize relevance**: Choose the 5-10 most relevant event types that directly match the user's intent.
+- **Avoid over-selection**: Do not include every possible event type, only the ones that answer the specific query.
 
 **Example Filter**: 
 ```python
-# SELECTIVE: Choose only relevant event types for the query
+# SELECTIVE: Choose only relevant event types for the query. Usrr login events have multipe event types
 relevant_event_types = [
     'user.authentication.auth',
     'user.authentication.sso', 
