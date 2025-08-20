@@ -354,9 +354,9 @@ async def generate_api_code(
         logger.debug(f"[{correlation_id}] Requirements: {code_output.requirements}")
         
         # Log metadata for debugging  
-        logger.debug(f"[{correlation_id}] COMPLETE API EXPLANATION:\n{code_output.explanation}")
-        logger.debug(f"[{correlation_id}] API SCRIPT REQUIREMENTS: {code_output.requirements}")
-        logger.debug(f"[{correlation_id}] API RATE LIMIT CONSIDERATIONS: {code_output.rate_limit_considerations}")
+        #logger.debug(f"[{correlation_id}] COMPLETE API EXPLANATION:\n{code_output.explanation}")
+        #logger.debug(f"[{correlation_id}] API SCRIPT REQUIREMENTS: {code_output.requirements}")
+        #logger.debug(f"[{correlation_id}] API RATE LIMIT CONSIDERATIONS: {code_output.rate_limit_considerations}")
         
         return {
             'success': True,
