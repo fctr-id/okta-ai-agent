@@ -8,6 +8,7 @@ import random
 from typing import Dict, Any, Optional
 from urllib.parse import urlencode
 from datetime import datetime
+import json  # NEW: for structured progress events
 
 # Import settings for configuration
 try:
@@ -48,6 +49,9 @@ class OktaAPIClient:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
+        
+        # Progress tracking state (for throttling entity progress updates)
+        self._entity_progress_state = {}
         
         self._setup_config()
     
@@ -121,13 +125,179 @@ class OktaAPIClient:
             self.logger.debug(f"Using existing limit parameter: {params['limit']} for endpoint: {endpoint}")
         
         return params
+
+    # ================================================================
+    # PROGRESS EMISSION (INITIAL IMPLEMENTATION)
+    # ------------------------------------------------
+    # Emits lightweight JSON lines to stderr with a fixed sentinel
+    # prefix so the orchestrator (modern_execution_manager) can parse
+    # and later forward over SSE without mixing with final stdout JSON.
+    # This keeps changes minimal and side‑effect free.
+    # ================================================================
+    _PROGRESS_SENTINEL = "__PROGRESS__"  # stable marker
+
+    def _emit_progress(self, event_type: str, details: Dict[str, Any]):
+        """Emit a structured progress event to stderr.
+
+        Args:
+            event_type: Short classifier (e.g., 'pagination_start','page','rate_limit','pagination_complete')
+            details: Arbitrary JSON-serializable metadata (small size)
+        """
+        try:
+            # Skip chatty api_call_start events - they don't provide meaningful user value
+            if event_type == "api_call_start":
+                return
+            
+            payload = {
+                "type": event_type,
+                "ts": datetime.utcnow().isoformat() + "Z",
+                **details
+            }
+            # Single line with sentinel so parsers can split cheaply
+            print(f"{self._PROGRESS_SENTINEL} {json.dumps(payload, separators=(',',':'))}", file=sys.stderr)
+            sys.stderr.flush()  # CRITICAL: Force immediate output for real-time streaming
+        except Exception:
+            # Never let progress emission break core flow
+            pass
+
+    # ---------------- Entity progress (for follow-up API calls over previous step IDs) ---------------
+    def start_entity_progress(self, label: str, total: int):
+        """Emit start event for entity batch processing.
+
+        Args:
+            label: Logical label (e.g., 'user_roles', 'user_detail_calls')
+            total: Total entities to process
+        """
+        if total <= 0:
+            return
+        self._entity_progress_state[label] = {
+            'total': total,
+            'last_emitted': 0,
+            'emitted_events': 0,
+            'errors': 0  # Track errors as they accumulate
+        }
+        # Fixed schema: entity_start with all fields
+        self._emit_progress("entity_start", {
+            "label": label, 
+            "current": 0, 
+            "total": total,
+            "percent": None,
+            "operation_type": "batch",
+            "status": None,
+            "success": None,
+            "errors": 0,
+            "wait_seconds": 0,
+            "message": None
+        })
+
+    def update_entity_progress(self, label: str, processed: int, errors: int = None):
+        """Emit throttled progress for entity batch.
+
+        Emits at most ~50 incremental events (configurable via API_PROGRESS_MAX_EVENTS env) plus final.
+        
+        Args:
+            label: Progress label
+            processed: Number of items processed so far
+            errors: Current error count (if None, keeps existing count)
+        """
+        state = self._entity_progress_state.get(label)
+        if not state:
+            return
+        
+        # Update error count if provided
+        if errors is not None:
+            state['errors'] = errors
+        
+        total = state['total']
+        processed = min(processed, total)
+        max_events = int(os.getenv('API_PROGRESS_MAX_EVENTS', '20'))  # Reduced from 50 to 20
+        if total <= 0:
+            return
+        # Determine minimum increment to emit another event - less frequent updates
+        min_step = max(1, total // max_events)
+        
+        # Only emit at significant milestones or completion
+        is_milestone = (processed % max(10, total // 10) == 0) or processed == total
+        
+        if processed == total or (processed - state['last_emitted'] >= min_step and is_milestone):
+            percent = round((processed / total) * 100, 2)
+            # Fixed schema: entity_progress with all fields including current errors
+            self._emit_progress("entity_progress", {
+                "label": label, 
+                "current": processed, 
+                "total": total, 
+                "percent": percent,
+                "operation_type": "batch",
+                "status": None,
+                "success": None,
+                "errors": state['errors'],  # Show current error count
+                "wait_seconds": 0,
+                "message": None
+            })
+            state['last_emitted'] = processed
+            state['emitted_events'] += 1
+
+    def increment_entity_errors(self, label: str, increment: int = 1):
+        """Increment error count for entity batch processing.
+        
+        Args:
+            label: Progress label
+            increment: Number of errors to add (default 1)
+        """
+        state = self._entity_progress_state.get(label)
+        if state:
+            state['errors'] = state.get('errors', 0) + increment
+
+    def complete_entity_progress(self, label: str, success: bool = True, errors: int = None):
+        """Emit completion event for entity batch.
+        
+        Args:
+            label: Progress label
+            success: Whether the overall operation succeeded
+            errors: Final error count (if None, uses accumulated count)
+        """
+        state = self._entity_progress_state.get(label)
+        if not state:
+            return
+        
+        # Use provided errors or accumulated count
+        final_errors = errors if errors is not None else state.get('errors', 0)
+        
+        # If we have errors, consider the operation partially successful
+        if final_errors > 0 and success:
+            success = True  # Still successful overall, but with some errors
+            
+        total = state['total']
+        # Fixed schema: entity_complete with all fields
+        completion_status = "completed" if success else "terminated_with_error"
+        if final_errors > 0 and success:
+            completion_status = "completed_with_errors"
+            
+        self._emit_progress("entity_complete", {
+            "label": label, 
+            "current": total, 
+            "total": total, 
+            "percent": 100.0 if success else None,
+            "operation_type": "batch",
+            "status": completion_status,
+            "success": success, 
+            "errors": final_errors,
+            "wait_seconds": 0,
+            "message": f"Completed with {final_errors} errors" if final_errors > 0 else "Completed successfully"
+        })
+        # Cleanup
+        try:
+            del self._entity_progress_state[label]
+        except KeyError:
+            pass
     
     async def make_request(self, 
                           endpoint: str,
                           method: str = "GET", 
                           params: Optional[Dict] = None,
                           body: Optional[Dict] = None,
-                          max_results: Optional[int] = None) -> Dict[str, Any]:
+                          max_results: Optional[int] = None,
+                          entity_label: Optional[str] = None) -> Dict[str, Any]:
         """
         Make an API request with automatic pagination detection and rate limit optimization.
         
@@ -137,15 +307,16 @@ class OktaAPIClient:
             params: Query parameters
             body: Request body for POST/PUT requests
             max_results: Maximum total results to return (stops pagination early)
+            entity_label: If provided, errors will be automatically tracked for this entity batch
             
         Returns:
             Dict with status and data/error
         """
-        print(f"API: {method} {endpoint}", file=sys.stderr)
+        # Emit structured progress events - only for max_results limit
         if max_results:
-            print(f"Max results limit: {max_results}", file=sys.stderr)
-        self.logger.info(f"API: {method} {endpoint}")
-        self.logger.info(f"Making {method} request to endpoint: {endpoint}")
+            self._emit_progress("api_call_limit", {"max_results": max_results})
+        # self.logger.debug(f"API: {method} {endpoint}")
+        # self.logger.debug(f"Making {method} request to endpoint: {endpoint}")
         if params:
             self.logger.debug(f"Request parameters: {params}")
         if max_results:
@@ -155,17 +326,32 @@ class OktaAPIClient:
             # Optimize parameters for better rate limit efficiency
             if method.upper() == "GET":
                 params = self._optimize_params(endpoint, params)
-                return await self._handle_get_request(endpoint, params, max_results)
+                result = await self._handle_get_request(endpoint, params, max_results)
             else:
-                return await self._handle_single_request(endpoint, method, params, body)
+                result = await self._handle_single_request(endpoint, method, params, body)
+            
+            # NEW: Automatic error tracking for entity batch operations
+            if entity_label and result.get("status") == "error":
+                self.increment_entity_errors(entity_label, 1)
+                self.logger.debug(f"Auto-tracked error for entity batch '{entity_label}': {result.get('error', 'Unknown error')}")
+            
+            return result
                 
         except Exception as e:
             self.logger.error(f"API request failed for {endpoint}: {str(e)}")
-            return {
+            sys.stderr.flush()  # Flush error logs immediately
+            error_result = {
                 "status": "error",
                 "error": f"API request failed: {str(e)}",
                 "error_code": "REQUEST_FAILED"
             }
+            
+            # NEW: Automatic error tracking for exceptions too
+            if entity_label:
+                self.increment_entity_errors(entity_label, 1)
+                self.logger.debug(f"Auto-tracked exception for entity batch '{entity_label}': {str(e)}")
+            
+            return error_result
     
     async def _handle_get_request(self, endpoint: str, params: Optional[Dict] = None, max_results: Optional[int] = None) -> Dict[str, Any]:
         """Handle GET request with automatic pagination detection."""
@@ -183,28 +369,74 @@ class OktaAPIClient:
             # No pagination needed, return single result
             self.logger.debug(f"No pagination detected for {endpoint}")
             return first_result
-        
+
         # Pagination detected, collect all pages
-        print(f"Paginating {endpoint}", file=sys.stderr)
-        self.logger.info(f"Paginating {endpoint} - collecting all pages...")
-        all_data = []
-        
         # Add first page data
         first_data = first_result["data"]
+        all_data = []
         if isinstance(first_data, list):
             all_data.extend(first_data)
         else:
             all_data.append(first_data)
         
+        # Start entity progress for pagination with special handling for unknown totals
+        # Use a descriptive label based on endpoint
+        endpoint_label = endpoint.strip('/').replace('/api/v1/', '').replace('/', '_')
+        pagination_label = f"paginate_{endpoint_label}"
+        
+        # For pagination, emit entity_start event with discovery mode - fixed schema
+        self._emit_progress("entity_start", {
+            "label": pagination_label, 
+            "current": len(all_data),  
+            "total": 0,  # Unknown total for pagination discovery
+            "percent": None,
+            "operation_type": "discovery",
+            "status": None,
+            "success": None,
+            "errors": 0,
+            "wait_seconds": 0,
+            "message": None
+        })
+        
+        # Remove old pagination_start event - replaced by entity_start
+        self.logger.info(f"Paginating {endpoint} - collecting all pages...")
+        
         page_count = 1
         current_link = link_header
+        
+        # Emit entity progress for first page with item count - fixed schema
+        self._emit_progress("entity_progress", {
+            "label": pagination_label, 
+            "current": len(all_data),
+            "total": 0,  # Unknown total for discovery
+            "percent": None,
+            "operation_type": "discovery",
+            "status": None,
+            "success": None,
+            "errors": 0,
+            "wait_seconds": 0,
+            "message": None
+        })
         
         self.logger.debug(f"Page 1: Retrieved {len(first_data) if isinstance(first_data, list) else 1} items")
         
         # Check if max_results is reached after first page
         if max_results and len(all_data) >= max_results:
-            print(f"Max results reached: {len(all_data[:max_results])}/{max_results}", file=sys.stderr)
+            # Remove old max_results_reached event - completion info is in entity_complete
             self.logger.info(f"Max results reached after page 1: returning {max_results} items")
+            # Emit entity completion for early exit due to max_results - fixed schema
+            self._emit_progress("entity_complete", {
+                "label": pagination_label, 
+                "current": max_results,
+                "total": max_results,  # Now we know the effective total
+                "percent": 100.0,
+                "operation_type": "discovery",
+                "status": "completed_max_reached",
+                "success": True, 
+                "errors": 0,
+                "wait_seconds": 0,
+                "message": f"Completed with max results limit: {max_results} items"
+            })
             return {
                 "status": "success",
                 "data": all_data[:max_results],
@@ -220,13 +452,13 @@ class OktaAPIClient:
                 break
             
             page_count += 1
-            print(f"Page {page_count}", file=sys.stderr)
             self.logger.debug(f"Fetching page {page_count} from: {next_url}")
             
             page_result = await self._single_request(next_url, "GET")
             
             if page_result["status"] != "success":
                 self.logger.error(f"Failed to retrieve page {page_count}: {page_result.get('error', 'Unknown error')}")
+                sys.stderr.flush()  # Flush error logs immediately
                 return page_result
             
             page_data = page_result["data"]
@@ -244,10 +476,39 @@ class OktaAPIClient:
                 all_data.append(page_data)
                 self.logger.debug(f"Page {page_count}: Added 1 item (total: {len(all_data)})")
             
+            # Emit entity progress with increasing item count (every page) - fixed schema
+            self._emit_progress("entity_progress", {
+                "label": pagination_label, 
+                "current": len(all_data),
+                "total": 0,  # Still unknown total for discovery
+                "percent": None,
+                "operation_type": "discovery",
+                "status": None,
+                "success": None,
+                "errors": 0,
+                "wait_seconds": 0,
+                "message": None
+            })
+            
+            # Remove old page and max_results_reached events - replaced by entity_progress
+            
             # Check if max_results is reached
             if max_results and len(all_data) >= max_results:
-                print(f"Max results reached: {max_results} items after {page_count} pages", file=sys.stderr)
+                # Remove old max_results_reached event - completion info is in entity_complete
                 self.logger.info(f"Max results reached after page {page_count}: returning {max_results} items")
+                # Emit entity completion for early exit due to max_results - fixed schema
+                self._emit_progress("entity_complete", {
+                    "label": pagination_label, 
+                    "current": max_results,
+                    "total": max_results,  # Now we know the effective total
+                    "percent": 100.0,
+                    "operation_type": "discovery",
+                    "status": "completed_max_reached",
+                    "success": True, 
+                    "errors": 0,
+                    "wait_seconds": 0,
+                    "message": f"Completed with max results limit: {max_results} items"
+                })
                 return {
                     "status": "success",
                     "data": all_data[:max_results],
@@ -261,8 +522,23 @@ class OktaAPIClient:
             
             # Small delay between requests
             await asyncio.sleep(0.2)
-        
+
+        # Remove old pagination_complete event - replaced by entity_complete
         self.logger.info(f"Pagination complete for {endpoint}: {len(all_data)} total items across {page_count} pages")
+        
+        # Emit entity completion with final item count - fixed schema
+        self._emit_progress("entity_complete", {
+            "label": pagination_label, 
+            "current": len(all_data),
+            "total": len(all_data),  # Now we know the final total
+            "percent": 100.0,
+            "operation_type": "discovery",
+            "status": "completed",
+            "success": True, 
+            "errors": 0,
+            "wait_seconds": 0,
+            "message": f"Pagination completed: {len(all_data)} items across {page_count} pages"
+        })
         
         return {
             "status": "success",
@@ -334,12 +610,10 @@ class OktaAPIClient:
                             if is_concurrent:
                                 # Concurrent rate limit - shorter retry with backoff
                                 retry_after = min(int(response.headers.get('Retry-After', '15')), 30)
-                                print(f"Rate limit hit, waiting {retry_after}s", file=sys.stderr)
                                 self.logger.warning(f"Concurrent rate limit exceeded on {endpoint}. Waiting {retry_after} seconds for retry {retry_count + 1}/{max_retries}")
                             else:
                                 # Org-wide rate limit - use Retry-After header
                                 retry_after = int(response.headers.get('Retry-After', '60'))
-                                print(f"Rate limit hit, waiting {retry_after}s", file=sys.stderr)
                                 self.logger.warning(f"Org-wide rate limit exceeded on {endpoint}. Waiting {retry_after} seconds for retry {retry_count + 1}/{max_retries}")
                                 self.logger.info(f"Rate limit details: {rate_limit_remaining}/{rate_limit_limit} remaining, resets at epoch {rate_limit_reset}")
                             
@@ -358,6 +632,19 @@ class OktaAPIClient:
                                 else:
                                     self.logger.info(f"Org-wide rate limit: Waiting {actual_wait} seconds as specified by Okta Retry-After header")
                                 
+                                # Standardized rate_limit_wait event - fixed schema
+                                self._emit_progress("rate_limit_wait", {
+                                    "label": f"rate_limit_{endpoint.strip('/').replace('/api/v1/', '').replace('/', '_')}", 
+                                    "current": 0,
+                                    "total": 0,
+                                    "percent": None,
+                                    "operation_type": "rate_limit",
+                                    "status": "waiting",
+                                    "success": None,
+                                    "errors": 0,
+                                    "wait_seconds": round(actual_wait, 2),
+                                    "message": f"Waiting for {'concurrent' if is_concurrent else 'org-wide'} rate limit..."
+                                })
                                 await asyncio.sleep(actual_wait)
                                 retry_count += 1
                                 continue
@@ -384,6 +671,7 @@ class OktaAPIClient:
                         
                 except asyncio.TimeoutError:
                     self.logger.error(f"Request timeout after {self.timeout} seconds for {endpoint}")
+                    sys.stderr.flush()  # Flush error logs immediately
                     return {
                         "status": "error",
                         "error": f"Request timeout after {self.timeout} seconds",
@@ -391,6 +679,7 @@ class OktaAPIClient:
                     }
                 except aiohttp.ClientError as e:
                     self.logger.error(f"Network error for {endpoint}: {str(e)}")
+                    sys.stderr.flush()  # Flush error logs immediately
                     return {
                         "status": "error", 
                         "error": f"Network error: {str(e)}",
@@ -398,6 +687,7 @@ class OktaAPIClient:
                     }
                 except Exception as e:
                     self.logger.error(f"Unexpected error for {endpoint}: {str(e)}")
+                    sys.stderr.flush()  # Flush error logs immediately
                     return {
                         "status": "error",
                         "error": f"Unexpected error: {str(e)}",
@@ -406,6 +696,7 @@ class OktaAPIClient:
             
             # All retries exhausted
             self.logger.error(f"All {max_retries} retries exhausted for {endpoint} due to rate limiting")
+            sys.stderr.flush()  # Flush error logs immediately
             return {
                 "status": "error",
                 "error": f"Request failed after {max_retries} retries due to rate limiting",

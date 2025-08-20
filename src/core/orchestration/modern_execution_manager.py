@@ -276,6 +276,9 @@ class ModernExecutionManager:
         self.step_status_callback = None  # Optional callback for step status updates (step_number, step_type, status)
         self.planning_phase_callback = None  # Optional callback for planning lifecycle ('planning_start'/'planning_complete')
         
+        # STEP SCHEMAS STORAGE: Store schemas generated for Results Formatter to recreate schema-enhanced structure in data injection
+        self.current_step_schemas = {}  # Store step schemas for data injection code generation
+        
         # MINIMAL CANCELLATION SYSTEM: Aggressive termination on user request
         self.cancelled_queries = set()  # Just store correlation_ids that are cancelled
         
@@ -829,7 +832,7 @@ class ModernExecutionManager:
                 injection_lines.append(f"{step_context_var} = {repr(step_context)}")
                 injection_lines.append(f"# Full data available as: {variable_name} = {repr(step_data)}")
                 
-                # CRITICAL: Add to full_results dict with consistent step_type key for Results Formatter Agent
+                # SIMPLE FORMAT: Just inject data directly without schema complexity
                 injection_lines.append(f"full_results['{full_results_key}'] = {repr(step_data)}")
                 injection_lines.append("")
         
@@ -854,6 +857,7 @@ class ModernExecutionManager:
         self.data_variables.clear()  # Legacy compatibility - FULL POLARS uses polars_dataframes
         self.polars_dataframes.clear()  # FULL POLARS ARCHITECTURE: Clear DataFrame storage
         self.step_metadata.clear()
+        self.current_step_schemas.clear()  # Clear stored schemas for Results Formatter
         logger.debug("FULL POLARS: Cleared execution data for fresh run")
     
     def cancel_query(self, correlation_id: str, reason: str = "User cancellation"):
@@ -1436,6 +1440,9 @@ class ModernExecutionManager:
             step_schemas = self._analyze_step_data_structures(step_results_for_processing)
             logger.debug(f"[{correlation_id}] Generated data structure schemas for Results Formatter: {list(step_schemas.keys())}")
             
+            # Store step schemas for data injection code (needed to recreate schema-enhanced structure)
+            self.current_step_schemas = step_schemas
+            
             # Call Results Formatter Agent like backup executor - let it decide complete vs sample processing
             try:
                 formatted_response = await process_results_formatter(
@@ -1658,6 +1665,17 @@ class ModernExecutionManager:
                 if result.success:
                     successful_steps += 1
                     logger.info(f"[{correlation_id}] Step {step_num} completed successfully")
+                    
+                    # EARLY TERMINATION CHECK: If first step returns 0 results, terminate execution
+                    if step_num == 1 and hasattr(result.result, 'data') and isinstance(result.result.data, list) and len(result.result.data) == 0:
+                        logger.warning(f"[{correlation_id}] EARLY TERMINATION: First step returned no data - stopping execution")
+                        result.result = {
+                            "early_termination": True,
+                            "message": "No data found matching your criteria. Try broadening your search.",
+                            "data": []
+                        }
+                        step_results.append(result)
+                        break
                     
                     # Notify step status callback - step completed
                     if self.step_status_callback:
@@ -2125,9 +2143,20 @@ class ModernExecutionManager:
             if execution_result.get('error'):
                 error_msg = execution_result.get('error', '').lower()
                 # Critical errors that should fail the step
-                if any(critical in error_msg for critical in ['import', 'module', 'syntax', 'indentation']):
+                critical_error_patterns = ['import', 'module', 'syntax', 'indentation', 'security violation']
+                if any(critical in error_msg for critical in critical_error_patterns):
                     execution_successful = False
                     logger.error(f"[{correlation_id}] API step has critical execution error: {execution_result.get('error')}")
+                    
+                    # Special handling for security violations - immediate step failure
+                    if 'security violation' in error_msg:
+                        logger.critical(f"[{correlation_id}] SECURITY VIOLATION DETECTED - Step immediately failed")
+                        return StepResult(
+                            step_number=step_number,
+                            step_type="api",
+                            success=False,
+                            error=f"Security violation in generated API code: {execution_result.get('error')}"
+                        )
                 else:
                     execution_successful = True  # Non-critical error (like network timeout)
             else:
@@ -2217,15 +2246,38 @@ class ModernExecutionManager:
                 # Indent the entire generated code block to fit inside try/except
                 indented_code = '\n'.join('    ' + line for line in python_code.split('\n'))
                 
-                # Wrap the code with data injection and error handling
+                # Wrap the code with data injection and explicit asyncio cleanup
                 wrapped_code = f"""# -*- coding: utf-8 -*-
 import sys
 import json
+import asyncio
 {data_injection_code}
 try:
 {indented_code}
+    # Explicit asyncio cleanup to prevent hanging
+    try:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No running loop, try to get or create one
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        
+        pending = asyncio.all_tasks(loop)
+        if pending:
+            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+        loop.close()
+    except Exception:
+        pass  # Ignore cleanup errors
+    
+    # Force immediate exit
+    sys.exit(0)
 except Exception as e:
     print(json.dumps({{"status": "error", "error": str(e)}}))
+    sys.exit(1)
 """
                 
                 with open(temp_file_path, 'w', encoding='utf-8') as temp_file:
@@ -2255,15 +2307,134 @@ except Exception as e:
                 # Use standard API timeout for all API operations (including system_log)
                 execution_timeout = API_EXECUTION_TIMEOUT
                 logger.debug(f"[{correlation_id}] Using API timeout: {execution_timeout} seconds")
-                    
-                result = subprocess.run(
-                    [sys.executable, temp_file_path],
-                    capture_output=True,
+                
+                # Use subprocess.Popen for real-time progress event streaming
+                import time
+                
+                process = subprocess.Popen(
+                    [sys.executable, "-u", temp_file_path],  # -u for unbuffered output
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
                     encoding='utf-8',
                     errors='replace',
-                    timeout=execution_timeout,
-                    cwd=temp_dir  # Set working directory to temp dir so imports work
+                    cwd=temp_dir
+                )
+
+                # --- IMPORTANT DEADLOCK FIX ---
+                # We previously only read stderr (for progress events) and waited until the
+                # subprocess exited before reading stdout. If the generated code prints a large
+                # JSON payload to stdout BEFORE exiting, the OS pipe buffer (typically 64KB on
+                # Windows) can fill up. The child then blocks on further writes (including any
+                # cleanup / exit) while the parent is blocked waiting for process termination
+                # -> classic deadlock.
+                #
+                # Solution: Drain stdout concurrently while we stream stderr progress lines.
+                # We'll read stdout in a background thread in chunk mode (not line mode) so a
+                # single large JSON print without newlines doesn't block.
+                import threading
+                from io import StringIO
+                stdout_buffer = StringIO()
+                stdout_lock = threading.Lock()
+
+                def _drain_stdout():  # Runs in background thread
+                    try:
+                        # Read in medium chunks until EOF
+                        while True:
+                            if process.stdout is None:
+                                break
+                            chunk = process.stdout.read(4096)
+                            if not chunk:
+                                break
+                            with stdout_lock:
+                                stdout_buffer.write(chunk)
+                    except Exception:
+                        pass  # Safe to ignore; best-effort draining
+
+                stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+                stdout_thread.start()
+
+                stderr_data = []
+                start_time = time.time()
+                
+                # Read stderr line by line for real-time progress events
+                while True:
+                    # Check for timeout first
+                    if time.time() - start_time > execution_timeout:
+                        process.kill()
+                        process.wait()
+                        raise subprocess.TimeoutExpired([sys.executable, "-u", temp_file_path], execution_timeout)
+                    
+                    # Check if process has finished (simple polling every 0.1s)
+                    if process.poll() is not None:
+                        # Process finished - read any remaining stderr and break
+                        remaining_stderr = process.stderr.read()
+                        if remaining_stderr:
+                            for line in remaining_stderr.strip().split('\n'):
+                                if line.strip():
+                                    stderr_data.append(line.strip())
+                        break
+                    
+                    # Try to read a line from stderr with non-blocking approach
+                    stderr_line = process.stderr.readline()
+                    
+                    if stderr_line:
+                        line = stderr_line.strip()
+                        stderr_data.append(line)
+                        
+                        # Parse and forward progress events in real-time
+                        if line.startswith('__PROGRESS__'):
+                            parts = line.split(' ', 1)
+                            if len(parts) == 2:
+                                try:
+                                    evt = json.loads(parts[1])
+                                    evt_type = evt.get('type')
+                                    # Only log essential progress events - entity operations and rate limits
+                                    if evt_type in ['entity_start', 'entity_progress', 'entity_complete', 'rate_limit_wait']:
+                                        logger.debug(f"[{correlation_id}] PROGRESS {evt_type}: {evt}")
+                                except json.JSONDecodeError:
+                                    logger.debug(f"[{correlation_id}] Failed to parse progress JSON: {parts[1]}")
+                    else:
+                        # No stderr data available, small sleep to prevent busy waiting
+                        time.sleep(0.1)
+                
+                # Ensure stdout thread has finished draining
+                logger.debug(f"[{correlation_id}] Joining stdout drain thread")
+                try:
+                    stdout_thread.join(timeout=2)
+                except Exception:
+                    pass
+
+                # Combine stdout chunks
+                with stdout_lock:
+                    combined_stdout = stdout_buffer.getvalue()
+                if not combined_stdout:
+                    logger.warning(f"[{correlation_id}] No stdout content received (combined length 0)")
+                else:
+                    logger.debug(f"[{correlation_id}] Drained {len(combined_stdout)} chars from stdout concurrently")
+                
+                # Wait for process to complete
+                logger.debug(f"[{correlation_id}] Waiting for process to complete...")
+                try:
+                    exit_code = process.wait(timeout=2)  # Should be immediate
+                    logger.debug(f"[{correlation_id}] Process completed with exit code: {exit_code}")
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"[{correlation_id}] Process didn't terminate naturally, force killing")
+                    process.kill()
+                    exit_code = process.wait()
+                    logger.debug(f"[{correlation_id}] Force-killed process, final exit code: {exit_code}")
+                
+                # Create result object compatible with subprocess.run
+                class ProcessResult:
+                    def __init__(self, returncode, stdout, stderr):
+                        self.returncode = returncode
+                        self.stdout = stdout
+                        self.stderr = stderr
+                
+                result = ProcessResult(
+                    returncode=process.returncode,
+                    stdout=combined_stdout,
+                    stderr='\n'.join(stderr_data)
                 )
             
             # Parse the output
@@ -2271,7 +2442,12 @@ except Exception as e:
                 try:
                     # DEBUG: Log raw subprocess output before parsing
                     #logger.debug(f"[{correlation_id}] Raw subprocess stdout ({len(result.stdout)} chars): {result.stdout}")
-                    logger.debug(f"[{correlation_id}] Raw subprocess stderr ({len(result.stderr)} chars): {result.stderr}")
+                    # Filter out __PROGRESS__ lines from stderr dump to avoid noise
+                    filtered_stderr = '\n'.join([
+                        line for line in result.stderr.split('\n') 
+                        if not line.strip().startswith('__PROGRESS__')
+                    ])
+                    logger.debug(f"[{correlation_id}] Raw subprocess stderr ({len(filtered_stderr)} chars): {filtered_stderr}")
 
                     output = json.loads(result.stdout.strip())
                     
@@ -2412,7 +2588,10 @@ except Exception as e:
         
         try:
             # Run SQL in thread pool
-            loop = asyncio.get_event_loop()
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 data = await loop.run_in_executor(executor, _sync_sql_execute)
             
@@ -2515,7 +2694,10 @@ except Exception as e:
         
         try:
             # Run SQL sequence in thread pool
-            loop = asyncio.get_event_loop()
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = asyncio.get_event_loop()
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 data = await loop.run_in_executor(executor, _sync_sql_sequence_execute)
             
