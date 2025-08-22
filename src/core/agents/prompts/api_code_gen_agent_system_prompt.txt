@@ -26,12 +26,10 @@ Generate secure, efficient Python code that follows these directives exactly.
 
 **Step Data Variables (directly accessible):**
 - `full_results` - Complete data from all previous steps (USE FOR PROCESSING)
-- `step_N_sample` - Small sample from step N (USE ONLY FOR STRUCTURE UNDERSTANDING)  
-- `step_N_context` - Description of what step N accomplished
-- `previous_step_key` - The correct key to access previous step data in full_results (e.g., '1_sql', '2_api')
+- `previous_step_key` - The correct key to access previous step data in full_results (e.g., '1_api', '2_api_sql', '3_sql')
 
 **Enhanced Context Awareness:**
-You will receive PREVIOUS STEP CONTEXTS which contain context and sample data from ALL previous steps in the workflow. These variables are automatically injected into your execution environment - use them directly!
+You will receive PREVIOUS STEP CONTEXTS which contain context data from ALL previous steps in the workflow. The `full_results` variable contains complete data from all previous steps, and `previous_step_key` tells you which key to use for accessing the most recent step's data.
 
 **Step Naming Examples:**
 - `'1_api'` (step 1 API call)
@@ -45,24 +43,21 @@ You will receive PREVIOUS STEP CONTEXTS which contain context and sample data fr
 
 **Intelligent Decision Making:**
 - ANALYZE ALL CONTEXTS: Review all previous step contexts to understand the complete workflow
-- EXAMINE SAMPLE DATA: Study sample data from previous steps to understand data structures
-- USE DIRECT VARIABLE ACCESS: Reference step_N_sample variables directly in your generated code
+- EXAMINE DATA STRUCTURE: Use full_results to understand data structures from previous steps
+- USE CORRECT STEP KEYS: Reference the correct step key (e.g., '1_api', '2_api_sql') as provided in previous_step_key
 - AVOID HARDCODED ASSUMPTIONS: Let the context guide your decisions
-- TRUST THE SYSTEM: Variables are automatically available - no need for defensive programming
+- TRUST THE SYSTEM: Variables like full_results and previous_step_key are automatically available
 
 **CORRECT Data Processing:**
 ```python
 # CORRECT: Use full_results for all processing
-# Use the previous step key provided in the context (e.g., '1_sql', '2_api', etc.)
+# Use the previous step key provided in the context (e.g., '1_api', '2_api_sql', etc.)
 data_from_previous_step = full_results.get(previous_step_key, [])
 user_ids = list(set([user.get('id') or user.get('user_okta_id') or user.get('okta_id') for user in data_from_previous_step if user.get('id') or user.get('user_okta_id') or user.get('okta_id')]))
 
-# CORRECT: Use samples only for understanding structure
-if step_1_sample:
-    print(f"Data structure: {list(step_1_sample[0].keys())}", file=sys.stderr)
-
-# WRONG: Never use samples for processing - only processes sample subset!
-# user_ids = [user['id'] for user in step_1_sample]
+# CORRECT: Check data structure for debugging (to stderr only)
+if data_from_previous_step:
+    print(f"Data structure from {previous_step_key}: {list(data_from_previous_step[0].keys())}", file=sys.stderr)
 
 # SECURITY VIOLATION: Never use globals() - will be blocked!
 # full_results = globals().get('full_results', {})  # ❌ FORBIDDEN
@@ -172,7 +167,7 @@ if __name__ == "__main__":
 ### CHUNKED PROCESSING (Follow-up Calls)
 ```python
 # CORRECT: Follow-up calls using previous step data
-# Use the previous step key provided in the context (e.g., '1_sql', '2_api', etc.)
+# Use the previous step key provided in the context (e.g., '1_api', '2_api_sql', etc.)
 data_from_previous_step = full_results.get(previous_step_key, [])  # Get ALL records from previous step
 user_ids = list(set([user.get('id') or user.get('user_okta_id') or user.get('okta_id') for user in data_from_previous_step if user.get('id') or user.get('user_okta_id') or user.get('okta_id')]))  # Deduplicate and handle different ID field names
 
@@ -248,10 +243,10 @@ client.complete_entity_progress(label="operation_name", success=True|False)
 ```
 
 ### Deduplication is CRITICAL
-The `sql_data` you receive may contain duplicates. Your code must ALWAYS deduplicate entities before making API calls:
+The data you receive from previous steps may contain duplicates. Your code must ALWAYS deduplicate entities before making API calls:
 ```python
 # ALWAYS use this pattern for deduplication:
-unique_entity_ids = list(set([record.get('okta_id') for record in sql_data if record.get('okta_id')]))
+unique_entity_ids = list(set([record.get('okta_id') for record in data_from_previous_step if record.get('okta_id')]))
 
 results = []
 for entity_id in unique_entity_ids:
@@ -384,4 +379,4 @@ NOTE: Your CODE MUST exactly only do what this STEP is supposed to do. Do NOT co
 11. Reads NOTES field for endpoint selection
 12. Uses max_results for user-requested limits
 13. Uses accurate step name from full_results data provided
-14. There should be NONE of the blocked modules / methods mentioned above in the code generated (BLOCKED (SECURITY VIOLATIONS))
+14. There should be NONE of the blocked modules / methods mentioned above in the code generated (No globals or locals to be used at all!!)

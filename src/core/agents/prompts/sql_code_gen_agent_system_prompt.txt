@@ -81,51 +81,19 @@ You MUST generate only one SQL query. Do not use placeholders (`?`) - all values
 *   **Find a Manager's Reports**: `SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status FROM users u WHERE u.manager = 'manager_login'`
 
 **Pattern 4: COMPREHENSIVE MULTI-ENTITY QUERIES (CRITICAL - USE FOR COMPLEX REQUESTS)**
-*   **Trigger**: When the user asks for multiple types of entities (users + applications + groups), use this pattern.
+*   **Trigger**: When the user asks for multiple types of entities, use this pattern.
 *   **CTE Structure**: Use Common Table Expressions to organize complex logic clearly.
-*   **Template for Users + Applications + Groups**:
-```sql
-WITH target_group AS (
-  SELECT okta_id FROM groups WHERE name = 'group_name'
-), group_members AS (
-  SELECT u.email, u.login, u.first_name, u.last_name, u.status, u.okta_id
-  FROM users u
-  JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
-  WHERE ugm.group_okta_id = (SELECT okta_id FROM target_group)
-), user_groups AS (
-  SELECT ugm.user_okta_id, g.name AS group_name, g.description, g.okta_id AS group_okta_id
-  FROM user_group_memberships ugm
-  JOIN groups g ON ugm.group_okta_id = g.okta_id
-), all_assignments AS (
-  SELECT u.okta_id AS user_okta_id, a.label, a.name, a.status, a.okta_id AS application_okta_id, 'Direct' AS assignment_type, 'Direct Assignment' AS assignment_source
-  FROM group_members u
-  JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id
-  JOIN applications a ON uaa.application_okta_id = a.okta_id
-  WHERE a.status = 'ACTIVE'
-  UNION
-  SELECT u.okta_id AS user_okta_id, a.label, a.name, a.status, a.okta_id AS application_okta_id, 'Group' AS assignment_type, g.name AS assignment_source
-  FROM group_members u
-  JOIN user_group_memberships ugm2 ON u.okta_id = ugm2.user_okta_id
-  JOIN groups g ON ugm2.group_okta_id = g.okta_id
-  JOIN group_application_assignments gaa ON g.okta_id = gaa.group_okta_id
-  JOIN applications a ON gaa.application_okta_id = a.okta_id
-  WHERE a.status = 'ACTIVE'
-)
-SELECT gm.email, gm.login, gm.first_name, gm.last_name, gm.status, gm.okta_id,
-       aa.label AS app_label, aa.name AS app_name, aa.status AS app_status, aa.application_okta_id,
-       aa.assignment_type, aa.assignment_source,
-       ug.group_name, ug.description AS group_description, ug.group_okta_id
-FROM group_members gm
-LEFT JOIN all_assignments aa ON gm.okta_id = aa.user_okta_id
-LEFT JOIN user_groups ug ON gm.okta_id = ug.user_okta_id
-ORDER BY gm.last_name ASC, gm.first_name ASC, aa.label ASC, ug.group_name ASC
-```
+*   **General Template**: Build CTEs to identify target entities first, then join related data in the final SELECT. Use proper table relationships and filter conditions based on the actual query requirements. Include both direct and indirect relationships (e.g., direct assignments and group-based assignments) when applicable.
 
 **Pattern 5: Application Assignment Queries (UNION Required)**
-*   For user application assignments, you MUST check for BOTH direct and group-based assignments:
+*   For entity assignment queries, you MUST check for BOTH direct and indirect assignments (e.g., through groups):
+*   Use UNION to combine direct assignments and group-based assignments, ensuring proper table relationships and filtering conditions based on the specific query requirements.
+*   **Example for User Application Assignments (Direct + Group-based)**:
 ```sql
 -- Group-based assignments
-SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, a.label, a.okta_id AS application_okta_id, 'Group' AS assignment_type, g.name AS assignment_source
+SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, 
+       a.label, a.okta_id AS application_okta_id, a.status AS app_status, a.sign_on_mode,
+       'Group' AS assignment_type, g.name AS assignment_source
 FROM users u
 JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
 JOIN groups g ON ugm.group_okta_id = g.okta_id
@@ -134,15 +102,63 @@ JOIN applications a ON gaa.application_okta_id = a.okta_id
 WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE' AND a.status = 'ACTIVE'
 UNION
 -- Direct assignments
-SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, a.label, a.okta_id AS application_okta_id, 'Direct' AS assignment_type, 'Direct Assignment' AS assignment_source
+SELECT u.email, u.login, u.first_name, u.last_name, u.okta_id, 
+       a.label, a.okta_id AS application_okta_id, a.status AS app_status, a.sign_on_mode,
+       'Direct' AS assignment_type, 'Direct Assignment' AS assignment_source
 FROM users u
 JOIN user_application_assignments uaa ON u.okta_id = uaa.user_okta_id
 JOIN applications a ON uaa.application_okta_id = a.okta_id
 WHERE u.okta_id IN ('user_id_1', 'user_id_2') AND u.status = 'ACTIVE' AND a.status = 'ACTIVE'
-ORDER BY email, label
+ORDER BY email, label;
 ```
 
-**Pattern 6: Timestamp Handling**
+**Pattern 6: AGGREGATED MULTI-ENTITY QUERIES (For Consolidated Views)**
+*   **Trigger**: When the query context explicitly mentions grouping, aggregation, or consolidation to avoid row duplication.
+*   **Method**: Use `GROUP BY` on the primary entity's fields and `GROUP_CONCAT(DISTINCT ...)` to aggregate related entities into comma-separated strings.
+*   **General Approach**: 
+    - Identify the primary entity (the one you want one row per record for)
+    - Use LEFT JOINs to related entities to preserve all primary records
+    - Apply GROUP BY on all primary entity fields you want to SELECT
+    - Use GROUP_CONCAT(DISTINCT column_name) for related entity fields you want to aggregate
+    - Use CASE statements within GROUP_CONCAT for conditional aggregation when needed
+    - Filter using WHERE clause with entity IDs from previous steps if provided
+    - Order results appropriately for the primary entity
+*   **Example for Users + Groups + Applications with Aggregation**:
+```sql
+WITH UserApplications AS (
+    -- Direct assignments
+    SELECT uaa.user_okta_id, a.label, a.name, a.status, 'Direct' AS assignment_type
+    FROM user_application_assignments uaa
+    JOIN applications a ON uaa.application_okta_id = a.okta_id
+    WHERE a.status = 'ACTIVE'
+    UNION
+    -- Group-based assignments
+    SELECT ugm.user_okta_id, a.label, a.name, a.status, 'Group' AS assignment_type
+    FROM user_group_memberships ugm
+    JOIN group_application_assignments gaa ON ugm.group_okta_id = gaa.group_okta_id
+    JOIN applications a ON gaa.application_okta_id = a.okta_id
+    WHERE a.status = 'ACTIVE'
+)
+SELECT 
+    u.okta_id,
+    u.email,
+    u.login,
+    u.first_name,
+    u.last_name,
+    u.status,
+    GROUP_CONCAT(DISTINCT g.name) AS group_names,
+    GROUP_CONCAT(DISTINCT ua.label) AS app_labels,
+    GROUP_CONCAT(DISTINCT ua.assignment_type) AS assignment_types
+FROM users u
+LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
+LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id
+LEFT JOIN UserApplications ua ON u.okta_id = ua.user_okta_id
+WHERE u.okta_id IN ('user_id_1', 'user_id_2') -- Replace with actual user IDs
+GROUP BY u.okta_id, u.email, u.login, u.first_name, u.last_name, u.status
+ORDER BY u.last_name, u.first_name;
+```
+
+**Pattern 7: Timestamp Handling**
 *   **Timestamp Formatting**: If a user asks for a timestamp field, you MUST format it for local time: `strftime('%Y-%m-%d %H:%M:%S', datetime(column_name, 'localtime')) AS column_name`
 
 ### 5. ENHANCED CONTEXT AWARENESS

@@ -93,6 +93,7 @@ Your output MUST be a valid JSON object with these exact keys:
 **Pattern 2: Enhanced User-Applications with Security Filtering**
 *   **Use When**: Query involves users and their application assignments with proper security filtering
 *   **Critical Rule**: MUST include BOTH direct assignments AND group-based assignments with comprehensive tenant_id filtering
+*   **Standard Version (Multiple Rows)**:
 ```json
 {
   "id_extraction_path": "id",
@@ -101,6 +102,17 @@ Your output MUST be a valid JSON object with these exact keys:
   "join_field": "okta_id",
   "explanation": "Get ALL applications (direct + group assignments) and ALL groups for users with comprehensive security filtering"
 }
+```
+*   **Aggregated Version (Consolidated Rows)**:
+```json
+{
+  "id_extraction_path": "id",
+  "sql_query_template": "WITH UserApplications AS (SELECT uaa.user_okta_id, a.label, a.name, a.status, 'Direct' AS assignment_type FROM user_application_assignments uaa JOIN applications a ON uaa.application_okta_id = a.okta_id WHERE a.status = 'ACTIVE' AND a.tenant_id = ? AND a.is_deleted = 0 UNION SELECT ugm.user_okta_id, a.label, a.name, a.status, 'Group' AS assignment_type FROM user_group_memberships ugm JOIN group_application_assignments gaa ON ugm.group_okta_id = gaa.group_okta_id JOIN applications a ON gaa.application_okta_id = a.okta_id WHERE a.status = 'ACTIVE' AND a.tenant_id = ? AND a.is_deleted = 0) SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status, GROUP_CONCAT(DISTINCT g.name) as group_names, GROUP_CONCAT(DISTINCT ua.label) as app_labels, GROUP_CONCAT(DISTINCT ua.assignment_type) as assignment_types FROM users u LEFT JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id LEFT JOIN groups g ON ugm.group_okta_id = g.okta_id AND g.tenant_id = ? AND g.is_deleted = 0 LEFT JOIN UserApplications ua ON u.okta_id = ua.user_okta_id WHERE u.okta_id IN ({user_ids}) AND u.tenant_id = ? AND u.is_deleted = 0 GROUP BY u.okta_id, u.email, u.first_name, u.last_name, u.status ORDER BY u.last_name, u.first_name",
+  "api_dataframe_fields": ["id", "profile.email", "status"],
+  "join_field": "okta_id",
+  "explanation": "Get consolidated view with aggregated groups and applications for each user to avoid row duplication using CTE for cleaner logic"
+}
+```
 ```
 
 **Pattern 3: COMPREHENSIVE MULTI-ENTITY QUERIES (CRITICAL - USE FOR COMPLEX REQUESTS)**
@@ -130,16 +142,31 @@ Your output MUST be a valid JSON object with these exact keys:
 }
 ```
 
-**Pattern 5: Context Integration (FROM PREVIOUS STEPS)**
+**Pattern 5: AGGREGATED MULTI-ENTITY QUERIES (For Consolidated Views)**
+*   **Use When**: Query context mentions grouping, aggregation, or consolidation to avoid row duplication
+*   **Method**: Use GROUP BY on primary entity fields and GROUP_CONCAT(DISTINCT ...) for related entities
+*   **General Template for Aggregated Results**:
+```json
+{
+  "id_extraction_path": "id",
+  "sql_query_template": "SELECT primary_entity.okta_id, primary_entity.core_fields, GROUP_CONCAT(DISTINCT related_entity.field) AS aggregated_field FROM primary_entity LEFT JOIN relationship_table ON primary_entity.okta_id = relationship_table.primary_okta_id LEFT JOIN related_entity ON relationship_table.related_okta_id = related_entity.okta_id WHERE primary_entity.okta_id IN ({entity_ids}) AND primary_entity.tenant_id = ? AND primary_entity.is_deleted = 0 AND (related_entity.tenant_id = ? OR related_entity.okta_id IS NULL) AND (related_entity.is_deleted = 0 OR related_entity.okta_id IS NULL) GROUP BY primary_entity.okta_id, primary_entity.core_fields ORDER BY primary_entity.sort_field",
+  "api_dataframe_fields": ["id", "relevant.fields"],
+  "join_field": "okta_id",
+  "explanation": "Generate consolidated view with aggregated related entity information to avoid row duplication"
+}
+```
+```
+
+**Pattern 6: Context Integration (FROM PREVIOUS STEPS)**
 *   **Use When**: Previous steps provide specific IDs or data structures
 *   **Adaptation Required**: Modify extraction path based on actual API data format
 *   **API Context Integration**: API data provided in context is context text, NOT a database column. Extract IDs (`00u...`, `00g...`, `0oa...`) from the provided text and hardcode them into your query.
 
-**Pattern 6: Manager & Report Hierarchy**
+**Pattern 7: Manager & Report Hierarchy**
 *   **Manager Query**: For finding a user's manager, use JOIN on manager field: `SELECT m.okta_id, m.email, m.first_name, m.last_name, m.status FROM users u JOIN users m ON u.manager = m.login WHERE u.okta_id IN ({user_ids}) AND u.tenant_id = ? AND u.is_deleted = 0 AND m.tenant_id = ? AND m.is_deleted = 0`
 *   **Direct Reports**: For finding manager's reports: `SELECT u.okta_id, u.email, u.first_name, u.last_name, u.status FROM users u WHERE u.manager = 'manager_login' AND u.tenant_id = ? AND u.is_deleted = 0`
 
-**Pattern 7: Timestamp Handling**
+**Pattern 8: Timestamp Handling**
 *   **Timestamp Formatting**: If timestamp fields are needed, format them: `strftime('%Y-%m-%d %H:%M:%S', datetime(column_name, 'localtime')) AS column_name`
 
 ### 6. ID EXTRACTION PATHS REFERENCE

@@ -54,6 +54,27 @@ Transform complete hybrid AI agent execution results into clear, user-friendly J
 - **CRITICAL FOR TABLES: content must be a direct array of objects, NEVER wrap in {"rows": [...]}**
 - The response must contain ONLY the JSON object, nothing else
 - Use PURE PYTHON only - no external libraries except json module
+- **NEVER use `locals()` or `globals()`**: These are security violations and will crash the system
+
+---
+## 2.5 MANDATORY SCHEMA ANALYSIS (MUST EXAMINE DATA FIRST)
+
+**CRITICAL**: Before processing any data, you MUST examine the provided schema information and sample data structure to understand the ACTUAL field layout. Do NOT assume field access patterns.
+
+### Available Schema Information:
+- **step_schemas**: Detailed column information including data types and sample values
+- **sample_data**: Actual records showing real field structure  
+- **Key Discovery Rule**: Use the schema and sample data to determine whether fields are flattened (e.g., `outcome_result`) or nested (e.g., `outcome.result`)
+
+### Data Structure Decision Process:
+1. **Check step_schemas**: Examine column names and types to understand flattening
+2. **Analyze sample records**: Look at first few records to see actual field structure
+3. **Apply hybrid field access**: Use flattened patterns as primary, nested as fallback
+4. **Pattern Examples**:
+   - Flattened (95% of cases): `record.get('outcome_result')`, `record.get('actor_id')`
+   - Nested (rare >4 level cases): `record.get('outcome', {}).get('result')`, `record.get('actor', {}).get('id')`
+
+**NOTE**: The data has already been pre-processed through Polars `json_normalize(max_level=4)` which flattens most nested structures automatically.
 
 ---
 ## 3. CONTENT STRUCTURE BY DISPLAY TYPE
@@ -181,7 +202,7 @@ Transform complete hybrid AI agent execution results into clear, user-friendly J
 
 **Allowed Methods:** {{ALLOWED_METHODS_PLACEHOLDER}}
 
-**Forbidden:** File operations, imports, exec, eval, subprocess, os operations, external libraries
+**Forbidden:** File operations, imports, exec, eval, subprocess, os operations, external libraries, locals(), globals()
 
 **Final Requirements:**
 - **DISPLAY ALL DATA PROVIDED** - Process and return every piece of information from the dataset
