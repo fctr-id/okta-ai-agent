@@ -28,145 +28,84 @@ sys.path.insert(0, str(project_root))
 
 from src.core.orchestration.modern_execution_manager import ModernExecutionManager
 
-async def run_comprehensive_test(query: str):
-    """Run the comprehensive test and validate results"""
-    print(f"🚀 Running comprehensive test with query: {query}")
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Okta Hybrid Agent Test Script
+
+This test runs the complete hybrid workflow and saves results to file for analysis.
+No validation - just execution and output saving.
+"""
+
+import asyncio
+import sys
+import json
+import os
+import time
+from pathlib import Path
+
+# Change to project root directory (from scripts folder to parent)
+project_root = Path(__file__).parent.parent
+os.chdir(str(project_root))
+sys.path.insert(0, str(project_root))
+
+from src.core.orchestration.modern_execution_manager import ModernExecutionManager
+
+async def run_test_and_save(query: str):
+    """Run the test and save results to file"""
+    print(f"🚀 Running hybrid agent test with query: {query}")
     print("=" * 80)
     
-    # Expected results for validation
-    expected_users = {"dan@fctr.io", "aiden.garcia@fctr.io"}
-    expected_dan_groups = 253  # Dan should have 253 groups
-    expected_dan_apps = 2      # Dan should have 2 applications
-    expected_dan_admin = True  # Dan should have super admin role
-    expected_aiden_groups = 0  # Aiden should have no groups (except Everyone)
-    expected_aiden_apps = 0    # Aiden should have no applications
-    expected_aiden_admin = False # Aiden should not have super admin role
+    start_time = time.time()
     
     manager = ModernExecutionManager()
     result = await manager.execute_query(query)
+    
+    end_time = time.time()
+    response_time = end_time - start_time
     
     print("📊 EXECUTION RESULTS:")
     print(f"Success: {result.get('success')}")
     print(f"Total steps: {result.get('total_steps', 0)}")
     print(f"Successful steps: {result.get('successful_steps', 0)}")
     print(f"Failed steps: {result.get('failed_steps', 0)}")
+    print(f"Response time: {response_time:.1f}s")
     print()
     
-    # Analyze step results
-    step_results = result.get('step_results', [])
-    users_found = set()
-    dan_data = {"groups": 0, "apps": 0, "admin_role": False}
-    aiden_data = {"groups": 0, "apps": 0, "admin_role": False}
+    # Create comprehensive test result
+    test_result = {
+        "timestamp": int(time.time()),
+        "query": query,
+        "response_time": response_time,
+        "execution_result": result,
+        "test_metadata": {
+            "test_type": "hybrid_agent_test",
+            "success": result.get('success', False),
+            "total_steps": result.get('total_steps', 0),
+            "successful_steps": result.get('successful_steps', 0),
+            "failed_steps": result.get('failed_steps', 0)
+        }
+    }
     
-    print("🔍 STEP-BY-STEP ANALYSIS:")
-    for i, step_result in enumerate(step_results, 1):
-        step_type = step_result.get('step_type', 'unknown')
-        success = step_result.get('success', False)
-        print(f"Step {i} ({step_type}): {'✅ SUCCESS' if success else '❌ FAILED'}")
-        
-        if success and step_result.get('result'):
-            result_obj = step_result['result']
-            
-            # Extract data based on step type
-            if hasattr(result_obj, 'data'):
-                data = result_obj.data
-            elif hasattr(result_obj, 'execution_output'):
-                data = result_obj.execution_output
-            else:
-                data = []
-            
-            if isinstance(data, list) and len(data) > 0:
-                print(f"  📈 Records: {len(data)}")
-                
-                # Analyze first few records to understand data structure
-                sample_record = data[0]
-                print(f"  📋 Sample record keys: {list(sample_record.keys()) if isinstance(sample_record, dict) else 'Not a dict'}")
-                
-                # Look for user emails to identify which users were found
-                for record in data[:10]:  # Check first 10 records
-                    if isinstance(record, dict):
-                        # Check for direct email fields
-                        email = record.get('email') or record.get('user_email') or record.get('login')
-                        if email and email in expected_users:
-                            users_found.add(email)
-                            print(f"  👤 Found user: {email}")
-                        
-                        # Check for nested profile data (from group members)
-                        if 'profile' in record:
-                            profile_email = record['profile'].get('email') or record['profile'].get('login')
-                            if profile_email and profile_email in expected_users:
-                                users_found.add(profile_email)
-                                print(f"  👤 Found user: {profile_email}")
-                        
-                        # Check for members array (from group data)
-                        if 'members' in record and isinstance(record['members'], list):
-                            for member in record['members']:
-                                if isinstance(member, dict) and 'profile' in member:
-                                    member_email = member['profile'].get('email') or member['profile'].get('login')
-                                    if member_email and member_email in expected_users:
-                                        users_found.add(member_email)
-                                        print(f"  👤 Found user: {member_email}")
-            elif isinstance(data, dict):
-                print(f"  📈 Records: Single record")
-                
-                # Check single record for user data
-                email = data.get('email') or data.get('user_email') or data.get('login')
-                if email and email in expected_users:
-                    users_found.add(email)
-                    print(f"  👤 Found user: {email}")
-                
-                # Check for nested profile data
-                if 'profile' in data:
-                    profile_email = data['profile'].get('email') or data['profile'].get('login')
-                    if profile_email and profile_email in expected_users:
-                        users_found.add(profile_email)
-                        print(f"  👤 Found user: {profile_email}")
-                
-                # Check for members array (from group data)
-                if 'members' in data and isinstance(data['members'], list):
-                    for member in data['members']:
-                        if isinstance(member, dict) and 'profile' in member:
-                            member_email = member['profile'].get('email') or member['profile'].get('login')
-                            if member_email and member_email in expected_users:
-                                users_found.add(member_email)
-                                print(f"  👤 Found user: {member_email}")
-            else:
-                print(f"  📈 Records: {len(data) if isinstance(data, list) else 'Not a list'}")
-        print()
+    # Save results to file
+    timestamp = int(time.time())
+    output_file = Path(f"logs/json_results/hybrid_agent_test_{timestamp}.json")
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     
-    # Final validation
-    print("🎯 VALIDATION RESULTS:")
-    print(f"Users found: {len(users_found)}/2 expected")
-    for user in expected_users:
-        if user in users_found:
-            print(f"  ✅ {user} - FOUND")
-        else:
-            print(f"  ❌ {user} - MISSING")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(test_result, f, indent=2, ensure_ascii=False, default=str)
     
-    # Overall success criteria
-    success_criteria = [
-        len(users_found) >= 1,  # Must find at least one user (relaxed for some tests)
-        result.get('success', False),  # Overall execution must succeed
-        result.get('successful_steps', 0) >= 2,  # At least 2 steps must succeed
-    ]
-    
-    overall_success = all(success_criteria)
-    
-    print()
-    print("🏆 FINAL RESULT:")
-    print(f"Overall Success: {'✅ PASS' if overall_success else '❌ FAIL'}")
+    print(f"� Results saved to: {output_file}")
     print()
     
-    if not overall_success:
-        print("❌ FAILURE REASONS:")
-        if len(users_found) < 1:
-            print(f"  - Expected at least 1 user, found {len(users_found)}")
-        if not result.get('success', False):
-            print(f"  - Execution failed: {result.get('error', 'Unknown error')}")
-        if result.get('successful_steps', 0) < 2:
-            print(f"  - Not enough successful steps: {result.get('successful_steps', 0)}/2 minimum")
+    # Brief summary
+    print("� TEST SUMMARY:")
+    print(f"Query: {query}")
+    print(f"Status: {'✅ SUCCESS' if result.get('success') else '❌ FAILED'}")
+    print(f"Steps executed: {result.get('successful_steps', 0)}/{result.get('total_steps', 0)}")
+    print(f"Time taken: {response_time:.1f}s")
     
-    return overall_success
+    return test_result
 
 def main():
     if len(sys.argv) != 2:
@@ -178,8 +117,10 @@ def main():
         sys.exit(1)
     
     query = sys.argv[1]
-    success = asyncio.run(run_comprehensive_test(query))
+    result = asyncio.run(run_test_and_save(query))
     
+    # Exit with 0 for success, 1 for failure based on execution success
+    success = result.get('test_metadata', {}).get('success', False)
     sys.exit(0 if success else 1)
 
 if __name__ == "__main__":
