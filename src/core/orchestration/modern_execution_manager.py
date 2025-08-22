@@ -1500,8 +1500,7 @@ class ModernExecutionManager:
                         
                         # Use existing sampling utility for relationship analysis
                         sample_data_for_analysis = create_intelligent_samples(
-                            step_results_dict_for_estimation,  # Already converted to dict format above
-                            max_records_per_step=10
+                            step_results_dict_for_estimation  # Use default max_records_per_step=5
                         )
                         
                         relationship_analysis = await analyze_data_relationships(
