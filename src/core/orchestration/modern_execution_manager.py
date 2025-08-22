@@ -22,6 +22,7 @@ from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDep
 from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent, PlanningDependencies
 from src.core.agents.results_formatter_agent import format_results as process_results_formatter  # Unified token-based results formatting
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
+from src.core.agents.relationship_analysis_agent import analyze_data_relationships  # Stage 1: Relationship analysis for three-stage pipeline
 
 # Import security validation
 from src.core.security import (
@@ -1443,14 +1444,87 @@ class ModernExecutionManager:
             # Store step schemas for data injection code (needed to recreate schema-enhanced structure)
             self.current_step_schemas = step_schemas
             
-            # Call Results Formatter Agent like backup executor - let it decide complete vs sample processing
+            # EXECUTION DECISION SWITCH: Determine processing path based on plan characteristics
+            # 1. SQL-only queries → Skip relationship analysis → Let results formatter handle single SQL optimization
+            # 2. Complete data → Skip relationship analysis → Send directly to results formatter with is_sample=False
+            # 3. Complex multi-step → Use full three-stage pipeline with relationship analysis
+            
+            # Token estimation function for decision making
+            def estimate_token_count(data):
+                """
+                Estimate token count for LLM processing.
+                Rough estimation: 1 token ≈ 4 characters for English text
+                """
+                try:
+                    import json
+                    data_str = json.dumps(data, ensure_ascii=False)
+                    # Rough token estimation: 1 token ≈ 4 characters
+                    estimated_tokens = len(data_str) // 4
+                    return estimated_tokens
+                except:
+                    # Fallback to string length estimation
+                    data_str = str(data)
+                    return len(data_str) // 4
+
+            # Estimate tokens for relationship analysis decision
+            estimated_tokens = estimate_token_count(step_results_for_processing)
+            token_threshold = 1000  # 1K tokens threshold
+            
+            is_sql_only = len(execution_plan.steps) == 1 and execution_plan.steps[0].tool_name.lower() == 'sql'
+            is_complete_data = estimated_tokens <= token_threshold  # Complete data = under token threshold
+            
+            logger.info(f"[{correlation_id}] Decision factors: SQL-only={is_sql_only}, tokens={estimated_tokens:,}, threshold={token_threshold:,}, complete_data={is_complete_data}")
+            
+            if is_sql_only:
+                logger.info(f"[{correlation_id}] SQL-only query detected - skipping relationship analysis, will use single SQL optimization in results formatter")
+                relationship_analysis = None
+            elif is_complete_data:
+                logger.info(f"[{correlation_id}] Complete data processing ({estimated_tokens:,} tokens under {token_threshold:,} threshold) - skipping relationship analysis")
+                relationship_analysis = None
+            else:
+                # STAGE 1: Relationship Analysis (Three-Stage Pipeline)
+                # Analyze data relationships before results formatting for complex multi-step data
+                relationship_analysis = None
+                if total_records > 100:  # Only do relationship analysis for complex datasets
+                    try:
+                        logger.info(f"[{correlation_id}] Stage 1: Running relationship analysis on {total_records} records")
+                        relationship_analysis = await analyze_data_relationships(
+                            sample_data=step_results_for_processing,
+                            correlation_id=correlation_id,
+                            query=query
+                        )
+                        logger.info(f"[{correlation_id}] Stage 1: Relationship analysis completed")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Stage 1: Relationship analysis failed: {e}")
+                        relationship_analysis = None
+
+            # Modern Execution Manager decides sample vs complete processing based on token size
             try:
+                logger.info(f"[{correlation_id}] Dataset analysis: {total_records} records, {estimated_tokens:,} estimated tokens, threshold: {token_threshold:,}")
+                
+                # Determine processing strategy based on estimated token size (use already calculated values)
+                if is_complete_data:
+                    # Complete processing for datasets under token threshold
+                    use_sample_processing = False
+                    logger.info(f"[{correlation_id}] Complete data mode - using complete processing (tokens: {estimated_tokens:,} <= {token_threshold:,})")
+                else:
+                    # Use token-based decision for regular datasets
+                    use_sample_processing = estimated_tokens > token_threshold
+                    logger.info(f"[{correlation_id}] Token-based decision: {'sample' if use_sample_processing else 'complete'} processing (tokens: {estimated_tokens:,} vs threshold: {token_threshold:,})")
+                
+                # Include relationship analysis in metadata for enhanced processing
+                formatter_metadata = {
+                    "flow_id": correlation_id, 
+                    "step_schemas": step_schemas,
+                    "relationship_analysis": relationship_analysis  # Stage 1 results for Stage 2 code generation
+                }
+                
                 formatted_response = await process_results_formatter(
                     query=query,
                     results=step_results_for_processing,
-                    is_sample=False,  # Pattern-based approach handles all data
+                    is_sample=use_sample_processing,  # Modern execution manager makes the decision
                     original_plan=json.dumps(execution_plan.model_dump()),
-                    metadata={"flow_id": correlation_id, "step_schemas": step_schemas}
+                    metadata=formatter_metadata
                 )
                 
                 logger.info(f"[{correlation_id}] Results formatting completed with {formatted_response.get('display_type', 'unknown')} format")
@@ -2460,9 +2534,16 @@ except Exception as e:
                         data = output.get('data', [])
                         #logger.debug(f"[{correlation_id}] Extracted data type: {type(data)}")
                         logger.debug(f"[{correlation_id}] Extracted data length: {len(data) if hasattr(data, '__len__') else 'No length'}")
+                        
                         # Print just the first entry to avoid logging huge data structures
                         if isinstance(data, list) and len(data) > 0:
-                            logger.debug(f"[{correlation_id}] First data entry: {data[0]}")
+                            first_entry = data[0]
+                            # If it's a dict, truncate any arrays to show only first item
+                            if isinstance(first_entry, dict):
+                                sample_entry = {k: (v[:1] if isinstance(v, list) and len(v) > 0 else v) for k, v in first_entry.items()}
+                                logger.debug(f"[{correlation_id}] First data entry: {sample_entry}")
+                            else:
+                                logger.debug(f"[{correlation_id}] First data entry: {first_entry}")
                         elif isinstance(data, dict):
                             logger.debug(f"[{correlation_id}] Data sample: {dict(list(data.items())[:1])}")  # First 1 key-value pair
                         else:

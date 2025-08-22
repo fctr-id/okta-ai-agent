@@ -16,15 +16,18 @@ Model Configuration:
 import asyncio
 import json
 import logging
-import json
 import time
 import re
 import sys
 import os
+import warnings
 from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, RunContext
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
+
+# Suppress Gemini additionalProperties warnings - these are harmless and tools work correctly
+warnings.filterwarnings("ignore", message=".*additionalProperties.*not supported by Gemini.*", category=UserWarning)
 
 # Add src path for importing utils
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
@@ -102,16 +105,14 @@ def _load_sample_data_prompt() -> str:
         if "{{ALLOWED_METHODS_PLACEHOLDER}}" in prompt_content:
             prompt_content = prompt_content.replace("{{ALLOWED_METHODS_PLACEHOLDER}}", allowed_methods_section)
         
-        logger.debug("Loaded sample data prompt with dynamic allowed methods for pure Python processing")
+        logger.debug("Loaded sample data prompt with tool-first workflow")
         return prompt_content
         
     except FileNotFoundError:
-        logger.warning("Sample data prompt file not found, using fallback")
-        return """You are a Results Formatter Agent that processes sample data and generates processing code.
-Analyze samples and create efficient code for processing complete datasets."""
+        logger.error("Sample data prompt file not found - this is required")
+        raise FileNotFoundError("results_formatter_sample_data_prompt.txt not found")
 
-# Create Results Formatter Agents with PydanticAI (2 specialized agents)
-# Create PydanticAI agents with string output to avoid validation issues
+# Create Results Formatter Agent with PydanticAI (single unified agent)
 # Complete data formatter uses REASONING model for data understanding and formatting
 complete_data_formatter = Agent(
     reasoning_model,
@@ -120,13 +121,174 @@ complete_data_formatter = Agent(
     retries=0  # No retries to avoid wasting money on failed attempts
 )
 
-# Sample data formatter uses CODING model for Python JSON code generation
+# Sample data formatter uses REASONING model for both relationship analysis AND code generation
+# This allows us to use tools while still being capable of generating Python code
 sample_data_formatter = Agent(
-    coding_model, 
+    coding_model,  # Back to coding_model - it was working fine
     system_prompt=_load_sample_data_prompt(),
     # No output_type - will return raw string which we can parse manually
     retries=0  # No retries to avoid wasting money on failed attempts
 )
+
+# Deterministic relationship analysis prompt with enhanced reflective thinking (same functionality as simple_pipeline.py)
+DETERMINISTIC_ANALYSIS_PROMPT = """You are a data relationship analyzer for multi-step API execution results with enhanced reflective thinking capabilities.
+
+## CRITICAL OUTPUT REQUIREMENT: RAW JSON ONLY
+
+**YOUR OUTPUT WILL BE PARSED BY json.loads() - ANY NON-JSON CONTENT WILL CRASH THE SYSTEM.**
+
+**ABSOLUTE PROHIBITIONS:**
+- **ZERO COMMENTS**: The characters `//` anywhere in your response will crash the system
+- **ZERO MARKDOWN**: No ```json blocks - raw JSON only  
+- **ZERO EXPLANATIONS**: Only the JSON object, nothing else
+- **NO TEXT**: Nothing before `{` or after `}` will crash the parser
+
+**YOUR FIRST CHARACTER MUST BE `{` AND YOUR LAST CHARACTER MUST BE `}`**
+
+## MANDATORY TOOL-BASED ANALYSIS PROCESS
+
+**REQUIRED WORKFLOW:**
+You MUST use the `analyze_sample_data_structure` tool before generating any JSON output.
+
+**STEP-BY-STEP REQUIREMENT:**
+1. **CALL THE TOOL**: First call `analyze_sample_data_structure` tool with the sample data
+2. **USE TOOL RESULTS**: Use the tool's comprehensive analysis to understand data structure and relationships
+3. **GENERATE OUTPUT**: Use the tool's findings to create accurate JSON output with proper field mappings
+
+## TOOL-PROVIDED ANALYSIS
+
+The `analyze_sample_data_structure` tool will provide you with:
+
+### 1. CROSS-STEP JOINS
+Exact join relationships between steps:
+"step_X_to_step_Y": {
+    "left_key": "exact_field_name",
+    "right_key": "exact_field_name", 
+    "join_type": "one-to-one|one-to-many|many-to-many",
+    "reliability": "high|medium|low"
+}
+
+### 2. PRIMARY ENTITY
+Main business entity (user, group, application, device, event, organization)
+
+### 3. AGGREGATION RULES  
+How to group data for each step:
+"step_X_aggregation": {
+    "group_by_field": "exact_field_name",
+    "aggregate_fields": ["field1", "field2"],
+    "method": "distinct_list|count|first|last|concat"
+}
+
+### 4. FIELD MAPPINGS  
+Mapping from source fields to output names:
+"stepX.source_field": "output_field_name"
+
+### 5. PROCESSING TEMPLATE
+Recommended processing approach (ENTITY_AGGREGATION, CROSS_REFERENCE, etc.)
+
+## CRITICAL SUCCESS FACTORS WITH REFLECTIVE THINKING
+1. **EXAMINE ACTUAL SAMPLE DATA** - Look at provided samples to find real field names
+2. **ANALYZE NESTED STRUCTURES** - Don't just say "data", examine what's inside complex fields  
+3. **IDENTIFY DISPLAY FIELDS** - For user-facing data, find appropriate display field (label, name, title)
+4. **BE SPECIFIC WITH FIELD PATHS** - Use precise field references for nested data extraction
+5. **THINK STEP-BY-STEP** - Reflect on relationship quality before finalizing the analysis
+6. **VALIDATE COMPLETENESS** - Ensure your analysis will capture all data the user requested (groups, roles, applications)
+
+Return JSON with this EXACT structure (NO MARKDOWN, NO COMMENTS):
+{
+    "cross_step_joins": {},
+    "primary_entity": "user",
+    "aggregation_rules": {},
+    "field_mappings": {},
+    "processing_template": "ENTITY_AGGREGATION - Description"
+}
+
+Use exact field names from sample data, not assumptions."""
+
+# Create dedicated relationship analysis agent 
+relationship_analysis_agent = Agent(
+    coding_model,
+    system_prompt=DETERMINISTIC_ANALYSIS_PROMPT,
+    retries=0
+)
+
+# Data Structure Analysis Tool (exactly like simple_pipeline.py)
+@sample_data_formatter.tool
+async def analyze_sample_data_structure(ctx: RunContext[Dict[str, Any]], sample_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Analyze sample data structure using the proven deterministic relationship analysis prompt"""
+    
+    # Prepare analysis data (first 2 records per step for structure analysis)
+    analysis_data = {}
+    for step_key, step_data in sample_data.items():
+        if isinstance(step_data, list) and step_data:
+            sample_records = step_data[:2] if len(step_data) > 2 else step_data
+            analysis_data[step_key] = {
+                "record_count": len(step_data),
+                "sample_records": sample_records
+            }
+    
+    prompt = f"Analyze this sample data:\n{json.dumps(analysis_data, indent=2, default=str)[:4000]}"
+    
+    try:
+        # Run relationship analysis using dedicated agent
+        result = await relationship_analysis_agent.run(prompt, deps=ctx.deps, usage=ctx.usage)
+        raw_response = str(result.output) if hasattr(result, 'output') else str(result)
+        
+        # ALWAYS LOG RAW OUTPUT FOR DEBUGGING
+        logger.info(f"🔍 RAW LLM OUTPUT FOR RELATIONSHIP ANALYSIS:")
+        logger.info(f"Raw response length: {len(raw_response)}")
+        logger.info(f"Raw response: {raw_response}")
+        
+        # Parse JSON response with better error handling
+        json_str = raw_response.strip()
+        
+        # Handle markdown blocks if present
+        if '```json' in json_str:
+            start = json_str.find('```json') + 7
+            end = json_str.find('```', start)
+            if end != -1:
+                json_str = json_str[start:end].strip()
+            else:
+                json_str = json_str[start:].strip()
+        
+        # Ensure it starts and ends with braces
+        if not json_str.startswith('{'):
+            # Find the first { and last }
+            start_idx = json_str.find('{')
+            end_idx = json_str.rfind('}')
+            if start_idx != -1 and end_idx != -1:
+                json_str = json_str[start_idx:end_idx+1]
+            else:
+                raise ValueError("No valid JSON structure found")
+        
+        analysis_result = json.loads(json_str)
+        
+        # DEBUG LOGGING: Log the complete relationship analysis output
+        logger.debug(f"🔍 RELATIONSHIP ANALYSIS TOOL OUTPUT:")
+        logger.debug(f"   Cross-step joins: {analysis_result.get('cross_step_joins', {})}")
+        logger.debug(f"   Primary entity: {analysis_result.get('primary_entity', 'unknown')}")
+        logger.debug(f"   Aggregation rules: {analysis_result.get('aggregation_rules', {})}")
+        logger.debug(f"   Field mappings: {analysis_result.get('field_mappings', {})}")
+        logger.debug(f"   Processing template: {analysis_result.get('processing_template', 'unknown')}")
+        logger.debug(f"🔍 COMPLETE RELATIONSHIP ANALYSIS:\n{json.dumps(analysis_result, indent=2)}")
+        
+        return analysis_result
+        
+    except Exception as e:
+        logger.error(f"Tool analyze_sample_data_structure failed: {e}")
+        logger.error(f"Raw response was: {raw_response[:500]}...")
+        
+        # Return a basic fallback analysis
+        fallback_result = {
+            "cross_step_joins": {},
+            "primary_entity": "user", 
+            "aggregation_rules": {},
+            "field_mappings": {},
+            "processing_template": "ENTITY_AGGREGATION - Basic fallback analysis due to tool error"
+        }
+        
+        logger.debug(f"🔍 FALLBACK RELATIONSHIP ANALYSIS: {fallback_result}")
+        return fallback_result
 
 def _parse_raw_llm_response(raw_response: str, flow_id: str) -> Dict[str, Any]:
     """Parse raw LLM response string into structured format"""
@@ -202,36 +364,33 @@ def _count_total_records(results: Dict[str, Any]) -> int:
     return total
 
 def _simplify_sample_record(record: Any) -> Any:
-    """Simplify individual records to reduce token usage in samples"""
+    """Simplify individual records using simple_sampler.py approach for token efficiency"""
     if not isinstance(record, dict):
         return record
     
-    simplified = {}
+    optimized = {}
     for key, value in record.items():
-        # Remove heavy nested metadata that's not essential for analysis
-        if key == '_links':
-            simplified[key] = '[removed_for_sampling]'
+        # Truncate long strings to save tokens in sample analysis
+        if isinstance(value, str) and len(value) > 150:
+            optimized[key] = value[:150] + "..."
+        elif isinstance(value, list) and len(value) > 3:
+            # Truncate arrays to 3 items but keep structure visible
+            optimized[key] = value[:3] + ["...more items"]
         elif isinstance(value, dict) and len(str(value)) > 200:
-            simplified[key] = '[large_object_simplified]'
-        elif isinstance(value, list) and len(value) > 5:
-            # Keep first few items in lists
-            simplified[key] = value[:3] + ['[...truncated]']
+            # Simplify large nested objects
+            optimized[key] = "[large_object_simplified]"
         else:
-            simplified[key] = value
+            optimized[key] = value
     
-    return simplified
+    return optimized
 
-def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> Dict[str, Any]:
-    """Create intelligent samples from each step's output - NEW structure only"""
-    import random
+def _create_intelligent_samples(results: Dict[str, Any], total_records: int, max_records_per_step: int = 5) -> Dict[str, Any]:
+    """Create minimal samples using simple_sampler.py approach - entity-agnostic for ANY data relationships
     
-    # Determine total sample target based on dataset size
-    if total_records <= 10:
-        target_samples = total_records  # Send all if very small
-    elif total_records <= 100:
-        target_samples = min(10, total_records)  # Sample 10 records
-    else:
-        target_samples = min(20, total_records)  # Sample 20 records for large datasets
+    Approach: Take up to N random records per step, truncate arrays within records to 2-3 items
+    Final results formatter will never truncate - this is only for sample analysis
+    """
+    import random
     
     # Detect step keys (format: "1_api", "2_sql", "3_api", etc.)
     step_keys = [key for key in results.keys() if key.split('_')[0].isdigit()]
@@ -240,49 +399,41 @@ def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> 
         print(f"[STATS] No step keys found in results: {list(results.keys())}")
         return results  # Return as-is if no step structure detected
     
-    print(f"[STATS] Creating samples: {target_samples} total from {total_records} records across {len(step_keys)} steps")
+    print(f"[STATS] Creating simple samples: max {max_records_per_step} random per step across {len(step_keys)} steps")
     print(f"[STATS] Detected step keys: {step_keys}")
     
-    # Distribute samples across steps
-    samples_per_step = max(1, target_samples // len(step_keys))
-    remaining_samples = target_samples % len(step_keys)
+    samples = {}
     
-    sampled_results = {}
-    
-    for i, step_key in enumerate(step_keys):
+    for step_key in step_keys:
         step_data = results[step_key]
         
-        if isinstance(step_data, list) and len(step_data) > 0:
-            # Calculate samples for this step (distribute remainder to first steps)
-            step_sample_count = samples_per_step + (1 if i < remaining_samples else 0)
-            step_sample_count = min(step_sample_count, len(step_data))
+        if not isinstance(step_data, list) or not step_data:
+            samples[step_key] = step_data
+            continue
             
-            if len(step_data) <= step_sample_count:
-                # Use all records if step has few records
-                sampled_data = step_data
-            else:
-                # Random sampling from this step
-                sampled_data = random.sample(step_data, step_sample_count)
-            
-            # Simplify the sampled records to reduce token usage
-            simplified_samples = [_simplify_sample_record(record) for record in sampled_data]
-            sampled_results[step_key] = simplified_samples
-            
-            print(f"   [STATS] {step_key}: {len(simplified_samples)} simplified samples from {len(step_data)} records")
+        # Take random sample (up to N records for structure analysis)
+        if len(step_data) <= max_records_per_step:
+            # Use all records if step has few records
+            sample_records = step_data
         else:
-            # Copy non-list data as-is
-            sampled_results[step_key] = step_data
-            print(f"   [STATS] {step_key}: copied non-list data as-is")
+            # Random sampling from this step
+            sample_records = random.sample(step_data, max_records_per_step)
+        
+        # Optimize records for tokens - truncate arrays to 2-3 items, long strings to reasonable length
+        optimized_records = []
+        for record in sample_records:
+            optimized_record = _simplify_sample_record(record)
+            optimized_records.append(optimized_record)
+        
+        samples[step_key] = optimized_records
+        print(f"   [STATS] {step_key}: sampled {len(optimized_records)} records from {len(step_data)} total")
     
     # Copy any non-step keys as-is
     for key, value in results.items():
         if key not in step_keys:
-            sampled_results[key] = value
-    
-    total_sampled = sum(len(data) for data in sampled_results.values() if isinstance(data, list))
-    print(f"[STATS] Final sample result: {total_sampled} records total")
-    
-    return sampled_results
+            samples[key] = value
+
+    return samples
 
 def _create_complete_data_prompt(query: str, results: Dict[str, Any], original_plan: Optional[str], 
                                dataset_size_context: str, total_records: int) -> str:
@@ -303,39 +454,29 @@ Complete Results: {results_str}
 You are processing the COMPLETE dataset. Create a comprehensive, user-friendly response that directly answers the user's query.
 Focus on clear presentation and include performance recommendations in your metadata if this is a large dataset."""
 
-def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], original_plan: Optional[str], 
-                              total_records: int, execution_journey: str) -> str:
-    """Create prompt for processing sample data and generating code"""
+def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], total_records: int) -> str:
+    """Create simplified prompt for sample data processing - tool-first approach"""
     
-    plan_reasoning = original_plan if original_plan else "No plan provided"
     results_str = json.dumps(sampled_results, default=str)
     
-    # CRITICAL: Aggressively truncate to ensure we stay under token limits
-    # Even with samples and simplification, complex nested data can be large
-    max_results_chars = 20000  # Conservative limit for sample data
+    # Aggressively truncate to ensure we stay under token limits
+    max_results_chars = 20000
     if len(results_str) > max_results_chars:
         results_str = results_str[:max_results_chars] + "... [sample data truncated to fit context]"
-        print(f"[STATS] Sample prompt truncated from {len(json.dumps(sampled_results, default=str))} to {max_results_chars} chars")
-    
-    # Also truncate plan if very long
-    if len(plan_reasoning) > 3000:
-        plan_reasoning = plan_reasoning[:3000] + "... [plan truncated]"
     
     available_keys = list(sampled_results.keys())
-    # Keep this dynamic block lean; core rules live in system prompt file to avoid drift.
+    
+    # Minimal prompt - just query and samples (tool does the rest)
     return (
-        "=== DYNAMIC CONTEXT START ===\n"
-        f"Query: {query}\n"
+        f"User Query: {query}\n"
         f"Dataset Size: {total_records} total records (SAMPLES ONLY SHOWN)\n"
-        f"Execution Plan (raw JSON): {plan_reasoning}\n"
-        "Execution Journey (authoritative step -> key mapping):\n"
-        f"{execution_journey}\n"
         f"Available Result Keys: {available_keys}\n"
-        "Sample Data (intelligent subset JSON): " + results_str + "\n\n"
-        "Use only the Available Result Keys verbatim; see system prompt for all aggregation & safety rules. "
-        "processing_code must access data via full_results.get('<key>', []) and never invent or shorten keys.\n"
-        "Return JSON per system prompt spec.\n"
-        "=== DYNAMIC CONTEXT END ==="
+        "Sample Data (for analysis): " + results_str + "\n\n"
+        "WORKFLOW:\n"
+        "1. ANALYZE DIRECTLY: Examine sample data structure without tool calls\n"
+        "2. THEN: Use relationship analysis to generate Python code for full dataset\n"
+        "3. Code must use full_results.get('<key>', []) with exact keys from Available Result Keys\n"
+        "Return JSON per system prompt format.\n"
     )
 
 def _requires_aggregation(query: str) -> bool:
@@ -618,16 +759,19 @@ async def format_results(query: str, results: Dict[str, Any], is_sample: bool = 
             return len(data_str) // 4
 
     try:
-        # Respect the is_sample decision from Modern Execution Manager
-        if is_sample:
-            # Modern Execution Manager decided to use sample processing
-            logger.info(f"[{flow_id}] Using sample processing as decided by Modern Execution Manager (total_records: {total_records})")
-            sampled_results = _create_intelligent_samples(results, total_records)
-            return await _process_sample_data(query, sampled_results, condensed_plan, flow_id, total_records)
-        else:
-            # Modern Execution Manager decided to use complete processing
-            logger.info(f"[{flow_id}] Using complete processing as decided by Modern Execution Manager (total_records: {total_records})")
+        # Determine processing approach based on estimated token count only (LLM context-aware)
+        estimated_tokens = _estimate_token_count(results)
+        token_threshold = 1000  # Conservative threshold to stay within LLM context limits
+        
+        if estimated_tokens <= token_threshold:  # Process if within token limits
+            # Small-to-medium dataset - process directly with aggregation  
+            logger.info(f"[{flow_id}] Processing complete dataset directly (estimated {estimated_tokens} tokens, {total_records} records)")
             return await _process_complete_data(query, results, condensed_plan, flow_id, total_records)
+        else:
+            # Large dataset - use sampling for efficiency and to avoid token limits
+            logger.info(f"[{flow_id}] Processing samples for large dataset (estimated {estimated_tokens} tokens, {total_records} records)")
+            sampled_results = _create_intelligent_samples(results, total_records)
+            return await _process_sample_data(query, sampled_results, flow_id, total_records)
             
     except Exception as e:
         logger.error(f"[{flow_id}] Results Formatter Agent Error: {e}")
@@ -705,65 +849,30 @@ LARGE DATASET DETECTED ({total_records} records):
             'usage_info': {'error': 'Complete data processing failed'}
         }
 
-async def _process_sample_data(query: str, sampled_results: Dict[str, Any], original_plan: Optional[str], 
-                              flow_id: str, total_records: int) -> Dict[str, Any]:
+async def _process_sample_data(query: str, sampled_results: Dict[str, Any], flow_id: str, total_records: int) -> Dict[str, Any]:
     """Process sample data and generate code for full dataset processing"""
     
-    # Debug logging for samples received
-    logger.debug(f"[{flow_id}] Sample Data Processing - Samples received:")
-    if 'raw_results' in sampled_results and 'sql_execution' in sampled_results['raw_results']:
-        logger.debug(f"[{flow_id}] SQL execution results (sample): {json.dumps(sampled_results['raw_results']['sql_execution'][:2], indent=2)}")
-
-    # Build the Execution Journey string to guide the LLM
-    execution_journey = ""
-    try:
-        plan_data = json.loads(original_plan) if original_plan else {}
-        steps = plan_data.get("steps", [])
-        # IMPORTANT: Sort the keys to ensure they align with the plan steps
-        step_keys = sorted([key for key in sampled_results.keys() if key.split('_')[0].isdigit()])
-
-        journey_lines = []
-        for i, key in enumerate(step_keys):
-            if i < len(steps):
-                step_info = steps[i]
-                tool_name = step_info.get('tool_name')
-                # Handle the case where the tool is 'api' but it's an api_sql step
-                if 'api_sql' in key:
-                    tool_name = 'api_sql'
-                line = f"- Step {i+1}: Executed '{tool_name}' for entity '{step_info.get('entity')}'. The data is in `full_results['{key}']`."
-                journey_lines.append(line)
-        execution_journey = "\n".join(journey_lines)
-        logger.info(f"[{flow_id}] Generated Execution Journey:\n{execution_journey}")
-    except Exception as e:
-        logger.warning(f"[{flow_id}] Could not build execution journey: {e}")
-        execution_journey = "Could not parse execution plan."
+    prompt = _create_sample_data_prompt(query, sampled_results, total_records)
     
-    prompt = _create_sample_data_prompt(query, sampled_results, original_plan, total_records, execution_journey)
-    
-    # Debug logging for prompt being sent
-    logger.debug(f"[{flow_id}] Sample Data Prompt (length: {len(prompt)} chars):")
-    logger.debug(f"[{flow_id}] Sample Prompt Content: {prompt[:1500]}..." if len(prompt) > 1500 else f"[{flow_id}] Sample Prompt Content: {prompt}")
+    logger.debug(f"[{flow_id}] Sample Data Prompt (length: {len(prompt)} chars)")
+    logger.debug(f"[{flow_id}] Available data keys: {list(sampled_results.keys())}")
     
     try:
-        # Run formatter with flexible validation
-        # pydantic_ai Agent.run does not accept 'config' kwarg; align with complete path handling
+        # Run formatter
         result = await sample_data_formatter.run(prompt)
         raw_response = str(result.output) if hasattr(result, 'output') else str(result)
         formatted_result = _parse_raw_llm_response(raw_response, flow_id)
 
-        # Log the final formatted result
         logger.debug(f"[{flow_id}] Sample Data Final Result Keys: {list(formatted_result.keys())}")
 
         # Log the generated processing code for debugging
         if formatted_result.get('processing_code'):
             logger.debug(f"[{flow_id}] Final Processing Code Generated: {formatted_result['processing_code'][:500]}...")
-            logger.debug(f"[{flow_id}] COMPLETE FINAL PROCESSING CODE GENERATED:\n{formatted_result['processing_code']}")
 
         return formatted_result
         
     except Exception as e:
         logger.error(f"[{flow_id}] Sample data processing failed: {e}")
-        # Return fallback response instead of re-raising
         raise ValueError(f"Results formatting failed during sample processing: {e}")
 
 # Backward compatibility function
