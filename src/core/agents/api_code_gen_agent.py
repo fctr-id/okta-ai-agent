@@ -315,7 +315,7 @@ async def generate_api_code(
         # Add explicit step key information if provided
         step_key_info = ""
         if previous_step_key:
-            step_key_info = f"\n\nPREVIOUS STEP KEY: Use '{previous_step_key}' to access data from the previous step in full_results dict."
+            step_key_info = f"\n\nPREVIOUS STEP KEY: Use '{previous_step_key}' to access data from the previous step  dict."
         
         user_message = f"Generate Python code for: {step_description}\n\nCurrent Step Data Structure: {data_structure}\nAPI Endpoints: {len(available_endpoints)} available{context_info}{step_key_info}"
         
