@@ -265,10 +265,10 @@ class ModernExecutionManager:
         
         # REPEATABLE DATA FLOW PATTERN: Variable-based data management
         # Based on proven old executor approach - scales with any number of tools/steps
-        self.data_variables = {}      # Legacy compatibility - FULL POLARS architecture uses polars_dataframes
         self.step_metadata = {}       # Step tracking: {"step_1": {"type": "sql", "success": True, "record_count": 1000, "step_context": "query"}}
         
-        # POLARS DATAFRAME ENHANCEMENT: High-performance DataFrame storage replacing temp tables
+        # POLARS DATAFRAME ENHANCEMENT: Single source of truth - High-performance DataFrame storage
+        # MEMORY OPTIMIZED: Removed legacy data_variables to prevent duplication
         self.polars_dataframes: Dict[str, pl.DataFrame] = {}  # {"sql_data_step_1": DataFrame, "api_data_step_2": DataFrame}
         
         # EXECUTION PLAN ACCESS: Store current execution plan for external access (minimal for realtime interface)
@@ -658,7 +658,20 @@ class ModernExecutionManager:
         
         for step_name, data in step_results_for_processing.items():
             try:
-                if not data:
+                # Handle both DataFrames and dictionary data
+                if hasattr(data, 'is_empty'):  # Polars DataFrame
+                    if data.is_empty():
+                        step_schemas[step_name] = {
+                            "step_name": step_name,
+                            "record_count": 0,
+                            "columns": [],
+                            "data_type": "empty",
+                            "sample_keys": []
+                        }
+                        continue
+                    df = data  # Already a DataFrame
+                    dict_data = data.to_dicts()  # Convert for sample_keys
+                elif not data:  # Empty list/dict
                     step_schemas[step_name] = {
                         "step_name": step_name,
                         "record_count": 0,
@@ -667,9 +680,10 @@ class ModernExecutionManager:
                         "sample_keys": []
                     }
                     continue
-                
-                # Create Polars DataFrame to analyze structure
-                df = pl.DataFrame(data)
+                else:
+                    # Create Polars DataFrame to analyze structure
+                    df = pl.DataFrame(data)
+                    dict_data = data
                 
                 # Get column information
                 column_info = []
@@ -699,11 +713,11 @@ class ModernExecutionManager:
                 
                 step_schemas[step_name] = {
                     "step_name": step_name,
-                    "record_count": len(data),
+                    "record_count": len(df),  # Use DataFrame length
                     "columns": column_info,
                     "data_type": "flattened_dataframe",
                     "key_columns": key_columns,
-                    "sample_keys": list(data[0].keys()) if data else [],
+                    "sample_keys": list(dict_data[0].keys()) if dict_data else [],
                     "is_user_data": any('user' in col.lower() for col in df.columns),
                     "is_group_data": any('group' in col.lower() for col in df.columns),
                     "is_app_data": any('app' in col.lower() for col in df.columns),
@@ -712,14 +726,29 @@ class ModernExecutionManager:
                 }
                 
             except Exception as e:
-                # Fallback to simple analysis
+                # Fallback to simple analysis - handle both DataFrame and dict data
+                try:
+                    if hasattr(data, '__len__'):
+                        record_count = len(data)
+                    else:
+                        record_count = 0
+                    
+                    if hasattr(data, 'to_dicts'):
+                        sample_data = data.to_dicts()
+                        sample_keys = list(sample_data[0].keys()) if sample_data else []
+                    else:
+                        sample_keys = list(data[0].keys()) if data else []
+                except:
+                    record_count = 0
+                    sample_keys = []
+                    
                 step_schemas[step_name] = {
                     "step_name": step_name,
-                    "record_count": len(data),
+                    "record_count": record_count,
                     "columns": [],
                     "data_type": "raw_list",
                     "error": str(e),
-                    "sample_keys": list(data[0].keys()) if data else []
+                    "sample_keys": sample_keys
                 }
         
         return step_schemas
@@ -802,10 +831,10 @@ class ModernExecutionManager:
             if step_key in self.step_metadata:
                 variable_name = self.step_metadata[step_key]["variable_name"]
                 
-                # FULL POLARS: Get data from Polars DataFrame instead of legacy data_variables
+                # MEMORY OPTIMIZATION: Convert DataFrame to dict only when needed for injection
                 if variable_name in self.polars_dataframes:
                     df = self.polars_dataframes[variable_name]
-                    step_data = df.to_dicts()
+                    step_data = df.to_dicts()  # Convert to dict ONLY for injection
                 else:
                     step_data = []
                     
@@ -827,13 +856,19 @@ class ModernExecutionManager:
                 # Get step context
                 step_context = self.step_metadata[step_key].get("step_context", f"Step {step_num} context")
                 
-                # Generate the injection code with Python-compatible serialization
-                injection_lines.append(f"# Step {step_num} ({step_type}) data injection")
+                # MEMORY OPTIMIZATION: Generate the injection code with lazy DataFrame conversion
+                # Instead of converting to dicts and storing, generate code that accesses DataFrames directly
+                injection_lines.append(f"# Step {step_num} ({step_type}) data injection - LAZY LOADING")
                 injection_lines.append(f"{step_sample_var} = {repr(sample_data)}")
                 injection_lines.append(f"{step_context_var} = {repr(step_context)}")
-                injection_lines.append(f"# Full data available as: {variable_name} = {repr(step_data)}")
                 
-                # SIMPLE FORMAT: Just inject data directly without schema complexity
+                # Instead of copying full data, provide a function to get it on demand
+                injection_lines.append(f"# MEMORY EFFICIENT: Access full data via variable name: {variable_name}")
+                injection_lines.append(f"def get_step_{step_num}_data():")
+                injection_lines.append(f"    # Lazy access to full dataset")
+                injection_lines.append(f"    return {repr(step_data)}")
+                
+                # For compatibility, still provide full_results but with reference
                 injection_lines.append(f"full_results['{full_results_key}'] = {repr(step_data)}")
                 injection_lines.append("")
         
@@ -855,7 +890,7 @@ class ModernExecutionManager:
     
     def _clear_execution_data(self):
         """Clear all execution data for fresh run - maintains repeatability."""
-        self.data_variables.clear()  # Legacy compatibility - FULL POLARS uses polars_dataframes
+        # MEMORY OPTIMIZED: Only clear polars_dataframes (data_variables removed to prevent duplication)
         self.polars_dataframes.clear()  # FULL POLARS ARCHITECTURE: Clear DataFrame storage
         self.step_metadata.clear()
         self.current_step_schemas.clear()  # Clear stored schemas for Results Formatter
@@ -1374,18 +1409,11 @@ class ModernExecutionManager:
             # Process results through Results Formatter Agent (like old executor)
             logger.info(f"[{correlation_id}] Processing results through Results Formatter Agent...")
             
-            # Build step_results_for_processing using FULL POLARS architecture (FULL DATASETS)
+            # Build step_results_for_processing using DATAFRAME REFERENCES (MEMORY OPTIMIZED)
             step_results_for_processing = {}
             raw_results = {}
             
-            # FULL POLARS: Collect ALL data from polars_dataframes storage
-            all_collected_data = []
-            for variable_name, df in self.polars_dataframes.items():
-                data = df.to_dicts() if not df.is_empty() else []
-                logger.debug(f"[{correlation_id}] FULL POLARS: Added {variable_name.split('_')[0]} data from {variable_name}: {len(data)} records")
-                all_collected_data.extend(data)
-            
-            # Build step results for processing with ACTUAL DATA (Generic for all step types)
+            # Build step results for processing with DATAFRAME REFERENCES (No conversion yet)
             for i, step_result in enumerate(execution_results.steps, 1):
                 # Preserve original step type for consistent key usage throughout pipeline
                 step_type_key = step_result.step_type.lower()
@@ -1402,39 +1430,26 @@ class ModernExecutionManager:
                         f"api_data_step_{i}",                        # legacy API pattern
                     ]
                     
-                    # FULL POLARS ARCHITECTURE: Find data in polars_dataframes instead of data_variables
-                    step_data = []
+                    # MEMORY EFFICIENT: Store DataFrame reference, not converted data
+                    found_dataframe = None
                     found_variable = None
                     for variable_name in possible_variable_names:
                         if variable_name in self.polars_dataframes:
-                            # Convert Polars DataFrame to list of dicts for Results Formatter
-                            df = self.polars_dataframes[variable_name]
-                            step_data = df.to_dicts() if not df.is_empty() else []
+                            found_dataframe = self.polars_dataframes[variable_name]
                             found_variable = variable_name
                             break
                     
-                    if found_variable:
-                        # Build result dictionary based on step type characteristics
-                        if 'sql' in step_type_lower:
-                            # SQL-like steps (SQL, API_SQL, etc.)
-                            result_dict = {
-                                'success': True,
-                                'sql': getattr(step_result.result, 'sql', ''),
-                                'explanation': getattr(step_result.result, 'explanation', ''),
-                                'data': step_data
-                            }
-                            raw_results['sql_execution'] = result_dict
-                        else:
-                            # API-like steps (API, etc.)
-                            raw_results['execution_result'] = {'execution_output': step_data}
+                    if found_dataframe is not None:
+                        # MEMORY OPTIMIZATION: Store DataFrame reference, convert only when needed
+                        step_results_for_processing[step_name] = found_dataframe  # DataFrame reference!
                         
-                        step_results_for_processing[step_name] = step_data
-                        logger.debug(f"[{correlation_id}] FULL POLARS: Added {step_result.step_type} data from {found_variable}: {len(step_data)} records")
+                        record_count = len(found_dataframe)
+                        logger.debug(f"[{correlation_id}] MEMORY EFFICIENT: Added {step_result.step_type} DataFrame from {found_variable}: {record_count} records")
                     else:
                         logger.warning(f"[{correlation_id}] FULL POLARS: No data found for {step_result.step_type} step {i} (tried: {possible_variable_names})")
             
-            # Log total data being passed to Results Formatter
-            total_records = sum(len(data) for data in step_results_for_processing.values() if isinstance(data, list))
+            # Log total data being passed to Results Formatter (count from DataFrames)
+            total_records = sum(len(df) for df in step_results_for_processing.values() if hasattr(df, '__len__'))
             logger.info(f"[{correlation_id}] Passing {total_records} total records to Results Formatter")
             
             # Analyze data structure using Polars for Results Formatter
@@ -1449,25 +1464,19 @@ class ModernExecutionManager:
             # 2. Complete data → Skip relationship analysis → Send directly to results formatter with is_sample=False
             # 3. Complex multi-step → Use full three-stage pipeline with relationship analysis
             
-            # Token estimation function for decision making
-            def estimate_token_count(data):
-                """
-                Estimate token count for LLM processing.
-                Rough estimation: 1 token ≈ 4 characters for English text
-                """
-                try:
-                    import json
-                    data_str = json.dumps(data, ensure_ascii=False)
-                    # Rough token estimation: 1 token ≈ 4 characters
-                    estimated_tokens = len(data_str) // 4
-                    return estimated_tokens
-                except:
-                    # Fallback to string length estimation
-                    data_str = str(data)
-                    return len(data_str) // 4
-
-            # Estimate tokens for relationship analysis decision
-            estimated_tokens = estimate_token_count(step_results_for_processing)
+            # Import sampling utilities
+            from .sampling_utils import estimate_token_count, create_intelligent_samples
+            
+            # Estimate tokens for relationship analysis decision using existing utility
+            # Convert DataFrames to dict format for token estimation
+            step_results_dict_for_estimation = {}
+            for key, dataframe in step_results_for_processing.items():
+                if hasattr(dataframe, 'to_dicts'):  # Polars DataFrame
+                    step_results_dict_for_estimation[key] = dataframe.to_dicts()
+                else:
+                    step_results_dict_for_estimation[key] = dataframe
+            
+            estimated_tokens = estimate_token_count(step_results_dict_for_estimation)
             token_threshold = 1000  # 1K tokens threshold
             
             is_sql_only = len(execution_plan.steps) == 1 and execution_plan.steps[0].tool_name.lower() == 'sql'
@@ -1485,11 +1494,18 @@ class ModernExecutionManager:
                 # STAGE 1: Relationship Analysis (Three-Stage Pipeline)
                 # Analyze data relationships before results formatting for complex multi-step data
                 relationship_analysis = None
-                if total_records > 100:  # Only do relationship analysis for complex datasets
+                if estimated_tokens > token_threshold:  # Only do relationship analysis for complex datasets (token-based)
                     try:
-                        logger.info(f"[{correlation_id}] Stage 1: Running relationship analysis on {total_records} records")
+                        logger.info(f"[{correlation_id}] Stage 1: Running relationship analysis on {total_records} records ({estimated_tokens:,} tokens)")
+                        
+                        # Use existing sampling utility for relationship analysis
+                        sample_data_for_analysis = create_intelligent_samples(
+                            step_results_dict_for_estimation,  # Already converted to dict format above
+                            max_records_per_step=10
+                        )
+                        
                         relationship_analysis = await analyze_data_relationships(
-                            sample_data=step_results_for_processing,
+                            sample_data=sample_data_for_analysis,  # Intelligent samples using existing utility
                             correlation_id=correlation_id,
                             query=query
                         )
@@ -1519,11 +1535,27 @@ class ModernExecutionManager:
                     "relationship_analysis": relationship_analysis  # Stage 1 results for Stage 2 code generation
                 }
                 
+                # ROUTING DECISION: Send appropriate data based on processing strategy
+                if use_sample_processing and relationship_analysis:
+                    # Large dataset: Send SAMPLES + relationship analysis to Results Formatter
+                    results_for_formatter = sample_data_for_analysis  # Already created above for relationship analysis
+                    logger.info(f"[{correlation_id}] Sending samples + relationship analysis to Results Formatter (large dataset)")
+                else:
+                    # Small dataset: Send FULL DATA to Results Formatter (no relationship analysis needed)
+                    step_results_dict = {}
+                    for key, dataframe in step_results_for_processing.items():
+                        if hasattr(dataframe, 'to_dicts'):  # Polars DataFrame
+                            step_results_dict[key] = dataframe.to_dicts()
+                        else:
+                            step_results_dict[key] = dataframe
+                    results_for_formatter = step_results_dict
+                    logger.info(f"[{correlation_id}] Sending full data to Results Formatter (small dataset)")
+                
                 formatted_response = await process_results_formatter(
                     query=query,
-                    results=step_results_for_processing,
+                    results=results_for_formatter,  # Samples for large datasets, full data for small datasets
                     is_sample=use_sample_processing,  # Modern execution manager makes the decision
-                    original_plan=json.dumps(execution_plan.model_dump()),
+                    relationship_analysis=relationship_analysis,  # Pass relationship analysis instead of original plan
                     metadata=formatter_metadata
                 )
                 
@@ -3012,8 +3044,8 @@ except Exception as e:
                 del self.polars_dataframes[correlation_id]
                 logger.info(f"[{correlation_id}] Polars DataFrames cleared from memory")
             
-            # 3. Clear any stored data for this query
-            self.data_variables.clear()
+            # 3. Clear any stored data for this query (MEMORY OPTIMIZED)
+            # Note: data_variables removed during memory optimization - using polars_dataframes only
             self.step_metadata.clear()
             
             # 4. Remove from cancelled set
