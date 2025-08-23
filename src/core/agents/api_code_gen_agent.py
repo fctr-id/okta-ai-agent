@@ -347,9 +347,14 @@ async def generate_api_code(
             python_code = re.sub(r'\n```\s*$', '', python_code, flags=re.MULTILINE)
             python_code = python_code.strip()
         
-        # Log usage information
+        # Log usage information in standardized format
         usage_info = result.usage()
-        logger.info(f"[{correlation_id}] API code generation completed - {usage_info}")
+        if usage_info:
+            input_tokens = getattr(usage_info, 'request_tokens', getattr(usage_info, 'input_tokens', 0))
+            output_tokens = getattr(usage_info, 'response_tokens', getattr(usage_info, 'output_tokens', 0))
+            logger.info(f"[{correlation_id}] API code generation completed - {input_tokens} in, {output_tokens} out tokens")
+        else:
+            logger.info(f"[{correlation_id}] API code generation completed - no token usage available")
         logger.debug(f"[{correlation_id}] Generated code: {len(python_code)} characters")
         logger.debug(f"[{correlation_id}] Requirements: {code_output.requirements}")
         
