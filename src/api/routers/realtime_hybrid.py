@@ -50,7 +50,35 @@ logger = get_logger("okta_ai_agent")
 RESULT_STREAM_CHUNK_SIZE = int(os.getenv("RESULT_STREAM_CHUNK_SIZE", "500"))  # Reduced from 1000 for faster streaming
 RESULT_STREAM_DELAY = float(os.getenv("RESULT_STREAM_DELAY", "0.01"))  # Configurable delay between chunks
 
-# --- Query sanitization (same as legacy) ---
+# --- Standardized SSE Event Types for Expansion Panel ---
+class ExecutionEventType:
+    """Clean standardized SSE event types for execution tracking"""
+    
+    # Step lifecycle events - New standardized system
+    STEP_START = "STEP-START"           # Step begins execution
+    STEP_END = "STEP-END"               # Step completes (success/error)  
+    STEP_PROGRESS = "STEP-PROGRESS"     # API progress updates (percentage)
+    STEP_COUNT = "STEP-COUNT"           # Record count from step
+    STEP_TOKENS = "STEP-TOKENS"         # Token usage from step
+    STEP_ERROR = "STEP-ERROR"           # Step-specific error with retry options
+    
+    # Plan events
+    PLAN_GENERATED = "PLAN-GENERATED"   # Complete execution plan ready
+
+def create_execution_event(event_type: str, process_id: str, data: Dict[str, Any]) -> str:
+    """Create standardized execution event for expansion panel"""
+    event = {
+        "type": event_type,
+        "content": {
+            "process_id": process_id,
+            "timestamp": time.time(),
+            "formatted_time": time.strftime('%H:%M:%S', time.localtime()),
+            **data
+        }
+    }
+    return json.dumps(event) + "\n"
+
+# --- Query sanitization ---
 custom_sanitizer = Sanitizer({
     'tags': ('__nonexistent_tag__',),
     'attributes': {},
@@ -149,7 +177,7 @@ def _chunk_large_response(data: Dict[str, Any], chunk_size: int = None) -> List[
     # Not chunkable or small data - return as single chunk
     return [data]
 
-# --- Process Status Enum (same as legacy) ---
+# --- Process Status Enum ---
 class ProcessStatus(str, Enum):  
     IDLE = "idle"
     PLAN_GENERATION = "plan_generation"
@@ -161,7 +189,7 @@ class ProcessStatus(str, Enum):
     ERROR = "error"
     UNKNOWN = "unknown"
 
-# --- API Pydantic Models (same as legacy) ---
+# --- API Pydantic Models ---
 class ApiStep(BaseModel):
     id: int
     tool_name: str
@@ -292,146 +320,147 @@ async def execute_plan_and_stream(
 
         # Update status to running
         active_processes[process_id]["status"] = ProcessStatus.RUNNING_EXECUTION
-        status_event = {
-            "type": "status",
-            "content": {
-                'process_id': process_id,
-                'status': ProcessStatus.RUNNING_EXECUTION.value,
-                'message': 'Executing with Modern Execution Manager (test_query_1.py pattern)'
-            }
-        }
-        yield json.dumps(status_event) + "\n"
-        if RESULT_STREAM_DELAY > 0:
-            await asyncio.sleep(RESULT_STREAM_DELAY)
 
-        # Store step info to yield when plan is ready
-        step_info_ready = asyncio.Event()
-        step_info_data = None
-        
         # Event queue for step status updates
         step_status_queue = asyncio.Queue()
 
-        # Set up callback to capture step info when plan is ready (before execution starts)
-        async def on_plan_ready(execution_plan):
-            nonlocal step_info_data
-            logger.info(f"[{process_id}] on_plan_ready callback triggered with {len(execution_plan.steps)} steps")
-            step_info_data = [
-                {
-                    'id': i,
-                    'tool_name': step.tool_name,
-                    'operation': getattr(step, 'operation', None),
-                    'entity': getattr(step, 'entity', None),
-                    'query_context': step.query_context,
-                    'critical': step.critical,
-                    'status': 'pending'  # Steps start as pending
-                }
-                for i, step in enumerate(execution_plan.steps)
-            ]
-            logger.info(f"[{process_id}] on_plan_ready - step_info_data created: {step_info_data}")
-            step_info_ready.set()
-            logger.info(f"[{process_id}] on_plan_ready - step_info_ready event set")
-            
-            # IMMEDIATE YIELD: Send step_plan_info event immediately when plan is ready
-            logger.info(f"[{process_id}] Sending step_plan_info event with {len(step_info_data)} steps")
-            plan_event = {
-                "type": "plan",
-                "content": {
-                    'process_id': process_id, 
-                    'steps': step_info_data
-                }
-            }
-            await step_status_queue.put(json.dumps(plan_event) + "\n")
-
-        async def on_step_status(step_number, step_type, status):
-            """Callback when step status changes - send real-time step updates"""
+        # NEW STANDARDIZED CALLBACKS - Clean implementation
+        async def on_step_start(step_number: int, step_type: str, step_name: str, query_context: str, critical: bool, formatted_time: str):
+            """Handle STEP-START events"""
             try:
-                step_status_data = {
-                    'process_id': process_id,
-                    'step_number': step_number,
-                    'step_name': step_type,  # Use actual step type from execution manager
-                    'status': status  # running, completed, error
-                }
-                
-                # Log error status for debugging
-                if status == 'error':
-                    logger.error(f"[{process_id}] ERROR STATUS - Step {step_number} ({step_type}) failed")
-                
-                # Create step status event in frontend format
-                step_event = {
-                    "type": "step_status",
-                    "content": step_status_data
-                }
-                
-                # Queue the step status event
-                await step_status_queue.put(json.dumps(step_event) + "\n")
-                
-                logger.info(f"[{process_id}] Step status sent: {step_number} - {step_type} - {status}")
+                event_data = create_execution_event(ExecutionEventType.STEP_START, process_id, {
+                    "step_number": step_number,
+                    "step_type": step_type,
+                    "step_name": step_name,
+                    "query_context": query_context,
+                    "critical": critical,
+                    "formatted_time": formatted_time
+                })
+                await step_status_queue.put(event_data)
+                logger.info(f"[{process_id}] STEP-START: {step_number} - {step_type}")
             except Exception as e:
-                logger.warning(f"[{process_id}] Step status callback error: {e}")
-
-        # Set the callbacks before executing
-        modern_executor.plan_ready_callback = on_plan_ready
-        modern_executor.step_status_callback = on_step_status
+                logger.warning(f"[{process_id}] Step start callback error: {e}")
         
-        async def on_planning_phase(phase_status: str):
-            # Map phase_status directly to status content
-            if phase_status in ("planning_start", "planning_complete"):
-                phase_event = {
-                    "type": "status",
-                    "content": {
-                        'process_id': process_id,
-                        'status': phase_status,
-                        'message': 'Planning started' if phase_status == 'planning_start' else 'Planning completed'
-                    }
-                }
-                await step_status_queue.put(json.dumps(phase_event) + "\n")
-        modern_executor.planning_phase_callback = on_planning_phase
-
-        async def on_analysis_phase(analysis_status: str):
-            """Callback for analysis phases like relationship analysis"""
+        async def on_step_end(step_number: int, step_type: str, success: bool, duration_seconds: float, record_count: int, formatted_time: str, error_message: str = None):
+            """Handle STEP-END events"""
             try:
-                if analysis_status == 'analysis_start':
-                    # Send trigger event to make enriching_data step visible
-                    trigger_event = {
-                        "type": "trigger_enriching_data",
-                        "content": {
-                            'process_id': process_id,
-                            'step_name': 'enriching_data',
-                            'message': 'Starting data enrichment analysis'
-                        }
-                    }
-                    await step_status_queue.put(json.dumps(trigger_event) + "\n")
-                    logger.info(f"[{process_id}] Triggered enriching_data step visibility")
-                
-                elif analysis_status == 'analysis_complete':
-                    # Send complete event to finish enriching_data step
-                    complete_event = {
-                        "type": "complete_enriching_data", 
-                        "content": {
-                            'process_id': process_id,
-                            'step_name': 'enriching_data',
-                            'message': 'Data enrichment analysis completed'
-                        }
-                    }
-                    await step_status_queue.put(json.dumps(complete_event) + "\n")
-                    logger.info(f"[{process_id}] Completed enriching_data step")
-                
-                elif analysis_status == 'analysis_error':
-                    # Send error event for enriching_data step
-                    error_event = {
-                        "type": "complete_enriching_data", 
-                        "content": {
-                            'process_id': process_id,
-                            'step_name': 'enriching_data',
-                            'message': 'Data enrichment analysis failed',
-                            'status': 'error'
-                        }
-                    }
-                    await step_status_queue.put(json.dumps(error_event) + "\n")
-                    logger.info(f"[{process_id}] Enriching_data step failed")
+                event_data = create_execution_event(ExecutionEventType.STEP_END, process_id, {
+                    "step_number": step_number,
+                    "step_type": step_type,
+                    "success": success,
+                    "duration_seconds": duration_seconds,
+                    "record_count": record_count,
+                    "formatted_time": formatted_time,
+                    "error_message": error_message
+                })
+                await step_status_queue.put(event_data)
+                logger.info(f"[{process_id}] STEP-END: {step_number} - {step_type} - {'SUCCESS' if success else 'FAILED'}")
             except Exception as e:
-                logger.warning(f"[{process_id}] Analysis phase callback error: {e}")
-        modern_executor.analysis_phase_callback = on_analysis_phase
+                logger.warning(f"[{process_id}] Step end callback error: {e}")
+        
+        async def on_step_count(step_number: int, step_type: str, record_count: int, operation_type: str, formatted_time: str):
+            """Handle STEP-COUNT events"""
+            try:
+                event_data = create_execution_event(ExecutionEventType.STEP_COUNT, process_id, {
+                    "step_number": step_number,
+                    "step_type": step_type,
+                    "record_count": record_count,
+                    "operation_type": operation_type,
+                    "formatted_time": formatted_time
+                })
+                await step_status_queue.put(event_data)
+                logger.info(f"[{process_id}] STEP-COUNT: {step_number} - {record_count} records")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Step count callback error: {e}")
+        
+        async def on_plan_generated(plan: dict, step_count: int, formatted_time: str, estimated_duration: str):
+            """Handle PLAN-GENERATED events"""
+            try:
+                event_data = create_execution_event(ExecutionEventType.PLAN_GENERATED, process_id, {
+                    "plan": plan,
+                    "step_count": step_count,
+                    "formatted_time": formatted_time,
+                    "estimated_duration": estimated_duration
+                })
+                await step_status_queue.put(event_data)
+                logger.info(f"[{process_id}] PLAN-GENERATED: {step_count} steps")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Plan generated callback error: {e}")
+        
+        async def on_step_progress(step_number: int, step_type: str, progress_percentage: float, current: int, total: int, message: str, formatted_time: str):
+            """Handle STEP-PROGRESS events for API operations"""
+            try:
+                event_data = create_execution_event(ExecutionEventType.STEP_PROGRESS, process_id, {
+                    "step_number": step_number,
+                    "step_type": step_type,
+                    "progress_percentage": progress_percentage,
+                    "current": current,
+                    "total": total,
+                    "message": message,
+                    "formatted_time": formatted_time
+                })
+                await step_status_queue.put(event_data)
+                logger.info(f"[{process_id}] STEP-PROGRESS: {step_number} - {progress_percentage}% ({current}/{total})")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Step progress callback error: {e}")
+        
+        async def on_step_tokens(step_number: int, step_type: str, input_tokens: int, output_tokens: int, agent_name: str, formatted_time: str):
+            """Handle STEP-TOKENS events for LLM usage tracking"""
+            try:
+                total_tokens = input_tokens + output_tokens
+                event_data = create_execution_event(ExecutionEventType.STEP_TOKENS, process_id, {
+                    "step_number": step_number,
+                    "step_type": step_type,
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": total_tokens,
+                    "agent_name": agent_name,
+                    "formatted_time": formatted_time
+                })
+                await step_status_queue.put(event_data)
+                logger.info(f"[{process_id}] STEP-TOKENS: {step_number} - {total_tokens} tokens ({agent_name})")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Step tokens callback error: {e}")
+        
+        async def on_step_error(step_number: int, step_type: str, error_message: str, error_type: str, retry_possible: bool, technical_details: str, formatted_time: str):
+            """Handle STEP-ERROR events for step-specific errors"""
+            try:
+                event_data = create_execution_event(ExecutionEventType.STEP_ERROR, process_id, {
+                    "step_number": step_number,
+                    "step_type": step_type,
+                    "error_message": error_message,
+                    "error_type": error_type,
+                    "retry_possible": retry_possible,
+                    "technical_details": technical_details,
+                    "formatted_time": formatted_time
+                })
+                await step_status_queue.put(event_data)
+                logger.error(f"[{process_id}] STEP-ERROR: {step_number} - {error_type}: {error_message}")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Step error callback error: {e}")
+        
+        async def on_planning_phase(phase: str):
+            """Handle planning phase transitions: thinking -> planning"""
+            try:
+                formatted_time = time.strftime('%H:%M:%S', time.localtime())
+                event_data = create_execution_event("PLANNING-PHASE", process_id, {
+                    "phase": phase,  # 'planning_start' or 'planning_complete' 
+                    "formatted_time": formatted_time
+                })
+                await step_status_queue.put(event_data)
+                logger.info(f"[{process_id}] PLANNING-PHASE: {phase}")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Planning phase callback error: {e}")
+        
+        # Register the new standardized callbacks ONLY
+        modern_executor.step_start_callback = on_step_start
+        modern_executor.step_end_callback = on_step_end
+        modern_executor.step_count_callback = on_step_count
+        modern_executor.plan_generated_callback = on_plan_generated
+        modern_executor.step_progress_callback = on_step_progress
+        modern_executor.step_tokens_callback = on_step_tokens
+        modern_executor.step_error_callback = on_step_error
+        modern_executor.planning_phase_callback = on_planning_phase
 
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
         logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
@@ -452,10 +481,6 @@ async def execute_plan_and_stream(
             except asyncio.TimeoutError:
                 # No event received, continue checking if execution is done
                 continue
-                step_status_queue.task_done()
-            except asyncio.TimeoutError:
-                # No event received, continue checking if execution is done
-                continue
         
         # Get the execution result
         result = await execution_task
@@ -471,11 +496,14 @@ async def execute_plan_and_stream(
             except asyncio.QueueEmpty:
                 break
         
-        # Clear callbacks post-execution (still inside try)
-        modern_executor.plan_ready_callback = None
-        modern_executor.step_status_callback = None
-        modern_executor.planning_phase_callback = None
-        modern_executor.analysis_phase_callback = None
+        # Clear standardized callbacks post-execution
+        modern_executor.step_start_callback = None
+        modern_executor.step_end_callback = None
+        modern_executor.step_count_callback = None
+        modern_executor.plan_generated_callback = None
+        modern_executor.step_progress_callback = None
+        modern_executor.step_tokens_callback = None
+        modern_executor.step_error_callback = None
 
         # Log execution summary
         logger.info(f"[{process_id}] EXECUTION RESULTS:")
@@ -1050,11 +1078,11 @@ async def stream_realtime_updates_endpoint(
         logger.warning(f"[{process_id}] Client reconnected to running execution")
         async def already_running_generator():
             event = {
-                "type": "status",
+                "type": "error",
                 "content": {
                     'process_id': process_id,
-                    'status': 'reconnected_to_running',
-                    'message': 'Reconnected to ongoing Modern Execution Manager execution.'
+                    'error': 'Process is already running - cannot start new stream',
+                    'message': 'Execution already in progress.'
                 }
             }
             yield json.dumps(event) + "\n"

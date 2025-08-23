@@ -10,6 +10,7 @@ import os
 import sys
 import sqlite3
 import json
+import time  # For step timing and formatting
 import polars as pl  # High-performance DataFrame operations replacing temp tables
 from pydantic import BaseModel
 
@@ -273,10 +274,18 @@ class ModernExecutionManager:
         
         # EXECUTION PLAN ACCESS: Store current execution plan for external access (minimal for realtime interface)
         self.current_execution_plan = None
+        
+        # NEW STANDARDIZED EXECUTION CALLBACKS - Clean implementation without legacy
         self.plan_ready_callback = None  # Optional callback for when plan is ready
-        self.step_status_callback = None  # Optional callback for step status updates (step_number, step_type, status)
-        self.planning_phase_callback = None  # Optional callback for planning lifecycle ('planning_start'/'planning_complete')
-        self.analysis_phase_callback = None  # Optional callback for analysis phases like relationship analysis ('analysis_start'/'analysis_complete')
+        self.planning_phase_callback = None  # Optional callback for planning phases (planning_start, planning_complete)
+        self.step_start_callback = None  # Optional callback for step start (step_number, step_type, metadata)
+        self.step_end_callback = None    # Optional callback for step end (step_number, step_type, success, metadata)
+        self.step_progress_callback = None  # Optional callback for API progress (step_number, step_type, percentage, details)
+        self.step_count_callback = None     # Optional callback for record counts (step_number, step_type, count, operation)
+        self.step_tokens_callback = None    # Optional callback for token usage (step_number, step_type, input_tokens, output_tokens)
+        self.step_error_callback = None     # Optional callback for step errors (step_number, step_type, error_message, retry_possible, technical_details)
+        self.plan_generated_callback = None # Optional callback for complete execution plan (plan_json, metadata)
+        self.analysis_phase_callback = None # Optional callback for analysis phases (analysis_start, analysis_complete, analysis_error)
         
         # STEP SCHEMAS STORAGE: Store schemas generated for Results Formatter to recreate schema-enhanced structure in data injection
         self.current_step_schemas = {}  # Store step schemas for data injection code generation
@@ -1228,6 +1237,13 @@ class ModernExecutionManager:
             # Phase 0: Pre-Planning - Entity and Operation Selection
             logger.debug(f"[{correlation_id}] Phase 0: Pre-Planning Agent execution")
             
+            # STEP-START for pre-planning phase (step 0)
+            if self.step_start_callback:
+                try:
+                    await self.step_start_callback(0, "thinking", "Analyzing query requirements and selecting relevant entities")
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] step_start_callback preplan error ignored: {cb_err}")
+            
             # Use the enhanced pre-planning agent to select relevant entities
             from src.core.agents.preplan_agent import select_relevant_entities
             
@@ -1246,6 +1262,14 @@ class ModernExecutionManager:
             
             if not preplan_result.get('success', False):
                 logger.error(f"[{correlation_id}] Pre-planning failed: {preplan_result.get('error', 'Unknown error')}")
+                
+                # STEP-END for failed pre-planning phase (step 0)
+                if self.step_end_callback:
+                    try:
+                        await self.step_end_callback(0, "thinking", False, f"Pre-planning failed: {preplan_result.get('error', 'Unknown error')}")
+                    except Exception as cb_err:
+                        logger.debug(f"[{correlation_id}] step_end_callback preplan error ignored: {cb_err}")
+                
                 return {
                     'success': False,
                     'error': f"Pre-planning failed: {preplan_result.get('error', 'Unknown error')}",
@@ -1257,6 +1281,13 @@ class ModernExecutionManager:
             selected_entity_operations = preplan_result['selected_entity_operations']
             entity_op_pairs = [f"{eo.entity}::{eo.operation or 'null'}" for eo in selected_entity_operations]
             logger.info(f"[{correlation_id}] Pre-planning completed: selected entity-operation pairs {entity_op_pairs}")
+            
+            # STEP-END for pre-planning phase (step 0)
+            if self.step_end_callback:
+                try:
+                    await self.step_end_callback(0, "thinking", True, f"Selected {len(entity_op_pairs)} entity-operation pairs")
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] step_end_callback preplan error ignored: {cb_err}")
             
             # CHECK FOR SQL-ONLY SCENARIO: No API entities needed
             if not selected_entity_operations:
@@ -1334,6 +1365,13 @@ class ModernExecutionManager:
                 except Exception as cb_err:
                     logger.debug(f"[{correlation_id}] planning_phase_callback planning_start error ignored: {cb_err}")
             
+            # STEP-START for planning phase (step -1, using negative to distinguish from execution steps)
+            if self.step_start_callback:
+                try:
+                    await self.step_start_callback(-1, "generating_steps", "Creating detailed execution plan from selected entities")
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] step_start_callback planning error ignored: {cb_err}")
+            
             # Create dependencies for Planning Agent with filtered endpoint data
             logger.info(f"[{correlation_id}] Built focused entity data: {len(endpoint_based_entities)} entities with {len(unique_endpoints)} endpoints")
             
@@ -1380,6 +1418,18 @@ class ModernExecutionManager:
             if self.plan_ready_callback:
                 await self.plan_ready_callback(execution_plan)
             
+            # NEW STANDARDIZED: PLAN-GENERATED callback  
+            if self.plan_generated_callback:
+                try:
+                    await self.plan_generated_callback(
+                        plan=execution_plan.model_dump(),
+                        step_count=len(execution_plan.steps),
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime()),
+                        estimated_duration="30-60 seconds"  # Could be calculated based on step types
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Plan generated callback error: {callback_error}")
+            
             # Pretty print the execution plan for debugging
             import json
             logger.info(f"[{correlation_id}] Generated execution plan:\n{json.dumps(execution_plan.model_dump(), indent=2)}")
@@ -1390,6 +1440,13 @@ class ModernExecutionManager:
                     await self.planning_phase_callback('planning_complete')
                 except Exception as cb_err:
                     logger.debug(f"[{correlation_id}] planning_phase_callback planning_complete error ignored: {cb_err}")
+            
+            # STEP-END for planning phase (step -1)
+            if self.step_end_callback:
+                try:
+                    await self.step_end_callback(-1, "generating_steps", True, f"Generated {len(execution_plan.steps)} execution steps")
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] step_end_callback planning error ignored: {cb_err}")
             
             # Phase 2: Execute steps using Modern Execution Manager
             logger.debug(f"[{correlation_id}] Phase 2: Step execution with Modern Execution Manager")
@@ -1761,14 +1818,23 @@ class ModernExecutionManager:
                 await self._emergency_cleanup(correlation_id)
                 break
             
+            # Track step timing
+            step_start_time = time.time()
             logger.info(f"[{correlation_id}] Executing step {step_num}/{len(plan.steps)}: {step.tool_name}")
             
-            # Notify step status callback - step starting
-            if self.step_status_callback:
+            # NEW STANDARDIZED: STEP-START callback
+            if self.step_start_callback:
                 try:
-                    await self.step_status_callback(step_num, step.tool_name, "running")
+                    await self.step_start_callback(
+                        step_number=step_num,
+                        step_type=step.tool_name,
+                        step_name=f"Step {step_num}/{len(plan.steps)}: {step.tool_name.upper()}",
+                        query_context=step.query_context,
+                        critical=step.critical,
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
+                    )
                 except Exception as callback_error:
-                    logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
+                    logger.warning(f"[{correlation_id}] Step start callback error: {callback_error}")
             
             try:
                 # Execute step based on type
@@ -1790,12 +1856,22 @@ class ModernExecutionManager:
                     )
                 
                 # REPEATABLE PATTERN: Track step results and store data automatically
+                step_end_time = time.time()
+                step_duration = step_end_time - step_start_time
+                
                 if result.success:
                     successful_steps += 1
-                    logger.info(f"[{correlation_id}] Step {step_num} completed successfully")
+                    logger.info(f"[{correlation_id}] Step {step_num} completed successfully in {step_duration:.2f}s")
+                    
+                    # Get record count from result
+                    record_count = 0
+                    if hasattr(result.result, 'data') and isinstance(result.result.data, list):
+                        record_count = len(result.result.data)
+                    elif hasattr(result, 'data') and isinstance(result.data, list):
+                        record_count = len(result.data)
                     
                     # EARLY TERMINATION CHECK: If first step returns 0 results, terminate execution
-                    if step_num == 1 and hasattr(result.result, 'data') and isinstance(result.result.data, list) and len(result.result.data) == 0:
+                    if step_num == 1 and record_count == 0:
                         logger.warning(f"[{correlation_id}] EARLY TERMINATION: First step returned no data - stopping execution")
                         result.result = {
                             "early_termination": True,
@@ -1805,12 +1881,33 @@ class ModernExecutionManager:
                         step_results.append(result)
                         break
                     
-                    # Notify step status callback - step completed
-                    if self.step_status_callback:
+                    # NEW STANDARDIZED: STEP-END callback (success)
+                    if self.step_end_callback:
                         try:
-                            await self.step_status_callback(step_num, step.tool_name, "completed")
+                            await self.step_end_callback(
+                                step_number=step_num,
+                                step_type=step.tool_name,
+                                success=True,
+                                duration_seconds=round(step_duration, 2),
+                                record_count=record_count,
+                                formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
+                                error_message=None
+                            )
                         except Exception as callback_error:
-                            logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
+                            logger.warning(f"[{correlation_id}] Step end callback error: {callback_error}")
+                    
+                    # NEW STANDARDIZED: STEP-COUNT callback
+                    if self.step_count_callback:
+                        try:
+                            await self.step_count_callback(
+                                step_number=step_num,
+                                step_type=step.tool_name,
+                                record_count=record_count,
+                                operation_type="stored",
+                                formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time))
+                            )
+                        except Exception as callback_error:
+                            logger.warning(f"[{correlation_id}] Step count callback error: {callback_error}")
                     
                     # Data storage is handled automatically in step execution methods
                     # Log current data state using FULL POLARS
@@ -1821,12 +1918,20 @@ class ModernExecutionManager:
                     failed_steps += 1
                     logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
                     
-                    # Notify step status callback - step failed
-                    if self.step_status_callback:
+                    # NEW STANDARDIZED: STEP-END callback (error)
+                    if self.step_end_callback:
                         try:
-                            await self.step_status_callback(step_num, step.tool_name, "error")
+                            await self.step_end_callback(
+                                step_number=step_num,
+                                step_type=step.tool_name,
+                                success=False,
+                                duration_seconds=round(step_duration, 2),
+                                record_count=0,
+                                formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
+                                error_message=str(result.error)
+                            )
                         except Exception as callback_error:
-                            logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
+                            logger.warning(f"[{correlation_id}] Step end callback error: {callback_error}")
                     
                     # CRITICAL ERROR HANDLING: Stop execution on step failure
                     logger.error(f"[{correlation_id}] Stopping execution due to step {step_num} failure")
@@ -1842,12 +1947,20 @@ class ModernExecutionManager:
                 step_results.append(error_result)
                 failed_steps += 1
                 
-                # Notify step status callback - step failed with exception
-                if self.step_status_callback:
+                # NEW STANDARDIZED: STEP-ERROR callback
+                if self.step_error_callback:
                     try:
-                        await self.step_status_callback(step_num, step.tool_name, "error")
+                        await self.step_error_callback(
+                            step_number=step_num,
+                            step_type=step.tool_name,
+                            error_message=str(e),
+                            error_type="execution_exception",
+                            retry_possible=True,  # Most unexpected errors could be retried
+                            technical_details=f"Exception in step execution: {type(e).__name__}",
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                        )
                     except Exception as callback_error:
-                        logger.warning(f"[{correlation_id}] Step status callback error: {callback_error}")
+                        logger.warning(f"[{correlation_id}] Step error callback error: {callback_error}")
                 
                 break  # Stop execution on exception
         
@@ -1939,9 +2052,45 @@ class ModernExecutionManager:
         else:
             sql_dict = sql_result_dict
         
+        # NEW STANDARDIZED: STEP-TOKENS callback after SQL generation
+        if self.step_tokens_callback and sql_dict.get('success', False):
+            try:
+                # Extract token usage from SQL generation (if available)
+                usage = sql_dict.get('usage', {})
+                input_tokens = usage.get('input_tokens', 0) if usage else 0
+                output_tokens = usage.get('output_tokens', 0) if usage else 0
+                total_tokens = input_tokens + output_tokens
+                
+                await self.step_tokens_callback(
+                    step_number=step_number,
+                    step_type=step.tool_name,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    agent_name="SQL Generation Agent",
+                    formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                )
+            except Exception as callback_error:
+                logger.warning(f"[{correlation_id}] Step tokens callback error: {callback_error}")
+        
         # Check if the operation was successful
         if not sql_dict.get('success', False):
             error_msg = sql_dict.get('error', 'Unknown SQL generation error')
+            
+            # NEW STANDARDIZED: STEP-ERROR callback for SQL generation failure
+            if self.step_error_callback:
+                try:
+                    await self.step_error_callback(
+                        step_number=step_number,
+                        step_type=step.tool_name,
+                        error_message=error_msg,
+                        error_type="sql_generation_error",
+                        retry_possible=True,  # SQL generation errors can usually be retried
+                        technical_details="SQL query generation failed - may be due to schema complexity or LLM errors",
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Step error callback error: {callback_error}")
+            
             return StepResult(
                 step_number=step_number,
                 step_type="SQL",
@@ -1949,10 +2098,41 @@ class ModernExecutionManager:
                 error=error_msg
             )
         
+        # NEW STANDARDIZED: STEP-PROGRESS callback before SQL execution
+        if self.step_progress_callback:
+            try:
+                await self.step_progress_callback(
+                    step_number=step_number,
+                    step_type=step.tool_name,
+                    progress_percentage=50.0,  # 50% - SQL generated, about to execute
+                    current=50,
+                    total=100,
+                    message="Executing SQL query against database",
+                    formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                )
+            except Exception as callback_error:
+                logger.warning(f"[{correlation_id}] Step progress callback error: {callback_error}")
+        
         # Execute the generated SQL query against the database
         if sql_dict['sql'] and sql_dict['sql'].strip():
             db_data = await self._execute_raw_sql_query(sql_dict['sql'], correlation_id)
             logger.info(f"[{correlation_id}] SQL execution completed: {len(db_data)} records returned")
+            
+            # NEW STANDARDIZED: STEP-PROGRESS callback after SQL execution
+            if self.step_progress_callback:
+                try:
+                    await self.step_progress_callback(
+                        step_number=step_number,
+                        step_type=step.tool_name,
+                        progress_percentage=100.0,  # 100% - execution complete
+                        current=100,
+                        total=100,
+                        message=f"SQL execution completed: {len(db_data)} records retrieved",
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Step progress callback error: {callback_error}")
+                    
             # if db_data:
             #     logger.debug(f"[{correlation_id}] Sample SQL record (1 of {len(db_data)}): {db_data[0]}")
         else:
@@ -2113,6 +2293,22 @@ class ModernExecutionManager:
             if not available_endpoints:
                 error_msg = f"CRITICAL: No API endpoints found for entity='{step.entity}', operation='{getattr(step, 'operation', None)}'. Cannot proceed with API code generation."
                 logger.error(f"[{correlation_id}] {error_msg}")
+                
+                # NEW STANDARDIZED: STEP-ERROR callback for missing endpoints
+                if self.step_error_callback:
+                    try:
+                        await self.step_error_callback(
+                            step_number=step_number,
+                            step_type=step.tool_name,
+                            error_message=error_msg,
+                            error_type="configuration_error",
+                            retry_possible=False,  # Cannot retry without endpoints
+                            technical_details="No matching API endpoints found for the specified entity and operation",
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                        )
+                    except Exception as callback_error:
+                        logger.warning(f"[{correlation_id}] Step error callback error: {callback_error}")
+                
                 return StepResult(
                     step_number=step_number,
                     step_type="api",
@@ -2163,9 +2359,44 @@ class ModernExecutionManager:
                 previous_step_key=previous_full_results_key  # NEW: Pass explicit step key
             )
             
+            # NEW STANDARDIZED: STEP-TOKENS callback after API code generation
+            if self.step_tokens_callback and api_result_dict.get('success', False):
+                try:
+                    # Extract token usage from API code generation (if available)
+                    input_tokens = api_result_dict.get('input_tokens', 0)
+                    output_tokens = api_result_dict.get('output_tokens', 0)
+                    total_tokens = input_tokens + output_tokens
+                    
+                    await self.step_tokens_callback(
+                        step_number=step_number,
+                        step_type=step.tool_name,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        agent_name="API Code Generation Agent",
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Step tokens callback error: {callback_error}")
+            
             # Check if the wrapper function was successful
             if not api_result_dict.get('success', False):
                 error_msg = api_result_dict.get('error', 'Unknown API code generation error')
+                
+                # NEW STANDARDIZED: STEP-ERROR callback for API code generation failure
+                if self.step_error_callback:
+                    try:
+                        await self.step_error_callback(
+                            step_number=step_number,
+                            step_type=step.tool_name,
+                            error_message=error_msg,
+                            error_type="code_generation_error",
+                            retry_possible=True,  # Code generation errors can usually be retried
+                            technical_details="API code generation failed - may be due to context limits or LLM errors",
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                        )
+                    except Exception as callback_error:
+                        logger.warning(f"[{correlation_id}] Step error callback error: {callback_error}")
+                
                 return StepResult(
                     step_number=step_number,
                     step_type="api",
@@ -2184,12 +2415,42 @@ class ModernExecutionManager:
             else:
                 logger.warning(f"[{correlation_id}] No API code was generated!")
             
+            # NEW STANDARDIZED: STEP-PROGRESS callback before API execution
+            if self.step_progress_callback:
+                try:
+                    await self.step_progress_callback(
+                        step_number=step_number,
+                        step_type=step.tool_name,
+                        progress_percentage=50.0,  # 50% - code generated, about to execute
+                        current=50,
+                        total=100,
+                        message="Executing API code to fetch data",
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Step progress callback error: {callback_error}")
+            
             execution_result = self._execute_generated_code(
                 api_result_dict.get('code', ''), 
                 correlation_id, 
                 step, 
                 current_step_number=step_number  # CRITICAL: Pass step number for data injection
             )
+            
+            # NEW STANDARDIZED: STEP-PROGRESS callback after API execution
+            if self.step_progress_callback and execution_result.get('success', False):
+                try:
+                    await self.step_progress_callback(
+                        step_number=step_number,
+                        step_type=step.tool_name,
+                        progress_percentage=100.0,  # 100% - execution complete
+                        current=100,
+                        total=100,
+                        message="API execution completed successfully",
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Step progress callback error: {callback_error}")
             
             if execution_result.get('success', False):
                 # Use the actual execution output
@@ -2230,14 +2491,31 @@ class ModernExecutionManager:
                 
                 logger.info(f"[{correlation_id}] API step completed: {len(actual_data) if isinstance(actual_data, list) else 1} records stored as {variable_name}")
             else:
-                logger.error(f"[{correlation_id}] API code execution failed: {execution_result.get('error', 'Unknown error')}")
+                error_msg = execution_result.get('error', 'Unknown error')
+                logger.error(f"[{correlation_id}] API code execution failed: {error_msg}")
+                
+                # NEW STANDARDIZED: STEP-ERROR callback for API code execution failure
+                if self.step_error_callback:
+                    try:
+                        await self.step_error_callback(
+                            step_number=step_number,
+                            step_type=step.tool_name,
+                            error_message=f"API code execution failed: {error_msg}",
+                            error_type="code_execution_error",
+                            retry_possible=True,  # Code execution errors can often be retried
+                            technical_details="Generated API code failed to execute - may be due to API errors, network issues, or code logic problems",
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                        )
+                    except Exception as callback_error:
+                        logger.warning(f"[{correlation_id}] Step error callback error: {callback_error}")
+                
                 # Fall back to code generation result without execution
                 result_data = APIExecutionResult(
                     code=api_result_dict['code'],
                     explanation=api_result_dict['explanation'],
                     data=[],
                     executed=False,
-                    error=execution_result.get('error', 'Unknown error')
+                    error=error_msg
                 )
                 
                 # REPEATABLE PATTERN: Store empty results for failed API execution
