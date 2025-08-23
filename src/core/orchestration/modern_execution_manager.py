@@ -2174,14 +2174,14 @@ class ModernExecutionManager:
                 logger.info(f"[{correlation_id}] API code execution successful, got {len(actual_data) if isinstance(actual_data, list) else 'N/A'} results")
                 
                 # Log only one sample element to avoid log spam
-                # if isinstance(actual_data, list) and actual_data:
-                #     sample_str = str(actual_data[0])
-                #     truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
-                #     logger.debug(f"[{correlation_id}] Sample API result (1 of {len(actual_data)}): {truncated_sample}")
-                # elif actual_data:
-                #     sample_str = str(actual_data)
-                #     truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
-                #     logger.debug(f"[{correlation_id}] API result sample: {truncated_sample}")
+                if isinstance(actual_data, list) and actual_data:
+                    sample_str = str(actual_data[0])
+                    truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
+                    logger.debug(f"[{correlation_id}] Sample API result (1 of {len(actual_data)}): {truncated_sample}")
+                elif actual_data:
+                    sample_str = str(actual_data)
+                    truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
+                    logger.debug(f"[{correlation_id}] API result sample: {truncated_sample}")
                 else:
                     logger.debug(f"[{correlation_id}] API execution returned no data")
                 
