@@ -16,7 +16,6 @@ Model Configuration:
 import asyncio
 import json
 import logging
-import json
 import time
 import re
 import sys
@@ -221,69 +220,6 @@ def _simplify_sample_record(record: Any) -> Any:
     
     return simplified
 
-def _create_intelligent_samples(results: Dict[str, Any], total_records: int) -> Dict[str, Any]:
-    """Create intelligent samples from each step's output - NEW structure only"""
-    import random
-    
-    # Determine total sample target based on dataset size
-    if total_records <= 10:
-        target_samples = total_records  # Send all if very small
-    elif total_records <= 100:
-        target_samples = min(10, total_records)  # Sample 10 records
-    else:
-        target_samples = min(20, total_records)  # Sample 20 records for large datasets
-    
-    # Detect step keys (format: "1_api", "2_sql", "3_api", etc.)
-    step_keys = [key for key in results.keys() if key.split('_')[0].isdigit()]
-    
-    if not step_keys:
-        print(f"[STATS] No step keys found in results: {list(results.keys())}")
-        return results  # Return as-is if no step structure detected
-    
-    print(f"[STATS] Creating samples: {target_samples} total from {total_records} records across {len(step_keys)} steps")
-    print(f"[STATS] Detected step keys: {step_keys}")
-    
-    # Distribute samples across steps
-    samples_per_step = max(1, target_samples // len(step_keys))
-    remaining_samples = target_samples % len(step_keys)
-    
-    sampled_results = {}
-    
-    for i, step_key in enumerate(step_keys):
-        step_data = results[step_key]
-        
-        if isinstance(step_data, list) and len(step_data) > 0:
-            # Calculate samples for this step (distribute remainder to first steps)
-            step_sample_count = samples_per_step + (1 if i < remaining_samples else 0)
-            step_sample_count = min(step_sample_count, len(step_data))
-            
-            if len(step_data) <= step_sample_count:
-                # Use all records if step has few records
-                sampled_data = step_data
-            else:
-                # Random sampling from this step
-                sampled_data = random.sample(step_data, step_sample_count)
-            
-            # Simplify the sampled records to reduce token usage
-            simplified_samples = [_simplify_sample_record(record) for record in sampled_data]
-            sampled_results[step_key] = simplified_samples
-            
-            print(f"   [STATS] {step_key}: {len(simplified_samples)} simplified samples from {len(step_data)} records")
-        else:
-            # Copy non-list data as-is
-            sampled_results[step_key] = step_data
-            print(f"   [STATS] {step_key}: copied non-list data as-is")
-    
-    # Copy any non-step keys as-is
-    for key, value in results.items():
-        if key not in step_keys:
-            sampled_results[key] = value
-    
-    total_sampled = sum(len(data) for data in sampled_results.values() if isinstance(data, list))
-    print(f"[STATS] Final sample result: {total_sampled} records total")
-    
-    return sampled_results
-
 def _create_complete_data_prompt(query: str, results: Dict[str, Any], original_plan: Optional[str], 
                                dataset_size_context: str, total_records: int) -> str:
     """Create prompt for processing complete data"""
@@ -303,11 +239,16 @@ Complete Results: {results_str}
 You are processing the COMPLETE dataset. Create a comprehensive, user-friendly response that directly answers the user's query.
 Focus on clear presentation and include performance recommendations in your metadata if this is a large dataset."""
 
-def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], original_plan: Optional[str], 
+def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], relationship_analysis: Optional[Dict[str, Any]], 
                               total_records: int, execution_journey: str) -> str:
-    """Create prompt for processing sample data and generating code"""
+    """Create prompt for processing sample data and generating code with relationship analysis"""
     
-    plan_reasoning = original_plan if original_plan else "No plan provided"
+    # Use relationship analysis instead of plan reasoning
+    analysis_info = ""
+    if relationship_analysis:
+        analysis_info = f"RELATIONSHIP ANALYSIS:\n{json.dumps(relationship_analysis, indent=2)}\n\n"
+    else:
+        analysis_info = "No relationship analysis provided - use dynamic field discovery.\n\n"
     results_str = json.dumps(sampled_results, default=str)
     
     # CRITICAL: Aggressively truncate to ensure we stay under token limits
@@ -317,9 +258,9 @@ def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], orig
         results_str = results_str[:max_results_chars] + "... [sample data truncated to fit context]"
         print(f"[STATS] Sample prompt truncated from {len(json.dumps(sampled_results, default=str))} to {max_results_chars} chars")
     
-    # Also truncate plan if very long
-    if len(plan_reasoning) > 3000:
-        plan_reasoning = plan_reasoning[:3000] + "... [plan truncated]"
+    # Also truncate relationship analysis if very long
+    if len(analysis_info) > 3000:
+        analysis_info = analysis_info[:3000] + "... [analysis truncated]"
     
     available_keys = list(sampled_results.keys())
     # Keep this dynamic block lean; core rules live in system prompt file to avoid drift.
@@ -327,170 +268,19 @@ def _create_sample_data_prompt(query: str, sampled_results: Dict[str, Any], orig
         "=== DYNAMIC CONTEXT START ===\n"
         f"Query: {query}\n"
         f"Dataset Size: {total_records} total records (SAMPLES ONLY SHOWN)\n"
-        f"Execution Plan (raw JSON): {plan_reasoning}\n"
+        f"{analysis_info}"
         "Execution Journey (authoritative step -> key mapping):\n"
         f"{execution_journey}\n"
         f"Available Result Keys: {available_keys}\n"
         "Sample Data (intelligent subset JSON): " + results_str + "\n\n"
         "Use only the Available Result Keys verbatim; see system prompt for all aggregation & safety rules. "
         "processing_code must access data via full_results.get('<key>', []) and never invent or shorten keys.\n"
+        "If relationship analysis is provided, use its join keys and field mappings to generate accurate processing code.\n"
         "Return JSON per system prompt spec.\n"
         "=== DYNAMIC CONTEXT END ==="
     )
 
-def _requires_aggregation(query: str) -> bool:
-    """
-    Check if the user's query explicitly requests grouping, aggregation, or summarization.
-    If so, we should use LLM formatting instead of direct SQL formatting.
-    """
-    query_lower = query.lower()
-    
-    # Keywords that indicate the user wants data grouped/aggregated
-    aggregation_keywords = [
-        'group by', 'group them by', 'grouped by', 'organize by',
-        'aggregate', 'summarize', 'summary', 'breakdown',
-        'collapse', 'consolidate', 'merge', 'combine',
-        'unique users', 'distinct users', 'each user',
-        'per user', 'by user', 'for each user'
-    ]
-    
-    for keyword in aggregation_keywords:
-        if keyword in query_lower:
-            return True
-    
-    return False
 
-def _is_single_sql_query(results: Dict[str, Any], original_plan: Optional[str] = None) -> bool:
-    """
-    Check if this is a single SQL query that can be formatted directly without LLM processing.
-    Returns True if:
-    1. Only one data source (SQL)
-    2. No API data
-    3. Simple tabular data structure
-    """
-    try:
-        # Check the results structure - should only have SQL data
-        data_sources = []
-        sql_data = None
-        
-        # Count different data sources
-        if results.get('1_sql'):
-            data_sources.append('sql')
-            sql_data = results['1_sql']
-        
-        # Check for API data sources (numbered API results)
-        for i in range(1, 10):  # Check up to 10 potential API steps
-            if results.get(f'{i}_api'):
-                data_sources.append('api')
-                break
-        
-        # Should only have SQL data, no API data
-        if len(data_sources) != 1 or 'sql' not in data_sources:
-            return False
-        
-        # Check if SQL data is simple tabular structure  
-        if not isinstance(sql_data, list) or not sql_data:
-            return False
-            return False
-            
-        # Check if all records have the same structure (simple table)
-        first_row = sql_data[0]
-        if not isinstance(first_row, dict):
-            return False
-            
-        # All rows should have the same keys (consistent table structure)
-        first_keys = set(first_row.keys())
-        for row in sql_data[:5]:  # Check first 5 rows for consistency
-            if set(row.keys()) != first_keys:
-                return False
-        
-        # Check original plan if available - should be simple single step
-        if original_plan:
-            try:
-                if isinstance(original_plan, str):
-                    import json
-                    plan_data = json.loads(original_plan) if original_plan.startswith('{') else {'steps': []}
-                else:
-                    plan_data = original_plan
-                    
-                steps = plan_data.get('steps', [])
-                if len(steps) != 1:
-                    return False
-                    
-                step = steps[0]
-                if step.get('tool_name', '').lower() != 'sql':
-                    return False
-            except:
-                # If plan parsing fails, still allow optimization based on data structure
-                pass
-        
-        return True
-        
-    except Exception as e:
-        # If detection fails, fall back to normal LLM processing
-        return False
-
-def _format_single_sql_directly(results: Dict[str, Any], flow_id: str, total_records: int) -> Dict[str, Any]:
-    """
-    Format single SQL query results directly using legacy ai_service.py pattern.
-    Creates Vuetify table structure without LLM processing.
-    """
-    try:
-        sql_data = results.get('1_sql', [])
-        
-        if not sql_data:
-            return {
-                'display_type': 'markdown',
-                'content': {'text': 'Query executed successfully but returned no results.'},
-                'metadata': {
-                    'total_records': 0,
-                    'query_type': 'sql',
-                    'single_sql_optimization': True,
-                    'bypassed_llm_processing': True,
-                    'execution_summary': 'No data returned from SQL query',
-                    'confidence_level': 'High',
-                    'data_sources': ['sql'],
-                    'processing_time': 'Instant (bypassed LLM)',
-                    'limitations': 'None'
-                },
-                'usage_info': {'tokens': 0, 'model': 'direct_formatting'}
-            }
-        
-        # Create Vuetify headers from first row keys (same as legacy ai_service.py)
-        first_row = sql_data[0]
-        headers = [{
-            "text": key.replace('_', ' ').title(),
-            "value": key,
-            "align": 'start'
-        } for key in first_row.keys()]
-        
-        logger.info(f"[{flow_id}] Direct SQL formatting: {len(sql_data)} records with {len(headers)} columns")
-        logger.info(f"[{flow_id}] Bypassed LLM processing - using legacy ai_service.py pattern")
-        
-        # Return the SAME structure as complex queries (display_type: "table", not "vuetify_table")
-        return {
-            'display_type': 'table',  # Match complex queries - NOT 'vuetify_table'
-            'content': sql_data,  # Will be chunked by realtime_hybrid.py if needed
-            'metadata': {
-                'total_records': len(sql_data),
-                'query_type': 'sql',
-                'single_sql_optimization': True,
-                'bypassed_llm_processing': True,
-                'execution_summary': f'Retrieved {len(sql_data)} records from database query',
-                'confidence_level': 'High',
-                'data_sources': ['sql'],
-                'processing_time': 'Instant (bypassed LLM)',
-                'limitations': 'None - direct database results',
-                'column_count': len(headers),
-                'columns': [h['value'] for h in headers]
-            },
-            'processing_code': None  # CRITICAL FIX: Set to None instead of string to avoid execution
-        }
-        
-    except Exception as e:
-        logger.error(f"[{flow_id}] Direct SQL formatting failed: {e}")
-        # Re-raise so caller can decide fallback path
-        raise
 
 def _condense_plan(original_plan: Optional[str]):
     """Produce a condensed JSON string of the execution plan to lower token usage.
@@ -562,87 +352,49 @@ def _dump_full_results_data(query: str, results: Dict[str, Any], flow_id: str,
 
 
 async def format_results(query: str, results: Dict[str, Any], is_sample: bool = False, 
-                         original_plan: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Enhanced results formatting with conditional processing based on dataset size"""
-    
+                         relationship_analysis: Optional[Dict[str, Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Simplified results formatting - Modern Execution Manager handles all routing decisions"""
     
     # Count total records to inform the LLM about dataset size
     total_records = _count_total_records(results)
     flow_id = metadata.get("flow_id", "unknown") if metadata else "unknown"
     
-    logger.info(f"[{flow_id}] Results Formatter Agent Starting")
+    logger.info(f"[{flow_id}] Results Formatter Agent: Starting processing")
     logger.info(f"[{flow_id}] Processing {total_records} total records (is_sample: {is_sample})")
     logger.debug(f"[{flow_id}] Query: {query}")
     
-    # DUMP FULL RESULTS DATA FOR RELATIONSHIP ANALYSIS
-    _dump_full_results_data(query, results, flow_id, original_plan, metadata)
+    # DUMP FULL RESULTS DATA FOR DEBUGGING - COMMENTED OUT TO REDUCE FILE I/O
+    # _dump_full_results_data(query, results, flow_id, None, metadata)
     
-    # Condense plan before logging / injection to reduce token footprint
-    condensed_plan = _condense_plan(original_plan)
-    logger.debug(f"[{flow_id}] Original Plan (condensed for prompt): {condensed_plan}")
-    
-    # SINGLE SQL OPTIMIZATION: Check if this is a simple single SQL query
-    # BUT skip the optimization if user explicitly requests grouping/aggregation
-    if _is_single_sql_query(results, original_plan) and not _requires_aggregation(query):
-        logger.info(f"[{flow_id}] SINGLE SQL OPTIMIZATION: Detected single SQL query - using direct formatting")
-        return _format_single_sql_directly(results, flow_id, total_records)
-    elif _is_single_sql_query(results, original_plan):
-        logger.info(f"[{flow_id}] SINGLE SQL OPTIMIZATION: Detected single SQL query but user requested grouping/aggregation - using LLM formatting")
-    
-    # Log the input data structure for debugging
-    if 'raw_results' in results:
-        raw_results = results['raw_results']
-        if 'sql_execution' in raw_results:
-            sql_data = raw_results['sql_execution'].get('data', [])
-            logger.debug(f"[{flow_id}] SQL Data: {len(sql_data)} records")
-            if sql_data:
-                sample_record = sql_data[0]
-                logger.debug(f"[{flow_id}] Sample SQL Record Keys: {list(sample_record.keys())}")
-                # Log the complete first record for debugging (not truncated fields)
-                logger.debug(f"[{flow_id}] Complete Sample SQL Record: {sample_record}")
-    
-    def _estimate_token_count(data):
-        """
-        Estimate token count for LLM processing.
-        Rough estimation: 1 token ≈ 4 characters for English text
-        """
-        try:
-            import json
-            data_str = json.dumps(data, ensure_ascii=False)
-            # Rough token estimation: 1 token ≈ 4 characters
-            estimated_tokens = len(data_str) // 4
-            return estimated_tokens
-        except:
-            # Fallback to string length estimation
-            data_str = str(data)
-            return len(data_str) // 4
+    # Log relationship analysis availability
+    if relationship_analysis:
+        logger.debug(f"[{flow_id}] Relationship Analysis available: {len(str(relationship_analysis))} chars")
+    else:
+        logger.debug(f"[{flow_id}] No relationship analysis provided")
 
     try:
-        # Respect the is_sample decision from Modern Execution Manager
+        # SIMPLIFIED FLOW: Modern Execution Manager already made the routing decision
         if is_sample:
-            # Modern Execution Manager decided to use sample processing
-            logger.info(f"[{flow_id}] Using sample processing as decided by Modern Execution Manager (total_records: {total_records})")
-            sampled_results = _create_intelligent_samples(results, total_records)
-            return await _process_sample_data(query, sampled_results, condensed_plan, flow_id, total_records)
+            # Large dataset: Process samples + relationship analysis → Generate code
+            logger.info(f"[{flow_id}] Large dataset processing: samples + relationship analysis → code generation")
+            return await _process_sample_data(query, results, relationship_analysis, flow_id, total_records)
         else:
-            # Modern Execution Manager decided to use complete processing
-            logger.info(f"[{flow_id}] Using complete processing as decided by Modern Execution Manager (total_records: {total_records})")
-            return await _process_complete_data(query, results, condensed_plan, flow_id, total_records)
+            # Small dataset: Process complete data directly
+            logger.info(f"[{flow_id}] Small dataset processing: complete data → direct formatting")
+            return await _process_complete_data(query, results, None, flow_id, total_records)
             
     except Exception as e:
         logger.error(f"[{flow_id}] Results Formatter Agent Error: {e}")
         return {
             'display_type': 'markdown', 
-            'content': {'text': f'**Error**: {e}'},
+            'content': f'**Error**: {e}',
             'metadata': {
                 'execution_summary': f'Formatting failed: {e}',
                 'confidence_level': 'Low',
                 'data_sources': ['error'],
                 'total_records': 0,
                 'processing_time': 'N/A',
-                'limitations': 'Processing failed due to error'
-            },
-            'usage_info': {'error': 'Processing failed'}
+            }
         }
 
 async def _process_complete_data(query: str, results: Dict[str, Any], original_plan: Optional[str], 
@@ -705,9 +457,9 @@ LARGE DATASET DETECTED ({total_records} records):
             'usage_info': {'error': 'Complete data processing failed'}
         }
 
-async def _process_sample_data(query: str, sampled_results: Dict[str, Any], original_plan: Optional[str], 
+async def _process_sample_data(query: str, sampled_results: Dict[str, Any], relationship_analysis: Optional[Dict[str, Any]], 
                               flow_id: str, total_records: int) -> Dict[str, Any]:
-    """Process sample data and generate code for full dataset processing"""
+    """Process sample data and generate code for full dataset processing using relationship analysis"""
     
     # Debug logging for samples received
     logger.debug(f"[{flow_id}] Sample Data Processing - Samples received:")
@@ -717,32 +469,39 @@ async def _process_sample_data(query: str, sampled_results: Dict[str, Any], orig
     # Build the Execution Journey string to guide the LLM
     execution_journey = ""
     try:
-        plan_data = json.loads(original_plan) if original_plan else {}
-        steps = plan_data.get("steps", [])
-        # IMPORTANT: Sort the keys to ensure they align with the plan steps
+        # Get step keys from the data (no original plan needed)
         step_keys = sorted([key for key in sampled_results.keys() if key.split('_')[0].isdigit()])
 
         journey_lines = []
-        for i, key in enumerate(step_keys):
-            if i < len(steps):
-                step_info = steps[i]
-                tool_name = step_info.get('tool_name')
-                # Handle the case where the tool is 'api' but it's an api_sql step
-                if 'api_sql' in key:
-                    tool_name = 'api_sql'
-                line = f"- Step {i+1}: Executed '{tool_name}' for entity '{step_info.get('entity')}'. The data is in `full_results['{key}']`."
-                journey_lines.append(line)
+        for key in step_keys:
+            parts = key.split('_')
+            step_num = parts[0]
+            tool_type = '_'.join(parts[1:]) if len(parts) > 1 else 'unknown'
+            
+            # Determine entity from the step data if possible
+            entity = "unknown"
+            if key in sampled_results and sampled_results[key]:
+                # Try to infer entity from data structure
+                if 'user' in str(sampled_results[key][0]).lower():
+                    entity = "users"
+                elif 'role' in str(sampled_results[key][0]).lower():
+                    entity = "role_assignment"
+                elif 'log' in str(sampled_results[key][0]).lower():
+                    entity = "system_log"
+            
+            line = f"- Step {step_num}: Executed '{tool_type}' for entity '{entity}'. The data is in `full_results['{key}']`."
+            journey_lines.append(line)
         execution_journey = "\n".join(journey_lines)
         logger.info(f"[{flow_id}] Generated Execution Journey:\n{execution_journey}")
     except Exception as e:
         logger.warning(f"[{flow_id}] Could not build execution journey: {e}")
         execution_journey = "Could not parse execution plan."
     
-    prompt = _create_sample_data_prompt(query, sampled_results, original_plan, total_records, execution_journey)
+    prompt = _create_sample_data_prompt(query, sampled_results, relationship_analysis, total_records, execution_journey)
     
     # Debug logging for prompt being sent
     logger.debug(f"[{flow_id}] Sample Data Prompt (length: {len(prompt)} chars):")
-    logger.debug(f"[{flow_id}] Sample Prompt Content: {prompt[:1500]}..." if len(prompt) > 1500 else f"[{flow_id}] Sample Prompt Content: {prompt}")
+    #logger.debug(f"[{flow_id}] Sample Prompt Content: {prompt[:1500]}..." if len(prompt) > 1500 else f"[{flow_id}] Sample Prompt Content: {prompt}")
     
     try:
         # Run formatter with flexible validation
