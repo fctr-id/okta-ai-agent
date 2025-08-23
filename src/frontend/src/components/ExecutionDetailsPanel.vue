@@ -11,8 +11,8 @@
       </button>
 
       <transition name="fade-collapse">
-        <div v-show="isExpanded" class="exec-body">
-          <div v-if="expansionPanelData.planData?.plan" class="unified-steps">
+        <div v-show="isExpanded" class="exec-body" style="background-color: #ffffff !important; min-height: 200px;">
+          <div v-if="expansionPanelData.planData?.plan" class="unified-steps" style="position: relative; z-index: 1;">
             <div class="steps-list">
               <template v-for="(planStep, index) in getPlanSteps(expansionPanelData.planData.plan)" :key="index">
                 <div 
@@ -73,6 +73,13 @@ const props = defineProps({
 });
 
 const isExpanded = ref(false);
+
+// Auto-collapse when execution is completed
+watch(() => props.executionStatus, (newStatus) => {
+  if (newStatus === 'completed') {
+    isExpanded.value = false;
+  }
+});
 
 // Sort steps numerically
 const sortedStepDetails = computed(() => [...props.expansionPanelData.stepDetails].sort((a,b) => a.stepNumber - b.stepNumber));
@@ -184,9 +191,11 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
 <style scoped>
 .exec-wrapper { 
   margin: 12px auto; 
-  max-width: 1280px !important;
-  width: calc(100% - 40px) !important;
+  max-width: 1280px;
+  width: calc(100% - 40px);
   min-width: 0;
+  position: relative;
+  font-family: inherit;
 }
 
 .exec-card { 
@@ -197,7 +206,7 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   overflow: hidden;
-  width: 100% !important;
+  width: 100%;
 }
 
 .exec-header { 
@@ -291,8 +300,31 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
 
 .exec-body { 
   padding: 16px;
-  background: #fafafa;
+  background-color: #ffffff !important;
+  background: #ffffff !important;
   border-top: 1px solid rgba(76, 100, 226, 0.08);
+  border-radius: 0 0 12px 12px;
+  position: relative;
+  min-height: 100px;
+}
+
+/* Ensure background shows by creating a solid layer */
+.exec-body::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ffffff;
+  border-radius: 0 0 12px 12px;
+  z-index: -1;
+}
+
+.exec-body * {
+  color: inherit;
+  position: relative;
+  z-index: 1;
 }
 
 .plan-block { 

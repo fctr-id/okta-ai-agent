@@ -129,6 +129,17 @@
         </div>
       </transition>
 
+      <!-- NEW: Execution Details Expansion Panel (moved completely OUTSIDE results-container for full width) -->
+      <transition name="fade">
+        <ExecutionDetailsPanel 
+          v-if="expansionPanelData.visible || isProcessing"
+          :expansionPanelData="expansionPanelData"
+          :isProcessing="isProcessing"
+          :executionStatus="rtExecutionStatus"
+          :currentQuery="messages.length > 0 ? messages[0].content : ''"
+        />
+      </transition>
+
       <!-- Unified Progress Display OR Final Outcome Area -->
       <transition name="fade-up">
         <div v-if="showProgressDisplayArea || showFinalOutcomeArea" ref="messagesContainerRef"
@@ -167,17 +178,6 @@
               </div>
             </div>
           </div>
-
-          <!-- NEW: Execution Details Expansion Panel (moved completely outside content-wrapper) -->
-          <transition name="fade">
-            <ExecutionDetailsPanel 
-              v-if="expansionPanelData.visible || isProcessing"
-              :expansionPanelData="expansionPanelData"
-              :isProcessing="isProcessing"
-              :executionStatus="rtExecutionStatus"
-              :currentQuery="messages.length > 0 ? messages[0].content : ''"
-            />
-          </transition>
 
           <div class="content-wrapper">
             <!-- Dedicated Error Container (outside stepper) -->
