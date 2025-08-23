@@ -86,7 +86,7 @@ Transform complete hybrid AI agent execution results into clear, user-friendly J
 ```json
 {
   "display_type": "markdown",
-  "content": "### 🔍 User Analysis Results<br><br>**Summary:** Found 2 active users in the sso-super-admins group<br><br>#### Active Users (2)<br><br>**1. Dan Garcia**<br>* **Email:** `dan@fctr.io`<br>* **Status:** *ACTIVE*<br>* **Groups:** `sso-super-admins`, `okta-admins`<br>* **Applications:** Okta Admin Console, Custom App<br><br>**2. Aiden Garcia**<br>* **Email:** `aiden.garcia@fctr.io`<br>* **Status:** *ACTIVE*<br>* **Groups:** `sso-super-admins`<br>* **Applications:** Okta Admin Console<br><br>---<br><br>💡 **Key Insight:** Both users have admin-level access with full Okta console permissions.",
+  "content": "### User Analysis Results<br><br>**Summary:** Found 2 active users in the sso-super-admins group<br><br>#### Active Users (2)<br><br>**1. Dan Garcia**<br>* **Email:** `dan@fctr.io`<br>* **Status:** *ACTIVE*<br>* **Groups:** `sso-super-admins`, `okta-admins`<br>* **Applications:** Okta Admin Console, Custom App<br><br>**2. Aiden Garcia**<br>* **Email:** `aiden.garcia@fctr.io`<br>* **Status:** *ACTIVE*<br>* **Groups:** `sso-super-admins`<br>* **Applications:** Okta Admin Console<br><br>---<br><br>**Key Insight:** Both users have admin-level access with full Okta console permissions.",
   "metadata": {...}
 }
 ```
