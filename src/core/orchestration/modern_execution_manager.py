@@ -560,11 +560,11 @@ class ModernExecutionManager:
                     if step_type in ('api', 'api_sql'):
                         # Use native Polars json_normalize for complex API responses and API_SQL (which contains API-like nested data)
                         df = _create_api_dataframe(data)
-                        logger.debug(f"Created API Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+                        # logger.debug(f"Created API Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
                     else:
                         # Use robust handling for SQL and other step types
                         df = _create_sql_dataframe(data)
-                        logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+                        # logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
                     
                     self.polars_dataframes[variable_name] = df
                 except Exception as e:
@@ -578,7 +578,7 @@ class ModernExecutionManager:
             try:
                 df = pl.DataFrame([data])
                 self.polars_dataframes[variable_name] = df
-                logger.debug(f"Created Polars DataFrame from single record: {df.shape[0]} rows × {df.shape[1]} columns")
+                # logger.debug(f"Created Polars DataFrame from single record: {df.shape[0]} rows × {df.shape[1]} columns")
             except Exception as e:
                 logger.error(f"Failed to create DataFrame from single record: {e}")
                 df = pl.DataFrame()
@@ -1225,7 +1225,7 @@ class ModernExecutionManager:
                 logger.info(f"[{correlation_id}] Query will use both SQL and API modes as planned")
             
             # Phase 0: Pre-Planning - Entity and Operation Selection
-            logger.info(f"[{correlation_id}] Phase 0: Pre-Planning Agent execution")
+            logger.debug(f"[{correlation_id}] Phase 0: Pre-Planning Agent execution")
             
             # Use the enhanced pre-planning agent to select relevant entities
             from src.core.agents.preplan_agent import select_relevant_entities
@@ -1255,7 +1255,7 @@ class ModernExecutionManager:
             
             selected_entity_operations = preplan_result['selected_entity_operations']
             entity_op_pairs = [f"{eo.entity}::{eo.operation or 'null'}" for eo in selected_entity_operations]
-            logger.info(f"[{correlation_id}] Pre-planning completed - selected entity-operation pairs: {entity_op_pairs}")
+            logger.info(f"[{correlation_id}] Pre-planning completed: selected entity-operation pairs {entity_op_pairs}")
             
             # CHECK FOR SQL-ONLY SCENARIO: No API entities needed
             if not selected_entity_operations:
@@ -1325,7 +1325,7 @@ class ModernExecutionManager:
                             filtered_entity_summary[entity_name]['methods'].append(method)
             
             # Phase 1: Use Planning Agent to generate execution plan
-            logger.info(f"[{correlation_id}] Phase 1: Planning Agent execution")
+            logger.debug(f"[{correlation_id}] Phase 1: Planning Agent execution")
             # Notify planning start (minimal hook)
             if self.planning_phase_callback:
                 try:
@@ -1391,7 +1391,7 @@ class ModernExecutionManager:
                     logger.debug(f"[{correlation_id}] planning_phase_callback planning_complete error ignored: {cb_err}")
             
             # Phase 2: Execute steps using Modern Execution Manager
-            logger.info(f"[{correlation_id}] Phase 2: Step execution with Modern Execution Manager")
+            logger.debug(f"[{correlation_id}] Phase 2: Step execution with Modern Execution Manager")
             execution_results = await self.execute_steps(execution_plan, correlation_id)
             
             # SIMPLE CANCELLATION CHECK: If fewer steps completed than planned, query was likely cancelled
@@ -1444,7 +1444,7 @@ class ModernExecutionManager:
                         step_results_for_processing[step_name] = found_dataframe  # DataFrame reference!
                         
                         record_count = len(found_dataframe)
-                        logger.debug(f"[{correlation_id}] MEMORY EFFICIENT: Added {step_result.step_type} DataFrame from {found_variable}: {record_count} records")
+                        # logger.debug(f"[{correlation_id}] MEMORY EFFICIENT: Added {step_result.step_type} DataFrame from {found_variable}: {record_count} records")
                     else:
                         logger.warning(f"[{correlation_id}] FULL POLARS: No data found for {step_result.step_type} step {i} (tried: {possible_variable_names})")
             
@@ -1793,7 +1793,7 @@ class ModernExecutionManager:
                     # Log current data state using FULL POLARS
                     total_dataframes = len(self.polars_dataframes)
                     total_metadata = len(self.step_metadata)
-                    logger.debug(f"[{correlation_id}] Data state: {total_dataframes} DataFrames, {total_metadata} step metadata entries")
+                    # logger.debug(f"[{correlation_id}] Data state: {total_dataframes} DataFrames, {total_metadata} step metadata entries")
                 else:
                     failed_steps += 1
                     logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
@@ -1888,14 +1888,14 @@ class ModernExecutionManager:
                 error="Query cancelled before step execution"
             )
         
-        logger.debug(f"[{correlation_id}] Executing user SQL step")
+        # logger.debug(f"[{correlation_id}] Executing user SQL step")
         
         # Get enhanced context from all previous steps
         all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
         logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
         
         # Call existing SQL Agent with enhanced logging using wrapper function
-        logger.debug(f"[{correlation_id}] Calling User SQL Agent with context: {step.query_context}")
+        # logger.debug(f"[{correlation_id}] Calling User SQL Agent with context: {step.query_context}")
         
         sql_result_dict = await generate_sql_query_with_logging(
             question=step.query_context,
@@ -1930,8 +1930,8 @@ class ModernExecutionManager:
         if sql_dict['sql'] and sql_dict['sql'].strip():
             db_data = await self._execute_raw_sql_query(sql_dict['sql'], correlation_id)
             logger.info(f"[{correlation_id}] SQL execution completed: {len(db_data)} records returned")
-            if db_data:
-                logger.debug(f"[{correlation_id}] Sample SQL record (1 of {len(db_data)}): {db_data[0]}")
+            # if db_data:
+            #     logger.debug(f"[{correlation_id}] Sample SQL record (1 of {len(db_data)}): {db_data[0]}")
         else:
             logger.warning(f"[{correlation_id}] No SQL query generated or empty query")
             db_data = []
@@ -2008,7 +2008,7 @@ class ModernExecutionManager:
         logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
         
         # ALWAYS use Polars DataFrame processing (13,964x performance improvement)
-        logger.debug(f"[{correlation_id}] Using Polars DataFrame processing for all API-SQL operations")
+        # logger.debug(f"[{correlation_id}] Using Polars DataFrame processing for all API-SQL operations")
         
         # Call Internal API-SQL Agent with Polars optimization (ONLY mode)
         result = await api_sql_code_gen_agent.process_api_data(
@@ -2105,7 +2105,7 @@ class ModernExecutionManager:
             actual_record_count = len(full_previous_data)
             logger.debug(f"[{correlation_id}] Retrieved {actual_record_count} records from Polars DataFrame")
             
-            logger.info(f"[{correlation_id}] API Code Gen: Processing {actual_record_count} records")
+            logger.debug(f"[{correlation_id}] API Code Gen: Processing {actual_record_count} records")
             logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
             
             # Call API Code Gen Agent with enhanced logging using wrapper function
@@ -2151,13 +2151,13 @@ class ModernExecutionManager:
                 )
             
             # Phase 5: Execute the generated API code to get actual data
-            logger.info(f"[{correlation_id}] Phase 5: Executing generated API code")
-            logger.debug(f"[{correlation_id}] Generated {len(api_result_dict.get('code', ''))} characters of API code")
+            logger.debug(f"[{correlation_id}] Phase 5: Executing generated API code")
+            # logger.debug(f"[{correlation_id}] Generated {len(api_result_dict.get('code', ''))} characters of API code")
             
             # DEBUG: Log the actual generated code if debug level is enabled
             generated_code = api_result_dict.get('code', '')
             if generated_code:
-                logger.info(f"[{correlation_id}] Generated API Code:\n{'-'*50}\n{generated_code}\n{'-'*50}")
+                logger.debug(f"[{correlation_id}] Generated API Code:\n{'-'*50}\n{generated_code}\n{'-'*50}")
             else:
                 logger.warning(f"[{correlation_id}] No API code was generated!")
             
@@ -2174,14 +2174,14 @@ class ModernExecutionManager:
                 logger.info(f"[{correlation_id}] API code execution successful, got {len(actual_data) if isinstance(actual_data, list) else 'N/A'} results")
                 
                 # Log only one sample element to avoid log spam
-                if isinstance(actual_data, list) and actual_data:
-                    sample_str = str(actual_data[0])
-                    truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
-                    logger.debug(f"[{correlation_id}] Sample API result (1 of {len(actual_data)}): {truncated_sample}")
-                elif actual_data:
-                    sample_str = str(actual_data)
-                    truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
-                    logger.debug(f"[{correlation_id}] API result sample: {truncated_sample}")
+                # if isinstance(actual_data, list) and actual_data:
+                #     sample_str = str(actual_data[0])
+                #     truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
+                #     logger.debug(f"[{correlation_id}] Sample API result (1 of {len(actual_data)}): {truncated_sample}")
+                # elif actual_data:
+                #     sample_str = str(actual_data)
+                #     truncated_sample = sample_str[:1000] + "..." if len(sample_str) > 1000 else sample_str
+                #     logger.debug(f"[{correlation_id}] API result sample: {truncated_sample}")
                 else:
                     logger.debug(f"[{correlation_id}] API execution returned no data")
                 
@@ -2306,7 +2306,7 @@ class ModernExecutionManager:
         
         try:
             # SECURITY VALIDATION: Use general validation for all Python code
-            logger.info(f"[{correlation_id}] Security validation: Checking generated code for safety")
+            logger.debug(f"[{correlation_id}] Security validation: Checking generated code for safety")
             security_result = validate_generated_code(python_code)
             
             if not security_result.is_valid:
@@ -2319,7 +2319,7 @@ class ModernExecutionManager:
                     'risk_level': security_result.risk_level
                 }
             
-            logger.info(f"[{correlation_id}] Security validation passed - code is safe to execute")
+            logger.debug(f"[{correlation_id}] Security validation passed - code is safe to execute")
             
             # Create a temporary directory for execution
             with tempfile.TemporaryDirectory() as temp_dir:
@@ -2496,7 +2496,7 @@ except Exception as e:
                                     evt_type = evt.get('type')
                                     # Only log essential progress events - entity operations and rate limits
                                     if evt_type in ['entity_start', 'entity_progress', 'entity_complete', 'rate_limit_wait']:
-                                        logger.debug(f"[{correlation_id}] PROGRESS {evt_type}: {evt}")
+                                        logger.info(f"[{correlation_id}] PROGRESS {evt_type}: {evt}")
                                 except json.JSONDecodeError:
                                     logger.debug(f"[{correlation_id}] Failed to parse progress JSON: {parts[1]}")
                     else:
@@ -2504,7 +2504,7 @@ except Exception as e:
                         time.sleep(0.1)
                 
                 # Ensure stdout thread has finished draining
-                logger.debug(f"[{correlation_id}] Joining stdout drain thread")
+                # logger.debug(f"[{correlation_id}] Joining stdout drain thread")
                 try:
                     stdout_thread.join(timeout=2)
                 except Exception:
@@ -2516,13 +2516,14 @@ except Exception as e:
                 if not combined_stdout:
                     logger.warning(f"[{correlation_id}] No stdout content received (combined length 0)")
                 else:
-                    logger.debug(f"[{correlation_id}] Drained {len(combined_stdout)} chars from stdout concurrently")
+                    # logger.debug(f"[{correlation_id}] Drained {len(combined_stdout)} chars from stdout concurrently")
+                    pass
                 
                 # Wait for process to complete
-                logger.debug(f"[{correlation_id}] Waiting for process to complete...")
+                # logger.debug(f"[{correlation_id}] Waiting for process to complete...")
                 try:
                     exit_code = process.wait(timeout=2)  # Should be immediate
-                    logger.debug(f"[{correlation_id}] Process completed with exit code: {exit_code}")
+                    # logger.debug(f"[{correlation_id}] Process completed with exit code: {exit_code}")
                 except subprocess.TimeoutExpired:
                     logger.warning(f"[{correlation_id}] Process didn't terminate naturally, force killing")
                     process.kill()
@@ -2580,7 +2581,7 @@ except Exception as e:
                         else:
                             logger.debug(f"[{correlation_id}] Extracted data content: {data}")
                         
-                        logger.info(f"[{correlation_id}] Code execution successful")
+                        logger.debug(f"[{correlation_id}] Code execution successful")
                         return {
                             'success': True,
                             'output': data,
@@ -2642,7 +2643,7 @@ except Exception as e:
         Returns:
             List of dictionaries containing query results
         """
-        logger.debug(f"[{correlation_id}] Executing SQL query against database...")
+        # logger.debug(f"[{correlation_id}] Executing SQL query against database...")
         
         # Safety check - use internal validation for legacy operations
         if use_internal_validation:
@@ -2729,7 +2730,7 @@ except Exception as e:
         Returns:
             List of query results from the final SELECT statement
         """
-        logger.debug(f"[{correlation_id}] Executing {len(sql_statements)} SQL statements in sequence")
+        # logger.debug(f"[{correlation_id}] Executing {len(sql_statements)} SQL statements in sequence")
         
         # Import security validation
         from src.utils.security_config import validate_sql_for_execution
@@ -2740,7 +2741,7 @@ except Exception as e:
             logger.error(f"[{correlation_id}] SQL statements failed security validation: {error_msg}")
             return []
         
-        logger.info(f"[{correlation_id}] All {len(sql_statements)} SQL statements passed security validation")
+        logger.debug(f"[{correlation_id}] All {len(sql_statements)} SQL statements passed security validation")
         
         # Execute in thread pool to avoid blocking event loop
         import asyncio
@@ -2780,7 +2781,7 @@ except Exception as e:
                 
                 # Execute all statements in sequence
                 for i, sql_stmt in enumerate(sql_statements):
-                    logger.debug(f"[{correlation_id}] Executing statement {i+1}: {sql_stmt[:100]}...")
+                    # logger.debug(f"[{correlation_id}] Executing statement {i+1}: {sql_stmt[:100]}...")
                     
                     cursor.execute(sql_stmt)
                     
@@ -2862,7 +2863,7 @@ except Exception as e:
             # Dynamic ID extraction using JSONPath-like logic
             extracted_ids = []
             
-            logger.debug(f"[{correlation_id}] Processing {len(api_records)} API records for ID extraction")
+            # logger.debug(f"[{correlation_id}] Processing {len(api_records)} API records for ID extraction")
             
             for i, record in enumerate(api_records):
                 try:
@@ -2915,20 +2916,20 @@ except Exception as e:
                 # Check if all normalized records are empty or problematic
                 if not normalized_api_records:
                     api_df = pl.DataFrame()
-                    logger.debug(f"[{correlation_id}] Created empty API DataFrame: no records to normalize")
+                    # logger.debug(f"[{correlation_id}] Created empty API DataFrame: no records to normalize")
                 elif all(not record or (isinstance(record, dict) and not record) for record in normalized_api_records):
                     api_df = pl.DataFrame()
-                    logger.debug(f"[{correlation_id}] Created empty API DataFrame: all normalized records were empty")
+                    # logger.debug(f"[{correlation_id}] Created empty API DataFrame: all normalized records were empty")
                 else:
                     try:
                         api_df = pl.DataFrame(normalized_api_records, infer_schema_length=None)
-                        logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                        # logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
                     except Exception as e:
                         logger.warning(f"[{correlation_id}] Could not create API DataFrame with full schema, trying with limited inference: {e}")
                         try:
                             # Try with limited schema inference to handle mixed types
                             api_df = pl.DataFrame(normalized_api_records, infer_schema_length=100)
-                            logger.debug(f"[{correlation_id}] Created API DataFrame with limited schema inference: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
+                            # logger.debug(f"[{correlation_id}] Created API DataFrame with limited schema inference: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
                         except Exception as e2:
                             logger.warning(f"[{correlation_id}] Could not create API DataFrame at all: {e2}")
                             api_df = None
@@ -2943,7 +2944,7 @@ except Exception as e:
             id_placeholders = ', '.join([f"'{str(uid).replace(chr(39), chr(39) + chr(39))}'" for uid in user_ids])
             sql_query = sql_template.replace('{user_ids}', id_placeholders)
             
-            logger.debug(f"[{correlation_id}] Executing SQL query: {sql_query[:200]}...")
+            # logger.debug(f"[{correlation_id}] Executing SQL query: {sql_query[:200]}...")
             
             # Execute the SQL query
             db_results = await self._execute_raw_sql_query(sql_query, correlation_id)
@@ -2974,13 +2975,13 @@ except Exception as e:
                     try:
                         # Try creating DataFrame with full schema inference
                         db_df = pl.DataFrame(clean_results, infer_schema_length=None)
-                        logger.debug(f"[{correlation_id}] Created database DataFrame (cleaned {len(db_results)} rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                        # logger.debug(f"[{correlation_id}] Created database DataFrame (cleaned {len(db_results)} rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
                     except Exception as e:
                         logger.warning(f"[{correlation_id}] Full schema inference failed, trying limited: {e}")
                         try:
                             # Try with limited schema inference
                             db_df = pl.DataFrame(clean_results, infer_schema_length=100)
-                            logger.debug(f"[{correlation_id}] Created database DataFrame with limited schema inference: {db_df.shape[0]} rows × {db_df.shape[1]} columns")
+                            # logger.debug(f"[{correlation_id}] Created database DataFrame with limited schema inference: {db_df.shape[0]} rows × {db_df.shape[1]} columns")
                         except Exception as e2:
                             logger.error(f"[{correlation_id}] All DataFrame creation attempts failed: {e2}")
                             # Fallback: return raw database results
