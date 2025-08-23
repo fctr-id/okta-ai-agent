@@ -148,9 +148,9 @@ def create_minimal_samples(results: Dict[str, Any], max_records_per_step: int = 
                 optimized_records.append(record)
         
         samples[step_name] = optimized_records
-        logger.info(f"Step {step_name}: sampled {len(optimized_records)} records from {len(step_data)} total")
+        logger.debug(f"Step {step_name}: sampled {len(optimized_records)} records from {len(step_data)} total")
     
-    logger.info(f"Created minimal samples for relationship analysis: {list(samples.keys())}")
+    logger.debug(f"Created minimal samples for relationship analysis: {list(samples.keys())}")
     return samples
 
 async def analyze_data_relationships(sample_data: Dict[str, Any], correlation_id: str = "unknown", query: str = "", execution_plan: Dict = None) -> Dict[str, Any]:
@@ -169,20 +169,20 @@ async def analyze_data_relationships(sample_data: Dict[str, Any], correlation_id
     Raises:
         Exception: If analysis fails (no fallbacks per requirements)
     """
-    logger.info(f"[{correlation_id}] Starting relationship analysis with PROVEN simple_pipeline approach")
+    logger.info(f"[{correlation_id}] Relationship Analysis Agent: Starting analysis with simple_pipeline approach")
     
     # DEBUG: Log what sample_data we received
-    logger.info(f"[{correlation_id}] DEBUG: Received sample_data keys: {list(sample_data.keys())}")
+    logger.debug(f"[{correlation_id}] DEBUG: Received sample_data keys: {list(sample_data.keys())}")
     for key, value in sample_data.items():
         if isinstance(value, list):
-            logger.info(f"[{correlation_id}] DEBUG: {key} has {len(value)} items")
+            logger.debug(f"[{correlation_id}] DEBUG: {key} has {len(value)} items")
         else:
-            logger.info(f"[{correlation_id}] DEBUG: {key} has type {type(value)}")
+            logger.debug(f"[{correlation_id}] DEBUG: {key} has type {type(value)}")
     
     try:
         # Step 1: Pre-process sample data using proven minimal sampling approach
         processed_samples = create_minimal_samples(sample_data, max_records_per_step=2)
-        logger.info(f"[{correlation_id}] Pre-processed samples: {list(processed_samples.keys())}")
+        logger.debug(f"[{correlation_id}] Pre-processed samples: {list(processed_samples.keys())}")
         
         # Step 2: Build execution journey with context for each step
         execution_journey = {
@@ -234,32 +234,32 @@ Analyze the relationships between these execution steps and provide structured o
         result = await relationship_analyzer.run(analysis_context)
         
         # Step 6: Extract and validate JSON using proven extraction logic
-        logger.info(f"[{correlation_id}] 🔍 RAW RELATIONSHIP ANALYSIS OUTPUT:")
-        logger.info(f"[{correlation_id}] {result.output}")
-        logger.info(f"[{correlation_id}] 🔍 END RAW OUTPUT")
+        logger.debug(f"[{correlation_id}] RAW RELATIONSHIP ANALYSIS OUTPUT:")
+        logger.debug(f"[{correlation_id}] {result.output}")
+        logger.debug(f"[{correlation_id}] END RAW OUTPUT")
         
         relationships_json = extract_json_from_response(result.output)
         
         if not relationships_json:
             raise ValueError("Failed to extract valid JSON from relationship analysis response")
         
-        logger.info(f"[{correlation_id}] 🔍 PARSED RELATIONSHIP ANALYSIS JSON:")
-        logger.info(f"[{correlation_id}] {json.dumps(relationships_json, indent=2)}")
-        logger.info(f"[{correlation_id}] 🔍 END PARSED JSON")
+        logger.debug(f"[{correlation_id}] PARSED RELATIONSHIP ANALYSIS JSON:")
+        logger.debug(f"[{correlation_id}] {json.dumps(relationships_json, indent=2)}")
+        logger.debug(f"[{correlation_id}] END PARSED JSON")
         
         # Step 7: Validate using proven validation logic
         validation = validate_deterministic_output(relationships_json)
         
-        logger.info(f"[{correlation_id}] ✅ Relationship analysis complete!")
-        logger.info(f"[{correlation_id}] 🎯 Primary Entity: {relationships_json.get('primary_entity', 'unknown')}")
-        logger.info(f"[{correlation_id}] 🔗 Cross-Step Joins: {len(relationships_json.get('cross_step_joins', {}))}")
-        logger.info(f"[{correlation_id}] 📊 Field Mappings: {len(relationships_json.get('field_mappings', {}))}")
-        logger.info(f"[{correlation_id}] 📋 Aggregation Rules: {len(relationships_json.get('aggregation_rules', {}))}")
+        logger.info(f"[{correlation_id}] Relationship analysis completed")
+        logger.debug(f"[{correlation_id}] Primary Entity: {relationships_json.get('primary_entity', 'unknown')}")
+        logger.debug(f"[{correlation_id}] Cross-Step Joins: {len(relationships_json.get('cross_step_joins', {}))}")
+        logger.debug(f"[{correlation_id}] Field Mappings: {len(relationships_json.get('field_mappings', {}))}")
+        logger.debug(f"[{correlation_id}] Aggregation Rules: {len(relationships_json.get('aggregation_rules', {}))}")
         
         if validation["structure_valid"]:
-            logger.info(f"[{correlation_id}] ✅ Structure validation: PASSED")
+            logger.debug(f"[{correlation_id}] Structure validation: PASSED")
         else:
-            logger.warning(f"[{correlation_id}] ⚠️ Structure validation issues: {validation}")
+            logger.warning(f"[{correlation_id}] Structure validation issues: {validation}")
         
         # Step 8: Add step_inventory for compatibility with existing interface
         if 'step_inventory' not in relationships_json:
@@ -273,8 +273,8 @@ Analyze the relationships between these execution steps and provide structured o
         # Step 9: Log successful analysis details for debugging
         cross_step_joins = relationships_json.get('cross_step_joins', {})
         aggregation_rules = relationships_json.get('aggregation_rules', {})
-        logger.info(f"[{correlation_id}] Cross-step joins found: {list(cross_step_joins.keys())}")
-        logger.info(f"[{correlation_id}] Aggregation rules found: {list(aggregation_rules.keys())}")
+        logger.debug(f"[{correlation_id}] Cross-step joins found: {list(cross_step_joins.keys())}")
+        logger.debug(f"[{correlation_id}] Aggregation rules found: {list(aggregation_rules.keys())}")
         
         return relationships_json
         

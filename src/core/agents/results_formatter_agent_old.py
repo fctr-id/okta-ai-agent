@@ -235,7 +235,7 @@ async def analyze_sample_data_structure(ctx: RunContext[Dict[str, Any]], sample_
         raw_response = str(result.output) if hasattr(result, 'output') else str(result)
         
         # ALWAYS LOG RAW OUTPUT FOR DEBUGGING
-        logger.info(f"🔍 RAW LLM OUTPUT FOR RELATIONSHIP ANALYSIS:")
+        logger.info(f"RAW LLM OUTPUT FOR RELATIONSHIP ANALYSIS:")
         logger.info(f"Raw response length: {len(raw_response)}")
         logger.info(f"Raw response: {raw_response}")
         
@@ -264,13 +264,13 @@ async def analyze_sample_data_structure(ctx: RunContext[Dict[str, Any]], sample_
         analysis_result = json.loads(json_str)
         
         # DEBUG LOGGING: Log the complete relationship analysis output
-        logger.debug(f"🔍 RELATIONSHIP ANALYSIS TOOL OUTPUT:")
+        logger.debug(f"RELATIONSHIP ANALYSIS TOOL OUTPUT:")
         logger.debug(f"   Cross-step joins: {analysis_result.get('cross_step_joins', {})}")
         logger.debug(f"   Primary entity: {analysis_result.get('primary_entity', 'unknown')}")
         logger.debug(f"   Aggregation rules: {analysis_result.get('aggregation_rules', {})}")
         logger.debug(f"   Field mappings: {analysis_result.get('field_mappings', {})}")
         logger.debug(f"   Processing template: {analysis_result.get('processing_template', 'unknown')}")
-        logger.debug(f"🔍 COMPLETE RELATIONSHIP ANALYSIS:\n{json.dumps(analysis_result, indent=2)}")
+        logger.debug(f"COMPLETE RELATIONSHIP ANALYSIS:\n{json.dumps(analysis_result, indent=2)}")
         
         return analysis_result
         
@@ -287,7 +287,7 @@ async def analyze_sample_data_structure(ctx: RunContext[Dict[str, Any]], sample_
             "processing_template": "ENTITY_AGGREGATION - Basic fallback analysis due to tool error"
         }
         
-        logger.debug(f"🔍 FALLBACK RELATIONSHIP ANALYSIS: {fallback_result}")
+        logger.debug(f"FALLBACK RELATIONSHIP ANALYSIS: {fallback_result}")
         return fallback_result
 
 def _parse_raw_llm_response(raw_response: str, flow_id: str) -> Dict[str, Any]:
