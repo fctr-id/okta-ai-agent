@@ -276,6 +276,7 @@ class ModernExecutionManager:
         self.plan_ready_callback = None  # Optional callback for when plan is ready
         self.step_status_callback = None  # Optional callback for step status updates (step_number, step_type, status)
         self.planning_phase_callback = None  # Optional callback for planning lifecycle ('planning_start'/'planning_complete')
+        self.analysis_phase_callback = None  # Optional callback for analysis phases like relationship analysis ('analysis_start'/'analysis_complete')
         
         # STEP SCHEMAS STORAGE: Store schemas generated for Results Formatter to recreate schema-enhanced structure in data injection
         self.current_step_schemas = {}  # Store step schemas for data injection code generation
@@ -1496,6 +1497,13 @@ class ModernExecutionManager:
                 relationship_analysis = None
                 if estimated_tokens > token_threshold:  # Only do relationship analysis for complex datasets (token-based)
                     try:
+                        # Notify analysis phase callback - analysis starting
+                        if self.analysis_phase_callback:
+                            try:
+                                await self.analysis_phase_callback('analysis_start')
+                            except Exception as cb_err:
+                                logger.debug(f"[{correlation_id}] analysis_phase_callback analysis_start error ignored: {cb_err}")
+                        
                         logger.info(f"[{correlation_id}] Stage 1: Running relationship analysis on {total_records} records ({estimated_tokens:,} tokens)")
                         
                         # Use existing sampling utility for relationship analysis
@@ -1509,9 +1517,24 @@ class ModernExecutionManager:
                             query=query
                         )
                         logger.info(f"[{correlation_id}] Stage 1: Relationship analysis completed")
+                        
+                        # Notify analysis phase callback - analysis complete
+                        if self.analysis_phase_callback:
+                            try:
+                                await self.analysis_phase_callback('analysis_complete')
+                            except Exception as cb_err:
+                                logger.debug(f"[{correlation_id}] analysis_phase_callback analysis_complete error ignored: {cb_err}")
+                                
                     except Exception as e:
                         logger.warning(f"[{correlation_id}] Stage 1: Relationship analysis failed: {e}")
                         relationship_analysis = None
+                        
+                        # Notify analysis phase callback - analysis error
+                        if self.analysis_phase_callback:
+                            try:
+                                await self.analysis_phase_callback('analysis_error')
+                            except Exception as cb_err:
+                                logger.debug(f"[{correlation_id}] analysis_phase_callback analysis_error error ignored: {cb_err}")
 
             # Modern Execution Manager decides sample vs complete processing based on token size
             try:

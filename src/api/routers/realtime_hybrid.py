@@ -387,6 +387,52 @@ async def execute_plan_and_stream(
                 await step_status_queue.put(json.dumps(phase_event) + "\n")
         modern_executor.planning_phase_callback = on_planning_phase
 
+        async def on_analysis_phase(analysis_status: str):
+            """Callback for analysis phases like relationship analysis"""
+            try:
+                if analysis_status == 'analysis_start':
+                    # Send trigger event to make enriching_data step visible
+                    trigger_event = {
+                        "type": "trigger_enriching_data",
+                        "content": {
+                            'process_id': process_id,
+                            'step_name': 'enriching_data',
+                            'message': 'Starting data enrichment analysis'
+                        }
+                    }
+                    await step_status_queue.put(json.dumps(trigger_event) + "\n")
+                    logger.info(f"[{process_id}] Triggered enriching_data step visibility")
+                
+                elif analysis_status == 'analysis_complete':
+                    # Send complete event to finish enriching_data step
+                    complete_event = {
+                        "type": "complete_enriching_data", 
+                        "content": {
+                            'process_id': process_id,
+                            'step_name': 'enriching_data',
+                            'message': 'Data enrichment analysis completed'
+                        }
+                    }
+                    await step_status_queue.put(json.dumps(complete_event) + "\n")
+                    logger.info(f"[{process_id}] Completed enriching_data step")
+                
+                elif analysis_status == 'analysis_error':
+                    # Send error event for enriching_data step
+                    error_event = {
+                        "type": "complete_enriching_data", 
+                        "content": {
+                            'process_id': process_id,
+                            'step_name': 'enriching_data',
+                            'message': 'Data enrichment analysis failed',
+                            'status': 'error'
+                        }
+                    }
+                    await step_status_queue.put(json.dumps(error_event) + "\n")
+                    logger.info(f"[{process_id}] Enriching_data step failed")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Analysis phase callback error: {e}")
+        modern_executor.analysis_phase_callback = on_analysis_phase
+
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
         logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
         
@@ -429,6 +475,7 @@ async def execute_plan_and_stream(
         modern_executor.plan_ready_callback = None
         modern_executor.step_status_callback = None
         modern_executor.planning_phase_callback = None
+        modern_executor.analysis_phase_callback = None
 
         # Log execution summary
         logger.info(f"[{process_id}] EXECUTION RESULTS:")

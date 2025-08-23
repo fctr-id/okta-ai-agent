@@ -129,22 +129,6 @@
         </div>
       </transition>
 
-      
-          <!-- Add this after the search container - ERROR -->
-        <transition name="fade">
-          <div v-if="rtError" class="error-container mt-4">
-            <v-alert
-              type="error"
-              variant="tonal"
-              border="start"
-              class="mx-auto"
-              style="max-width: 800px;"
-            >
-              {{ rtError }}
-            </v-alert>
-          </div>
-        </transition>
-
       <!-- Unified Progress Display OR Final Outcome Area -->
       <transition name="fade-up">
         <div v-if="showProgressDisplayArea || showFinalOutcomeArea" ref="messagesContainerRef"
@@ -180,15 +164,15 @@
                     </transition-group>
                   </v-stepper-header>
                 </v-stepper>
-                
-                <!-- Error message under stepper -->
-                <div v-if="rtExecutionStatus === 'error' && rtError" 
-                     class="error-details mt-3 mx-4 mb-3 pa-3 rounded bg-red-lighten-5">
-                  <div class="d-flex align-center text-red-darken-2">
-                    <v-icon color="error" class="me-2">mdi-alert-circle-outline</v-icon>
-                    <span class="font-weight-medium">Step failed: {{ getFailedStepName() }}</span>
-                  </div>
-                  <div class="error-message mt-2">{{ rtError }}</div>
+              </div>
+            </div>
+
+            <!-- Dedicated Error Container (outside stepper) -->
+            <div v-if="rtExecutionStatus === 'error' && rtError" class="error-container-standalone mt-4">
+              <div class="error-details pa-4 rounded bg-red-lighten-5">
+                <div class="d-flex align-center text-red-darken-2">
+                  <v-icon color="error" class="me-2">mdi-alert-circle-outline</v-icon>
+                  <span class="font-weight-medium">Step failed: {{ getFailedStepName() }}</span>
                 </div>
               </div>
             </div>
@@ -489,14 +473,27 @@ const getFailedStepName = () => {
   if (failedStep) {
     return failedStep.tool_name || `Step ${failedStep.step_index + 1}`;
   }
-  return 'Unknown step';
+  
+  // When there's a general execution error but no specific failed step
+  // Provide a cleaner message instead of showing the raw error
+  if (rtError.value) {
+    // Check if the error is about 0 failed steps (general execution failure)
+    if (rtError.value.includes('0 failed steps') || rtError.value.includes('completed with 0')) {
+      return 'Execution error occurred';
+    }
+    // For other errors, show a generic message
+    return 'Error occurred during execution';
+  }
+  
+  return 'Error! Please check the backend and try again.';
 };
 
 const hasStepperExpanded = computed(() => {
   // Expand the stepper container when:
-  // 1. We have received execution steps from step_plan_info (more than just the 3 bookend steps)
+  // 1. We have received execution steps from step_plan_info (more than the 4 bookend steps including hidden ones)
   // 2. OR we have an error condition
-  return (rtSteps.value?.length > 3) || rtExecutionStatus.value === 'error';
+  const visibleStepsCount = rtSteps.value?.filter(step => !step.hidden).length || 0;
+  return (visibleStepsCount > 3) || rtExecutionStatus.value === 'error';
 });
 
 const resetInterface = async () => {
@@ -553,7 +550,9 @@ const handleScroll = () => {
 // Stepper management using the managed step flow from useRealtimeStream
 
 const progressSteps = computed(() => {
-  return rtSteps.value.map((step, index) => {
+  return rtSteps.value
+    .filter(step => !step.hidden) // Filter out hidden steps
+    .map((step, index) => {
     let badge = '';
     let entity = '';
     let operation = '';
@@ -575,6 +574,11 @@ const progressSteps = computed(() => {
       entity = 'Results';
       operation = '';
       phase = 'finalizing';
+    } else if (tool === 'enriching_data') {
+      badge = 'ENRICHING';
+      entity = 'Data';
+      operation = '';
+      phase = 'enriching';
     } else if (tool === 'api') {
       badge = 'API';
       entity = step.entity || '';
@@ -1256,11 +1260,14 @@ watch(showToolsModal, (newVal) => {
 }
 
 /* Phase color accents */
-.step-badge.badge-creating { background: #f0ecff; color: #5d3fc4; }
+.step-badge.badge-crafting { background: #f3e5f5; color: #7b1fa2; }
 .step-badge.badge-generating { background: #e9f7ff; color: #076489; }
 .step-badge.badge-formatting { background: #f5f6ff; color: #2d3c9c; }
+.step-badge.badge-enriching { background: #fde7d9; color: #f57c00; }
+.step-badge.badge-finalizing { background: #e8f5e8; color: #2e7d32; }
 .step-badge.badge-api { background: #e8f9f6; color: #0f6f62; }
 .step-badge.badge-sql { background: #fff4e5; color: #9a5a00; }
+.step-badge.badge-hybrid { background: #fce4ec; color: #ad1457; }
 .step-badge.badge-other { background: #ececec; color: #555; }
 .step-badge.badge-error { 
   /* Softer error styling (Option B) to align with other pastel phase badges */
@@ -1662,6 +1669,11 @@ watch(showToolsModal, (newVal) => {
 .error-details {
   border-left: 3px solid #ef4444;
   background-color: #fef2f2;
+}
+
+.error-container-standalone {
+  max-width: 800px;
+  margin: 0 auto;
 }
 
 .error-message {

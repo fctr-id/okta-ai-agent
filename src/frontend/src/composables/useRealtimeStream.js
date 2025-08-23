@@ -81,10 +81,11 @@ export function useRealtimeStream() {
         //     isStreaming: isStreaming.value
         // });
 
-        // Initialize with three sentinel steps:
+        // Initialize with four sentinel steps:
         // 1. thinking (pre-plan entity relevance selection)
         // 2. generating_steps (plan generation)
-        // 3. finalizing_results (will activate after all execution steps complete)
+        // 3. enriching_data (hidden step that appears before results formatting when triggered)
+        // 4. finalizing_results (will activate after all execution steps complete)
         execution.steps = [
             {
                 id: 'thinking',
@@ -97,6 +98,13 @@ export function useRealtimeStream() {
                 tool_name: 'generating_steps',
                 reason: 'Generating detailed execution plan',
                 status: 'pending',
+            },
+            {
+                id: 'enriching_data',
+                tool_name: 'enriching_data',
+                reason: 'Enriching data with contextual insights',
+                status: 'hidden', // Hidden by default, shown only when triggered
+                hidden: true
             },
             {
                 id: 'finalizing_results',
@@ -216,6 +224,14 @@ export function useRealtimeStream() {
                             // console.log("Handling step_status event");
                             handleStepStatusEvent(event);
                             break;
+                        case 'trigger_enriching_data':
+                            // console.log("Handling trigger_enriching_data event");
+                            triggerEnrichingData();
+                            break;
+                        case 'complete_enriching_data':
+                            // console.log("Handling complete_enriching_data event");
+                            completeEnrichingData();
+                            break;
                         case 'error':
                             // console.log("Handling error event");
                             handleErrorEvent(event);
@@ -334,7 +350,7 @@ export function useRealtimeStream() {
             const content = data.content;
             // console.log("Step status content:", content);
 
-            // Handle Modern Execution Manager format
+            // Handle Modern Execution Manager format - Backend-driven step activation
             if (content.step_number !== undefined && content.step_name && content.status) {
                 // console.log(`Processing step ${content.step_number}: ${content.step_name} - ${content.status}`);
                 // Map step numbers to our inserted steps (accounting for thinking at index 0 and generating_steps at index 1)
@@ -383,19 +399,14 @@ export function useRealtimeStream() {
                         execution.status = "executing";
                     }
                     
-                    // Check if all execution steps are completed (excluding bookends)
+                    // SIMPLIFIED: Let the backend completely control step activation
+                    // Don't automatically activate finalizing_results here - let final result event handle it
+                    // This prevents race condition where both enriching_data and finalizing_results become active
                     if (content.status === 'completed') {
-                        const executionSteps = execution.steps.slice(2, -1); // Exclude thinking, generating_steps and finalizing_results
-                        const allExecutionStepsCompleted = executionSteps.every(step => step.status === 'completed');
-                        
-                        if (allExecutionStepsCompleted) {
-                            // All execution steps are done, activate finalizing_results
-                            const finalizingStepIndex = execution.steps.length - 1;
-                            if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                                execution.steps[finalizingStepIndex].status = 'active';
-                                execution.currentStepIndex = finalizingStepIndex;
-                            }
-                        }
+                        // Just update the current step index, don't activate finalizing_results yet
+                        // The backend will either:
+                        // 1. Trigger enriching_data step, then send final results
+                        // 2. Send final results directly (which activates finalizing_results)
                     }
                 }
             }
@@ -437,15 +448,17 @@ export function useRealtimeStream() {
                     return newStep;
                 });
 
-                // Insert the new steps between generating_steps (index 1) and finalizing_results (last)
+                // Insert the new steps between generating_steps (index 1) and the hidden steps (enriching_data, finalizing_results)
                 const thinkingStep = execution.steps[0];
                 const generatingStepsStep = execution.steps[1];
-                const finalizingResultsStep = execution.steps[execution.steps.length - 1];
+                const enrichingDataStep = execution.steps[2]; // Keep the hidden enriching_data step
+                const finalizingResultsStep = execution.steps[3]; // finalizing_results is now at index 3
                 
                 execution.steps = [
                     thinkingStep,
                     generatingStepsStep,
                     ...newExecutionSteps,
+                    enrichingDataStep, // Keep hidden until triggered
                     finalizingResultsStep
                 ];
 
@@ -512,8 +525,10 @@ export function useRealtimeStream() {
                 activeEventSource.value = null;
             }
             
-            // Activate the finalizing_results step (last step)
+            // SIMPLIFIED: Always activate and complete finalizing_results step
+            // The backend controls execution steps, so when we get final results, we can safely finalize
             const finalizingStepIndex = execution.steps.length - 1;
+            
             if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
                 execution.steps[finalizingStepIndex].status = 'active';
                 execution.currentStepIndex = finalizingStepIndex;
@@ -922,6 +937,37 @@ export function useRealtimeStream() {
         // });
     }, { deep: true });
 
+    /**
+     * Trigger the enriching data step with animation
+     * This makes the hidden step visible and activates it before results formatting
+     */
+    const triggerEnrichingData = () => {
+        const enrichingStepIndex = execution.steps.findIndex(step => step.id === 'enriching_data');
+        if (enrichingStepIndex !== -1 && execution.steps[enrichingStepIndex].hidden) {
+            // Make the step visible and active
+            execution.steps[enrichingStepIndex].hidden = false;
+            execution.steps[enrichingStepIndex].status = 'active';
+            execution.currentStepIndex = enrichingStepIndex;
+        }
+    };
+
+    /**
+     * Complete the enriching data step and move to finalizing results
+     */
+    const completeEnrichingData = () => {
+        const enrichingStepIndex = execution.steps.findIndex(step => step.id === 'enriching_data');
+        const finalizingStepIndex = execution.steps.findIndex(step => step.id === 'finalizing_results');
+        
+        if (enrichingStepIndex !== -1) {
+            execution.steps[enrichingStepIndex].status = 'completed';
+        }
+        
+        if (finalizingStepIndex !== -1) {
+            execution.steps[finalizingStepIndex].status = 'active';
+            execution.currentStepIndex = finalizingStepIndex;
+        }
+    };
+
     return {
         // State
         isLoading,
@@ -937,5 +983,7 @@ export function useRealtimeStream() {
         connectToStream,
         cancelProcess,
         cleanup,
+        triggerEnrichingData,
+        completeEnrichingData,
     };
 }
