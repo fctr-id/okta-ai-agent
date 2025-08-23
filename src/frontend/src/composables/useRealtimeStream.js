@@ -35,8 +35,15 @@ export function useRealtimeStream() {
         currentStepIndex: -1,
         steps: [],
         results: null,
-    planningStarted: false,
-    planningCompleted: false,
+        currentPhase: "idle", // Track current execution phase for dynamic stepper updates
+    });
+
+    // NEW: Expansion Panel Data - standardized SSE events
+    const expansionPanelData = reactive({
+        visible: false,
+        planData: null,
+        stepDetails: [], // Array of step execution details with timing, progress, etc.
+        currentStepExecution: null, // Current step being executed
     });
 
     /**
@@ -46,14 +53,6 @@ export function useRealtimeStream() {
      */
     const startProcess = async (query) => {
         if (!query?.trim()) return null;
-
-        // console.log("🔄 startProcess: Starting new query - RESETTING ALL STATE");
-        // console.log("🔄 startProcess: Previous state before reset:", {
-        //     hasResults: !!execution.results,
-        //     previousStatus: execution.status,
-        //     isProcessing: isProcessing.value,
-        //     isStreaming: isStreaming.value
-        // });
 
         // Reset state
         isLoading.value = true;
@@ -65,27 +64,26 @@ export function useRealtimeStream() {
         execution.currentStepIndex = -1;
         execution.results = null;
 
+        // Reset expansion panel data
+        expansionPanelData.visible = false;
+        expansionPanelData.planData = null;
+        expansionPanelData.stepDetails = [];
+        expansionPanelData.currentStepExecution = null;
+
         // Reset chunked results state
         chunkedResults.value = {
             chunks: [],
             expectedChunks: 0,
             receivedChunks: 0,
             totalRecords: 0,
-            isReceivingChunks: false
+            isReceivingChunks: false,
+            baseData: null
         };
 
-        // console.log("🔄 startProcess: State after reset:", {
-        //     hasResults: !!execution.results,
-        //     newStatus: execution.status,
-        //     isProcessing: isProcessing.value,
-        //     isStreaming: isStreaming.value
-        // });
-
-        // Initialize with four sentinel steps:
+        // Initialize with three core steps:
         // 1. thinking (pre-plan entity relevance selection)
         // 2. generating_steps (plan generation)
-        // 3. enriching_data (hidden step that appears before results formatting when triggered)
-        // 4. finalizing_results (will activate after all execution steps complete)
+        // 3. finalizing_results (will activate after all execution steps complete)
         execution.steps = [
             {
                 id: 'thinking',
@@ -98,13 +96,6 @@ export function useRealtimeStream() {
                 tool_name: 'generating_steps',
                 reason: 'Generating detailed execution plan',
                 status: 'pending',
-            },
-            {
-                id: 'enriching_data',
-                tool_name: 'enriching_data',
-                reason: 'Enriching data with contextual insights',
-                status: 'hidden', // Hidden by default, shown only when triggered
-                hidden: true
             },
             {
                 id: 'finalizing_results',
@@ -199,56 +190,58 @@ export function useRealtimeStream() {
 
             // Handle connection open event
             eventSource.onopen = () => {
-                // console.log("SSE connection opened");
                 execution.status = execution.planGenerated ? "executing" : "planning";
             };
 
             // Handle all messages with unified JSON format {type: "...", content: {...}}
             eventSource.onmessage = (event) => {
-                // console.log("SSE Event received:", event.data);
                 try {
                     const data = JSON.parse(event.data);
-                    // console.log("Parsed SSE data:", data);
                     
                     // Route messages based on the unified 'type' field
                     switch (data.type) {
-                        case 'status':
-                            // console.log("Handling status event");
-                            handlePlanStatusEvent(event);
+                        // NEW STANDARDIZED EVENTS - Complete SSE System
+                        case 'PLAN-GENERATED':
+                            handlePlanGeneratedEvent(event);
                             break;
-                        case 'plan':
-                            // console.log("Handling plan event");
-                            handleStepPlanInfoEvent(event);
+                        case 'STEP-START':
+                            handleStepStartEvent(event);
                             break;
-                        case 'step_status':
-                            // console.log("Handling step_status event");
-                            handleStepStatusEvent(event);
+                        case 'STEP-END':
+                            handleStepEndEvent(event);
                             break;
-                        case 'trigger_enriching_data':
-                            // console.log("Handling trigger_enriching_data event");
-                            triggerEnrichingData();
+                        case 'STEP-PROGRESS':
+                            handleStepProgressEvent(event);
                             break;
-                        case 'complete_enriching_data':
-                            // console.log("Handling complete_enriching_data event");
-                            completeEnrichingData();
+                        case 'STEP-COUNT':
+                            handleStepCountEvent(event);
                             break;
+                        case 'STEP-TOKENS':
+                            handleStepTokensEvent(event);
+                            break;
+                        case 'STEP-ERROR':
+                            handleStepErrorEvent(event);
+                            break;
+                        case 'PLANNING-PHASE':
+                            console.log(`🔍 DEBUG: PLANNING-PHASE case reached!`);
+                            handlePlanningPhaseEvent(event);
+                            break;
+                        
+                        // Essential UI events (kept for functionality)
                         case 'error':
-                            // console.log("Handling error event");
                             handleErrorEvent(event);
                             break;
                         case 'metadata':
                             handleChunkedMetadata(event);
                             break;
                         case 'batch':
-                            // console.log("Handling batch event - chunked data batch");
                             handleChunkedBatch(event);
                             break;
                         case 'complete':
-                            // console.log("Handling complete event");
                             handleFinalResultEvent(event);
                             break;
                         default:
-                            // console.log("Unhandled message type:", data.type, data);
+                            break;
                     }
                 } catch (err) {
                     console.error("Error parsing SSE message:", err, event.data);
@@ -271,208 +264,6 @@ export function useRealtimeStream() {
             return null;
         }
     };
-
-    /**
-     * Handle plan status events
-     */
-
-    const handlePlanStatusEvent = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            const content = data.content;
-            // Only activate generating_steps when actual planning starts
-            if (content.status === 'planning_start' && execution.steps[0] && execution.steps[0].id === 'thinking') {
-                execution.planningStarted = true;
-                execution.status = 'planning';
-                // Complete thinking step and activate generating_steps
-                execution.steps[0].status = 'completed';
-                if (execution.steps[1] && execution.steps[1].id === 'generating_steps') {
-                    execution.steps[1].status = 'active';
-                }
-                execution._thinkingRenamed = true; // Keep flag for compatibility
-            }
-
-            // If we receive explicit planning_complete before plan event, mark generating_steps completed
-            if (content.status === 'planning_complete' && execution.steps[1] && execution.steps[1].id === 'generating_steps') {
-                // If thinking is still active (edge case), complete it first
-                if (execution.steps[0] && execution.steps[0].id === 'thinking' && execution.steps[0].status === 'active') {
-                    execution.steps[0].status = 'completed';
-                    execution.steps[1].status = 'active';
-                }
-                // Complete the generating_steps step
-                if (execution.steps[1].status !== 'completed') {
-                    execution.steps[1].status = 'completed';
-                }
-                execution.planningCompleted = true;
-            }
-
-            // Handle rich plan details when available
-            if (content.plan_details) {
-                execution.planGenerated = true;
-                const steps = content.plan_details.steps_summary || [];
-                execution.steps = steps.map((step) => ({
-                    id: step.step_index,
-                    tool_name: step.tool_name,
-                    reason: step.reason,
-                    status: "pending",
-                }));
-                execution.status = "executing";
-                return;
-            }
-
-            // Handle simpler plan status updates
-            if (
-                (content.status === "generated" ||
-                 content.status === "starting_execution" ||
-                 content.status === "running_execution") &&
-                 // Avoid premature transition: require planning started + (plan data arrived or planning complete)
-                 ((execution.planningStarted && execution.planningCompleted) || execution.planGenerated)
-            ) {
-                // Only switch to executing if we actually have a plan (plan event) OR got planning_complete
-                execution.planGenerated = execution.planGenerated || execution.planningCompleted;
-                execution.status = "executing";
-            } else if (content.status === 'running_execution' && !execution.planningStarted) {
-                // Backend may emit a generic running_execution early; treat as still planning
-                execution.status = 'planning';
-            }
-        } catch (err) {
-            console.error("Error processing plan status event:", err);
-        }
-    };
-
-    /**
-     * Handle step status update events
-     */
-    const handleStepStatusEvent = (event) => {
-        // console.log("handleStepStatusEvent called with:", event.data);
-        try {
-            const data = JSON.parse(event.data);
-            const content = data.content;
-            // console.log("Step status content:", content);
-
-            // Handle Modern Execution Manager format - Backend-driven step activation
-            if (content.step_number !== undefined && content.step_name && content.status) {
-                // console.log(`Processing step ${content.step_number}: ${content.step_name} - ${content.status}`);
-                // Map step numbers to our inserted steps (accounting for thinking at index 0 and generating_steps at index 1)
-                // Backend step 1 -> frontend index 2 (after thinking and generating_steps)
-                const stepIndex = content.step_number + 1; // Offset by 2 (thinking + generating_steps), but step_number is 1-based
-                
-                if (stepIndex >= 2 && stepIndex < execution.steps.length - 1) { // Exclude finalizing_results (last step)
-                    // Map backend status to frontend status
-                    const statusMap = {
-                        'running': 'active',
-                        'completed': 'completed', 
-                        'error': 'error'
-                    };
-                    
-                    const frontendStatus = statusMap[content.status] || content.status;
-                    execution.steps[stepIndex].status = frontendStatus;
-                    
-                    // Handle ERROR status - immediately stop execution and show error
-                    if (content.status === 'error') {
-                        console.error('Step failed:', content);
-                        execution.status = "error";
-                        execution.currentStepIndex = stepIndex;
-                        
-                        // Set error message for user display
-                        const stepName = execution.steps[stepIndex].tool_name || `Step ${stepIndex}`;
-                        error.value = `Execution failed at ${stepName}. The system encountered an error and cannot continue.`;
-                        
-                        // Mark remaining steps as disabled
-                        for (let i = stepIndex + 1; i < execution.steps.length; i++) {
-                            if (execution.steps[i].status === "pending" || execution.steps[i].status === "active") {
-                                execution.steps[i].status = "pending";
-                                execution.steps[i].disabled = true;
-                            }
-                        }
-                        
-                        // Stop processing
-                        isProcessing.value = false;
-                        isStreaming.value = false;
-                        
-                        return;
-                    }
-                    
-                    // Update current step index if step is running
-                    if (content.status === 'running') {
-                        execution.currentStepIndex = stepIndex;
-                        execution.status = "executing";
-                    }
-                    
-                    // SIMPLIFIED: Let the backend completely control step activation
-                    // Don't automatically activate finalizing_results here - let final result event handle it
-                    // This prevents race condition where both enriching_data and finalizing_results become active
-                    if (content.status === 'completed') {
-                        // Just update the current step index, don't activate finalizing_results yet
-                        // The backend will either:
-                        // 1. Trigger enriching_data step, then send final results
-                        // 2. Send final results directly (which activates finalizing_results)
-                    }
-                }
-            }
-        } catch (err) {
-            console.error("Error processing step status event:", err);
-        }
-    };
-
-    /**
-     * Handle step plan info events - INSERT steps between generate_plan and finalizing_results
-     */
-    const handleStepPlanInfoEvent = (event) => {
-        try {
-            const data = JSON.parse(event.data);
-            const content = data.content;
-
-            if (content.steps && Array.isArray(content.steps)) {
-                execution.planGenerated = true;
-                
-                // Complete the thinking and generating_steps sentinel steps
-                if (execution.steps[0] && execution.steps[0].id === 'thinking') {
-                    execution.steps[0].status = 'completed';
-                }
-                if (execution.steps[1] && execution.steps[1].id === 'generating_steps') {
-                    execution.steps[1].status = 'completed';
-                }
-
-                // Create the new execution steps from the plan
-                const newExecutionSteps = content.steps.map((step, index) => {
-                    const newStep = {
-                        id: `step_${index + 1}`,
-                        tool_name: step.tool_name,
-                        operation: step.operation,
-                        entity: step.entity,
-                        reason: step.query_context || 'Processing data',
-                        status: "pending",
-                        critical: step.critical
-                    };
-                    return newStep;
-                });
-
-                // Insert the new steps between generating_steps (index 1) and the hidden steps (enriching_data, finalizing_results)
-                const thinkingStep = execution.steps[0];
-                const generatingStepsStep = execution.steps[1];
-                const enrichingDataStep = execution.steps[2]; // Keep the hidden enriching_data step
-                const finalizingResultsStep = execution.steps[3]; // finalizing_results is now at index 3
-                
-                execution.steps = [
-                    thinkingStep,
-                    generatingStepsStep,
-                    ...newExecutionSteps,
-                    enrichingDataStep, // Keep hidden until triggered
-                    finalizingResultsStep
-                ];
-
-                execution.status = "executing";
-            } else {
-                // console.warn("[handleStepPlanInfoEvent] No valid steps array found in data:", data);
-            }
-        } catch (err) {
-            console.error("[handleStepPlanInfoEvent] Error processing step plan info event:", err);
-            console.error("[handleStepPlanInfoEvent] Event data:", event.data);
-        }
-    };
-
-    // This function was redundant - chunked streaming is now handled by handleChunkedMetadata and handleChunkedBatch
 
     /**
      * Handle final result events - Activate finalizing_results step and then complete
@@ -777,8 +568,6 @@ export function useRealtimeStream() {
         }
     };
 
-    // This function was redundant - phase updates are handled by step_status events
-
     /**
      * Handle error events
      */
@@ -801,8 +590,6 @@ export function useRealtimeStream() {
             console.error("Error processing error event:", err);
         }
     };
-
-    // This function was redundant - cancellation is handled by the main error handling
 
     /**
      * Handle connection errors
@@ -937,36 +724,327 @@ export function useRealtimeStream() {
         // });
     }, { deep: true });
 
+    // ====== NEW STANDARDIZED EVENT HANDLERS FOR EXPANSION PANEL ======
+    
     /**
-     * Trigger the enriching data step with animation
-     * This makes the hidden step visible and activates it before results formatting
+     * Handle PLAN-GENERATED events - store plan data for expansion panel AND setup stepper
      */
-    const triggerEnrichingData = () => {
-        const enrichingStepIndex = execution.steps.findIndex(step => step.id === 'enriching_data');
-        if (enrichingStepIndex !== -1 && execution.steps[enrichingStepIndex].hidden) {
-            // Make the step visible and active
-            execution.steps[enrichingStepIndex].hidden = false;
-            execution.steps[enrichingStepIndex].status = 'active';
-            execution.currentStepIndex = enrichingStepIndex;
+    const handlePlanGeneratedEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content;
+            
+            // Store plan data for expansion panel
+            expansionPanelData.planData = {
+                plan: content.plan,
+                stepCount: content.step_count,
+                formattedTime: content.formatted_time,
+                estimatedDuration: content.estimated_duration
+            };
+            
+            // Make expansion panel visible when we have plan data
+            expansionPanelData.visible = true;
+            
+            // STEPPER MANAGEMENT: Setup stepper steps from plan data
+            if (content.plan && content.plan.steps && Array.isArray(content.plan.steps)) {
+                execution.planGenerated = true;
+                
+                // Complete the thinking and generating_steps sentinel steps
+                if (execution.steps[0] && execution.steps[0].id === 'thinking') {
+                    execution.steps[0].status = 'completed';
+                }
+                if (execution.steps[1] && execution.steps[1].id === 'generating_steps') {
+                    execution.steps[1].status = 'completed';
+                }
+
+                // Create the new execution steps from the plan for the stepper
+                const newExecutionSteps = content.plan.steps.map((step, index) => ({
+                    id: step.step_index || index,
+                    tool_name: step.tool_name || step.step_name,
+                    reason: step.reason || step.step_name,
+                    status: "pending",
+                    operation: step.operation,
+                    entity: step.entity
+                }));
+
+                // Insert new steps between thinking/generating_steps and finalizing_results
+                execution.steps = [
+                    execution.steps[0], // thinking
+                    execution.steps[1], // generating_steps
+                    ...newExecutionSteps,
+                    execution.steps[execution.steps.length - 1] // finalizing_results
+                ];
+
+                execution.status = "executing";
+            }
+            
+            console.log("📋 PLAN-GENERATED: Plan stored for expansion panel and stepper updated");
+        } catch (err) {
+            console.error("Error handling PLAN-GENERATED event:", err);
         }
     };
 
     /**
-     * Complete the enriching data step and move to finalizing results
+     * Handle STEP-START events - track step start timing AND update stepper status
      */
-    const completeEnrichingData = () => {
-        const enrichingStepIndex = execution.steps.findIndex(step => step.id === 'enriching_data');
-        const finalizingStepIndex = execution.steps.findIndex(step => step.id === 'finalizing_results');
-        
-        if (enrichingStepIndex !== -1) {
-            execution.steps[enrichingStepIndex].status = 'completed';
-        }
-        
-        if (finalizingStepIndex !== -1) {
-            execution.steps[finalizingStepIndex].status = 'active';
-            execution.currentStepIndex = finalizingStepIndex;
+    const handleStepStartEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content;
+            
+            // Update or create step detail record for expansion panel
+            const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
+                step => step.stepNumber === content.step_number
+            );
+            
+            const stepDetail = {
+                stepNumber: content.step_number,
+                stepType: content.step_type,
+                stepName: content.step_name,
+                queryContext: content.query_context,
+                critical: content.critical,
+                startTime: content.formatted_time,
+                endTime: null,
+                duration: null,
+                success: null,
+                recordCount: 0,
+                progressPercentage: 0,
+                progressDetails: '',
+                inputTokens: 0,
+                outputTokens: 0,
+                errorMessage: null
+            };
+            
+            if (stepDetailIndex >= 0) {
+                // Update existing step
+                expansionPanelData.stepDetails[stepDetailIndex] = {
+                    ...expansionPanelData.stepDetails[stepDetailIndex],
+                    ...stepDetail
+                };
+            } else {
+                // Add new step
+                expansionPanelData.stepDetails.push(stepDetail);
+            }
+            
+            // Track current step being executed
+            expansionPanelData.currentStepExecution = {
+                stepNumber: content.step_number,
+                stepType: content.step_type,
+                stepName: content.step_name,
+                startTime: content.formatted_time
+            };
+            
+            // STEPPER MANAGEMENT: Update stepper step status to active
+            const stepIndex = content.step_number + 1; // Offset for thinking + generating_steps
+            if (stepIndex >= 2 && stepIndex < execution.steps.length - 1) {
+                execution.steps[stepIndex].status = 'active';
+                execution.currentStepIndex = stepIndex;
+            }
+            
+            console.log(`🚀 STEP-START: Step ${content.step_number} (${content.step_type}) - ${content.step_name}`);
+        } catch (err) {
+            console.error("Error handling STEP-START event:", err);
         }
     };
+
+    /**
+     * Handle STEP-END events - track completion timing AND update stepper status
+     */
+    const handleStepEndEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content;
+            
+            // Find and update the step detail for expansion panel
+            const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
+                step => step.stepNumber === content.step_number
+            );
+            
+            if (stepDetailIndex >= 0) {
+                const stepDetail = expansionPanelData.stepDetails[stepDetailIndex];
+                stepDetail.endTime = content.formatted_time;
+                stepDetail.duration = content.duration_seconds;
+                stepDetail.success = content.success;
+                stepDetail.recordCount = content.record_count || stepDetail.recordCount;
+                stepDetail.errorMessage = content.error_message;
+                
+                // Update the step detail in place for Vue reactivity
+                expansionPanelData.stepDetails[stepDetailIndex] = { ...stepDetail };
+            }
+            
+            // Clear current step execution if this matches
+            if (expansionPanelData.currentStepExecution?.stepNumber === content.step_number) {
+                expansionPanelData.currentStepExecution = null;
+            }
+            
+            // STEPPER MANAGEMENT: Update stepper step status to completed/error
+            const stepIndex = content.step_number + 1; // Offset for thinking + generating_steps
+            if (stepIndex >= 2 && stepIndex < execution.steps.length - 1) {
+                execution.steps[stepIndex].status = content.success ? 'completed' : 'error';
+            }
+            
+            const status = content.success ? "SUCCESS" : "FAILED";
+            console.log(`✅ STEP-END: Step ${content.step_number} - ${status} - ${content.duration_seconds?.toFixed(1)}s - ${content.record_count || 0} records`);
+        } catch (err) {
+            console.error("Error handling STEP-END event:", err);
+        }
+    };
+
+    /**
+     * Handle STEP-PROGRESS events - track API progress percentage
+     */
+    const handleStepProgressEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content;
+            
+            // Find and update the step detail
+            const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
+                step => step.stepNumber === content.step_number
+            );
+            
+            if (stepDetailIndex >= 0) {
+                const stepDetail = expansionPanelData.stepDetails[stepDetailIndex];
+                stepDetail.progressPercentage = content.progress_percentage;
+                stepDetail.progressDetails = content.message;  // Backend sends 'message', not 'details'
+                
+                // Update the step detail in place for Vue reactivity
+                expansionPanelData.stepDetails[stepDetailIndex] = { ...stepDetail };
+            }
+            
+            console.log(`📈 STEP-PROGRESS: Step ${content.step_number} - ${content.progress_percentage?.toFixed(1)}% - ${content.message}`);
+        } catch (err) {
+            console.error("Error handling STEP-PROGRESS event:", err);
+        }
+    };
+
+    /**
+     * Handle STEP-COUNT events - track record counts from operations
+     */
+    const handleStepCountEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content;
+            
+            // Find and update the step detail
+            const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
+                step => step.stepNumber === content.step_number
+            );
+            
+            if (stepDetailIndex >= 0) {
+                const stepDetail = expansionPanelData.stepDetails[stepDetailIndex];
+                stepDetail.recordCount = content.record_count;
+                
+                // Update the step detail in place for Vue reactivity
+                expansionPanelData.stepDetails[stepDetailIndex] = { ...stepDetail };
+            }
+            
+            console.log(`📊 STEP-COUNT: Step ${content.step_number} - ${content.record_count} ${content.operation_type} records`);
+        } catch (err) {
+            console.error("Error handling STEP-COUNT event:", err);
+        }
+    };
+
+    /**
+     * Handle STEP-TOKENS events - track LLM token usage and costs
+     */
+    const handleStepTokensEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content;
+            
+            // Find and update the step detail
+            const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
+                step => step.stepNumber === content.step_number
+            );
+            
+            if (stepDetailIndex >= 0) {
+                const stepDetail = expansionPanelData.stepDetails[stepDetailIndex];
+                stepDetail.inputTokens = content.input_tokens;
+                stepDetail.outputTokens = content.output_tokens;
+                // Note: total_cost removed to match execution_events_spec.md
+                
+                // Update the step detail in place for Vue reactivity
+                expansionPanelData.stepDetails[stepDetailIndex] = { ...stepDetail };
+            }
+            
+            const totalTokens = content.input_tokens + content.output_tokens;
+            console.log(`🪙 STEP-TOKENS: Step ${content.step_number} - ${totalTokens} tokens (${content.agent_name})`);
+        } catch (err) {
+            console.error("Error handling STEP-TOKENS event:", err);
+        }
+    };
+
+    /**
+     * Handle STEP-ERROR events - track step-specific errors with retry options
+     */
+    const handleStepErrorEvent = (event) => {
+        try {
+            const content = event.content;
+            
+            // Find the step detail for this specific step
+            const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
+                step => step.stepNumber === content.step_number
+            );
+            
+            if (stepDetailIndex !== -1) {
+                const stepDetail = expansionPanelData.stepDetails[stepDetailIndex];
+                
+                // Mark step as failed and add error information
+                stepDetail.status = 'error';
+                stepDetail.errorMessage = content.error_message;
+                stepDetail.errorType = content.error_type;
+                stepDetail.retryPossible = content.retry_possible;
+                stepDetail.technicalDetails = content.technical_details;
+                stepDetail.formattedTime = content.formatted_time;
+                
+                // Update the step detail in place for Vue reactivity
+                expansionPanelData.stepDetails[stepDetailIndex] = { ...stepDetail };
+            }
+            
+            const retryText = content.retry_possible ? " (Retry Possible)" : " (Retry Not Possible)";
+            console.log(`❌ STEP-ERROR: Step ${content.step_number} - ${content.error_type}: ${content.error_message}${retryText}`);
+        } catch (err) {
+            console.error("Error handling STEP-ERROR event:", err);
+        }
+    };
+
+    /**
+     * Handle PLANNING-PHASE events - track planning phase transitions
+     */
+    const handlePlanningPhaseEvent = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            const content = data.content;
+            
+            // Update step statuses based on planning phase transitions
+            if (content.phase === 'planning_start') {
+                // Thinking phase completed, planning phase started
+                const thinkingStep = execution.steps.find(step => step.id === 'thinking');
+                const generatingStep = execution.steps.find(step => step.id === 'generating_steps');
+                
+                if (thinkingStep) thinkingStep.status = 'completed';
+                if (generatingStep) generatingStep.status = 'active';
+                
+                execution.currentPhase = 'thinking';
+                console.log("🧠 PLANNING-PHASE: Starting strategy analysis");
+            } else if (content.phase === 'planning_complete') {
+                // Planning phase completed
+                const generatingStep = execution.steps.find(step => step.id === 'generating_steps');
+                
+                if (generatingStep) generatingStep.status = 'completed';
+                
+                execution.currentPhase = 'generating_steps';
+                console.log("📋 PLANNING-PHASE: Generating execution plan");
+            }
+            
+            console.log(`📋 PLANNING-PHASE: ${content.phase} at ${content.formatted_time}`);
+        } catch (err) {
+            console.error("Error handling PLANNING-PHASE event:", err);
+        }
+    };
+
+    // ====== END OF NEW STANDARDIZED EVENT HANDLERS ======
 
     return {
         // State
@@ -976,6 +1054,7 @@ export function useRealtimeStream() {
         error,
         processId,
         chunkedResults, // Expose chunked results state for progress tracking
+        expansionPanelData, // NEW: Expansion panel data for detailed step tracking
         ...toRefs(execution), // Expose reactive execution state
 
         // Methods
@@ -983,7 +1062,5 @@ export function useRealtimeStream() {
         connectToStream,
         cancelProcess,
         cleanup,
-        triggerEnrichingData,
-        completeEnrichingData,
     };
 }

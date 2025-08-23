@@ -166,7 +166,20 @@
                 </v-stepper>
               </div>
             </div>
+          </div>
 
+          <!-- NEW: Execution Details Expansion Panel (moved completely outside content-wrapper) -->
+          <transition name="fade">
+            <ExecutionDetailsPanel 
+              v-if="expansionPanelData.visible || isProcessing"
+              :expansionPanelData="expansionPanelData"
+              :isProcessing="isProcessing"
+              :executionStatus="rtExecutionStatus"
+              :currentQuery="messages.length > 0 ? messages[0].content : ''"
+            />
+          </transition>
+
+          <div class="content-wrapper">
             <!-- Dedicated Error Container (outside stepper) -->
             <div v-if="rtExecutionStatus === 'error' && rtError" class="error-container-standalone mt-4">
               <div class="error-details pa-4 rounded bg-red-lighten-5">
@@ -260,6 +273,7 @@
 import { ref, computed, watch, nextTick, onMounted } from 'vue';
 import AppLayout from '@/components/layout/AppLayout.vue';
 import DataDisplay from '@/components/messages/DataDisplay.vue';
+import ExecutionDetailsPanel from '@/components/ExecutionDetailsPanel.vue';
 import { useRealtimeStream } from '@/composables/useRealtimeStream';
 import { MessageType } from '@/components/messages/messageTypes';
 
@@ -273,6 +287,7 @@ const {
   steps: rtSteps,
   results: rtResults,
   chunkedResults, // Add chunked results for progress indicators
+  expansionPanelData, // NEW: Expansion panel data for detailed step tracking
   startProcess,
   connectToStream,
   cancelProcess,
@@ -1080,6 +1095,15 @@ watch(showToolsModal, (newVal) => {
   flex-direction: column;
   align-items: center;
   background: transparent;
+}
+
+/* NEW: Expansion Panel Container */
+.expansion-panel-container {
+  max-width: var(--max-width);
+  width: calc(100% - 40px);
+  margin: 16px auto 0;
+  display: flex;
+  justify-content: center;
 }
 
 .content-wrapper {
