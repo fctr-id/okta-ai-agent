@@ -1237,10 +1237,20 @@ class ModernExecutionManager:
             # Phase 0: Pre-Planning - Entity and Operation Selection
             logger.debug(f"[{correlation_id}] Phase 0: Pre-Planning Agent execution")
             
+            # Track timing for thinking step
+            thinking_start_time = time.time()
+            
             # STEP-START for pre-planning phase (step 0)
             if self.step_start_callback:
                 try:
-                    await self.step_start_callback(0, "thinking", "Analyzing query requirements and selecting relevant entities")
+                    await self.step_start_callback(
+                        step_number=0,
+                        step_type="thinking", 
+                        step_name="Step 0: Analyzing Requirements",
+                        query_context="Analyzing query requirements and selecting relevant entities", 
+                        critical=True,
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(thinking_start_time))
+                    )
                 except Exception as cb_err:
                     logger.debug(f"[{correlation_id}] step_start_callback preplan error ignored: {cb_err}")
             
@@ -1263,10 +1273,22 @@ class ModernExecutionManager:
             if not preplan_result.get('success', False):
                 logger.error(f"[{correlation_id}] Pre-planning failed: {preplan_result.get('error', 'Unknown error')}")
                 
+                # Calculate thinking step duration
+                thinking_end_time = time.time()
+                thinking_duration = thinking_end_time - thinking_start_time
+                
                 # STEP-END for failed pre-planning phase (step 0)
                 if self.step_end_callback:
                     try:
-                        await self.step_end_callback(0, "thinking", False, f"Pre-planning failed: {preplan_result.get('error', 'Unknown error')}")
+                        await self.step_end_callback(
+                            step_number=0,
+                            step_type="thinking",
+                            success=False,
+                            duration_seconds=round(thinking_duration, 2),
+                            record_count=0,
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime(thinking_end_time)),
+                            error_message=f"Pre-planning failed: {preplan_result.get('error', 'Unknown error')}"
+                        )
                     except Exception as cb_err:
                         logger.debug(f"[{correlation_id}] step_end_callback preplan error ignored: {cb_err}")
                 
@@ -1282,10 +1304,22 @@ class ModernExecutionManager:
             entity_op_pairs = [f"{eo.entity}::{eo.operation or 'null'}" for eo in selected_entity_operations]
             logger.info(f"[{correlation_id}] Pre-planning completed: selected entity-operation pairs {entity_op_pairs}")
             
+            # Calculate thinking step duration  
+            thinking_end_time = time.time()
+            thinking_duration = thinking_end_time - thinking_start_time
+            
             # STEP-END for pre-planning phase (step 0)
             if self.step_end_callback:
                 try:
-                    await self.step_end_callback(0, "thinking", True, f"Selected {len(entity_op_pairs)} entity-operation pairs")
+                    await self.step_end_callback(
+                        step_number=0,
+                        step_type="thinking",
+                        success=True,
+                        duration_seconds=round(thinking_duration, 2),
+                        record_count=len(entity_op_pairs),
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(thinking_end_time)),
+                        error_message=None
+                    )
                 except Exception as cb_err:
                     logger.debug(f"[{correlation_id}] step_end_callback preplan error ignored: {cb_err}")
             
@@ -1365,10 +1399,20 @@ class ModernExecutionManager:
                 except Exception as cb_err:
                     logger.debug(f"[{correlation_id}] planning_phase_callback planning_start error ignored: {cb_err}")
             
-            # STEP-START for planning phase (step -1, using negative to distinguish from execution steps)
+            # Track timing for generating_steps step
+            generating_start_time = time.time()
+            
+            # STEP-START for planning phase (step 1, consistent step numbering)
             if self.step_start_callback:
                 try:
-                    await self.step_start_callback(-1, "generating_steps", "Creating detailed execution plan from selected entities")
+                    await self.step_start_callback(
+                        step_number=1,
+                        step_type="generating_steps",
+                        step_name="Step 1: Generating Execution Plan",
+                        query_context="Creating detailed execution plan from selected entities",
+                        critical=True,
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(generating_start_time))
+                    )
                 except Exception as cb_err:
                     logger.debug(f"[{correlation_id}] step_start_callback planning error ignored: {cb_err}")
             
@@ -1418,7 +1462,26 @@ class ModernExecutionManager:
             if self.plan_ready_callback:
                 await self.plan_ready_callback(execution_plan)
             
-            # NEW STANDARDIZED: PLAN-GENERATED callback  
+            # Calculate generating_steps duration
+            generating_end_time = time.time()
+            generating_duration = generating_end_time - generating_start_time
+            
+            # STEP-END for planning phase (step 1, consistent step numbering) - SEND FIRST
+            if self.step_end_callback:
+                try:
+                    await self.step_end_callback(
+                        step_number=1,
+                        step_type="generating_steps",
+                        success=True,
+                        duration_seconds=round(generating_duration, 2),
+                        record_count=len(execution_plan.steps),
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(generating_end_time)),
+                        error_message=None
+                    )
+                except Exception as cb_err:
+                    logger.debug(f"[{correlation_id}] step_end_callback planning error ignored: {cb_err}")
+            
+            # NEW STANDARDIZED: PLAN-GENERATED callback - SEND AFTER STEP-END 
             if self.plan_generated_callback:
                 try:
                     await self.plan_generated_callback(
@@ -1440,13 +1503,6 @@ class ModernExecutionManager:
                     await self.planning_phase_callback('planning_complete')
                 except Exception as cb_err:
                     logger.debug(f"[{correlation_id}] planning_phase_callback planning_complete error ignored: {cb_err}")
-            
-            # STEP-END for planning phase (step -1)
-            if self.step_end_callback:
-                try:
-                    await self.step_end_callback(-1, "generating_steps", True, f"Generated {len(execution_plan.steps)} execution steps")
-                except Exception as cb_err:
-                    logger.debug(f"[{correlation_id}] step_end_callback planning error ignored: {cb_err}")
             
             # Phase 2: Execute steps using Modern Execution Manager
             logger.debug(f"[{correlation_id}] Phase 2: Step execution with Modern Execution Manager")
@@ -1554,7 +1610,25 @@ class ModernExecutionManager:
                 relationship_analysis = None
                 if estimated_tokens > token_threshold:  # Only do relationship analysis for complex datasets (token-based)
                     try:
-                        # Notify analysis phase callback - analysis starting
+                        # Calculate step number for Analysis Agent (after execution steps but before Results Formatter)
+                        analysis_step_number = len(execution_results.steps) + 2  # +2 for thinking(0) + generating_steps(1) + execution steps
+                        analysis_start_time = time.time()
+                        
+                        # NEW STANDARDIZED: STEP-START for Analysis Agent
+                        if self.step_start_callback:
+                            try:
+                                await self.step_start_callback(
+                                    step_number=analysis_step_number,
+                                    step_type="relationship_analysis",
+                                    step_name=f"Step {analysis_step_number}: Analyzing Data Relationships",
+                                    query_context="Analyzing data relationships and cross-step joins for complex dataset processing",
+                                    critical=True,
+                                    formatted_time=time.strftime('%H:%M:%S', time.localtime(analysis_start_time))
+                                )
+                            except Exception as callback_error:
+                                logger.warning(f"[{correlation_id}] Analysis agent start callback error: {callback_error}")
+                        
+                        # Notify analysis phase callback - analysis starting (legacy callback, keep for compatibility)
                         if self.analysis_phase_callback:
                             try:
                                 await self.analysis_phase_callback('analysis_start')
@@ -1573,9 +1647,30 @@ class ModernExecutionManager:
                             correlation_id=correlation_id,
                             query=query
                         )
+                        
+                        # Calculate Analysis Agent duration and metrics
+                        analysis_end_time = time.time()
+                        analysis_duration = analysis_end_time - analysis_start_time
+                        analysis_success = relationship_analysis is not None
+                        
                         logger.info(f"[{correlation_id}] Stage 1: Relationship analysis completed")
                         
-                        # Notify analysis phase callback - analysis complete
+                        # NEW STANDARDIZED: STEP-END for Analysis Agent 
+                        if self.step_end_callback:
+                            try:
+                                await self.step_end_callback(
+                                    step_number=analysis_step_number,
+                                    step_type="relationship_analysis",
+                                    success=analysis_success,
+                                    duration_seconds=round(analysis_duration, 2),
+                                    record_count=len(relationship_analysis.get('cross_step_joins', {})) if analysis_success else 0,
+                                    formatted_time=time.strftime('%H:%M:%S', time.localtime(analysis_end_time)),
+                                    error_message=None
+                                )
+                            except Exception as callback_error:
+                                logger.warning(f"[{correlation_id}] Analysis agent end callback error: {callback_error}")
+                        
+                        # Notify analysis phase callback - analysis complete (legacy callback, keep for compatibility)
                         if self.analysis_phase_callback:
                             try:
                                 await self.analysis_phase_callback('analysis_complete')
@@ -1583,10 +1678,29 @@ class ModernExecutionManager:
                                 logger.debug(f"[{correlation_id}] analysis_phase_callback analysis_complete error ignored: {cb_err}")
                                 
                     except Exception as e:
+                        # Calculate duration for failed analysis
+                        analysis_end_time = time.time()
+                        analysis_duration = analysis_end_time - analysis_start_time if 'analysis_start_time' in locals() else 0
+                        
                         logger.warning(f"[{correlation_id}] Stage 1: Relationship analysis failed: {e}")
                         relationship_analysis = None
                         
-                        # Notify analysis phase callback - analysis error
+                        # NEW STANDARDIZED: STEP-END for failed Analysis Agent
+                        if self.step_end_callback:
+                            try:
+                                await self.step_end_callback(
+                                    step_number=analysis_step_number if 'analysis_step_number' in locals() else 0,
+                                    step_type="relationship_analysis",
+                                    success=False,
+                                    duration_seconds=round(analysis_duration, 2),
+                                    record_count=0,
+                                    formatted_time=time.strftime('%H:%M:%S', time.localtime(analysis_end_time)),
+                                    error_message=str(e)
+                                )
+                            except Exception as callback_error:
+                                logger.warning(f"[{correlation_id}] Analysis agent error callback error: {callback_error}")
+                        
+                        # Notify analysis phase callback - analysis error (legacy callback, keep for compatibility)
                         if self.analysis_phase_callback:
                             try:
                                 await self.analysis_phase_callback('analysis_error')
@@ -1630,6 +1744,26 @@ class ModernExecutionManager:
                     results_for_formatter = step_results_dict
                     logger.info(f"[{correlation_id}] Sending full data to Results Formatter (small dataset)")
                 
+                # Calculate step number for Results Formatter (after analysis step if it ran)
+                formatter_step_number = len(execution_results.steps) + 2  # +2 for thinking(0) + generating_steps(1) + execution steps
+                if relationship_analysis:
+                    formatter_step_number += 1  # +1 more if analysis step ran before this
+                formatter_start_time = time.time()
+                
+                # NEW STANDARDIZED: STEP-START for Results Formatter
+                if self.step_start_callback:
+                    try:
+                        await self.step_start_callback(
+                            step_number=formatter_step_number,
+                            step_type="results_formatter",
+                            step_name=f"Step {formatter_step_number}: Formatting Results",
+                            query_context="Processing and formatting execution results for user presentation",
+                            critical=True,
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime(formatter_start_time))
+                        )
+                    except Exception as callback_error:
+                        logger.warning(f"[{correlation_id}] Results formatter start callback error: {callback_error}")
+                
                 formatted_response = await process_results_formatter(
                     query=query,
                     results=results_for_formatter,  # Samples for large datasets, full data for small datasets
@@ -1637,6 +1771,26 @@ class ModernExecutionManager:
                     relationship_analysis=relationship_analysis,  # Pass relationship analysis instead of original plan
                     metadata=formatter_metadata
                 )
+                
+                # Calculate Results Formatter duration and metrics
+                formatter_end_time = time.time()
+                formatter_duration = formatter_end_time - formatter_start_time
+                formatter_success = formatted_response is not None and not formatted_response.get('usage_info', {}).get('error')
+                
+                # NEW STANDARDIZED: STEP-END for Results Formatter
+                if self.step_end_callback:
+                    try:
+                        await self.step_end_callback(
+                            step_number=formatter_step_number,
+                            step_type="results_formatter",
+                            success=formatter_success,
+                            duration_seconds=round(formatter_duration, 2),
+                            record_count=1,  # Results formatter produces 1 formatted response
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime(formatter_end_time)),
+                            error_message=formatted_response.get('usage_info', {}).get('error') if not formatter_success else None
+                        )
+                    except Exception as callback_error:
+                        logger.warning(f"[{correlation_id}] Results formatter end callback error: {callback_error}")
                 
                 logger.info(f"[{correlation_id}] Results formatting completed with {formatted_response.get('display_type', 'unknown')} format")
                 logger.debug(f"[{correlation_id}] Formatted response keys: {list(formatted_response.keys())}")
@@ -1822,20 +1976,6 @@ class ModernExecutionManager:
             step_start_time = time.time()
             logger.info(f"[{correlation_id}] Executing step {step_num}/{len(plan.steps)}: {step.tool_name}")
             
-            # NEW STANDARDIZED: STEP-START callback
-            if self.step_start_callback:
-                try:
-                    await self.step_start_callback(
-                        step_number=step_num,
-                        step_type=step.tool_name,
-                        step_name=f"Step {step_num}/{len(plan.steps)}: {step.tool_name.upper()}",
-                        query_context=step.query_context,
-                        critical=step.critical,
-                        formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
-                    )
-                except Exception as callback_error:
-                    logger.warning(f"[{correlation_id}] Step start callback error: {callback_error}")
-            
             try:
                 # Execute step based on type
                 if step.tool_name == "sql":
@@ -1865,10 +2005,29 @@ class ModernExecutionManager:
                     
                     # Get record count from result
                     record_count = 0
-                    if hasattr(result.result, 'data') and isinstance(result.result.data, list):
-                        record_count = len(result.result.data)
-                    elif hasattr(result, 'data') and isinstance(result.data, list):
-                        record_count = len(result.data)
+                    data_to_check = None
+                    
+                    # Try different data access patterns
+                    if hasattr(result.result, 'data') and result.result.data:
+                        data_to_check = result.result.data
+                    elif hasattr(result, 'data') and result.data:
+                        data_to_check = result.data
+                    
+                    if data_to_check:
+                        if isinstance(data_to_check, list):
+                            record_count = len(data_to_check)
+                        elif isinstance(data_to_check, dict):
+                            # Handle dictionary results - count all list values
+                            total_records = 0
+                            for key, value in data_to_check.items():
+                                if isinstance(value, list):
+                                    total_records += len(value)
+                                elif value is not None:  # Count non-null single values
+                                    total_records += 1
+                            record_count = total_records
+                        else:
+                            # Single non-list result
+                            record_count = 1
                     
                     # EARLY TERMINATION CHECK: If first step returns 0 results, terminate execution
                     if step_num == 1 and record_count == 0:
@@ -1881,34 +2040,6 @@ class ModernExecutionManager:
                         step_results.append(result)
                         break
                     
-                    # NEW STANDARDIZED: STEP-END callback (success)
-                    if self.step_end_callback:
-                        try:
-                            await self.step_end_callback(
-                                step_number=step_num,
-                                step_type=step.tool_name,
-                                success=True,
-                                duration_seconds=round(step_duration, 2),
-                                record_count=record_count,
-                                formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
-                                error_message=None
-                            )
-                        except Exception as callback_error:
-                            logger.warning(f"[{correlation_id}] Step end callback error: {callback_error}")
-                    
-                    # NEW STANDARDIZED: STEP-COUNT callback
-                    if self.step_count_callback:
-                        try:
-                            await self.step_count_callback(
-                                step_number=step_num,
-                                step_type=step.tool_name,
-                                record_count=record_count,
-                                operation_type="stored",
-                                formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time))
-                            )
-                        except Exception as callback_error:
-                            logger.warning(f"[{correlation_id}] Step count callback error: {callback_error}")
-                    
                     # Data storage is handled automatically in step execution methods
                     # Log current data state using FULL POLARS
                     total_dataframes = len(self.polars_dataframes)
@@ -1917,21 +2048,6 @@ class ModernExecutionManager:
                 else:
                     failed_steps += 1
                     logger.error(f"[{correlation_id}] Step {step_num} failed: {result.error}")
-                    
-                    # NEW STANDARDIZED: STEP-END callback (error)
-                    if self.step_end_callback:
-                        try:
-                            await self.step_end_callback(
-                                step_number=step_num,
-                                step_type=step.tool_name,
-                                success=False,
-                                duration_seconds=round(step_duration, 2),
-                                record_count=0,
-                                formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
-                                error_message=str(result.error)
-                            )
-                        except Exception as callback_error:
-                            logger.warning(f"[{correlation_id}] Step end callback error: {callback_error}")
                     
                     # CRITICAL ERROR HANDLING: Stop execution on step failure
                     logger.error(f"[{correlation_id}] Stopping execution due to step {step_num} failure")
@@ -2026,6 +2142,23 @@ class ModernExecutionManager:
         
         # logger.debug(f"[{correlation_id}] Executing user SQL step")
         
+        # NEW STANDARDIZED: STEP-START callback for SQL step
+        step_start_time = time.time()
+        # Calculate correct step number: execution steps start at step 2 (after thinking=0, generating_steps=1)
+        callback_step_number = step_number + 1  # step_number is 0-based execution step index, callback needs 2, 3, 4, etc.
+        if self.step_start_callback:
+            try:
+                await self.step_start_callback(
+                    step_number=callback_step_number,
+                    step_type="sql",
+                    step_name=f"Step {callback_step_number}: {step.tool_name}",
+                    query_context=step.query_context,
+                    critical=getattr(step, 'critical', True),
+                    formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
+                )
+            except Exception as callback_error:
+                logger.warning(f"[{correlation_id}] SQL step start callback error: {callback_error}")
+        
         # Get enhanced context from all previous steps
         all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
         logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
@@ -2062,7 +2195,7 @@ class ModernExecutionManager:
                 total_tokens = input_tokens + output_tokens
                 
                 await self.step_tokens_callback(
-                    step_number=step_number,
+                    step_number=callback_step_number,  # Use consistent step numbering
                     step_type=step.tool_name,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -2080,7 +2213,7 @@ class ModernExecutionManager:
             if self.step_error_callback:
                 try:
                     await self.step_error_callback(
-                        step_number=step_number,
+                        step_number=callback_step_number,  # Use consistent step numbering
                         step_type=step.tool_name,
                         error_message=error_msg,
                         error_type="sql_generation_error",
@@ -2168,6 +2301,23 @@ class ModernExecutionManager:
         # Create result with SQL execution data
         result_data = SQLExecutionResult(sql_dict['sql'], sql_dict['explanation'], db_data)
         
+        # NEW STANDARDIZED: STEP-END callback for SQL step
+        step_end_time = time.time()
+        step_duration = step_end_time - step_start_time
+        if self.step_end_callback:
+            try:
+                await self.step_end_callback(
+                    step_number=callback_step_number,  # Use consistent step numbering
+                    step_type="sql",
+                    success=step_success,
+                    duration_seconds=step_duration,
+                    record_count=len(db_data) if isinstance(db_data, list) else 0,
+                    formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
+                    error_message=None if step_success else "SQL execution failed"
+                )
+            except Exception as callback_error:
+                logger.warning(f"[{correlation_id}] SQL step end callback error: {callback_error}")
+        
         return StepResult(
             step_number=step_number,
             step_type="SQL",
@@ -2196,6 +2346,23 @@ class ModernExecutionManager:
         
         # ENHANCED PATTERN: Get context and samples from ALL previous steps
         all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
+        
+        # NEW STANDARDIZED: STEP-START callback for API-SQL step
+        step_start_time = time.time()
+        # Calculate correct step number: execution steps start at step 2 (after thinking=0, generating_steps=1)
+        callback_step_number = step_number + 1  # step_number is 0-based execution step index, callback needs 2, 3, 4, etc.
+        if self.step_start_callback:
+            try:
+                await self.step_start_callback(
+                    step_number=callback_step_number,
+                    step_type="sql",  # Display as SQL step since it's primarily SQL operations
+                    step_name=f"Step {callback_step_number}: {step.tool_name}",
+                    query_context=step.query_context,
+                    critical=getattr(step, 'critical', True),
+                    formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
+                )
+            except Exception as callback_error:
+                logger.warning(f"[{correlation_id}] API-SQL step start callback error: {callback_error}")
         
         # DON'T PROCESS DATA - Just pass it through as-is, let LLM handle it
         # Only fix the data count calculation for logging
@@ -2258,6 +2425,23 @@ class ModernExecutionManager:
         sql_query = result.output.sql_query_template  # Use Polars template
         result_data = SQLExecutionResult(sql_query, result.output.explanation, db_data)
         
+        # NEW STANDARDIZED: STEP-END callback for API-SQL step
+        step_end_time = time.time()
+        step_duration = step_end_time - step_start_time
+        if self.step_end_callback:
+            try:
+                await self.step_end_callback(
+                    step_number=callback_step_number,  # Use consistent step numbering
+                    step_type="sql",  # Display as SQL step since it's primarily SQL operations
+                    success=True,
+                    duration_seconds=step_duration,
+                    record_count=len(db_data) if isinstance(db_data, list) else 0,
+                    formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
+                    error_message=None
+                )
+            except Exception as callback_error:
+                logger.warning(f"[{correlation_id}] API-SQL step end callback error: {callback_error}")
+        
         return StepResult(
             step_number=step_number,
             step_type="API_SQL",
@@ -2286,6 +2470,25 @@ class ModernExecutionManager:
             )
         
         try:
+            # Record step start time for duration calculation
+            step_start_time = time.time()
+            
+            # NEW STANDARDIZED: STEP-START callback for API step
+            # Calculate correct step number: execution steps start at step 2 (after thinking=0, generating_steps=1)
+            callback_step_number = step_number + 1  # step_number is 0-based execution step index, callback needs 2, 3, 4, etc.
+            if self.step_start_callback:
+                try:
+                    await self.step_start_callback(
+                        step_number=callback_step_number,
+                        step_type="api",
+                        step_name=step.tool_name,
+                        query_context=step.query_context,
+                        critical=getattr(step, 'critical', True),
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] API step start callback error: {callback_error}")
+            
             # Get filtered endpoints for this specific step (using old executor logic)
             available_endpoints = self._get_entity_endpoints_for_step(step)
             
@@ -2298,8 +2501,8 @@ class ModernExecutionManager:
                 if self.step_error_callback:
                     try:
                         await self.step_error_callback(
-                            step_number=step_number,
-                            step_type=step.tool_name,
+                            step_number=callback_step_number,
+                            step_type="api",
                             error_message=error_msg,
                             error_type="configuration_error",
                             retry_possible=False,  # Cannot retry without endpoints
@@ -2368,8 +2571,8 @@ class ModernExecutionManager:
                     total_tokens = input_tokens + output_tokens
                     
                     await self.step_tokens_callback(
-                        step_number=step_number,
-                        step_type=step.tool_name,
+                        step_number=callback_step_number,  # Use consistent step numbering
+                        step_type="api",
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                         agent_name="API Code Generation Agent",
@@ -2386,8 +2589,8 @@ class ModernExecutionManager:
                 if self.step_error_callback:
                     try:
                         await self.step_error_callback(
-                            step_number=step_number,
-                            step_type=step.tool_name,
+                            step_number=callback_step_number,  # Use consistent step numbering
+                            step_type="api",
                             error_message=error_msg,
                             error_type="code_generation_error",
                             retry_possible=True,  # Code generation errors can usually be retried
@@ -2419,8 +2622,8 @@ class ModernExecutionManager:
             if self.step_progress_callback:
                 try:
                     await self.step_progress_callback(
-                        step_number=step_number,
-                        step_type=step.tool_name,
+                        step_number=callback_step_number,  # Use consistent step numbering
+                        step_type="api",
                         progress_percentage=50.0,  # 50% - code generated, about to execute
                         current=50,
                         total=100,
@@ -2441,8 +2644,8 @@ class ModernExecutionManager:
             if self.step_progress_callback and execution_result.get('success', False):
                 try:
                     await self.step_progress_callback(
-                        step_number=step_number,
-                        step_type=step.tool_name,
+                        step_number=callback_step_number,  # Use consistent step numbering
+                        step_type="api",
                         progress_percentage=100.0,  # 100% - execution complete
                         current=100,
                         total=100,
@@ -2490,6 +2693,19 @@ class ModernExecutionManager:
                 )
                 
                 logger.info(f"[{correlation_id}] API step completed: {len(actual_data) if isinstance(actual_data, list) else 1} records stored as {variable_name}")
+                
+                # NEW STANDARDIZED: STEP-COUNT callback for successful API execution
+                if self.step_count_callback:
+                    try:
+                        await self.step_count_callback(
+                            step_number=callback_step_number,
+                            step_type="api",
+                            record_count=len(actual_data) if isinstance(actual_data, list) else 1,
+                            operation_type="retrieved",
+                            formatted_time=time.strftime('%H:%M:%S', time.localtime())
+                        )
+                    except Exception as callback_error:
+                        logger.warning(f"[{correlation_id}] Step count callback error: {callback_error}")
             else:
                 error_msg = execution_result.get('error', 'Unknown error')
                 logger.error(f"[{correlation_id}] API code execution failed: {error_msg}")
@@ -2498,8 +2714,8 @@ class ModernExecutionManager:
                 if self.step_error_callback:
                     try:
                         await self.step_error_callback(
-                            step_number=step_number,
-                            step_type=step.tool_name,
+                            step_number=callback_step_number,  # Use consistent step numbering
+                            step_type="api",
                             error_message=f"API code execution failed: {error_msg}",
                             error_type="code_execution_error",
                             retry_possible=True,  # Code execution errors can often be retried
@@ -2576,6 +2792,32 @@ class ModernExecutionManager:
                     logger.warning(f"[{correlation_id}] API step marked as FAILED: execution structure invalid")
                 if not execution_successful:
                     logger.warning(f"[{correlation_id}] API step marked as FAILED: critical execution error")
+            
+            # NEW STANDARDIZED: STEP-END callback for API step
+            step_end_time = time.time()
+            step_duration = step_end_time - step_start_time
+            
+            # Calculate correct record count
+            if hasattr(result_data, 'data') and isinstance(result_data.data, list):
+                final_record_count = len(result_data.data)
+            elif isinstance(result_data, list):
+                final_record_count = len(result_data)
+            else:
+                final_record_count = 1 if result_data else 0
+            
+            if self.step_end_callback:
+                try:
+                    await self.step_end_callback(
+                        step_number=callback_step_number,  # Use consistent step numbering
+                        step_type="api",
+                        success=step_success,
+                        duration_seconds=step_duration,
+                        record_count=final_record_count,
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
+                        error_message=None if step_success else "API execution failed"
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] API step end callback error: {callback_error}")
             
             return StepResult(
                 step_number=step_number,
