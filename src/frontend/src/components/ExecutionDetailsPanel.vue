@@ -1,54 +1,66 @@
 <template>
-  <div v-if="expansionPanelData.visible" class="exec-wrapper">
+  <div v-if="expansionPanelData.visible || isProcessing || rtSteps.length > 0" class="exec-wrapper">
     <div class="exec-card">
       <button class="exec-header" @click="isExpanded = !isExpanded" :aria-expanded="isExpanded.toString()">
         <span class="chevron" :class="{ open: isExpanded }">›</span>
         <span class="title">Execution Details</span>
         <div class="spacer"></div>
         <span class="status-badge" :class="statusClass">{{ statusText }}</span>
-        <span v-if="expansionPanelData.planData?.stepCount" class="steps-info">{{ expansionPanelData.planData.stepCount }} steps</span>
         <span v-if="completedStepsCount > 0 && totalStepsCount > 0" class="progress-info">{{ completedStepsCount }}/{{ totalStepsCount }}</span>
       </button>
 
       <transition name="fade-collapse">
         <div v-show="isExpanded" class="exec-body" style="background-color: #ffffff !important; min-height: 200px;">
-          <div v-if="expansionPanelData.planData?.plan" class="unified-steps" style="position: relative; z-index: 1;">
+          <div v-if="getDisplaySteps().length > 0" class="unified-steps" style="position: relative; z-index: 1;">
             <div class="steps-list">
-              <template v-for="(planStep, index) in getPlanSteps(expansionPanelData.planData.plan)" :key="index">
-                <div 
-                  class="unified-step"
-                  :class="getUnifiedStepClass(index + 1)"
-                >
-                  <div class="step-status">
-                    <span class="status-icon" :class="getStatusIconClass(index + 1)">
-                      <span v-if="getStepStatus(index + 1) === 'completed'">✓</span>
-                      <span v-else-if="getStepStatus(index + 1) === 'failed'">✗</span>
-                      <span v-else-if="getStepStatus(index + 1) === 'active'">●</span>
-                      <span v-else>○</span>
-                    </span>
-                  </div>
-                  <div class="step-content">
-                    <div class="step-header">
-                      <span class="step-type">{{ planStep.toolType }}</span>
-                      <span class="step-operation">{{ planStep.operation }}</span>
-                      <div class="step-metrics" v-if="getStepDetails(index + 1)">
-                        <span v-if="getStepDetails(index + 1).duration" class="duration">
-                          <v-icon size="12" color="grey-darken-1">mdi-timer-outline</v-icon>
-                          {{ formatDuration(getStepDetails(index + 1).duration) }}
-                        </span>
-                        <span v-if="getStepDetails(index + 1).recordCount" class="record-count">
-                          <v-icon size="12" color="grey-darken-1">mdi-database-outline</v-icon>
-                          {{ getStepDetails(index + 1).recordCount.toLocaleString() }} records
-                        </span>
-                      </div>
+              <transition-group name="step-slide" tag="div" class="step-container">
+                <template v-for="(planStep, index) in getDisplaySteps()" :key="`step-${index}-${planStep.toolType}`">
+                  <div 
+                    class="unified-step"
+                    :class="getUnifiedStepClass(index)"
+                  >
+                    <div class="step-status">
+                      <span class="status-icon" :class="getStatusIconClass(index)">
+                        <span v-if="getStepStatus(index) === 'completed'">✓</span>
+                        <span v-else-if="getStepStatus(index) === 'failed'">✗</span>
+                        <span v-else-if="getStepStatus(index) === 'active'">●</span>
+                        <span v-else>○</span>
+                      </span>
                     </div>
-                    <div class="step-description">{{ planStep.context }}</div>
-                    <div v-if="getStepDetails(index + 1)?.errorMessage" class="step-error">{{ getStepDetails(index + 1).errorMessage }}</div>
+                    <div class="step-content">
+                      <div class="step-header">
+                        <span class="step-type" :class="`step-badge-${planStep.phase}`">{{ planStep.toolType }}</span>
+                        <span class="step-operation">{{ planStep.operation }}</span>
+                        <div class="step-metrics">
+                          <!-- Show duration - prefer execution details, fallback to rtSteps -->
+                          <span v-if="getStepDetailsForDisplay(index)?.duration || props.rtSteps?.[planStep.stepIndex]?.duration" class="duration">
+                            <v-icon size="12" color="grey-darken-1">mdi-timer-outline</v-icon>
+                            {{ formatDuration(getStepDetailsForDisplay(index)?.duration || props.rtSteps[planStep.stepIndex].duration) }}
+                          </span>
+                          
+                          <!-- Show record count ONLY for execution steps (API, SQL, API_SQL) -->
+                          <span v-if="(planStep.phase === 'api' || planStep.phase === 'sql' || planStep.phase === 'hybrid') && (getStepDetailsForDisplay(index)?.recordCount || props.rtSteps?.[planStep.stepIndex]?.record_count)" class="record-count">
+                            <v-icon size="12" color="grey-darken-1">mdi-database-outline</v-icon>
+                            {{ (getStepDetailsForDisplay(index)?.recordCount || props.rtSteps[planStep.stepIndex]?.record_count || 0).toLocaleString() }} records
+                          </span>
+                        </div>
+                      </div>
+                      <div class="step-description">
+                        <!-- Show execution step query context if available, otherwise show stepper context -->
+                        <div v-if="planStep.executionStep && planStep.executionStep.queryContext" class="step-context">
+                          {{ planStep.executionStep.queryContext }}
+                        </div>
+                        <div v-else-if="planStep.context" class="step-context">
+                          {{ planStep.context }}
+                        </div>
+                      </div>
+                      <div v-if="getStepDetailsForDisplay(index)?.errorMessage" class="step-error">{{ getStepDetailsForDisplay(index).errorMessage }}</div>
+                    </div>
                   </div>
-                </div>
-                <!-- HR separator between steps (not after last step) -->
-                <hr v-if="index < getPlanSteps(expansionPanelData.planData.plan).length - 1" class="step-separator">
-              </template>
+                  <!-- HR separator between steps (not after last step) -->
+                  <hr v-if="index < getDisplaySteps().length - 1" :key="`separator-${index}`" class="step-separator">
+                </template>
+              </transition-group>
             </div>
           </div>
           <div v-else class="empty">No execution plan available.</div>
@@ -69,7 +81,9 @@ import { ref, computed, watch } from 'vue';
 const props = defineProps({
   expansionPanelData: { type: Object, required: true },
   isProcessing: { type: Boolean, default: false },
-  executionStatus: { type: String, default: 'idle' }
+  executionStatus: { type: String, default: 'idle' },
+  // Add stepper data from useRealtimeStream
+  rtSteps: { type: Array, default: () => [] }
 });
 
 const isExpanded = ref(false);
@@ -135,7 +149,85 @@ const formatDuration = (seconds) => {
   return `${m}m ${s}s`;
 };
 
-// Convert plan to structured steps for modern display
+// Convert plan to structured steps for modern display - ENHANCED with stepper integration
+const getDisplaySteps = () => {
+  // If we have rtSteps from stepper, use those for consistent step display
+  if (props.rtSteps && props.rtSteps.length > 0) {
+    return props.rtSteps
+      .map((step, originalIndex) => {
+        // Apply the same step mapping logic as the main stepper
+        let badge = '';
+        let entity = '';
+        let operation = '';
+        let phase = '';
+        const tool = step.tool_name;
+
+        if (tool === 'thinking') {
+          badge = 'CRAFTING';
+          entity = 'Strategy';
+          operation = '';
+          phase = 'crafting';
+        } else if (tool === 'generating_steps' || tool === 'generate_plan') {
+          badge = 'GENERATING';
+          entity = 'Plan';
+          operation = '';
+          phase = 'generating';
+        } else if (tool === 'finalizing_results') {
+          badge = 'FINALIZING';
+          entity = 'Results';
+          operation = '';
+          phase = 'finalizing';
+        } else if (tool === 'enriching_data') {
+          badge = 'ENRICHING';
+          entity = 'Data';
+          operation = '';
+          phase = 'enriching';
+        } else if (tool === 'api') {
+          badge = 'API';
+          entity = step.entity || '';
+          operation = step.operation || '';
+          phase = 'api';
+        } else if (tool === 'sql') {
+          badge = 'SQL';
+          entity = step.entity || '';
+          operation = step.operation || '';
+          phase = 'sql';
+        } else if (tool === 'API_SQL') {
+          badge = 'HYBRID';
+          entity = step.entity || '';
+          operation = step.operation || '';
+          phase = 'hybrid';
+        } else {
+          badge = (tool || step.name || `step_${originalIndex+1}`).toUpperCase();
+          entity = step.entity || '';
+          operation = step.operation || '';
+          phase = 'other';
+        }
+
+        return {
+          toolType: badge,
+          operation: operation || entity,
+          // PRIORITY: Use detailed context from plan, fallback to rtSteps reason
+          context: getPlanContextForStep(originalIndex) || step.reason || `${badge} ${entity}`.trim(),
+          stepStatus: step.status || 'pending',
+          stepIndex: originalIndex, // Use original index for rtSteps access
+          originalIndex: originalIndex, // Keep track of original index
+          phase: phase,
+          // NEW: Add execution step details for enhanced context
+          executionStep: getExecutionStepForStepperIndex(originalIndex)
+        };
+      })
+      .filter(step => !props.rtSteps[step.originalIndex]?.hidden); // Filter hidden steps AFTER mapping
+  }
+
+  // Fallback to original plan-based logic if no rtSteps available yet
+  if (props.expansionPanelData.planData?.plan) {
+    return getPlanSteps(props.expansionPanelData.planData.plan);
+  }
+
+  return [];
+};
+
 const getPlanSteps = (plan) => {
   if (!plan || typeof plan !== 'object' || !plan.steps || !Array.isArray(plan.steps)) {
     return [];
@@ -144,26 +236,81 @@ const getPlanSteps = (plan) => {
   return plan.steps.map(step => ({
     toolType: step.tool_name ? step.tool_name.toUpperCase() : 'UNKNOWN',
     operation: step.operation || 'query',
-    context: step.query_context || step.reasoning || 'Processing step'
+    context: step.query_context || step.reasoning || 'Processing step',
+    stepStatus: 'pending',
+    stepIndex: 0,
+    phase: 'other'
   }));
 };
 
-// Helper methods for unified plan/execution view
+// NEW: Helper to get detailed plan context for a specific step index
+const getPlanContextForStep = (stepIndex) => {
+  if (!props.expansionPanelData.planData?.plan?.steps) return null;
+  
+  // Map rtSteps index to plan steps - plan steps are execution steps only
+  // rtSteps: [thinking(0), generating_steps(1), step1(2), step2(3), step3(4), ...]
+  // plan.steps: [step1(0), step2(1), step3(2), ...]
+  const planStepIndex = stepIndex - 2; // Subtract thinking(0) and generating_steps(1)
+  
+  if (planStepIndex >= 0 && planStepIndex < props.expansionPanelData.planData.plan.steps.length) {
+    const planStep = props.expansionPanelData.planData.plan.steps[planStepIndex];
+    return planStep.query_context || planStep.reasoning;
+  }
+  
+  return null;
+};
+
+// Helper methods for unified plan/execution view - ENHANCED with stepper status
 const getStepDetails = (stepNumber) => {
   return props.expansionPanelData.stepDetails.find(step => step.stepNumber === stepNumber);
 };
 
-const getStepStatus = (stepNumber) => {
-  const stepDetail = getStepDetails(stepNumber);
+// NEW: Map stepper step index to actual execution step number
+const getExecutionStepForStepperIndex = (stepperIndex) => {
+  if (!props.rtSteps || !props.rtSteps[stepperIndex]) return null;
+  
+  const stepperStep = props.rtSteps[stepperIndex];
+  const backendStepNumber = stepperStep.backend_step_number;
+  
+  // Match by actual backend step number, not tool type
+  if (backendStepNumber !== undefined) {
+    return props.expansionPanelData.stepDetails.find(execStep => 
+      execStep.stepNumber === backendStepNumber
+    );
+  }
+  
+  return null; // No backend step number available
+};
+
+// ENHANCED: Get step details for display that correctly maps stepper to execution steps
+const getStepDetailsForDisplay = (stepperIndex) => {
+  return getExecutionStepForStepperIndex(stepperIndex);
+};
+
+const getStepStatus = (stepIndex) => {
+  // First check if we have rtSteps data with status (using 0-based index)
+  if (props.rtSteps && props.rtSteps.length > stepIndex) {
+    const rtStep = props.rtSteps[stepIndex];
+    if (rtStep && rtStep.status) {
+      // Map stepper statuses to expansion panel statuses
+      if (rtStep.status === 'completed') return 'completed';
+      if (rtStep.status === 'error') return 'failed';
+      if (rtStep.status === 'active') return 'active';
+      return 'pending';
+    }
+  }
+
+  // Fallback to original stepDetails logic (convert to 1-based for stepDetails)
+  const stepDetail = getStepDetails(stepIndex + 1);
   if (!stepDetail) return 'pending';
   if (stepDetail.success === true) return 'completed';
   if (stepDetail.success === false) return 'failed';
-  if (props.expansionPanelData.currentStepExecution?.stepNumber === stepNumber) return 'active';
+  if (props.expansionPanelData.currentStepExecution?.stepNumber === stepIndex + 1) return 'active';
   return 'pending';
 };
 
-const getUnifiedStepClass = (stepNumber) => {
-  const status = getStepStatus(stepNumber);
+const getUnifiedStepClass = (stepIndex) => {
+  const status = getStepStatus(stepIndex);
   return {
     'unified-step-completed': status === 'completed',
     'unified-step-failed': status === 'failed',
@@ -172,8 +319,8 @@ const getUnifiedStepClass = (stepNumber) => {
   };
 };
 
-const getStatusIconClass = (stepNumber) => {
-  const status = getStepStatus(stepNumber);
+const getStatusIconClass = (stepIndex) => {
+  const status = getStepStatus(stepIndex);
   return {
     'status-completed': status === 'completed',
     'status-failed': status === 'failed',
@@ -182,9 +329,15 @@ const getStatusIconClass = (stepNumber) => {
   };
 };
 
-// Auto expand when processing begins
-watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([processing, visible]) => {
-  if (processing && visible && !isExpanded.value) isExpanded.value = true;
+// Auto expand when processing begins - ENHANCED to show immediately on query submission
+watch([() => props.isProcessing, () => props.expansionPanelData.visible, () => props.rtSteps.length], ([processing, visible, stepCount]) => {
+  // Show panel immediately when:
+  // 1. Processing starts (isProcessing becomes true) - IMMEDIATE EXPANSION
+  // 2. Panel data becomes visible (query submitted)
+  // 3. We have rtSteps (step tracking begins)
+  if ((processing || visible || stepCount > 0) && !isExpanded.value) {
+    isExpanded.value = true;
+  }
 });
 </script>
 
@@ -375,11 +528,6 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
   color: #4C64E2;
 }
 
-.debug-info {
-  font-size: 10px;
-  color: #999;
-}
-
 .step-status {
   display: flex;
   align-items: center;
@@ -434,7 +582,7 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
   gap: 8px;
 }
 
-.duration, .record-count {
+.duration, .record-count, .step-number {
   font-size: 11px;
   font-weight: 500;
   color: #666;
@@ -501,6 +649,16 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
   letter-spacing: 0.5px;
 }
 
+/* Step badge phase colors - integrated from stepper */
+.step-badge-crafting { background: #f3e5f5 !important; color: #7b1fa2 !important; }
+.step-badge-generating { background: #e9f7ff !important; color: #076489 !important; }
+.step-badge-finalizing { background: #e8f5e8 !important; color: #2e7d32 !important; }
+.step-badge-enriching { background: #fde7d9 !important; color: #f57c00 !important; }
+.step-badge-api { background: #e8f9f6 !important; color: #0f6f62 !important; }
+.step-badge-sql { background: #fff4e5 !important; color: #9a5a00 !important; }
+.step-badge-hybrid { background: #fce4ec !important; color: #ad1457 !important; }
+.step-badge-other { background: #ececec !important; color: #555 !important; }
+
 .step-operation {
   color: #333;
   font-weight: 500;
@@ -513,6 +671,10 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
   line-height: 1.5;
   margin-left: 0;
   margin-top: 6px;
+}
+
+.step-context {
+  color: #666;
 }
 
 .steps { 
@@ -675,5 +837,74 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible], ([proc
 
 .fade-collapse-enter-active, .fade-collapse-leave-active { 
   transition: all 0.3s ease;
+}
+
+/* Step Animation Styles */
+.step-container {
+  position: relative;
+}
+
+.step-slide-enter-active {
+  transition: all 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  transform-origin: top;
+}
+
+.step-slide-leave-active {
+  transition: all 0.4s cubic-bezier(0.55, 0.06, 0.68, 0.19);
+  position: absolute;
+  width: 100%;
+}
+
+.step-slide-enter-from {
+  opacity: 0;
+  transform: translateY(-20px) scaleY(0.8);
+}
+
+.step-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-10px) scaleY(0.9);
+}
+
+.step-slide-move {
+  transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+
+/* Enhanced step animations with subtle glow effect */
+.unified-step {
+  transition: all 0.3s ease;
+  transform-origin: left center;
+}
+
+.unified-step.step-active {
+  animation: pulse-glow 2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-glow {
+  from {
+    box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
+  }
+  to {
+    box-shadow: 0 4px 16px rgba(76, 175, 80, 0.4), 0 0 20px rgba(76, 175, 80, 0.1);
+  }
+}
+
+.step-separator {
+  transition: all 0.3s ease;
+  opacity: 0.6;
+}
+
+/* New step highlight animation */
+@keyframes new-step-highlight {
+  0% {
+    background-color: rgba(255, 235, 59, 0.3);
+    transform: scale(1.02);
+  }
+  50% {
+    background-color: rgba(255, 235, 59, 0.1);
+  }
+  100% {
+    background-color: transparent;
+    transform: scale(1);
+  }
 }
 </style>
