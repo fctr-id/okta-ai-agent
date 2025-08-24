@@ -132,78 +132,42 @@
       <!-- NEW: Execution Details Expansion Panel (moved completely OUTSIDE results-container for full width) -->
       <transition name="fade">
         <ExecutionDetailsPanel 
-          v-if="expansionPanelData.visible || isProcessing"
+          v-if="expansionPanelData.visible || isProcessing || rtSteps.length > 0"
           :expansionPanelData="expansionPanelData"
           :isProcessing="isProcessing"
           :executionStatus="rtExecutionStatus"
           :currentQuery="messages.length > 0 ? messages[0].content : ''"
+          :rtSteps="rtSteps"
         />
       </transition>
 
-      <!-- Unified Progress Display OR Final Outcome Area -->
+      <!-- Clean Results Display Area -->
       <transition name="fade-up">
-        <div v-if="showProgressDisplayArea || showFinalOutcomeArea" ref="messagesContainerRef"
+        <div v-if="showFinalOutcomeArea" ref="messagesContainerRef"
           class="results-container mt-8" @scroll="handleScroll">
 
-          <div class="content-wrapper">
-            <!-- Progress Area with Stepper - Show for both processing and errors -->
-            <div v-if="showProgressDisplayArea || (rtExecutionStatus === 'error' && rtSteps.length > 0)" class="unified-progress-area">
-              <div :class="['stepper-container-wrapper', { 'expanded': hasStepperExpanded }]">
-                <v-stepper v-model="currentProgressStepId" class="elevation-0 transparent-stepper" flat hide-actions>
-                  <v-stepper-header>
-                    <transition-group name="step-fade">
-                      <template v-for="(item, index) in progressSteps" :key="item.id">
-                        <v-stepper-item :value="item.id" :complete="item.status === 'completed'"
-                                         :error="item.status === 'error'" :disabled="item.status === 'pending'"
-                                         class="custom-badge-step">
-                          <template #icon>
-                            <div v-if="item.status === 'active'" class="step-pulse-indicator"></div>
-                            <v-icon v-else-if="item.status === 'completed'" color="#38b2ac">mdi-check-circle</v-icon>
-                            <v-icon v-else-if="item.status === 'error'" color="error">mdi-alert-circle</v-icon>
-                            <div v-else class="step-empty-indicator"></div>
-                          </template>
-                          <template #title>
-                            <div class="step-badge-wrapper">
-                              <span class="step-badge" :class="[`badge-${item.phase}`, { 'badge-error': item.status === 'error' } ]">{{ item.badge }}</span>
-                              <div class="step-main-text" :class="{'dimmed': item.status === 'pending'}">{{ item.entity }}</div>
-                              <div class="step-operation-text" :class="{'dimmed': item.status === 'pending'}">{{ item.operation }}</div>
-                            </div>
-                          </template>
-                        </v-stepper-item>
-                        <v-divider v-if="index < progressSteps.length - 1" :key="`divider-${index}`"></v-divider>
-                      </template>
-                    </transition-group>
-                  </v-stepper-header>
-                </v-stepper>
+          <!-- Error Display -->
+          <div v-if="rtExecutionStatus === 'error' && rtError" class="error-container-standalone mb-4">
+            <div class="error-details pa-4 rounded bg-red-lighten-5">
+              <div class="d-flex align-center text-red-darken-2">
+                <v-icon color="error" class="me-2">mdi-alert-circle-outline</v-icon>
+                <span class="font-weight-medium">Step failed: {{ getFailedStepName() }}</span>
               </div>
             </div>
           </div>
 
-          <div class="content-wrapper">
-            <!-- Dedicated Error Container (outside stepper) -->
-            <div v-if="rtExecutionStatus === 'error' && rtError" class="error-container-standalone mt-4">
-              <div class="error-details pa-4 rounded bg-red-lighten-5">
-                <div class="d-flex align-center text-red-darken-2">
-                  <v-icon color="error" class="me-2">mdi-alert-circle-outline</v-icon>
-                  <span class="font-weight-medium">Step failed: {{ getFailedStepName() }}</span>
-                </div>
-              </div>
-            </div>
+          <!-- Final Results Display -->
+          <div v-if="rtResults && rtExecutionStatus !== 'error'" class="results-content">
+            <data-display :content="rtResults.content" :type="determineDisplayType(rtResults.display_type)"
+              :metadata="rtResults.metadata || {}" />
+          </div>
 
-            <!-- Final Results/Cancelled Display (only show when not error) -->
-            <div v-if="showFinalOutcomeArea && rtExecutionStatus !== 'error'" class="full-width-section">
-              <div v-if="rtResults" class="final-results mt-4">
-                <!--<h3 class="text-subtitle-1 mb-3 px-4">Results</h3>-->
-                <data-display :content="rtResults.content" :type="determineDisplayType(rtResults.display_type)"
-                  :metadata="rtResults.metadata || {}" />
-              </div>
-
-              <div v-if="rtExecutionStatus === 'cancelled'"
-                class="cancelled-container mt-3 pa-3 rounded bg-orange-lighten-5">
-                <div class="d-flex align-center text-orange-darken-3">
-                  <v-icon color="warning" class="me-2">mdi-cancel</v-icon>
-                  <span class="font-weight-medium">Query execution was cancelled.</span>
-                </div>
+          <!-- Cancelled Display -->
+          <div v-if="rtExecutionStatus === 'cancelled'" class="cancelled-container">
+            <div class="cancelled-message pa-3 rounded bg-orange-lighten-5">
+              <div class="d-flex align-center text-orange-darken-3">
+                <v-icon color="warning" class="me-2">mdi-cancel</v-icon>
+                <span class="font-weight-medium">Query execution was cancelled.</span>
               </div>
             </div>
           </div>
@@ -503,6 +467,8 @@ const getFailedStepName = () => {
   return 'Error! Please check the backend and try again.';
 };
 
+// OLD STEPPER-RELATED COMPUTED PROPERTIES - COMMENTED OUT - NOT USED BY EXECUTIONDETAILSPANEL
+/*
 const hasStepperExpanded = computed(() => {
   // Expand the stepper container when:
   // 1. We have received execution steps from step_plan_info (more than the 4 bookend steps including hidden ones)
@@ -511,59 +477,7 @@ const hasStepperExpanded = computed(() => {
   return (visibleStepsCount > 3) || rtExecutionStatus.value === 'error';
 });
 
-const resetInterface = async () => {
-  if (isProcessing.value && rtProcessId.value) {
-    await handleCancelExecution();
-  }
-  messages.value = [];
-  userInput.value = '';
-  cleanup();
-  
-  // Clear the error state from previous runs
-  rtError.value = null;
-  
-  isCancelling.value = false;
-  autoScroll.value = true;
-  // Don't clear history when resetting interface
-};
-
-const handleCancelExecution = async () => {
-  if (!rtProcessId.value || isCancelling.value) return;
-  isCancelling.value = true;
-  try {
-    await cancelProcess();
-  } catch (error) {
-    console.error('Error during manual cancellation:', error);
-  } finally {
-    isCancelling.value = false;
-  }
-};
-
-const determineDisplayType = (typeFromServer) => {
-  if (typeFromServer === 'markdown') return MessageType.MARKDOWN;
-  if (typeFromServer === 'table' || typeFromServer === 'vuetify_data_table') return MessageType.TABLE;
-  return MessageType.TEXT;
-};
-
-const scrollToBottom = () => {
-  nextTick(() => {
-    if (autoScroll.value && messagesContainerRef.value) {
-      messagesContainerRef.value.scrollTop = messagesContainerRef.value.scrollHeight;
-    }
-  });
-};
-
-const handleScroll = () => {
-  if (messagesContainerRef.value) {
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.value;
-    // Only enable auto-scroll if user is near the bottom (within 100px)
-    // If user scrolls up, disable auto-scroll to allow manual scrolling
-    autoScroll.value = scrollHeight - scrollTop - clientHeight < 100;
-  }
-};
-
 // Stepper management using the managed step flow from useRealtimeStream
-
 const progressSteps = computed(() => {
   return rtSteps.value
     .filter(step => !step.hidden) // Filter out hidden steps
@@ -645,6 +559,58 @@ const currentProgressStepId = computed(() => {
   // Default to first step if all are pending
   return rtSteps.value.length > 0 ? (rtSteps.value[0].id || 'step_0') : 'default_step';
 });
+*/
+
+const resetInterface = async () => {
+  if (isProcessing.value && rtProcessId.value) {
+    await handleCancelExecution();
+  }
+  messages.value = [];
+  userInput.value = '';
+  cleanup();
+  
+  // Clear the error state from previous runs
+  rtError.value = null;
+  
+  isCancelling.value = false;
+  autoScroll.value = true;
+  // Don't clear history when resetting interface
+};
+
+const handleCancelExecution = async () => {
+  if (!rtProcessId.value || isCancelling.value) return;
+  isCancelling.value = true;
+  try {
+    await cancelProcess();
+  } catch (error) {
+    console.error('Error during manual cancellation:', error);
+  } finally {
+    isCancelling.value = false;
+  }
+};
+
+const determineDisplayType = (typeFromServer) => {
+  if (typeFromServer === 'markdown') return MessageType.MARKDOWN;
+  if (typeFromServer === 'table' || typeFromServer === 'vuetify_data_table') return MessageType.TABLE;
+  return MessageType.TEXT;
+};
+
+const scrollToBottom = () => {
+  nextTick(() => {
+    if (autoScroll.value && messagesContainerRef.value) {
+      messagesContainerRef.value.scrollTop = messagesContainerRef.value.scrollHeight;
+    }
+  });
+};
+
+const handleScroll = () => {
+  if (messagesContainerRef.value) {
+    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.value;
+    // Only enable auto-scroll if user is near the bottom (within 100px)
+    // If user scrolls up, disable auto-scroll to allow manual scrolling
+    autoScroll.value = scrollHeight - scrollTop - clientHeight < 100;
+  }
+};
 
 const showProgressDisplayArea = computed(() =>
   messages.value.length > 0 &&
@@ -1086,15 +1052,21 @@ watch(showToolsModal, (newVal) => {
   white-space: nowrap;
 }
 
-/* Results container */
+/* Results container - simplified for clean display */
 .results-container {
   max-width: var(--max-width);
   width: calc(100% - 40px);
   margin: 12px auto 120px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   background: transparent;
+}
+
+/* Results content styling */
+.results-content {
+  width: 100%;
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow-medium);
+  background: white;
+  overflow: hidden;
 }
 
 /* NEW: Expansion Panel Container */
@@ -1106,334 +1078,20 @@ watch(showToolsModal, (newVal) => {
   justify-content: center;
 }
 
-.content-wrapper {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.full-width-results {
-  border-radius: var(--border-radius);
-  box-shadow: var(--shadow-medium);
-  background: white;
-  overflow: hidden;
-  width: 100%;
-}
-
-.system-message {
-  border-radius: var(--border-radius);
-  width: 100%;
-}
-
-.error-container,
+.error-container-standalone,
 .cancelled-container {
+  max-width: var(--max-width);
+  width: 100%;
   border: 0px solid currentColor;
 }
 
-/* Stepper styles */
-.transparent-stepper {
-  background-color: transparent !important;
+.cancelled-message {
+  border-left: 3px solid #ff9800;
 }
 
-.stepper-container-wrapper {
-  width: 480px;
-  max-width: 100%;
-  margin: 0 auto;
-  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
-  background-color: white;
-  border-radius: var(--border-radius);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
-  padding: 8px 0 0;
-  /* Remove bottom padding */
-  overflow: hidden;
-}
-
-
-.stepper-bottom-spacer {
-  height: 12px;
-  background-color: white;
-  width: 100%;
-}
-
-.stepper-container-wrapper.expanded {
-  width: 100%;
-  /* Full width when expanded */
-}
-
-.full-width-section {
-  width: 100%;
-}
-
-
-.final-results {
-  background: white;
-  border-radius: var(--border-radius);
-  box-shadow: var(--shadow-medium);
-  overflow: hidden;
-  width: 100%;
-}
-
-
-/* Keep the transition container visible during animation */
-.unified-progress-area {
-  width: 100%;
-  margin-top: 10px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 20px;
-  overflow: hidden;
-  /* Ensure animation is visible */
-}
-
-.v-stepper :deep(.v-stepper-header) {
-  flex-wrap: nowrap;
-  padding: 16px 32px;
-  overflow-x: auto;
-  justify-content: space-between !important;
-  border-radius: 8px;
-  background-color: transparent;
-}
-
-.v-stepper {
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.v-stepper-item {
-  flex-basis: auto !important;
-  min-width: 140px;
-  flex-shrink: 0;
-  padding: 0 12px;
-}
-
-/* Custom column layout for step item */
-.v-stepper :deep(.v-stepper-item) {
-  flex-direction: column !important;
-  align-items: center !important;
-  text-align: center !important;
-  min-width: 100px !important;
-  max-width: 150px !important;
-}
-
-/* Remove any theme colors that might interfere */
-.v-stepper :deep(.v-stepper-item__icon) {
-  background-color: transparent !important;
-  background: none !important;
-  box-shadow: none !important;
-  border: none !important;
-  margin: 0 !important;
-  padding: 0 !important;
-  width: 24px !important;
-  height: 24px !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.v-stepper :deep(.v-stepper-item__icon) div {
-  background-color: transparent !important;
-  background: none !important;
-  box-shadow: none !important;
-  border: none !important;
-}
-
-.v-stepper :deep(.v-stepper-item__title) {
-  /* We now render custom content (badge + main), so neutralize defaults */
-  font-size: 0 !important; /* hide native text spacing */
-  line-height: 0 !important;
-  margin-top: 0 !important;
-  color: transparent !important;
-  text-align: center !important;
-}
-
-.v-stepper :deep(.v-stepper-item__content) {
-  margin: 8px auto 0 !important;
-  padding: 0 4px !important;
-  text-align: center !important;
-}
-
-/* Subtitle slot unused now */
-.v-stepper :deep(.v-stepper-item__subtitle) { display: none !important; }
-
-/* Custom badge + main layout */
-.custom-badge-step .step-badge-wrapper {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  min-width: 72px;
-}
-
-.step-badge {
-  display: inline-block;
-  padding: 3px 8px; /* slightly larger badge */
-  font-size: 0.66rem; /* tiny bump */
-  font-weight: 600;
-  letter-spacing: 0.75px; /* tighten a touch */
-  border-radius: 10px;
-  background: #eef1f5;
-  color: #44515e;
-  line-height: 1.12;
-  position: relative;
-  text-transform: uppercase;
-  max-width: 100%;
-  white-space: nowrap;
-}
-
-/* Phase color accents */
-.step-badge.badge-crafting { background: #f3e5f5; color: #7b1fa2; }
-.step-badge.badge-generating { background: #e9f7ff; color: #076489; }
-.step-badge.badge-formatting { background: #f5f6ff; color: #2d3c9c; }
-.step-badge.badge-enriching { background: #fde7d9; color: #f57c00; }
-.step-badge.badge-finalizing { background: #e8f5e8; color: #2e7d32; }
-.step-badge.badge-api { background: #e8f9f6; color: #0f6f62; }
-.step-badge.badge-sql { background: #fff4e5; color: #9a5a00; }
-.step-badge.badge-hybrid { background: #fce4ec; color: #ad1457; }
-.step-badge.badge-other { background: #ececec; color: #555; }
-.step-badge.badge-error { 
-  /* Softer error styling (Option B) to align with other pastel phase badges */
-  background: #fbe9ea !important; /* light, slightly cool red */
-  color: #b3261e !important;      /* Material error primary */
-  box-shadow: 0 0 0 1px #f2b8b5 inset; /* subtle border for definition */
-}
-
-.step-main-text {
-  font-size: 0.72rem; /* slightly smaller */
-  font-weight: 500;
-  line-height: 1.18;
-  color: #6b7280; /* Lighter gray for entity (same as operation for balance) */
-  text-align: center;
-  word-break: break-word;
-  max-width: 165px; /* allow longer operation names */
-  white-space: normal;
-}
-
-.step-main-text.dimmed { opacity: 0.55; }
-
-.step-operation-text {
-  font-size: 0.65rem; /* smaller than entity */
-  font-weight: 400;
-  line-height: 1.15;
-  color: #6b7280; /* Lighter gray for operation */
-  text-align: center;
-  word-break: break-word;
-  max-width: 165px;
-  white-space: normal;
-  margin-top: 2px; /* small gap between entity and operation */
-}
-
-.step-operation-text.dimmed { opacity: 0.55; }
-
-.v-stepper :deep(.v-divider) {
-  align-self: center;
-  min-height: 1px;
-  max-height: 1px;
-  min-width: 20px;
-  max-width: none;
-}
-
-.v-stepper :deep(.v-icon) {
-  margin: 0 !important;
-  font-size: 20px !important;
-}
-
-.v-stepper :deep(.v-icon.mdi-check-circle) {
-  color: #38b2ac !important;
-}
-
-.v-stepper-item :deep(.v-ripple__container) {
-  display: none !important;
-}
-
-/* Step indicators */
-.step-pulse-indicator {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #4C64E2, #3949AB);
-  box-shadow: 0 0 10px rgba(76, 100, 226, 0.4);
-  display: inline-block;
-  position: relative;
-  animation: pulse-animation 2s infinite ease-in-out;
-  z-index: 5;
-}
-
-.step-empty-indicator {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.2);
-  display: inline-block;
-}
-
-.completed-step-icon {
-  color: #38b2ac !important;
-  filter: drop-shadow(0 1px 2px rgba(56, 178, 172, 0.3));
-}
-
-/* Dynamic stepper container */
-.stepper-container {
-  width: 380px;
-  /* Initial width for just 2-3 steps */
-  margin: 0 auto;
-  transition: width 0.8s cubic-bezier(0.22, 1, 0.36, 1);
-  overflow: hidden;
-}
-
-.stepper-container.expanded {
-  width: 100%;
-  /* Full width when expanded */
-}
-
-/* Step fade animation */
-.step-fade-enter-active {
-  transition: all 0.5s ease;
-  position: relative;
-  z-index: 1;
-}
-
-.step-fade-leave-active {
-  transition: all 0.3s ease;
-  position: absolute;
-}
-
-.step-fade-enter-from,
-.step-fade-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-/* Add smooth transitions for dividers */
-.v-stepper :deep(.v-divider) {
-  transition: width 0.5s ease, opacity 0.5s ease;
-}
-
-
-/* Animation for steps */
-.step-fade-enter-active {
-  transition: all 0.5s ease;
-  position: relative;
-  z-index: 1;
-}
-
-.step-fade-leave-active {
-  transition: all 0.3s ease;
-  position: absolute;
-}
-
-.step-fade-enter-from,
-.step-fade-leave-to {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-/* Transitions for dividers */
-.v-stepper :deep(.v-divider) {
-  transition: width 0.5s ease, opacity 0.5s ease;
-}
+/* OLD STEPPER STYLES - COMMENTED OUT FOR CLEANUP
+... (large block of stepper-related CSS removed for brevity)
+*/
 
 /* Entities Modal Styling - Match Realtime Interface Theme */
 .entities-modal {
@@ -1649,6 +1307,7 @@ watch(showToolsModal, (newVal) => {
   }
 }
 
+/* OLD STEPPER ANIMATION - COMMENTED OUT
 @keyframes pulse-animation {
   0% {
     transform: scale(0.8);
@@ -1665,6 +1324,7 @@ watch(showToolsModal, (newVal) => {
     box-shadow: 0 0 0 0 rgba(76, 100, 226, 0);
   }
 }
+*/
 
 /* Transitions */
 .fade-enter-active,

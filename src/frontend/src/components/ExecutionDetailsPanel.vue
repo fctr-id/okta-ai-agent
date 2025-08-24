@@ -174,7 +174,7 @@ const getDisplaySteps = () => {
           phase = 'generating';
         } else if (tool === 'finalizing_results') {
           badge = 'FINALIZING';
-          entity = 'Results';
+          entity = '';  // Don't show entity for FINALIZING
           operation = '';
           phase = 'finalizing';
         } else if (tool === 'enriching_data') {
@@ -207,8 +207,8 @@ const getDisplaySteps = () => {
         return {
           toolType: badge,
           operation: operation || entity,
-          // PRIORITY: Use detailed context from plan, fallback to rtSteps reason
-          context: getPlanContextForStep(originalIndex) || step.reason || `${badge} ${entity}`.trim(),
+          // ENHANCED: Use query_context first, then plan context, then reason, then fallback
+          context: step.query_context || getPlanContextForStep(originalIndex) || step.reason || `${badge} ${entity}`.trim(),
           stepStatus: step.status || 'pending',
           stepIndex: originalIndex, // Use original index for rtSteps access
           originalIndex: originalIndex, // Keep track of original index
