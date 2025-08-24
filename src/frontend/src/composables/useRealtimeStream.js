@@ -47,6 +47,19 @@ export function useRealtimeStream() {
     });
 
     /**
+     * Transform backend step types to display names for consistent UI
+     */
+    const transformStepTypeToDisplayName = (backendStepType) => {
+        const transformMap = {
+            'results_formatter': 'finalizing_results',
+            'generate_plan': 'generating_steps',
+            'thinking': 'thinking',
+            // Add more transformations as needed
+        };
+        return transformMap[backendStepType] || backendStepType;
+    };
+
+    /**
      * Start a new query process
      * @param {string} query - The natural language query to process
      * @returns {Promise<string|null>} - The process ID or null if failed
@@ -65,7 +78,7 @@ export function useRealtimeStream() {
         execution.results = null;
 
         // Reset expansion panel data
-        expansionPanelData.visible = false;
+        expansionPanelData.visible = true; // Show immediately when query starts
         expansionPanelData.planData = null;
         expansionPanelData.stepDetails = [];
         expansionPanelData.currentStepExecution = null;
@@ -80,30 +93,8 @@ export function useRealtimeStream() {
             baseData: null
         };
 
-        // Initialize with three core steps:
-        // 1. thinking (pre-plan entity relevance selection)
-        // 2. generating_steps (plan generation)
-        // 3. finalizing_results (will activate after all execution steps complete)
-        execution.steps = [
-            {
-                id: 'thinking',
-                tool_name: 'thinking',
-                reason: 'Crafting optimal execution strategy',
-                status: 'active', // Start with thinking step active
-            },
-            {
-                id: 'generating_steps',
-                tool_name: 'generating_steps',
-                reason: 'Generating detailed execution plan',
-                status: 'pending',
-            },
-            {
-                id: 'finalizing_results',
-                tool_name: 'finalizing_results', 
-                reason: 'Finalizing and formatting results',
-                status: 'pending',
-            }
-        ];
+        // Initialize with empty steps array - will be populated by PLAN-GENERATED event
+        execution.steps = [];
 
         try {
             const response = await fetch("/api/realtime/start-process", {
@@ -289,11 +280,8 @@ export function useRealtimeStream() {
                     delete execution.results.metadata.streamingProgress;
                 }
                 
-                // Complete the finalizing step
-                const finalizingStepIndex = execution.steps.length - 1;
-                if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                    execution.steps[finalizingStepIndex].status = 'completed';
-                }
+                // CALLBACK-BASED: Finalizing step completion handled via STEP-END callbacks
+                // No manual completion needed
                 
                 execution.status = "completed";
                 isProcessing.value = false;
@@ -316,91 +304,68 @@ export function useRealtimeStream() {
                 activeEventSource.value = null;
             }
             
-            // SIMPLIFIED: Always activate and complete finalizing_results step
-            // The backend controls execution steps, so when we get final results, we can safely finalize
-            const finalizingStepIndex = execution.steps.length - 1;
-            
-            if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                execution.steps[finalizingStepIndex].status = 'active';
-                execution.currentStepIndex = finalizingStepIndex;
-                // console.log("Activated finalizing_results step");
-            }
-            
-            // Small delay to show the finalizing step as active, then complete it
-            setTimeout(() => {
-                // console.log("Completing finalizing step and setting results");
-                // Complete the finalizing_results step
-                if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                    execution.steps[finalizingStepIndex].status = 'completed';
-                }
+            // CALLBACK-BASED: Results Formatter and finalizing steps are now handled via STEP-START/STEP-END callbacks
+            // No manual step completion needed - backend sends proper callbacks
                 
-                // The Results Formatter output is in content.formatted_response
-                const formattedResponse = content.formatted_response || {};
-                const agentDisplayMetadata = formattedResponse.metadata || content.metadata || content.display_hints || {};
+            // The Results Formatter output is in content.formatted_response
+            const formattedResponse = content.formatted_response || {};
+            const agentDisplayMetadata = formattedResponse.metadata || content.metadata || content.display_hints || {};
 
-                // Handle nested content structure from Modern Execution Manager
-                let actualContent, actualMetadata;
-                if (formattedResponse.content && typeof formattedResponse.content === 'object' && formattedResponse.content.content) {
-                    // Nested structure: formatted_response.content.content contains the actual data
-                    actualContent = formattedResponse.content.content;
-                    actualMetadata = {
-                        ...agentDisplayMetadata,
-                        ...formattedResponse.content.metadata // Merge metadata from nested content
-                    };
-                    // console.log("Using nested content structure");
-                } else {
-                    // Flat structure
-                    actualContent = formattedResponse.content || content.content || content.result_content || "";
-                    actualMetadata = agentDisplayMetadata;
-                    // console.log("Using flat content structure");
-                }
-
-                // Clean up malformed array data from backend
-                if (Array.isArray(actualContent)) {
-                    actualContent = actualContent.map(row => {
-                        const cleanedRow = { ...row };
-                        Object.keys(cleanedRow).forEach(key => {
-                            const value = cleanedRow[key];
-                            // Fix stringified empty arrays like ["[]"] -> []
-                            if (Array.isArray(value) && value.length === 1 && value[0] === "[]") {
-                                cleanedRow[key] = [];
-                                console.log(`Fixed malformed array in ${key}: ["[]"] -> []`);
-                            }
-                            // Fix other stringified arrays like ["[\"item1\",\"item2\"]"] -> ["item1", "item2"]
-                            else if (Array.isArray(value) && value.length === 1 && typeof value[0] === 'string' && value[0].startsWith('[')) {
-                                try {
-                                    cleanedRow[key] = JSON.parse(value[0]);
-                                    console.log(`Fixed stringified array in ${key}:`, value[0], '->', cleanedRow[key]);
-                                } catch (e) {
-                                    console.warn(`Could not parse stringified array in ${key}:`, value[0]);
-                                }
-                            }
-                        });
-                        return cleanedRow;
-                    });
-                    // console.log("Cleaned content:", actualContent);
-                }
-
-                // Format the result to the expected shape for the frontend
-                execution.results = {
-                    content: actualContent,
-                    display_type: formattedResponse.display_type || content.display_type || "markdown",
-                    headers: actualMetadata.headers || formattedResponse.headers || [], // Include headers for Vuetify table display
-                    metadata: actualMetadata, // This will now correctly pass headers, totalItems, etc.
+            // Handle nested content structure from Modern Execution Manager
+            let actualContent, actualMetadata;
+            if (formattedResponse.content && typeof formattedResponse.content === 'object' && formattedResponse.content.content) {
+                // Nested structure: formatted_response.content.content contains the actual data
+                actualContent = formattedResponse.content.content;
+                actualMetadata = {
+                    ...agentDisplayMetadata,
+                    ...formattedResponse.content.metadata // Merge metadata from nested content
                 };
+                // console.log("Using nested content structure");
+            } else {
+                // Flat structure
+                actualContent = formattedResponse.content || content.content || content.result_content || "";
+                actualMetadata = agentDisplayMetadata;
+                // console.log("Using flat content structure");
+            }
 
-                // console.log("Final execution.results set:", execution.results);
-                // console.log("execution.results.content:", execution.results.content);
-                // console.log("execution.results.content as JSON:", JSON.stringify(execution.results.content, null, 2));
-                // console.log("execution.results.display_type:", execution.results.display_type);
-                // console.log("execution.results.metadata:", execution.results.metadata);
-                // console.log("execution.results.metadata as JSON:", JSON.stringify(execution.results.metadata, null, 2));
-                
-                execution.status = content.status || "completed"; // Use status from content if available
-                isProcessing.value = false;
-                isStreaming.value = false; // Ensure streaming is also marked as false
-                
-            }, 500); // Show finalizing step as active for 500ms
+            // Clean up malformed array data from backend
+            if (Array.isArray(actualContent)) {
+                actualContent = actualContent.map(row => {
+                    const cleanedRow = { ...row };
+                    Object.keys(cleanedRow).forEach(key => {
+                        const value = cleanedRow[key];
+                        // Fix stringified empty arrays like ["[]"] -> []
+                        if (Array.isArray(value) && value.length === 1 && value[0] === "[]") {
+                            cleanedRow[key] = [];
+                            console.log(`Fixed malformed array in ${key}: ["[]"] -> []`);
+                        }
+                        // Fix other stringified arrays like ["[\"item1\",\"item2\"]"] -> ["item1", "item2"]
+                        else if (Array.isArray(value) && value.length === 1 && typeof value[0] === 'string' && value[0].startsWith('[')) {
+                            try {
+                                cleanedRow[key] = JSON.parse(value[0]);
+                                console.log(`Fixed stringified array in ${key}:`, value[0], '->', cleanedRow[key]);
+                            } catch (e) {
+                                console.warn(`Could not parse stringified array in ${key}:`, value[0]);
+                            }
+                        }
+                    });
+                    return cleanedRow;
+                });
+                // console.log("Cleaned content:", actualContent);
+            }
+
+            // Format the result to the expected shape for the frontend
+            execution.results = {
+                content: actualContent,
+                display_type: formattedResponse.display_type || content.display_type || "markdown",
+                headers: actualMetadata.headers || formattedResponse.headers || [], // Include headers for Vuetify table display
+                metadata: actualMetadata, // This will now correctly pass headers, totalItems, etc.
+            };
+
+            // console.log("Final execution.results set:", execution.results);
+            execution.status = content.status || "completed"; // Use status from content if available
+            isProcessing.value = false;
+            isStreaming.value = false; // Ensure streaming is also marked as false
             
         } catch (err) {
             console.error("Error processing final result event:", err);
@@ -611,10 +576,8 @@ export function useRealtimeStream() {
             execution.results.metadata.isStreaming = false;
             delete execution.results.metadata.streamingProgress;
             
-            // Complete the finalizing step
-            if (execution.steps[finalizingStepIndex] && execution.steps[finalizingStepIndex].id === 'finalizing_results') {
-                execution.steps[finalizingStepIndex].status = 'completed';
-            }
+            // CALLBACK-BASED: Finalizing step completion handled via STEP-END callbacks
+            // No manual completion needed
             
             execution.status = "completed";
             isProcessing.value = false;
@@ -724,6 +687,69 @@ export function useRealtimeStream() {
         // });
     }, { deep: true });
 
+    // ====== HELPER FUNCTIONS FOR STEP TIMING ======
+    
+    /**
+     * Update step status - CALLBACK-ONLY system, no local timing calculations
+     */
+    const updateStepStatus = (stepIndex, newStatus, callbackTiming = null) => {
+        console.log(`🔍 DEBUG updateStepStatus: stepIndex=${stepIndex}, newStatus=${newStatus}, steps.length=${execution.steps.length}`);
+        
+        if (stepIndex < 0 || stepIndex >= execution.steps.length) {
+            console.log(`❌ DEBUG: Invalid stepIndex ${stepIndex}, steps.length=${execution.steps.length}`);
+            return;
+        }
+        
+        const step = execution.steps[stepIndex];
+        console.log(`🔍 DEBUG: Found step at index ${stepIndex}:`, {
+            tool_name: step.tool_name,
+            current_status: step.status,
+            current_duration: step.duration
+        });
+        
+        // Only update status and timing from callbacks
+        if (step.status !== newStatus) {
+            step.status = newStatus;
+            
+            // Apply callback timing data if provided
+            if (callbackTiming) {
+                if (callbackTiming.start_time) {
+                    step.start_time = new Date(callbackTiming.start_time + ' UTC').getTime();
+                }
+                if (callbackTiming.duration_seconds) {
+                    step.duration = callbackTiming.duration_seconds;
+                }
+                if (callbackTiming.end_time) {
+                    step.end_time = new Date(callbackTiming.end_time + ' UTC').getTime();
+                }
+            }
+            
+            // Force Vue reactivity by updating the array reference
+            execution.steps = [...execution.steps];
+        }
+        
+        // Also apply timing data even if status unchanged (for STEP-END after array rebuilds)
+        else if (callbackTiming) {
+            let updated = false;
+            if (callbackTiming.start_time && !step.start_time) {
+                step.start_time = new Date(callbackTiming.start_time + ' UTC').getTime();
+                updated = true;
+            }
+            if (callbackTiming.duration_seconds && !step.duration) {
+                step.duration = callbackTiming.duration_seconds;
+                updated = true;
+            }
+            if (callbackTiming.end_time && !step.end_time) {
+                step.end_time = new Date(callbackTiming.end_time + ' UTC').getTime();
+                updated = true;
+            }
+            
+            if (updated) {
+                execution.steps = [...execution.steps];
+            }
+        }
+    };
+
     // ====== NEW STANDARDIZED EVENT HANDLERS FOR EXPANSION PANEL ======
     
     /**
@@ -745,40 +771,68 @@ export function useRealtimeStream() {
             // Make expansion panel visible when we have plan data
             expansionPanelData.visible = true;
             
-            // STEPPER MANAGEMENT: Setup stepper steps from plan data
+            // ESSENTIAL: Initialize basic steps structure for ExecutionDetailsPanel
             if (content.plan && content.plan.steps && Array.isArray(content.plan.steps)) {
                 execution.planGenerated = true;
                 
-                // Complete the thinking and generating_steps sentinel steps
-                if (execution.steps[0] && execution.steps[0].id === 'thinking') {
-                    execution.steps[0].status = 'completed';
+                // Initialize minimal step structure for duration tracking
+                // Steps 0 and 1 are static (thinking, generating_steps)
+                if (execution.steps.length === 0) {
+                    // Add thinking step
+                    execution.steps.push({
+                        id: 0,
+                        tool_name: 'thinking',
+                        status: 'pending',
+                        duration: null,
+                        start_time: null,
+                        end_time: null,
+                        hidden: false
+                    });
+                    
+                    // Add generating_steps step
+                    execution.steps.push({
+                        id: 1,
+                        tool_name: 'generating_steps',
+                        status: 'pending',
+                        duration: null,
+                        start_time: null,
+                        end_time: null,
+                        hidden: false
+                    });
                 }
-                if (execution.steps[1] && execution.steps[1].id === 'generating_steps') {
-                    execution.steps[1].status = 'completed';
-                }
-
-                // Create the new execution steps from the plan for the stepper
-                const newExecutionSteps = content.plan.steps.map((step, index) => ({
-                    id: step.step_index || index,
-                    tool_name: step.tool_name || step.step_name,
-                    reason: step.reason || step.step_name,
-                    status: "pending",
-                    operation: step.operation,
-                    entity: step.entity
-                }));
-
-                // Insert new steps between thinking/generating_steps and finalizing_results
-                execution.steps = [
-                    execution.steps[0], // thinking
-                    execution.steps[1], // generating_steps
-                    ...newExecutionSteps,
-                    execution.steps[execution.steps.length - 1] // finalizing_results
-                ];
-
+                
+                // Add execution steps from plan (step 2+)
+                content.plan.steps.forEach((step, index) => {
+                    execution.steps.push({
+                        id: step.step_index || (index + 2),
+                        tool_name: step.tool_name || step.step_name,
+                        status: 'pending',
+                        duration: null,
+                        start_time: null,
+                        end_time: null,
+                        hidden: false,
+                        operation: step.operation,
+                        entity: step.entity
+                    });
+                });
+                
+                // Add finalizing_results step at the end
+                const finalizingStepId = execution.steps.length;
+                execution.steps.push({
+                    id: finalizingStepId,
+                    tool_name: 'finalizing_results',
+                    status: 'pending',
+                    duration: null,
+                    start_time: null,
+                    end_time: null,
+                    hidden: false
+                });
+                
                 execution.status = "executing";
+                console.log(`📋 STEPS: Initialized ${execution.steps.length} steps for tracking`);
             }
             
-            console.log("📋 PLAN-GENERATED: Plan stored for expansion panel and stepper updated");
+            console.log("📋 PLAN-GENERATED: Plan stored for expansion panel");
         } catch (err) {
             console.error("Error handling PLAN-GENERATED event:", err);
         }
@@ -793,8 +847,9 @@ export function useRealtimeStream() {
             const content = data.content;
             
             // Update or create step detail record for expansion panel
+            // Use step_number AND step_name for unique identification to handle duplicate step numbers
             const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
-                step => step.stepNumber === content.step_number
+                step => step.stepNumber === content.step_number && step.stepName === content.step_name
             );
             
             const stepDetail = {
@@ -834,14 +889,50 @@ export function useRealtimeStream() {
                 startTime: content.formatted_time
             };
             
-            // STEPPER MANAGEMENT: Update stepper step status to active
-            const stepIndex = content.step_number + 1; // Offset for thinking + generating_steps
-            if (stepIndex >= 2 && stepIndex < execution.steps.length - 1) {
+            // ESSENTIAL: Track steps for ExecutionDetailsPanel (rtSteps array)
+            let stepIndex = -1;
+            
+            // Map backend step numbers directly to frontend indices
+            // The plan initialization creates steps at the correct indices
+            if (content.step_number === 0) {
+                stepIndex = 0;
+            } else if (content.step_number === 1) {
+                stepIndex = 1;
+            } else if (content.step_number >= 2) {
+                // Backend step numbers should map directly to array indices
+                stepIndex = content.step_number;
+            }
+            
+            // Update execution.steps for ExecutionDetailsPanel (rtSteps prop)
+            if (stepIndex >= 0) {
+                // Ensure we have enough steps in the array
+                while (execution.steps.length <= stepIndex) {
+                    execution.steps.push({
+                        id: execution.steps.length,
+                        tool_name: '',
+                        status: 'pending',
+                        duration: null,
+                        start_time: null,
+                        end_time: null,
+                        hidden: false
+                    });
+                }
+                
+                // Update the step with start information - TRANSFORM BACKEND NAMES TO DISPLAY NAMES
+                const displayToolName = transformStepTypeToDisplayName(content.step_type);
+                execution.steps[stepIndex].tool_name = displayToolName;
                 execution.steps[stepIndex].status = 'active';
+                execution.steps[stepIndex].start_time = content.formatted_time;
+                // IMPORTANT: Store the actual backend step number for display
+                execution.steps[stepIndex].backend_step_number = content.step_number;
+                execution.steps[stepIndex].step_name = content.step_name;
                 execution.currentStepIndex = stepIndex;
+                
+                console.log(`🔄 STEPS: Updated step ${stepIndex} (${content.step_type}) to active`);
             }
             
             console.log(`🚀 STEP-START: Step ${content.step_number} (${content.step_type}) - ${content.step_name}`);
+            console.log(`🔍 DEBUG STEP-START: Mapped to stepIndex=${stepIndex}, execution.steps.length=${execution.steps.length}`);
         } catch (err) {
             console.error("Error handling STEP-START event:", err);
         }
@@ -855,9 +946,12 @@ export function useRealtimeStream() {
             const data = JSON.parse(event.data);
             const content = data.content;
             
+            console.log(`🔍 DEBUG STEP-END: Received step ${content.step_number} (${content.step_type}) with duration ${content.duration_seconds}s`);
+            
             // Find and update the step detail for expansion panel
+            // Use step_number AND step_name for unique identification to handle duplicate step numbers
             const stepDetailIndex = expansionPanelData.stepDetails.findIndex(
-                step => step.stepNumber === content.step_number
+                step => step.stepNumber === content.step_number && step.stepName === content.step_name
             );
             
             if (stepDetailIndex >= 0) {
@@ -877,14 +971,37 @@ export function useRealtimeStream() {
                 expansionPanelData.currentStepExecution = null;
             }
             
-            // STEPPER MANAGEMENT: Update stepper step status to completed/error
-            const stepIndex = content.step_number + 1; // Offset for thinking + generating_steps
-            if (stepIndex >= 2 && stepIndex < execution.steps.length - 1) {
-                execution.steps[stepIndex].status = content.success ? 'completed' : 'error';
+            // ESSENTIAL: Update execution.steps for ExecutionDetailsPanel (rtSteps prop)
+            let stepIndex = -1;
+            
+            // Map backend step numbers directly to frontend indices  
+            // The plan initialization creates steps at the correct indices
+            if (content.step_number === 0) {
+                stepIndex = 0;
+            } else if (content.step_number === 1) {
+                stepIndex = 1;
+            } else if (content.step_number >= 2) {
+                // Backend step numbers should map directly to array indices
+                stepIndex = content.step_number;
+            }
+            
+            // Update execution.steps with completion information
+            if (stepIndex >= 0 && stepIndex < execution.steps.length) {
+                const newStatus = content.success ? 'completed' : 'error';
+                execution.steps[stepIndex].status = newStatus;
+                execution.steps[stepIndex].duration = content.duration_seconds;
+                execution.steps[stepIndex].end_time = content.formatted_time;
+                execution.steps[stepIndex].record_count = content.record_count;
+                // IMPORTANT: Store the actual backend step number for display
+                execution.steps[stepIndex].backend_step_number = content.step_number;
+                execution.steps[stepIndex].step_name = content.step_name;
+                
+                console.log(`🔄 STEPS: Updated step ${stepIndex} (${execution.steps[stepIndex].tool_name}) to ${newStatus} - ${content.duration_seconds?.toFixed(2)}s`);
             }
             
             const status = content.success ? "SUCCESS" : "FAILED";
             console.log(`✅ STEP-END: Step ${content.step_number} - ${status} - ${content.duration_seconds?.toFixed(1)}s - ${content.record_count || 0} records`);
+            console.log(`🔍 DEBUG STEP-END: Mapped to stepIndex=${stepIndex}, updating execution.steps[${stepIndex}]`);
         } catch (err) {
             console.error("Error handling STEP-END event:", err);
         }
