@@ -1,7 +1,7 @@
 # Version History
 
 
-## Current latest: v1.2.0 (08-25-2025) - "Anchor Drop"
+## Current latest: v1.2.0-beta (08-25-2025) - "Anchor Drop"
 
 This release focuses on delivering consistent, deterministic results and transforming the user experience from guesswork to clarity. While acknowledging the probabilistic nature of LLMs, we've engineered systematic improvements through advanced context-engineering that dramatically reduce variability and provide complete visibility into execution processes.
 
