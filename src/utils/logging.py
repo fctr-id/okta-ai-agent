@@ -11,6 +11,7 @@ import socket
 import time
 import logging
 from logging.handlers import RotatingFileHandler
+import atexit
 from pathlib import Path
 from typing import Dict, Optional, Any
 from dotenv import load_dotenv
@@ -28,6 +29,60 @@ _CORRELATION_ID = None
 
 # Track configured loggers to prevent duplicate handlers
 _CONFIGURED_LOGGERS = set()
+
+# Singleton file handler (prevents multiple handlers holding the log file open)
+_FILE_HANDLER_SINGLETON: Optional[RotatingFileHandler] = None
+
+
+class SafeRotatingFileHandler(RotatingFileHandler):
+    """RotatingFileHandler with Windows-safe rollover.
+
+    Handles PermissionError (WinError 32) that occurs when another process/thread
+    still has the file open during rotation. We retry once after a short delay; if
+    it still fails we skip rotation (better to keep logging than crash).
+    """
+
+    def doRollover(self):  # type: ignore[override]
+        try:
+            super().doRollover()
+            return
+        except PermissionError:
+            # Attempt graceful retry
+            try:
+                if self.stream:
+                    try:
+                        self.stream.flush()
+                    except Exception:
+                        pass
+                    try:
+                        self.stream.close()
+                    except Exception:
+                        pass
+                time.sleep(0.2)
+                super().doRollover()
+                return
+            except PermissionError:
+                logging.getLogger(__name__).warning(
+                    "Log rotation skipped due to locked file (PermissionError). Continuing without rotating this cycle."  # noqa: E501
+                )
+            except Exception as e:  # noqa: BLE001
+                logging.getLogger(__name__).warning(
+                    f"Unexpected error during log rollover retry: {e}. Continuing without rotating."
+                )
+
+
+def _close_file_handler():
+    """Ensure singleton handler is closed at process exit to release file lock."""
+    global _FILE_HANDLER_SINGLETON
+    if _FILE_HANDLER_SINGLETON:
+        try:
+            _FILE_HANDLER_SINGLETON.close()
+        except Exception:
+            pass
+        _FILE_HANDLER_SINGLETON = None
+
+
+atexit.register(_close_file_handler)
 
 
 def generate_correlation_id(prefix="cli"):
@@ -128,21 +183,27 @@ def get_logger(name: str, log_dir: Optional[Path] = None) -> logging.Logger:
     # Add file handler if log_dir is provided
     if log_dir:
         os.makedirs(log_dir, exist_ok=True)
-        # Use unified okta_ai_agent.log for all agents
+        # Use unified okta_ai_agent.log for all agents (singleton handler)
         log_file = os.path.join(log_dir, "okta_ai_agent.log")
-        file_handler = RotatingFileHandler(
-            log_file, 
-            maxBytes=10*1024*1024, 
-            backupCount=5,
-            encoding='utf-8'  # Fix for Windows Unicode/emoji logging
-        )
-        file_handler.setLevel(DEFAULT_FILE_LEVEL)
-        file_formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s',
-            '%Y-%m-%d %H:%M:%S'
-        )
-        file_handler.setFormatter(file_formatter)
-        logger.addHandler(file_handler)
+        global _FILE_HANDLER_SINGLETON
+        if _FILE_HANDLER_SINGLETON is None:
+            file_handler = SafeRotatingFileHandler(
+                log_file,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+                encoding="utf-8",
+                delay=True,  # Open lazily to reduce locking window
+            )
+            file_handler.setLevel(DEFAULT_FILE_LEVEL)
+            file_formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s',
+                '%Y-%m-%d %H:%M:%S'
+            )
+            file_handler.setFormatter(file_formatter)
+            _FILE_HANDLER_SINGLETON = file_handler
+        # Attach singleton handler if not already attached
+        if _FILE_HANDLER_SINGLETON not in logger.handlers:
+            logger.addHandler(_FILE_HANDLER_SINGLETON)
     
     # Prevent duplicate logs
     if name != "root":
