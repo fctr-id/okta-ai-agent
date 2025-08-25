@@ -15,8 +15,7 @@ Performance & Reliability:
 - **Normalized Relationships**: Structured linkage reduces missed joins and result drift
 - **Enhanced Context**: Internal naming rationalized for relation analysis logic consistency
 
-
-## Current latest: v1.1.4-beta (08-14-2025) - "Bug Buster"
+## v1.1.4-beta (08-14-2025) - "Bug Buster"
 
 Major Bugs Fixed: (update immediately)
 - **Fixed API Response Correlation**: Resolved critical issue with API responses failing SQL co-relation that was preventing proper data joins (appreciate all of you who worked with us on this)
@@ -35,7 +34,7 @@ Community Contributions:
 - **AWS Session Token Support**: Added support for AWS session tokens in Bedrock configuration for enhanced security with temporary credentials and STS assume role scenarios ([PR #12](https://github.com/fctr-id/okta-ai-agent/pull/12) - Thanks @Kittzus!)
 
 
-## Current latest: v1.1.3-beta (08-12-2025) - "Octo Morph"
+## v1.1.3-beta (08-12-2025) - "Octo Morph"
 
 Major Framework & Intelligence Upgrades:
 - **ARM64 Support**: Migrated from polars to polars-lts-cpu for enhanced ARM64/Apple Silicon compatibility
