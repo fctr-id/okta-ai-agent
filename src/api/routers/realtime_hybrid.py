@@ -222,6 +222,56 @@ active_processes: Dict[str, Any] = {}
 # Global modern execution manager instance
 modern_executor = ModernExecutionManager()
 
+# === TEST SSE ENDPOINT (NO SECURITY) ===
+@router.get("/test-sse")
+async def test_sse():
+    """
+    Test SSE endpoint without security for command line testing.
+    
+    Usage:
+    curl -N -H "Accept: text/event-stream" http://localhost:8000/api/realtime-hybrid/test-sse
+    
+    This endpoint simulates real-time progress events to test SSE streaming.
+    """
+    
+    async def event_generator():
+        """Generate test progress events similar to subprocess execution"""
+        
+        # Start event
+        yield f"event: progress\ndata: {json.dumps({'type': 'start', 'message': 'Starting test subprocess simulation...'})}\n\n"
+        await asyncio.sleep(1)
+        
+        # Progress events (simulate 10% increments)
+        for i in range(1, 11):
+            progress_data = {
+                'type': 'progress', 
+                'message': f'Processing step {i}/10',
+                'progress_percent': i * 10,
+                'step_details': f'Executing API call batch {i}'
+            }
+            yield f"event: progress\ndata: {json.dumps(progress_data)}\n\n"
+            await asyncio.sleep(0.5)  # 500ms between events
+        
+        # Rate limit simulation
+        yield f"event: rate_limit\ndata: {json.dumps({'type': 'rate_limit_wait', 'message': 'Rate limit hit, waiting 2 seconds...', 'wait_time': 2})}\n\n"
+        await asyncio.sleep(2)
+        
+        # Completion events
+        yield f"event: progress\ndata: {json.dumps({'type': 'entity_complete', 'message': 'Entity processing complete', 'total_records': 150})}\n\n"
+        await asyncio.sleep(0.5)
+        
+        # Final result
+        final_result = {
+            'type': 'complete',
+            'message': 'Test subprocess simulation completed successfully',
+            'total_duration': '6.5 seconds',
+            'records_processed': 150,
+            'status': 'success'
+        }
+        yield f"event: complete\ndata: {json.dumps(final_result)}\n\n"
+    
+    return EventSourceResponse(event_generator(), media_type="text/event-stream")
+
 
 async def get_last_sync_info_for_realtime() -> Dict[str, Any]:
     """Get sync timestamp for the most recent successful sync (realtime version)"""
@@ -452,6 +502,29 @@ async def execute_plan_and_stream(
             except Exception as e:
                 logger.warning(f"[{process_id}] Planning phase callback error: {e}")
         
+        async def on_subprocess_progress(event_type: str, event_data: dict, correlation_id: str):
+            """Handle subprocess progress events and forward to SSE"""
+            try:
+                # Create properly formatted SSE event
+                from sse_starlette.sse import ServerSentEvent
+                
+                payload = {
+                    "type": "subprocess_progress",
+                    "subprocess_event_type": event_type,
+                    "content": event_data,
+                    "correlation_id": correlation_id,
+                    "timestamp": time.time()
+                }
+                
+                sse_event = ServerSentEvent(
+                    event="subprocess_progress",
+                    data=json.dumps(payload) # Explicitly serialize to JSON string
+                )
+                await step_status_queue.put(sse_event)
+                logger.info(f"[{process_id}] SUBPROCESS-PROGRESS {event_type}: {event_data}")
+            except Exception as e:
+                logger.warning(f"[{process_id}] Subprocess progress callback error: {e}")
+        
         # Register the new standardized callbacks ONLY
         modern_executor.step_start_callback = on_step_start
         modern_executor.step_end_callback = on_step_end
@@ -461,6 +534,7 @@ async def execute_plan_and_stream(
         modern_executor.step_tokens_callback = on_step_tokens
         modern_executor.step_error_callback = on_step_error
         modern_executor.planning_phase_callback = on_planning_phase
+        modern_executor.subprocess_progress_callback = on_subprocess_progress
 
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
         logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
@@ -504,6 +578,7 @@ async def execute_plan_and_stream(
         modern_executor.step_progress_callback = None
         modern_executor.step_tokens_callback = None
         modern_executor.step_error_callback = None
+        modern_executor.subprocess_progress_callback = None
 
         # Log execution summary
         logger.info(f"[{process_id}] EXECUTION RESULTS:")

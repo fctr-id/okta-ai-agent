@@ -38,6 +38,12 @@
                             {{ formatDuration(getStepDetailsForDisplay(index)?.duration || props.rtSteps[planStep.stepIndex].duration) }}
                           </span>
                           
+                          <!-- Show rate limit warning badge if rate limit occurred -->
+                          <span v-if="getRateLimitInfo(index)" class="rate-limit-warning-big">
+                            <v-icon size="16" color="warning">mdi-clock-alert-outline</v-icon>
+                            <strong>Rate limit: {{ getRateLimitInfo(index).waitSeconds }}s</strong>
+                          </span>
+                          
                           <!-- Show record count ONLY for execution steps (API, SQL, API_SQL) -->
                           <span v-if="(planStep.phase === 'api' || planStep.phase === 'sql' || planStep.phase === 'hybrid') && (getStepDetailsForDisplay(index)?.recordCount || props.rtSteps?.[planStep.stepIndex]?.record_count)" class="record-count">
                             <v-icon size="12" color="grey-darken-1">mdi-database-outline</v-icon>
@@ -52,6 +58,31 @@
                         </div>
                         <div v-else-if="planStep.context" class="step-context">
                           {{ planStep.context }}
+                        </div>
+                        
+                        <!-- API Progress Bar for active API steps -->
+                        <div v-if="planStep.phase === 'api'" class="api-progress-container">
+                          <div v-if="index === 2" style="background: yellow; padding: 4px; font-size: 10px;">
+                            DEBUG: Container rendered for step {{ index }}, phase: {{ planStep.phase }}, visible: {{ isProgressVisible(index) }}
+                          </div>
+                          <v-progress-linear
+                            v-show="isProgressVisible(index)"
+                            :model-value="getProgressValue(index)"
+                            :indeterminate="isProgressIndeterminate(index)"
+                            height="6"
+                            color="primary"
+                            bg-color="rgba(76, 100, 226, 0.1)"
+                            rounded
+                            class="api-progress-bar"
+                          ></v-progress-linear>
+                          <div v-show="isProgressVisible(index)" class="progress-text">
+                            <span v-if="isProgressIndeterminate(index)">
+                              {{ getProgressMessage(index) }}
+                            </span>
+                            <span v-else>
+                              {{ getProgressValue(index)?.toFixed(1) }}% - {{ getProgressMessage(index) }}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       <div v-if="getStepDetailsForDisplay(index)?.errorMessage" class="step-error">{{ getStepDetailsForDisplay(index).errorMessage }}</div>
@@ -79,11 +110,24 @@
 import { ref, computed, watch } from 'vue';
 
 const props = defineProps({
-  expansionPanelData: { type: Object, required: true },
-  isProcessing: { type: Boolean, default: false },
-  executionStatus: { type: String, default: 'idle' },
-  // Add stepper data from useRealtimeStream
-  rtSteps: { type: Array, default: () => [] }
+  expansionPanelData: {
+    type: Object,
+    required: true
+  },
+  rtSteps: {
+    type: Array,
+    default: () => []
+  },
+  // NEW: execution status prop (passed from parent) – fixes badge stuck on Idle
+  executionStatus: {
+    type: String,
+    default: 'idle'
+  },
+  // NEW: processing state (ref or boolean)
+  isProcessing: {
+    type: [Boolean, Object],
+    default: false
+  }
 });
 
 const isExpanded = ref(false);
@@ -113,6 +157,16 @@ const totalOutputTokens = computed(() => {
 });
 
 const totalTokens = computed(() => totalInputTokens.value + totalOutputTokens.value);
+
+// Reset function to collapse the panel
+const resetPanel = () => {
+  isExpanded.value = false;
+};
+
+// Expose reset function to parent components
+defineExpose({
+  resetPanel
+});
 
 const statusText = computed(() => {
   switch (props.executionStatus) {
@@ -149,6 +203,132 @@ const formatDuration = (seconds) => {
   return `${m}m ${s}s`;
 };
 
+// Helper methods for progress bar functionality
+const hasSubprocessProgress = (stepIndex) => {
+  // Simple, direct logic with proper Vue reactivity
+  if (props.expansionPanelData.currentStepExecution) {
+    const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
+    const displaySteps = getDisplaySteps();
+    const step = displaySteps[stepIndex];
+    
+    // Must be API step AND match current executing step AND have subprocess data
+    if (step?.phase === 'api' && step?.backend_step_number === currentStepNumber) {
+      const currentStep = props.expansionPanelData.currentStepExecution;
+      return !!(currentStep.subprocessProgressPercent !== undefined || currentStep.subprocessProgressDetails);
+    }
+  }
+  
+  return false;
+};
+
+// Helper function to determine if the progress bar and text should be visible
+const isProgressVisible = (stepIndex) => {
+  if (props.expansionPanelData.currentStepExecution) {
+    const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
+    const displaySteps = getDisplaySteps();
+    const step = displaySteps[stepIndex];
+    
+    if (step?.backend_step_number === currentStepNumber) {
+      const currentStep = props.expansionPanelData.currentStepExecution;
+      const hasData = !!(currentStep.subprocessProgressPercent !== undefined || currentStep.subprocessProgressDetails);
+      
+      // Debug logging for first API step behavior
+      if (hasData && currentStepNumber <= 3) {
+        console.log(`🎯 isProgressVisible(${stepIndex}) for step ${currentStepNumber}:`, {
+          hasData,
+          subprocessProgressPercent: currentStep.subprocessProgressPercent,
+          subprocessProgressDetails: currentStep.subprocessProgressDetails,
+          stepBackendNumber: step?.backend_step_number
+        });
+      }
+      
+      return hasData;
+    }
+  }
+  return false;
+};
+
+const isProgressIndeterminate = (stepIndex) => {
+  // If this is the currently active step, check live data
+  if (props.expansionPanelData.currentStepExecution) {
+    const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
+    const displaySteps = getDisplaySteps();
+    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    
+    if (stepBackendNumber === currentStepNumber) {
+      const subprocessPercentage = props.expansionPanelData.currentStepExecution.subprocessProgressPercent;
+      return subprocessPercentage === undefined || subprocessPercentage === null;
+    }
+  }
+  
+  // For other steps, check regular step details
+  const stepDetails = getExecutionStepForStepperIndex(stepIndex);
+  const subprocessPercentage = stepDetails?.subprocessProgressPercent;
+  return subprocessPercentage === undefined || subprocessPercentage === null;
+};
+
+const getProgressValue = (stepIndex) => {
+  // If this is the currently active step, check live data
+  if (props.expansionPanelData.currentStepExecution) {
+    const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
+    const displaySteps = getDisplaySteps();
+    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    
+    if (stepBackendNumber === currentStepNumber) {
+      const subprocessPercentage = props.expansionPanelData.currentStepExecution.subprocessProgressPercent;
+      return (subprocessPercentage !== undefined && subprocessPercentage !== null) ? subprocessPercentage : 0;
+    }
+  }
+  
+  // For other steps, check regular step details
+  const stepDetails = getExecutionStepForStepperIndex(stepIndex);
+  const subprocessPercentage = stepDetails?.subprocessProgressPercent;
+  return (subprocessPercentage !== undefined && subprocessPercentage !== null) ? subprocessPercentage : 0;
+};
+
+const getProgressMessage = (stepIndex) => {
+  // If this is the currently active step, check live data
+  if (props.expansionPanelData.currentStepExecution) {
+    const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
+    const displaySteps = getDisplaySteps();
+    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    
+    if (stepBackendNumber === currentStepNumber) {
+      const subprocessDetails = props.expansionPanelData.currentStepExecution.subprocessProgressDetails;
+      if (subprocessDetails) {
+        return subprocessDetails;
+      }
+    }
+  }
+  
+  // For other steps, check regular step details
+  const stepDetails = getExecutionStepForStepperIndex(stepIndex);
+  if (stepDetails?.subprocessProgressDetails) {
+    return stepDetails.subprocessProgressDetails;
+  }
+  
+  // Otherwise, show generic message based on step status
+  return 'Starting API requests...';
+};
+
+// Helper function to get rate limit info for the correct step
+const getRateLimitInfo = (stepIndex) => {
+  // If this is the currently active step, check live data
+  if (props.expansionPanelData.currentStepExecution) {
+    const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
+    const displaySteps = getDisplaySteps();
+    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    
+    if (stepBackendNumber === currentStepNumber) {
+      return props.expansionPanelData.currentStepExecution.rateLimitInfo;
+    }
+  }
+  
+  // For other steps, check regular step details
+  const stepDetails = getExecutionStepForStepperIndex(stepIndex);
+  return stepDetails?.rateLimitInfo;
+};
+
 // Convert plan to structured steps for modern display - ENHANCED with stepper integration
 const getDisplaySteps = () => {
   // If we have rtSteps from stepper, use those for consistent step display
@@ -175,8 +355,13 @@ const getDisplaySteps = () => {
         } else if (tool === 'finalizing_results') {
           badge = 'FINALIZING';
           entity = '';  // Don't show entity for FINALIZING
-          operation = '';
+          operation = 'Results';  // Show meaningful operation
           phase = 'finalizing';
+        } else if (tool === 'RELATIONSHIP_ANALYSIS' || tool === 'relationship_analysis') {
+          badge = 'ANALYZING';
+          entity = 'Relationships';
+          operation = '';
+          phase = 'analyzing';
         } else if (tool === 'enriching_data') {
           badge = 'ENRICHING';
           entity = 'Data';
@@ -207,12 +392,15 @@ const getDisplaySteps = () => {
         return {
           toolType: badge,
           operation: operation || entity,
-          // ENHANCED: Use query_context first, then plan context, then reason, then fallback
-          context: step.query_context || getPlanContextForStep(originalIndex) || step.reason || `${badge} ${entity}`.trim(),
+          // ENHANCED: Use query_context first, then plan context, then reason, then meaningful fallback
+          context: step.query_context || getPlanContextForStep(originalIndex) || step.reason || 
+                   (tool === 'finalizing_results' ? 'Compiling and formatting the final results' : `${badge} ${entity}`.trim()),
           stepStatus: step.status || 'pending',
           stepIndex: originalIndex, // Use original index for rtSteps access
           originalIndex: originalIndex, // Keep track of original index
           phase: phase,
+          // CRITICAL: Add backend step number mapping for subprocess progress
+          backend_step_number: step.backend_step_number,
           // NEW: Add execution step details for enhanced context
           executionStep: getExecutionStepForStepperIndex(originalIndex)
         };
@@ -284,6 +472,16 @@ const getExecutionStepForStepperIndex = (stepperIndex) => {
 
 // ENHANCED: Get step details for display that correctly maps stepper to execution steps
 const getStepDetailsForDisplay = (stepperIndex) => {
+  // If the current step is the one being displayed, return the live execution data
+  const displaySteps = getDisplaySteps();
+  if (displaySteps[stepperIndex]?.status === 'active' && props.expansionPanelData.currentStepExecution) {
+    // Ensure the active step we're displaying matches the backend's active step
+    if (displaySteps[stepperIndex].backend_step_number === props.expansionPanelData.currentStepExecution.stepNumber) {
+      return props.expansionPanelData.currentStepExecution;
+    }
+  }
+  
+  // For non-active steps, find the corresponding execution data
   return getExecutionStepForStepperIndex(stepperIndex);
 };
 
@@ -582,7 +780,7 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible, () => p
   gap: 8px;
 }
 
-.duration, .record-count, .step-number {
+.duration, .record-count, .step-number, .rate-limit-warning {
   font-size: 11px;
   font-weight: 500;
   color: #666;
@@ -592,6 +790,21 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible, () => p
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.rate-limit-warning {
+  background: rgba(255, 193, 7, 0.1);
+  color: #f57c00;
+  border: 1px solid rgba(255, 193, 7, 0.2);
+}
+
+.rate-limit-warning-big {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f57c00;
+  padding: 8px 0;
+  margin-left: 8px;
+  text-shadow: 0 1px 2px rgba(245, 124, 0, 0.3);
 }
 
 .step-error {
@@ -675,6 +888,22 @@ watch([() => props.isProcessing, () => props.expansionPanelData.visible, () => p
 
 .step-context {
   color: #666;
+}
+
+.api-progress-container {
+  margin-top: 8px;
+  padding: 8px 0;
+}
+
+.api-progress-bar {
+  margin-bottom: 4px;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #4C64E2;
+  font-weight: 500;
+  text-align: left;
 }
 
 .steps { 

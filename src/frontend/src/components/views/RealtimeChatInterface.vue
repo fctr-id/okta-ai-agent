@@ -132,6 +132,7 @@
       <!-- NEW: Execution Details Expansion Panel (moved completely OUTSIDE results-container for full width) -->
       <transition name="fade">
         <ExecutionDetailsPanel 
+          ref="executionDetailsPanel"
           v-if="expansionPanelData.visible || isProcessing || rtSteps.length > 0"
           :expansionPanelData="expansionPanelData"
           :isProcessing="isProcessing"
@@ -262,6 +263,7 @@ const userInput = ref('');
 const messages = ref([]);
 const messagesContainerRef = ref(null);
 const textareaRef = ref(null);
+const executionDetailsPanel = ref(null);
 const isSubmitting = ref(false);
 const isCancelling = ref(false);
 const autoScroll = ref(true);
@@ -568,6 +570,11 @@ const resetInterface = async () => {
   messages.value = [];
   userInput.value = '';
   cleanup();
+  
+  // Reset the execution details panel to collapsed state
+  if (executionDetailsPanel.value?.resetPanel) {
+    executionDetailsPanel.value.resetPanel();
+  }
   
   // Clear the error state from previous runs
   rtError.value = null;

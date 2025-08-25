@@ -136,7 +136,7 @@ client = OktaAPIClient(timeout=180)  # Use 180 second timeout
 
 **CRITICAL: When user requests specific quantities, use max_results parameter:**
 ```python
-# CORRECT: User wants exactly 20 users
+# CORRECT: User wants exactly 20 users, ONLY when user specifically says I only need 20 users in results, otherwise do NOT use this limit
 result = await client.make_request("/api/v1/users", max_results=20)
 
 # WRONG: Don't use params={"limit": 20} for total limits - gets ALL users!

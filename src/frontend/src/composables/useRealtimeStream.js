@@ -54,6 +54,7 @@ export function useRealtimeStream() {
             'results_formatter': 'finalizing_results',
             'generate_plan': 'generating_steps',
             'thinking': 'thinking',
+            'RELATIONSHIP_ANALYSIS': 'analyzing_relationships',
             // Add more transformations as needed
         };
         return transformMap[backendStepType] || backendStepType;
@@ -238,6 +239,16 @@ export function useRealtimeStream() {
                     console.error("Error parsing SSE message:", err, event.data);
                 }
             };
+
+            // NEW: Add specific event listener for subprocess_progress events
+            eventSource.addEventListener('subprocess_progress', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSubprocessProgressEvent(data);
+                } catch (err) {
+                    console.error("Error parsing subprocess_progress event:", err, event.data);
+                }
+            });
 
             // Handle connection errors
             eventSource.onerror = (e) => {
@@ -661,6 +672,36 @@ export function useRealtimeStream() {
             activeEventSource.value = null;
         }
         isStreaming.value = false;
+        
+        // Reset all execution state
+        isProcessing.value = false;
+        isLoading.value = false;
+        error.value = null;
+        processId.value = null;
+        
+        // Reset chunked results
+        chunkedResults.value = {
+            chunks: [],
+            expectedChunks: 0,
+            receivedChunks: 0,
+            totalRecords: 0,
+            isReceivingChunks: false,
+            baseData: null
+        };
+        
+        // Reset execution object completely
+        execution.status = "idle";
+        execution.planGenerated = false;
+        execution.currentStepIndex = -1;
+        execution.steps = [];
+        execution.results = null;
+        execution.currentPhase = "idle";
+        
+        // Reset expansion panel data
+        expansionPanelData.visible = false;
+        expansionPanelData.planData = null;
+        expansionPanelData.stepDetails = [];
+        expansionPanelData.currentStepExecution = null;
     };
 
     // Automatically clean up EventSource when process ID changes to null
@@ -997,6 +1038,16 @@ export function useRealtimeStream() {
                 execution.steps[stepIndex].step_name = content.step_name;
                 
                 console.log(`🔄 STEPS: Updated step ${stepIndex} (${execution.steps[stepIndex].tool_name}) to ${newStatus} - ${content.duration_seconds?.toFixed(2)}s`);
+                
+                // Check if this was the final step and set execution status to completed
+                const totalSteps = expansionPanelData.planData?.stepCount || execution.steps.length;
+                const completedSteps = execution.steps.filter(step => step.status === 'completed' || step.status === 'error').length;
+                
+                if (completedSteps === totalSteps) {
+                    execution.status = "completed";
+                    isProcessing.value = false;
+                    console.log(`🎉 EXECUTION COMPLETE: All ${totalSteps} steps finished`);
+                }
             }
             
             const status = content.success ? "SUCCESS" : "FAILED";
@@ -1158,6 +1209,57 @@ export function useRealtimeStream() {
             console.log(`📋 PLANNING-PHASE: ${content.phase} at ${content.formatted_time}`);
         } catch (err) {
             console.error("Error handling PLANNING-PHASE event:", err);
+        }
+    };
+
+    /**
+     * Handle subprocess_progress events - Real-time progress from subprocess execution
+     */
+    const handleSubprocessProgressEvent = (data) => {
+        try {
+            const eventType = data.subprocess_event_type || 'unknown';
+            const progressData = data.content || {};
+            
+            // We ONLY update the live currentStepExecution object
+            if (!expansionPanelData.currentStepExecution) {
+                return;
+            }
+
+            const liveStep = expansionPanelData.currentStepExecution;
+
+            if (eventType === 'entity_start') {
+                console.log(`🎯 SUBPROCESS-START: ${progressData.label} - Starting API pagination`);
+                liveStep.subprocessProgressPercent = null; // null = indeterminate
+                liveStep.subprocessProgressDetails = 'Starting API discovery...';
+            } else if (eventType === 'entity_progress' && progressData.current) {
+                console.log(`🚀 SUBPROCESS-PROGRESS: ${progressData.label} - ${progressData.current} records fetched`);
+                liveStep.subprocessProgressPercent = progressData.percent;
+                liveStep.subprocessProgressDetails = `${progressData.current} records fetched`;
+                if (progressData.current) {
+                    liveStep.recordCount = progressData.current;
+                }
+            } else if (eventType === 'entity_complete' && progressData.percent === 100.0) {
+                console.log(`✅ SUBPROCESS-COMPLETE: ${progressData.label} - ${progressData.message}`);
+                liveStep.subprocessProgressPercent = 100.0;
+                liveStep.subprocessProgressDetails = progressData.message || 'Completed';
+                if (progressData.total) {
+                    liveStep.recordCount = progressData.total;
+                }
+            } else if (eventType === 'rate_limit_wait' && progressData.wait_seconds) {
+                console.log(`⏳ RATE-LIMIT: Waiting ${progressData.wait_seconds}s due to rate limit`);
+                liveStep.rateLimitInfo = {
+                    waitSeconds: progressData.wait_seconds,
+                    message: progressData.message || 'Rate limit encountered'
+                };
+            } else {
+                console.log(`📊 SUBPROCESS-EVENT: ${eventType}`, progressData);
+            }
+
+            // Force reactivity by re-assigning the object
+            expansionPanelData.currentStepExecution = { ...liveStep };
+
+        } catch (err) {
+            console.error("Error handling subprocess_progress event:", err, data);
         }
     };
 
