@@ -630,13 +630,10 @@ const showFinalOutcomeArea = computed(() =>
   (rtResults.value || rtExecutionStatus.value === 'error' || rtExecutionStatus.value === 'cancelled')
 );
 
-watch([rtExecutionStatus, rtSteps, rtResults, rtError, rtPlanGenerated, rtCurrentStepIndexVal, isProcessing], () => {
+// Consolidated scroll watcher - only watch essential changes for better performance
+watch([() => messages.value.length, () => rtResults.value, () => rtExecutionStatus.value === 'completed'], () => {
   scrollToBottom();
-}, { deep: true });
-
-watch(messages, () => {
-  scrollToBottom();
-}, { deep: true });
+});
 
 // Watch for input changes to adjust textarea height
 watch(userInput, () => {

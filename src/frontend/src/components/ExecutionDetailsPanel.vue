@@ -10,11 +10,11 @@
       </button>
 
       <transition name="fade-collapse">
-        <div v-show="isExpanded" class="exec-body" style="background-color: #ffffff !important; min-height: 200px;">
-          <div v-if="getDisplaySteps().length > 0" class="unified-steps" style="position: relative; z-index: 1;">
+        <div v-show="isExpanded" class="exec-body" style="background-color: #ffffff !important;">
+          <div v-if="displaySteps.length > 0" class="unified-steps" style="position: relative; z-index: 1;">
             <div class="steps-list">
               <transition-group name="step-slide" tag="div" class="step-container">
-                <template v-for="(planStep, index) in getDisplaySteps()" :key="`step-${index}-${planStep.toolType}`">
+                <template v-for="(planStep, index) in displaySteps" :key="`step-${index}-${planStep.toolType}`">
                   <div 
                     class="unified-step"
                     :class="getUnifiedStepClass(index)"
@@ -86,7 +86,7 @@
                     </div>
                   </div>
                   <!-- HR separator between steps (not after last step) -->
-                  <hr v-if="index < getDisplaySteps().length - 1" :key="`separator-${index}`" class="step-separator">
+                  <hr v-if="index < displaySteps.length - 1" :key="`separator-${index}`" class="step-separator">
                 </template>
               </transition-group>
             </div>
@@ -129,21 +129,24 @@ const props = defineProps({
 
 const isExpanded = ref(false);
 
-// Single watcher - handles expand/collapse without conflicts
-watch([() => props.isProcessing, () => props.expansionPanelData.visible, () => props.rtSteps.length, () => props.executionStatus], 
-([processing, visible, stepCount, status]) => {
-  // Expand when: processing OR data exists AND not completed
-  const shouldExpand = (processing || visible || stepCount > 0) && status !== 'completed';
+// Expansion logic: expand when processing, collapse when results are ready
+watch([() => props.isProcessing, () => props.executionStatus], 
+([processing, status]) => {
+  // Expand when processing, collapse when completed (results are ready)
+  const shouldExpand = processing && status !== 'completed';
   
-  if (shouldExpand && !isExpanded.value) {
-    isExpanded.value = true;
-  } else if (!shouldExpand && isExpanded.value) {
-    isExpanded.value = false;
+  // Only update if state actually changes to prevent unnecessary renders
+  if (shouldExpand !== isExpanded.value) {
+    isExpanded.value = shouldExpand;
   }
 });
 
-// Sort steps numerically
-const sortedStepDetails = computed(() => [...props.expansionPanelData.stepDetails].sort((a,b) => a.stepNumber - b.stepNumber));
+// Optimized sorted step details - avoid unnecessary array operations
+const sortedStepDetails = computed(() => {
+  const details = props.expansionPanelData.stepDetails;
+  if (!details || details.length <= 1) return details || [];
+  return [...details].sort((a,b) => a.stepNumber - b.stepNumber);
+});
 const completedStepsCount = computed(() => props.expansionPanelData.stepDetails.filter(s => s.success === true).length);
 const totalStepsCount = computed(() => {
   // Use static step count from plan data if available, otherwise fall back to step details length
@@ -170,6 +173,29 @@ const resetPanel = () => {
 defineExpose({
   resetPanel
 });
+
+// Smooth animation handlers for proper height transitions
+// const onEnter = (el) => {
+//   el.style.height = '0';
+//   el.style.opacity = '0';
+// };
+
+// const onAfterEnter = (el) => {
+//   el.style.height = 'auto';
+//   el.style.opacity = '1';
+// };
+
+// const onLeave = (el) => {
+//   el.style.height = el.scrollHeight + 'px';
+//   el.offsetHeight; // Force reflow
+//   el.style.height = '0';
+//   el.style.opacity = '0';
+// };
+
+// const onAfterLeave = (el) => {
+//   el.style.height = '';
+//   el.style.opacity = '';
+// };
 
 const statusText = computed(() => {
   switch (props.executionStatus) {
@@ -208,22 +234,12 @@ const formatDuration = (seconds) => {
 const isProgressVisible = (stepIndex) => {
   if (props.expansionPanelData.currentStepExecution) {
     const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
-    const displaySteps = getDisplaySteps();
-    const step = displaySteps[stepIndex];
+    const displayStepsValue = displaySteps.value;
+    const step = displayStepsValue[stepIndex];
     
     if (step?.backend_step_number === currentStepNumber) {
       const currentStep = props.expansionPanelData.currentStepExecution;
       const hasData = !!(currentStep.subprocessProgressPercent !== undefined || currentStep.subprocessProgressDetails);
-      
-      // Debug logging for first API step behavior
-      if (hasData && currentStepNumber <= 3) {
-        console.log(`🎯 isProgressVisible(${stepIndex}) for step ${currentStepNumber}:`, {
-          hasData,
-          subprocessProgressPercent: currentStep.subprocessProgressPercent,
-          subprocessProgressDetails: currentStep.subprocessProgressDetails,
-          stepBackendNumber: step?.backend_step_number
-        });
-      }
       
       return hasData;
     }
@@ -235,8 +251,8 @@ const isProgressIndeterminate = (stepIndex) => {
   // If this is the currently active step, check live data
   if (props.expansionPanelData.currentStepExecution) {
     const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
-    const displaySteps = getDisplaySteps();
-    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    const displayStepsValue = displaySteps.value;
+    const stepBackendNumber = displayStepsValue[stepIndex]?.backend_step_number;
     
     if (stepBackendNumber === currentStepNumber) {
       const subprocessPercentage = props.expansionPanelData.currentStepExecution.subprocessProgressPercent;
@@ -254,8 +270,8 @@ const getProgressValue = (stepIndex) => {
   // If this is the currently active step, check live data
   if (props.expansionPanelData.currentStepExecution) {
     const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
-    const displaySteps = getDisplaySteps();
-    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    const displayStepsValue = displaySteps.value;
+    const stepBackendNumber = displayStepsValue[stepIndex]?.backend_step_number;
     
     if (stepBackendNumber === currentStepNumber) {
       const subprocessPercentage = props.expansionPanelData.currentStepExecution.subprocessProgressPercent;
@@ -273,8 +289,8 @@ const getProgressMessage = (stepIndex) => {
   // If this is the currently active step, check live data
   if (props.expansionPanelData.currentStepExecution) {
     const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
-    const displaySteps = getDisplaySteps();
-    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    const displayStepsValue = displaySteps.value;
+    const stepBackendNumber = displayStepsValue[stepIndex]?.backend_step_number;
     
     if (stepBackendNumber === currentStepNumber) {
       const subprocessDetails = props.expansionPanelData.currentStepExecution.subprocessProgressDetails;
@@ -299,8 +315,8 @@ const getRateLimitInfo = (stepIndex) => {
   // If this is the currently active step, check live data
   if (props.expansionPanelData.currentStepExecution) {
     const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
-    const displaySteps = getDisplaySteps();
-    const stepBackendNumber = displaySteps[stepIndex]?.backend_step_number;
+    const displayStepsValue = displaySteps.value;
+    const stepBackendNumber = displayStepsValue[stepIndex]?.backend_step_number;
     
     if (stepBackendNumber === currentStepNumber) {
       return props.expansionPanelData.currentStepExecution.rateLimitInfo;
@@ -312,8 +328,8 @@ const getRateLimitInfo = (stepIndex) => {
   return stepDetails?.rateLimitInfo;
 };
 
-// Convert plan to structured steps for modern display - ENHANCED with stepper integration
-const getDisplaySteps = () => {
+// Convert plan to structured steps for modern display - CACHED as computed for performance
+const displaySteps = computed(() => {
   // If we have rtSteps from stepper, use those for consistent step display
   if (props.rtSteps && props.rtSteps.length > 0) {
     return props.rtSteps
@@ -397,7 +413,7 @@ const getDisplaySteps = () => {
   }
 
   return [];
-};
+});
 
 const getPlanSteps = (plan) => {
   if (!plan || typeof plan !== 'object' || !plan.steps || !Array.isArray(plan.steps)) {
@@ -456,10 +472,10 @@ const getExecutionStepForStepperIndex = (stepperIndex) => {
 // ENHANCED: Get step details for display that correctly maps stepper to execution steps
 const getStepDetailsForDisplay = (stepperIndex) => {
   // If the current step is the one being displayed, return the live execution data
-  const displaySteps = getDisplaySteps();
-  if (displaySteps[stepperIndex]?.status === 'active' && props.expansionPanelData.currentStepExecution) {
+  const displayStepsValue = displaySteps.value;
+  if (displayStepsValue[stepperIndex]?.status === 'active' && props.expansionPanelData.currentStepExecution) {
     // Ensure the active step we're displaying matches the backend's active step
-    if (displaySteps[stepperIndex].backend_step_number === props.expansionPanelData.currentStepExecution.stepNumber) {
+    if (displayStepsValue[stepperIndex].backend_step_number === props.expansionPanelData.currentStepExecution.stepNumber) {
       return props.expansionPanelData.currentStepExecution;
     }
   }
@@ -765,18 +781,23 @@ const getStatusIconClass = (stepIndex) => {
 }
 
 .rate-limit-warning {
-  background: rgba(255, 193, 7, 0.1);
+  background: rgba(255, 193, 7, 0.08);
   color: #f57c00;
-  border: 1px solid rgba(255, 193, 7, 0.2);
+  border: 1px solid rgba(255, 193, 7, 0.12);
 }
 
 .rate-limit-warning-big {
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 11px;
+  font-weight: 600;
   color: #f57c00;
-  padding: 8px 0;
+  background: rgba(255, 193, 7, 0.08);
+  padding: 3px 8px;
+  border-radius: 4px;
   margin-left: 8px;
-  text-shadow: 0 1px 2px rgba(245, 124, 0, 0.3);
+  border: 1px solid rgba(255, 193, 7, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .step-error {
@@ -1026,18 +1047,27 @@ const getStatusIconClass = (stepIndex) => {
   border-radius: 8px;
 }
 
-.fade-collapse-enter-from, .fade-collapse-leave-to { 
-  opacity: 0;
+/* Smooth expand/collapse animation */
+.fade-collapse-enter-active {
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+  overflow: hidden;
+}
+
+.fade-collapse-leave-active {
+  transition: max-height 0.35s cubic-bezier(0.4, 0, 0.6, 1), opacity 0.25s ease;
+  overflow: hidden;
+}
+
+.fade-collapse-enter-from,
+.fade-collapse-leave-to {
   max-height: 0;
+  opacity: 0;
 }
 
-.fade-collapse-enter-to, .fade-collapse-leave-from { 
-  opacity: 1;
+.fade-collapse-enter-to,
+.fade-collapse-leave-from {
   max-height: 800px;
-}
-
-.fade-collapse-enter-active, .fade-collapse-leave-active { 
-  transition: all 0.3s ease;
+  opacity: 1;
 }
 
 /* Step Animation Styles */

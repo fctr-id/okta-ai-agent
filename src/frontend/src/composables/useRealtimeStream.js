@@ -215,7 +215,7 @@ export function useRealtimeStream() {
                             handleStepErrorEvent(event);
                             break;
                         case 'PLANNING-PHASE':
-                            console.log(`🔍 DEBUG: PLANNING-PHASE case reached!`);
+                            // console.log(`🔍 DEBUG: PLANNING-PHASE case reached!`);
                             handlePlanningPhaseEvent(event);
                             break;
                         
@@ -348,13 +348,13 @@ export function useRealtimeStream() {
                         // Fix stringified empty arrays like ["[]"] -> []
                         if (Array.isArray(value) && value.length === 1 && value[0] === "[]") {
                             cleanedRow[key] = [];
-                            console.log(`Fixed malformed array in ${key}: ["[]"] -> []`);
+                            // console.log(`Fixed malformed array in ${key}: ["[]"] -> []`);
                         }
                         // Fix other stringified arrays like ["[\"item1\",\"item2\"]"] -> ["item1", "item2"]
                         else if (Array.isArray(value) && value.length === 1 && typeof value[0] === 'string' && value[0].startsWith('[')) {
                             try {
                                 cleanedRow[key] = JSON.parse(value[0]);
-                                console.log(`Fixed stringified array in ${key}:`, value[0], '->', cleanedRow[key]);
+                                // console.log(`Fixed stringified array in ${key}:`, value[0], '->', cleanedRow[key]);
                             } catch (e) {
                                 console.warn(`Could not parse stringified array in ${key}:`, value[0]);
                             }
@@ -573,6 +573,21 @@ export function useRealtimeStream() {
     const handleConnectionError = (e, eventSource) => {
         console.error("Connection error in EventSource:", e);
 
+        // Check if we're in a rate limit scenario (step is active but waiting)
+        const hasActiveStep = execution.steps.some(step => step.status === 'active');
+        const hasRateLimitInfo = expansionPanelData.currentStepExecution?.rateLimitInfo;
+        
+        // If connection drops during rate limit wait, don't treat as error - attempt reconnection
+        if (hasActiveStep && hasRateLimitInfo && execution.status === "executing") {
+            console.warn("SSE connection lost during rate limit wait - this is expected behavior");
+            // Don't set error state, let the backend complete normally
+            if (eventSource && activeEventSource.value) {
+                eventSource.close();
+                activeEventSource.value = null;
+            }
+            return;
+        }
+
         // If we're already completed, cancelled, or have an error, this is expected connection closure
         // Also check if we have results (final processing phase) or finalizing_results step is active
         const finalizingStepIndex = execution.steps.length - 1;
@@ -714,19 +729,10 @@ export function useRealtimeStream() {
         }
     );
 
-    // Add watcher to track execution.results changes
-    watch(() => execution.results, (newResults, oldResults) => {
-        // console.log("🎯 execution.results changed:", {
-        //     newExists: !!newResults,
-        //     oldExists: !!oldResults,
-        //     newType: newResults?.display_type,
-        //     oldType: oldResults?.display_type,
-        //     newContentLength: Array.isArray(newResults?.content) ? newResults.content.length : 'N/A',
-        //     oldContentLength: Array.isArray(oldResults?.content) ? oldResults.content.length : 'N/A',
-        //     newResults: newResults,
-        //     oldResults: oldResults
-        // });
-    }, { deep: true });
+    // Debug results watcher disabled to reduce reactive overhead
+    // watch(() => execution.results, (newResults, oldResults) => {
+    //     // Debug logging removed for performance
+    // }, { deep: true });
 
     // ====== HELPER FUNCTIONS FOR STEP TIMING ======
     
@@ -734,19 +740,19 @@ export function useRealtimeStream() {
      * Update step status - CALLBACK-ONLY system, no local timing calculations
      */
     const updateStepStatus = (stepIndex, newStatus, callbackTiming = null) => {
-        console.log(`🔍 DEBUG updateStepStatus: stepIndex=${stepIndex}, newStatus=${newStatus}, steps.length=${execution.steps.length}`);
+        // console.log(`🔍 DEBUG updateStepStatus: stepIndex=${stepIndex}, newStatus=${newStatus}, steps.length=${execution.steps.length}`);
         
         if (stepIndex < 0 || stepIndex >= execution.steps.length) {
-            console.log(`❌ DEBUG: Invalid stepIndex ${stepIndex}, steps.length=${execution.steps.length}`);
+            // console.log(`❌ DEBUG: Invalid stepIndex ${stepIndex}, steps.length=${execution.steps.length}`);
             return;
         }
         
         const step = execution.steps[stepIndex];
-        console.log(`🔍 DEBUG: Found step at index ${stepIndex}:`, {
-            tool_name: step.tool_name,
-            current_status: step.status,
-            current_duration: step.duration
-        });
+        // console.log(`🔍 DEBUG: Found step at index ${stepIndex}:`, {
+        //     tool_name: step.tool_name,
+        //     current_status: step.status,
+        //     current_duration: step.duration
+        // });
         
         // Only update status and timing from callbacks
         if (step.status !== newStatus) {
@@ -870,10 +876,10 @@ export function useRealtimeStream() {
                 });
                 
                 execution.status = "executing";
-                console.log(`📋 STEPS: Initialized ${execution.steps.length} steps for tracking`);
+                // console.log(`📋 STEPS: Initialized ${execution.steps.length} steps for tracking`);
             }
             
-            console.log("📋 PLAN-GENERATED: Plan stored for expansion panel");
+            // console.log("📋 PLAN-GENERATED: Plan stored for expansion panel");
         } catch (err) {
             console.error("Error handling PLAN-GENERATED event:", err);
         }
@@ -969,11 +975,11 @@ export function useRealtimeStream() {
                 execution.steps[stepIndex].step_name = content.step_name;
                 execution.currentStepIndex = stepIndex;
                 
-                console.log(`🔄 STEPS: Updated step ${stepIndex} (${content.step_type}) to active`);
+                // console.log(`🔄 STEPS: Updated step ${stepIndex} (${content.step_type}) to active`);
             }
             
-            console.log(`🚀 STEP-START: Step ${content.step_number} (${content.step_type}) - ${content.step_name}`);
-            console.log(`🔍 DEBUG STEP-START: Mapped to stepIndex=${stepIndex}, execution.steps.length=${execution.steps.length}`);
+            // console.log(`🚀 STEP-START: Step ${content.step_number} (${content.step_type}) - ${content.step_name}`);
+            // console.log(`🔍 DEBUG STEP-START: Mapped to stepIndex=${stepIndex}, execution.steps.length=${execution.steps.length}`);
         } catch (err) {
             console.error("Error handling STEP-START event:", err);
         }
@@ -987,7 +993,7 @@ export function useRealtimeStream() {
             const data = JSON.parse(event.data);
             const content = data.content;
             
-            console.log(`🔍 DEBUG STEP-END: Received step ${content.step_number} (${content.step_type}) with duration ${content.duration_seconds}s`);
+            // console.log(`🔍 DEBUG STEP-END: Received step ${content.step_number} (${content.step_type}) with duration ${content.duration_seconds}s`);
             
             // Find and update the step detail for expansion panel
             // Use step_number AND step_name for unique identification to handle duplicate step numbers
@@ -1037,14 +1043,14 @@ export function useRealtimeStream() {
                 execution.steps[stepIndex].backend_step_number = content.step_number;
                 execution.steps[stepIndex].step_name = content.step_name;
                 
-                console.log(`🔄 STEPS: Updated step ${stepIndex} (${execution.steps[stepIndex].tool_name}) to ${newStatus} - ${content.duration_seconds?.toFixed(2)}s`);
+                // console.log(`🔄 STEPS: Updated step ${stepIndex} (${execution.steps[stepIndex].tool_name}) to ${newStatus} - ${content.duration_seconds?.toFixed(2)}s`);
                 
                 // Completion is handled by backend 'complete' event only - no frontend counting needed
             }
             
             const status = content.success ? "SUCCESS" : "FAILED";
-            console.log(`✅ STEP-END: Step ${content.step_number} - ${status} - ${content.duration_seconds?.toFixed(1)}s - ${content.record_count || 0} records`);
-            console.log(`🔍 DEBUG STEP-END: Mapped to stepIndex=${stepIndex}, updating execution.steps[${stepIndex}]`);
+            // console.log(`✅ STEP-END: Step ${content.step_number} - ${status} - ${content.duration_seconds?.toFixed(1)}s - ${content.record_count || 0} records`);
+            // console.log(`🔍 DEBUG STEP-END: Mapped to stepIndex=${stepIndex}, updating execution.steps[${stepIndex}]`);
         } catch (err) {
             console.error("Error handling STEP-END event:", err);
         }
@@ -1072,7 +1078,7 @@ export function useRealtimeStream() {
                 expansionPanelData.stepDetails[stepDetailIndex] = { ...stepDetail };
             }
             
-            console.log(`📈 STEP-PROGRESS: Step ${content.step_number} - ${content.progress_percentage?.toFixed(1)}% - ${content.message}`);
+            // console.log(`📈 STEP-PROGRESS: Step ${content.step_number} - ${content.progress_percentage?.toFixed(1)}% - ${content.message}`);
         } catch (err) {
             console.error("Error handling STEP-PROGRESS event:", err);
         }
@@ -1099,7 +1105,7 @@ export function useRealtimeStream() {
                 expansionPanelData.stepDetails[stepDetailIndex] = { ...stepDetail };
             }
             
-            console.log(`📊 STEP-COUNT: Step ${content.step_number} - ${content.record_count} ${content.operation_type} records`);
+            // console.log(`📊 STEP-COUNT: Step ${content.step_number} - ${content.record_count} ${content.operation_type} records`);
         } catch (err) {
             console.error("Error handling STEP-COUNT event:", err);
         }
@@ -1129,7 +1135,7 @@ export function useRealtimeStream() {
             }
             
             const totalTokens = content.input_tokens + content.output_tokens;
-            console.log(`🪙 STEP-TOKENS: Step ${content.step_number} - ${totalTokens} tokens (${content.agent_name})`);
+            // console.log(`🪙 STEP-TOKENS: Step ${content.step_number} - ${totalTokens} tokens (${content.agent_name})`);
         } catch (err) {
             console.error("Error handling STEP-TOKENS event:", err);
         }
@@ -1163,7 +1169,7 @@ export function useRealtimeStream() {
             }
             
             const retryText = content.retry_possible ? " (Retry Possible)" : " (Retry Not Possible)";
-            console.log(`❌ STEP-ERROR: Step ${content.step_number} - ${content.error_type}: ${content.error_message}${retryText}`);
+            // console.log(`❌ STEP-ERROR: Step ${content.step_number} - ${content.error_type}: ${content.error_message}${retryText}`);
         } catch (err) {
             console.error("Error handling STEP-ERROR event:", err);
         }
@@ -1187,7 +1193,7 @@ export function useRealtimeStream() {
                 if (generatingStep) generatingStep.status = 'active';
                 
                 execution.currentPhase = 'thinking';
-                console.log("🧠 PLANNING-PHASE: Starting strategy analysis");
+                // console.log("🧠 PLANNING-PHASE: Starting strategy analysis");
             } else if (content.phase === 'planning_complete') {
                 // Planning phase completed
                 const generatingStep = execution.steps.find(step => step.id === 'generating_steps');
@@ -1195,10 +1201,10 @@ export function useRealtimeStream() {
                 if (generatingStep) generatingStep.status = 'completed';
                 
                 execution.currentPhase = 'generating_steps';
-                console.log("📋 PLANNING-PHASE: Generating execution plan");
+                // console.log("📋 PLANNING-PHASE: Generating execution plan");
             }
             
-            console.log(`📋 PLANNING-PHASE: ${content.phase} at ${content.formatted_time}`);
+            // console.log(`📋 PLANNING-PHASE: ${content.phase} at ${content.formatted_time}`);
         } catch (err) {
             console.error("Error handling PLANNING-PHASE event:", err);
         }
@@ -1220,31 +1226,31 @@ export function useRealtimeStream() {
             const liveStep = expansionPanelData.currentStepExecution;
 
             if (eventType === 'entity_start') {
-                console.log(`🎯 SUBPROCESS-START: ${progressData.label} - Starting API pagination`);
+                // console.log(`🎯 SUBPROCESS-START: ${progressData.label} - Starting API pagination`);
                 liveStep.subprocessProgressPercent = null; // null = indeterminate
                 liveStep.subprocessProgressDetails = 'Starting API discovery...';
             } else if (eventType === 'entity_progress' && progressData.current) {
-                console.log(`🚀 SUBPROCESS-PROGRESS: ${progressData.label} - ${progressData.current} records fetched`);
+                // console.log(`🚀 SUBPROCESS-PROGRESS: ${progressData.label} - ${progressData.current} records fetched`);
                 liveStep.subprocessProgressPercent = progressData.percent;
                 liveStep.subprocessProgressDetails = `${progressData.current} records fetched`;
                 if (progressData.current) {
                     liveStep.recordCount = progressData.current;
                 }
             } else if (eventType === 'entity_complete' && progressData.percent === 100.0) {
-                console.log(`✅ SUBPROCESS-COMPLETE: ${progressData.label} - ${progressData.message}`);
+                // console.log(`✅ SUBPROCESS-COMPLETE: ${progressData.label} - ${progressData.message}`);
                 liveStep.subprocessProgressPercent = 100.0;
                 liveStep.subprocessProgressDetails = progressData.message || 'Completed';
                 if (progressData.total) {
                     liveStep.recordCount = progressData.total;
                 }
             } else if (eventType === 'rate_limit_wait' && progressData.wait_seconds) {
-                console.log(`⏳ RATE-LIMIT: Waiting ${progressData.wait_seconds}s due to rate limit`);
+                // console.log(`⏳ RATE-LIMIT: Waiting ${progressData.wait_seconds}s due to rate limit`);
                 liveStep.rateLimitInfo = {
                     waitSeconds: progressData.wait_seconds,
                     message: progressData.message || 'Rate limit encountered'
                 };
             } else {
-                console.log(`📊 SUBPROCESS-EVENT: ${eventType}`, progressData);
+                // console.log(`📊 SUBPROCESS-EVENT: ${eventType}`, progressData);
             }
 
             // Force reactivity by re-assigning the object
