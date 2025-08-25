@@ -521,7 +521,7 @@ async def execute_plan_and_stream(
                     data=json.dumps(payload) # Explicitly serialize to JSON string
                 )
                 await step_status_queue.put(sse_event)
-                logger.info(f"[{process_id}] SUBPROCESS-PROGRESS {event_type}: {event_data}")
+                logger.debug(f"[{process_id}] SUBPROCESS-PROGRESS {event_type}: {event_data}")
             except Exception as e:
                 logger.warning(f"[{process_id}] Subprocess progress callback error: {e}")
         
