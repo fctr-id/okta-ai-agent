@@ -280,18 +280,29 @@ for entity_id in unique_entity_ids:
 - **No 'published'**: NEVER use 'published' parameter - use 'since'/'until' instead
 - **Structured over free-text**: Prefer eventType filters over 'q' parameter
 
-**CRITICAL RULE FOR LOGIN QUERIES**
-For any user login, sign-on, or authentication activity queries, you **MUST** include **BOTH** authentication events and session events for complete coverage. Do not select only one type.
-
-**Correct Example for Login Queries**:
+**LOGIN / SIGN-ON EVENT SELECTION (HARD REQUIREMENT)**
+Mode:
+ - BROAD (generic login/sign-on/auth history intent) -> build list size ≥3
+ - NARROW (explicitly limited: "only", "just", or single eventType named) -> single allowed
+Approved set (no invention): AUTH_LOGIN_EVENT_TYPES = ['user.authentication.auth','user.authentication.sso','user.mfa.factor.verify','user.session.start','user.session.end','app.oauth2.signon','policy.evaluate_sign_on']
+Broad composition:
+ 1 auth event (user.authentication.*) + 'user.session.start' mandatory
+ + 'user.mfa.factor.verify' if MFA context
+ + 'user.session.end' if logout/end/duration
+ + 'app.oauth2.signon' if app/oauth/oidc/token
+ + 'policy.evaluate_sign_on' unless explicitly excluded
+Prohibitions: no comma-merged strings; in broad mode no single-item list; cannot omit user.session.start.
+Examples:
+    Wrong: ['user.authentication.auth']; ['user.authentication.auth,user.session.start']
+    Broad OK: ['user.authentication.auth','user.session.start','policy.evaluate_sign_on']
+    Broad w/ extras: ['user.authentication.auth','user.session.start','user.mfa.factor.verify','app.oauth2.signon','policy.evaluate_sign_on']
+    Narrow OK: ['user.session.start'] (only if user explicitly restricts)
+Self-check:
+    Broad -> len>=3 & contains auth + user.session.start
+    Narrow -> len==1 & exact requested type
+    Add conditional MFA/session.end/app.oauth2.signon/policy per context
+Filter:
 ```python
-# CORRECT: Include multiple event types for comprehensive login coverage
-login_event_types = [
-    'user.authentication.sso',         # SSO authentication
-    'user.session.start',              # Session initiation
-    'app.oauth2.signon',               # OAuth2 sign-on events
-    'policy.evaluate_sign_on'          # Sign-on policy evaluation
-]
 filter_expr = ' or '.join([f'eventType eq "{etype}"' for etype in login_event_types])
 ```
 
