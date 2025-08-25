@@ -62,9 +62,6 @@
                         
                         <!-- API Progress Bar for active API steps -->
                         <div v-if="planStep.phase === 'api'" class="api-progress-container">
-                          <div v-if="index === 2" style="background: yellow; padding: 4px; font-size: 10px;">
-                            DEBUG: Container rendered for step {{ index }}, phase: {{ planStep.phase }}, visible: {{ isProgressVisible(index) }}
-                          </div>
                           <v-progress-linear
                             v-show="isProgressVisible(index)"
                             :model-value="getProgressValue(index)"
@@ -132,9 +129,15 @@ const props = defineProps({
 
 const isExpanded = ref(false);
 
-// Auto-collapse when execution is completed
-watch(() => props.executionStatus, (newStatus) => {
-  if (newStatus === 'completed') {
+// Single watcher - handles expand/collapse without conflicts
+watch([() => props.isProcessing, () => props.expansionPanelData.visible, () => props.rtSteps.length, () => props.executionStatus], 
+([processing, visible, stepCount, status]) => {
+  // Expand when: processing OR data exists AND not completed
+  const shouldExpand = (processing || visible || stepCount > 0) && status !== 'completed';
+  
+  if (shouldExpand && !isExpanded.value) {
+    isExpanded.value = true;
+  } else if (!shouldExpand && isExpanded.value) {
     isExpanded.value = false;
   }
 });
@@ -202,26 +205,6 @@ const formatDuration = (seconds) => {
   const s = (seconds % 60).toFixed(1);
   return `${m}m ${s}s`;
 };
-
-// Helper methods for progress bar functionality
-const hasSubprocessProgress = (stepIndex) => {
-  // Simple, direct logic with proper Vue reactivity
-  if (props.expansionPanelData.currentStepExecution) {
-    const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
-    const displaySteps = getDisplaySteps();
-    const step = displaySteps[stepIndex];
-    
-    // Must be API step AND match current executing step AND have subprocess data
-    if (step?.phase === 'api' && step?.backend_step_number === currentStepNumber) {
-      const currentStep = props.expansionPanelData.currentStepExecution;
-      return !!(currentStep.subprocessProgressPercent !== undefined || currentStep.subprocessProgressDetails);
-    }
-  }
-  
-  return false;
-};
-
-// Helper function to determine if the progress bar and text should be visible
 const isProgressVisible = (stepIndex) => {
   if (props.expansionPanelData.currentStepExecution) {
     const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
@@ -526,17 +509,6 @@ const getStatusIconClass = (stepIndex) => {
     'status-pending': status === 'pending'
   };
 };
-
-// Auto expand when processing begins - ENHANCED to show immediately on query submission
-watch([() => props.isProcessing, () => props.expansionPanelData.visible, () => props.rtSteps.length], ([processing, visible, stepCount]) => {
-  // Show panel immediately when:
-  // 1. Processing starts (isProcessing becomes true) - IMMEDIATE EXPANSION
-  // 2. Panel data becomes visible (query submitted)
-  // 3. We have rtSteps (step tracking begins)
-  if ((processing || visible || stepCount > 0) && !isExpanded.value) {
-    isExpanded.value = true;
-  }
-});
 </script>
 
 <style scoped>

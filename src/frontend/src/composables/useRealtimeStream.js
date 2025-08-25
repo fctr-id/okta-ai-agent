@@ -1039,15 +1039,7 @@ export function useRealtimeStream() {
                 
                 console.log(`🔄 STEPS: Updated step ${stepIndex} (${execution.steps[stepIndex].tool_name}) to ${newStatus} - ${content.duration_seconds?.toFixed(2)}s`);
                 
-                // Check if this was the final step and set execution status to completed
-                const totalSteps = expansionPanelData.planData?.stepCount || execution.steps.length;
-                const completedSteps = execution.steps.filter(step => step.status === 'completed' || step.status === 'error').length;
-                
-                if (completedSteps === totalSteps) {
-                    execution.status = "completed";
-                    isProcessing.value = false;
-                    console.log(`🎉 EXECUTION COMPLETE: All ${totalSteps} steps finished`);
-                }
+                // Completion is handled by backend 'complete' event only - no frontend counting needed
             }
             
             const status = content.success ? "SUCCESS" : "FAILED";
