@@ -1,6 +1,21 @@
 # Version History
 
 
+## Current latest: v1.2.0 (08-25-2025) - "Anchor Drop"
+
+This release focuses on delivering consistent, deterministic results and transforming the user experience from guesswork to clarity. While acknowledging the probabilistic nature of LLMs, we've engineered systematic improvements through advanced context-engineering that dramatically reduce variability and provide complete visibility into execution processes.
+
+Major Enhancements:
+- **Relation Analysis Agent**: New agent delivers ~95% consistent multi-step result assembly by correlating cross-step entities (user ↔ device ↔ policy)
+- **Expandable Execution Panel**: Replaced stepper with rich expansion panels showing status, timings, errors, and payload visibility with progressive disclosure
+- **Memory Optimization Fix**: Eliminated execution manager duplicate in-memory dataset bug that was causing RAM bloat and removed mirrored variable references
+- **Code Cleanup**: Removed inefficient variable handling logic and redundant frontend utilities
+
+Performance & Reliability:
+- **Normalized Relationships**: Structured linkage reduces missed joins and result drift
+- **Enhanced Context**: Internal naming rationalized for relation analysis logic consistency
+
+
 ## Current latest: v1.1.4-beta (08-14-2025) - "Bug Buster"
 
 Major Bugs Fixed: (update immediately)

@@ -8,11 +8,11 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.1.4-beta)</h2>
+<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.2.0)</h2>
 
 <div align="center">
 
-> **🚨 CRITICAL UPDATE: v1.1.4-beta fixes critical API correlation and token overflow issues. Update immediately!** [📋 Changelog →](VERSION.md)🚨
+> **🚨 MAJOR RELEASE: v1.2.0 "Anchor Drop" delivers consistent, deterministic results and much better UI experience. Update now for reliability boost!** [📋 Changelog →](VERSION.md)🚨
 
 </div>
 <br/>
@@ -91,7 +91,7 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 &nbsp;
 
 ## ⚠️ MAJOR ARCHITECTURE UPGRADE
-> **IMPORTANT**: Version 1.1-beta builds upon the revolutionary multi-agent architecture, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
+> **IMPORTANT**: Version 1.2.0-beta builds upon the revolutionary multi-agent architecture, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
 > 
 > **Previous v0.6.x users:** This version uses an entirely different approach. Your existing setup will work, but to access the new unified agent capabilities, follow the new installation process.
 > 
