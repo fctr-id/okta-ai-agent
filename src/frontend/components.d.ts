@@ -15,7 +15,6 @@ declare module 'vue' {
     ChatInterfaceV2: typeof import('./src/components/ChatInterfaceV2.vue')['default']
     DataDisplay: typeof import('./src/components/messages/DataDisplay.vue')['default']
     ExecutionDetailsPanel: typeof import('./src/components/ExecutionDetailsPanel.vue')['default']
-    ExecutionDetailsPanel_Clean: typeof import('./src/components/ExecutionDetailsPanel_Clean.vue')['default']
     LoginView: typeof import('./src/components/views/LoginView.vue')['default']
     NotFoundView: typeof import('./src/components/views/NotFoundView.vue')['default']
     RealtimeChatInterface: typeof import('./src/components/views/RealtimeChatInterface.vue')['default']
