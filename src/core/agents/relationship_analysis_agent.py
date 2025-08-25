@@ -243,9 +243,9 @@ Analyze the relationships between these execution steps and provide structured o
         if not relationships_json:
             raise ValueError("Failed to extract valid JSON from relationship analysis response")
         
-        logger.debug(f"[{correlation_id}] PARSED RELATIONSHIP ANALYSIS JSON:")
-        logger.debug(f"[{correlation_id}] {json.dumps(relationships_json, indent=2)}")
-        logger.debug(f"[{correlation_id}] END PARSED JSON")
+        #logger.debug(f"[{correlation_id}] PARSED RELATIONSHIP ANALYSIS JSON:")
+        #logger.debug(f"[{correlation_id}] {json.dumps(relationships_json, indent=2)}")
+        #logger.debug(f"[{correlation_id}] END PARSED JSON")
         
         # Step 7: Validate using proven validation logic
         validation = validate_deterministic_output(relationships_json)
