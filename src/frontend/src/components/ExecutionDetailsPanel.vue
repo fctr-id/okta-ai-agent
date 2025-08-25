@@ -29,8 +29,19 @@
                     </div>
                     <div class="step-content">
                       <div class="step-header">
-                        <span class="step-type" :class="`step-badge-${planStep.phase}`">{{ planStep.toolType }}</span>
-                        <span class="step-operation">{{ planStep.operation }}</span>
+                        <div class="step-info-flow">
+                          <div class="step-type-container">
+                            <span class="step-type" :class="`step-badge-${planStep.phase}`">
+                              <span v-if="planStep.toolType === 'API' || planStep.toolType === 'SQL'">
+                                {{ planStep.toolType }}<span v-if="getEntityFromStep(planStep)"> • {{ getEntityFromStep(planStep) }}</span> • {{ planStep.operation }}
+                              </span>
+                              <span v-else>
+                                {{ planStep.toolType }}
+                              </span>
+                            </span>
+                          </div>
+                          <span v-if="planStep.toolType !== 'API' && planStep.toolType !== 'SQL'" class="step-operation-text">{{ planStep.operation }}</span>
+                        </div>
                         <div class="step-metrics">
                           <!-- Show duration - prefer execution details, fallback to rtSteps -->
                           <span v-if="getStepDetailsForDisplay(index)?.duration || props.rtSteps?.[planStep.stepIndex]?.duration" class="duration">
@@ -525,6 +536,29 @@ const getStatusIconClass = (stepIndex) => {
     'status-pending': status === 'pending'
   };
 };
+
+// Helper to extract entity from step for enhanced display
+const getEntityFromStep = (planStep) => {
+  // Extract entity from rtSteps if available
+  if (planStep.stepIndex !== undefined && props.rtSteps && props.rtSteps[planStep.stepIndex]) {
+    const rtStep = props.rtSteps[planStep.stepIndex];
+    if (rtStep.entity && rtStep.entity.trim()) {
+      return rtStep.entity;
+    }
+  }
+  
+  // Fallback: try to extract from operation or context
+  if (planStep.operation && planStep.operation.includes(' ')) {
+    // If operation contains spaces, first word might be entity
+    const words = planStep.operation.split(' ');
+    const possibleEntity = words[0];
+    if (['Users', 'Groups', 'Applications', 'Devices', 'Policies', 'Logs', 'Events'].includes(possibleEntity)) {
+      return possibleEntity;
+    }
+  }
+  
+  return null;
+};
 </script>
 
 <style scoped>
@@ -853,6 +887,48 @@ const getStatusIconClass = (stepIndex) => {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.step-type-container {
+  display: inline-block;
+}
+
+.step-badge-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-info-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.entity-separator {
+  color: #4C64E2;
+  font-weight: 600;
+  font-size: 14px;
+  margin: 0 2px;
+}
+
+.step-entity-name {
+  color: #2e7d32;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.step-operation-text {
+  color: #333;
+  font-weight: 500;
+  font-size: 13px;
 }
 
 /* Step badge phase colors - integrated from stepper */
@@ -865,10 +941,22 @@ const getStatusIconClass = (stepIndex) => {
 .step-badge-hybrid { background: #fce4ec !important; color: #ad1457 !important; }
 .step-badge-other { background: #ececec !important; color: #555 !important; }
 
+.step-entity {
+  background: rgba(76, 175, 80, 0.08);
+  color: #2e7d32;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
 .step-operation {
   color: #333;
   font-weight: 500;
   font-size: 13px;
+  display: flex;
+  align-items: center;
 }
 
 .step-description {
