@@ -25,6 +25,9 @@ from src.core.agents.results_formatter_agent import format_results as process_re
 from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 from src.core.agents.relationship_analysis_agent import analyze_data_relationships  # Stage 1: Relationship analysis for three-stage pipeline
 
+# Import special tools support
+from src.core.tools.special_tools import get_special_tool, execute_special_tool
+
 # Import security validation
 from src.core.security import (
     validate_generated_code, 
@@ -254,6 +257,23 @@ class ModernExecutionManager:
                           for table in self.simple_ref_data.get('sql_tables', [])}
         self.endpoints = self.full_api_data.get('endpoints', [])  # Load endpoints for filtering
         
+        # SPECIAL TOOLS INTEGRATION: Add special tool endpoints to main endpoints list
+        try:
+            from src.core.tools.special_tools import get_lightweight_references
+            special_tools_refs = get_lightweight_references()
+            
+            for special_tool in special_tools_refs:
+                if 'endpoints' in special_tool:
+                    # Add special tool endpoints to main endpoints list
+                    for endpoint in special_tool['endpoints']:
+                        self.endpoints.append(endpoint)
+                    logger.debug(f"Added {len(special_tool['endpoints'])} special tool endpoints to main endpoints list")
+            
+            logger.info(f"Total endpoints available (including special tools): {len(self.endpoints)}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to integrate special tool endpoints: {e}")
+        
         # Legacy operation mapping for backwards compatibility (generate from entities)
         self.operation_mapping = {}
         for entity_name, entity_data in entities_dict.items():
@@ -262,7 +282,6 @@ class ModernExecutionManager:
                 if '_' in operation and operation.startswith(entity_name + '_'):
                     base_operation = operation[len(entity_name) + 1:]
                     self.operation_mapping[operation] = {'entity': entity_name, 'operation': base_operation}
-        self.endpoints = self.full_api_data.get('endpoints', [])  # Load endpoints for filtering
         
         # REPEATABLE DATA FLOW PATTERN: Variable-based data management
         # Based on proven old executor approach - scales with any number of tools/steps
@@ -1023,7 +1042,28 @@ class ModernExecutionManager:
         """Load simple reference format for planning, generating it if missing"""
         try:
             with open(self.simple_ref_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                simple_ref = json.load(f)
+            
+            # INTEGRATION: Merge special tools into entities for pre-planning agent
+            from src.core.tools.special_tools import get_lightweight_references
+            try:
+                special_tools_refs = get_lightweight_references()
+                logger.info(f"Discovered {len(special_tools_refs)} special tools for integration")
+                
+                # Merge special tools into entities section
+                entities = simple_ref.get('entities', {})
+                for special_tool in special_tools_refs:
+                    if 'entities' in special_tool:
+                        entities.update(special_tool['entities'])
+                        logger.debug(f"Integrated special tool entities: {list(special_tool['entities'].keys())}")
+                
+                simple_ref['entities'] = entities
+                logger.info(f"Total entities available for pre-planning: {len(entities)}")
+                
+            except Exception as e:
+                logger.warning(f"Failed to load special tools: {e} - continuing with standard entities only")
+            
+            return simple_ref
         except FileNotFoundError:
             logger.warning(f"Simple reference file not found: {self.simple_ref_path}")
             logger.info("Generating lightweight API reference from comprehensive sources...")
@@ -1389,9 +1429,7 @@ class ModernExecutionManager:
                             filtered_entity_summary[entity_name]['operations'].append(operation)
                         
                         if method and method not in filtered_entity_summary[entity_name]['methods']:
-                            filtered_entity_summary[entity_name]['methods'].append(method)
-            
-            # Phase 1: Use Planning Agent to generate execution plan
+                            filtered_entity_summary[entity_name]['methods'].append(method)            # Phase 1: Use Planning Agent to generate execution plan
             logger.debug(f"[{correlation_id}] Phase 1: Planning Agent execution")
             # Notify planning start (minimal hook)
             if self.planning_phase_callback:
@@ -1594,16 +1632,25 @@ class ModernExecutionManager:
             estimated_tokens = estimate_token_count(step_results_dict_for_estimation)
             token_threshold = 1000  # 1K tokens threshold
             
-            is_sql_only = len(execution_plan.steps) == 1 and execution_plan.steps[0].tool_name.lower() == 'sql'
-            is_complete_data = estimated_tokens <= token_threshold  # Complete data = under token threshold
+            # Check if any step uses special tools that need complete processing
+            has_special_tool = any(
+                step.tool_name == 'special_tool'
+                for step in execution_plan.steps
+            )
             
-            logger.info(f"[{correlation_id}] Decision factors: SQL-only={is_sql_only}, tokens={estimated_tokens:,}, threshold={token_threshold:,}, complete_data={is_complete_data}")
+            is_sql_only = len(execution_plan.steps) == 1 and execution_plan.steps[0].tool_name.lower() == 'sql'
+            is_complete_data = estimated_tokens <= token_threshold or has_special_tool  # Complete data = under token threshold OR access analysis tools
+            
+            logger.info(f"[{correlation_id}] Decision factors: SQL-only={is_sql_only}, tokens={estimated_tokens:,}, threshold={token_threshold:,}, access_analysis={has_special_tool}, complete_data={is_complete_data}")
             
             if is_sql_only:
                 logger.info(f"[{correlation_id}] SQL-only query detected - skipping relationship analysis, will use single SQL optimization in results formatter")
                 relationship_analysis = None
             elif is_complete_data:
-                logger.info(f"[{correlation_id}] Complete data processing ({estimated_tokens:,} tokens under {token_threshold:,} threshold) - skipping relationship analysis")
+                if has_special_tool:
+                    logger.info(f"[{correlation_id}] Access analysis tool detected - forcing complete data processing regardless of tokens ({estimated_tokens:,})")
+                else:
+                    logger.info(f"[{correlation_id}] Complete data processing ({estimated_tokens:,} tokens under {token_threshold:,} threshold) - skipping relationship analysis")
                 relationship_analysis = None
             else:
                 # STAGE 1: Relationship Analysis (Three-Stage Pipeline)
@@ -1714,9 +1761,12 @@ class ModernExecutionManager:
                 
                 # Determine processing strategy based on estimated token size (use already calculated values)
                 if is_complete_data:
-                    # Complete processing for datasets under token threshold
+                    # Complete processing for datasets under token threshold OR access analysis tools
                     use_sample_processing = False
-                    logger.info(f"[{correlation_id}] Complete data mode - using complete processing (tokens: {estimated_tokens:,} <= {token_threshold:,})")
+                    if has_special_tool:
+                        logger.info(f"[{correlation_id}] Access analysis mode - using complete processing (tokens: {estimated_tokens:,})")
+                    else:
+                        logger.info(f"[{correlation_id}] Complete data mode - using complete processing (tokens: {estimated_tokens:,} <= {token_threshold:,})")
                 else:
                     # Use token-based decision for regular datasets
                     use_sample_processing = estimated_tokens > token_threshold
@@ -1983,6 +2033,8 @@ class ModernExecutionManager:
                     result = await self._execute_sql_step(step, correlation_id, step_num)
                 elif step.tool_name == "api":
                     result = await self._execute_api_step(step, correlation_id, step_num)
+                elif step.tool_name == "special_tool":
+                    result = await self._execute_special_tool_step(step, correlation_id, step_num)
                 # REPEATABLE PATTERN: Add new tool types here
                 # elif step.tool_name == "new_tool":
                 #     result = await self._execute_new_tool_step(step, correlation_id, step_num)
@@ -2830,6 +2882,166 @@ class ModernExecutionManager:
         except Exception as e:
             return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
     
+    async def _execute_special_tool_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
+        """
+        Execute special tool step using code template and subprocess execution (like API steps).
+        
+        GENERIC PROXY PATTERN:
+        - Get code template from special tool
+        - Fill template with whatever parameters planning agent provided
+        - Execute code in subprocess using _execute_generated_code
+        - Store results using variable-based storage for next steps
+        """
+        # IMMEDIATE CANCELLATION CHECK - Don't start step if already cancelled
+        if correlation_id in self.cancelled_queries:
+            logger.warning(f"[{correlation_id}] Special Tool Step {step_number} CANCELLED before execution - Skipping")
+            return StepResult(
+                step_number=step_number,
+                step_type="special_tool",
+                success=False,
+                error="Query cancelled before step execution"
+            )
+        
+        try:
+            # Record step start time for duration calculation
+            step_start_time = time.time()
+            
+            # NEW STANDARDIZED: STEP-START callback for special tool step
+            callback_step_number = step_number + 1  # step_number is 0-based execution step index
+            if self.step_start_callback:
+                try:
+                    await self.step_start_callback(
+                        step_number=callback_step_number,
+                        step_type="special_tool",
+                        step_name=f"Step {callback_step_number}: {step.tool_name}",
+                        query_context=step.query_context,
+                        critical=getattr(step, 'critical', True),
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Special tool step start callback error: {callback_error}")
+            
+            # Get special tool by entity name
+            entity_name = getattr(step, 'entity', None)
+            if not entity_name:
+                error_msg = "Special tool step missing entity name"
+                logger.error(f"[{correlation_id}] {error_msg}")
+                return StepResult(
+                    step_number=step_number,
+                    step_type="special_tool",
+                    success=False,
+                    error=error_msg
+                )
+            
+            # Get the special tool
+            from src.core.tools.special_tools import get_special_tool
+            special_tool = get_special_tool(entity_name)
+            if not special_tool:
+                error_msg = f"Special tool '{entity_name}' not found"
+                logger.error(f"[{correlation_id}] {error_msg}")
+                return StepResult(
+                    step_number=step_number,
+                    step_type="special_tool",
+                    success=False,
+                    error=error_msg
+                )
+            
+            # Get code template from special tool
+            code_template = special_tool.get('code_template')
+            if not code_template:
+                error_msg = f"Special tool '{entity_name}' missing code template"
+                logger.error(f"[{correlation_id}] {error_msg}")
+                return StepResult(
+                    step_number=step_number,
+                    step_type="special_tool",
+                    success=False,
+                    error=error_msg
+                )
+            
+            logger.info(f"[{correlation_id}] Generating code for special tool: {entity_name}")
+            
+            # Parse parameters from query_context for special tools
+            parameters = self._parse_special_tool_parameters(step.query_context)
+            
+            # Ensure all template parameters have default values (optional parameters default to empty string)
+            template_params = {
+                'user_identifier': parameters.get('user_identifier', ''),
+                'group_identifier': parameters.get('group_identifier', ''),
+                'app_identifier': parameters.get('app_identifier', ''),
+                **parameters  # Include any additional parameters
+            }
+            
+            # Fill template with parameters (planning agent is responsible for providing correct parameters)
+            generated_code = code_template.format(**template_params)
+            
+            logger.debug(f"[{correlation_id}] Generated special tool code: {len(generated_code)} characters")
+            logger.debug(f"[{correlation_id}] Parameters passed from planning agent: {parameters}")
+            logger.debug(f"[{correlation_id}] Template parameters used: {template_params}")
+            
+            # Execute the generated code in subprocess (exactly like API execution)
+            execution_result = await self._execute_generated_code(
+                generated_code,
+                correlation_id,
+                step,
+                step_number,
+                callback_step_number
+            )
+            
+            logger.info(f"[{correlation_id}] Special tool execution completed")
+            
+            # Check if execution was successful
+            is_successful = execution_result.get('success', False)
+            result_data = execution_result.get('output', [])
+            
+            if is_successful:
+                logger.info(f"[{correlation_id}] Special tool '{entity_name}' executed successfully")
+                
+                # REPEATABLE PATTERN: Store results for next step access
+                variable_name = self._store_step_data(
+                    step_number=step_number,
+                    step_type="special_tool",
+                    data=result_data,
+                    metadata={
+                        "tool_name": entity_name,
+                        "execution_method": "subprocess_code_execution",
+                        "parameters": parameters
+                    },
+                    step_context=step.query_context
+                )
+                
+                logger.info(f"[{correlation_id}] Special tool results stored as {variable_name}")
+            else:
+                error_msg = execution_result.get('error', 'Special tool execution failed')
+                logger.error(f"[{correlation_id}] Special tool '{entity_name}' failed: {error_msg}")
+            
+            # NEW STANDARDIZED: STEP-END callback
+            step_end_time = time.time()
+            step_duration = step_end_time - step_start_time
+            if self.step_end_callback:
+                try:
+                    await self.step_end_callback(
+                        step_number=callback_step_number,
+                        step_type="special_tool",
+                        success=is_successful,
+                        duration_seconds=step_duration,
+                        record_count=len(result_data) if isinstance(result_data, list) else 1,
+                        formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
+                        error_message=None if is_successful else error_msg
+                    )
+                except Exception as callback_error:
+                    logger.warning(f"[{correlation_id}] Special tool step end callback error: {callback_error}")
+            
+            return StepResult(
+                step_number=step_number,
+                step_type="special_tool",
+                success=is_successful,
+                result=execution_result
+            )
+            
+        except Exception as e:
+            logger.error(f"[{correlation_id}] Special tool step execution failed: {e}")
+            return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
+    
     async def _execute_generated_code(self, python_code: str, correlation_id: str, step: Optional[Dict[str, Any]] = None, current_step_number: int = None, callback_step_number: int = None) -> Dict[str, Any]:
         """
         Execute generated Python code in a subprocess with access to previous step data.
@@ -2876,6 +3088,18 @@ class ModernExecutionManager:
                     logger.debug(f"[{correlation_id}] Copied base_okta_api_client.py to execution directory")
                 else:
                     logger.warning(f"[{correlation_id}] base_okta_api_client.py not found at {api_client_source}")
+                
+                # Copy special tool files if they are imported in the generated code
+                special_tools_dir = os.path.join(os.path.dirname(__file__), '..', 'tools', 'special_tools')
+                if os.path.exists(special_tools_dir):
+                    for tool_file in os.listdir(special_tools_dir):
+                        if tool_file.endswith('.py') and tool_file != '__init__.py':
+                            tool_name = tool_file[:-3]  # Remove .py extension
+                            if tool_name in python_code:  # If the tool is imported in the generated code
+                                tool_source = os.path.join(special_tools_dir, tool_file)
+                                tool_dest = os.path.join(temp_dir, tool_file)
+                                shutil.copy2(tool_source, tool_dest)
+                                logger.debug(f"[{correlation_id}] Copied special tool {tool_file} to execution directory")
                 
                 # CRITICAL FIX: Inject previous step data into execution environment
                 # Calculate previous step key for dynamic access
@@ -3656,6 +3880,45 @@ except Exception as e:
                 
         except Exception:
             return []
+    
+    def _parse_special_tool_parameters(self, query_context: str) -> dict:
+        """
+        Parse parameters from query_context for special tools.
+        
+        Expected format: "PARAMETERS: user_identifier='dan@fctr.io', app_identifier='Fctr Portal' | Description..."
+        
+        Returns:
+            Dict of parameters, or empty dict if no PARAMETERS section found
+        """
+        if not query_context or "PARAMETERS:" not in query_context:
+            return {}
+        
+        try:
+            # Split on PARAMETERS: and take the part after it
+            parts = query_context.split("PARAMETERS:", 1)
+            if len(parts) < 2:
+                return {}
+            
+            # Get the parameters part (before | or end of string)
+            params_part = parts[1].split("|")[0].strip()
+            
+            parameters = {}
+            
+            # Parse key='value' pairs
+            import re
+            # Match patterns like: key='value' or key="value"
+            pattern = r"(\w+)=(['\"])(.*?)\2"
+            matches = re.findall(pattern, params_part)
+            
+            for match in matches:
+                key, _, value = match
+                parameters[key] = value
+            
+            return parameters
+            
+        except Exception as e:
+            logger.warning(f"Failed to parse special tool parameters from query_context: {e}")
+            return {}
 
 # Create singleton instance
 modern_executor = ModernExecutionManager()

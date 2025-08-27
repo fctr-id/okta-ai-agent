@@ -96,10 +96,18 @@ If you cannot create a valid plan because the user's request cannot be fulfilled
 
 **STEP STRUCTURE REQUIREMENTS**
 
-- **tool_name**: "sql" or "api" 
+- **tool_name**: "sql", "api", or "special_tool" 
+  - Use "special_tool" when the endpoint path starts with "/special-tools/" (e.g., "/special-tools/access-analysis") - CHECK THE PATH FIELD CAREFULLY
+  - Use "api" for regular Okta API endpoints (e.g., "/api/v1/users")
+  - Use "sql" for database queries
 - **entity**: MUST use the EXACT `entity` field from the endpoint definition in AVAILABLE DATA SOURCES - NO INFERENCE FROM OPERATION NAMES
 - **operation**: MUST use the EXACT `operation` field from the endpoint definition in AVAILABLE DATA SOURCES for API steps, null for SQL steps  
-- **query_context**: What data to collect + required limits + specific guidance + parameter usage + note that pagination is automatically handled
+- **query_context**: For special_tool steps, start with PARAMETERS followed by extracted values, then description:
+  - Format: "PARAMETERS: user_identifier='dan@fctr.io', app_identifier='Fctr Portal', group_identifier='' | Comprehensive access analysis data collection..."
+  - Extract parameter values from user's query based on endpoint's parameter definitions
+  - CRITICAL: Include ALL parameters defined in the endpoint (both required and optional) - set optional parameters to empty string '' if not mentioned in query
+  - Example query: "can dan@fctr.io access Fctr Portal" → "PARAMETERS: user_identifier='dan@fctr.io', app_identifier='Fctr Portal', group_identifier='' | Analyze user access to application with comprehensive data collection"
+  - For non-special_tool steps: What data to collect + required limits + specific guidance + note that pagination is automatically handled
 - **critical**: true/false
 - **reasoning**: Why this step is needed + which specific endpoint/table from AVAILABLE DATA SOURCES provides this capability
 

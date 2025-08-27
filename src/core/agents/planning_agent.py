@@ -58,8 +58,8 @@ class ExecutionStep(BaseModel):
     """Individual execution step in the plan"""
     
     tool_name: str = Field(
-        description='Execution method: "sql" or "api"',
-        pattern=r'^(sql|api)$'
+        description='Execution method: "sql", "api", or "special_tool"',
+        pattern=r'^(sql|api|special_tool)$'
     )
     entity: str = Field(
         description='The actual entity/table name (e.g., "users", "system_log", "groups")',
@@ -67,6 +67,10 @@ class ExecutionStep(BaseModel):
     )
     operation: Optional[str] = Field(
         description='Exact operation name for API steps, null for SQL steps',
+        default=None
+    )
+    parameters: Optional[Dict[str, Any]] = Field(
+        description='Parameters extracted from user query for special_tool steps (e.g., {"user_identifier": "dan@fctr.io", "app_identifier": "Fctr Portal"})',
         default=None
     )
     query_context: str = Field(

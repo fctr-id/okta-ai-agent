@@ -84,6 +84,9 @@ ALLOWED_MODULES: Set[str] = {
     # Our API client
     'base_okta_api_client',
     
+    # Special tools
+    'user_access_analysis',  # Access analysis special tool
+    
     # Template system (specific allowlist for security)
     'src.core.agents.results_template_agent',
     'src',  # Allow src module imports for template system
@@ -264,8 +267,17 @@ class EnhancedSecurityValidator:
             risk_level = 'HIGH'
         
         # Basic URL validation (simplified - detailed validation in network_security.py)
-        url_pattern = endpoint_data.get('url_pattern', '')
-        if not url_pattern.startswith('/api/v1/'):
+        # Allow special tool endpoints to bypass standard API pattern validation
+        url_pattern = endpoint_data.get('url_pattern', '') or endpoint_data.get('path', '')
+        
+        # Exempt special tool endpoints from standard API pattern validation
+        # Special tools use /special-tools/ path prefix instead of /api/v1/
+        if url_pattern.startswith('/special-tools/'):
+            # Special tools have their own validation rules
+            pass
+        elif not url_pattern.startswith('/api/v1/'):
+            violations.append(f"Invalid API endpoint pattern: {url_pattern}")
+            risk_level = 'MEDIUM'
             violations.append(f"Invalid API endpoint pattern: {url_pattern}")
             risk_level = 'MEDIUM'
         

@@ -32,21 +32,21 @@
                         <div class="step-info-flow">
                           <div class="step-type-container">
                             <span class="step-type" :class="`step-badge-${planStep.phase}`">
-                              <span v-if="planStep.toolType === 'API' || planStep.toolType === 'SQL'">
-                                {{ planStep.toolType }}<span v-if="getEntityFromStep(planStep)"> • {{ getEntityFromStep(planStep) }}</span> • {{ planStep.operation }}
+                              <span v-if="['API', 'SQL', 'SPECIAL_TOOL'].includes(planStep.toolType)">
+                                {{ planStep.toolType }}<span v-if="planStep.entity"> • {{ planStep.entity }}</span>
                               </span>
                               <span v-else>
                                 {{ planStep.toolType }}
                               </span>
                             </span>
                           </div>
-                          <span v-if="planStep.toolType !== 'API' && planStep.toolType !== 'SQL'" class="step-operation-text">{{ planStep.operation }}</span>
+                          <span v-if="!['API', 'SQL', 'SPECIAL_TOOL'].includes(planStep.toolType)" class="step-operation-text">{{ planStep.operation }}</span>
                         </div>
                         <div class="step-metrics">
-                          <!-- Show duration - prefer execution details, fallback to rtSteps -->
-                          <span v-if="getStepDetailsForDisplay(index)?.duration || props.rtSteps?.[planStep.stepIndex]?.duration" class="duration">
-                            <v-icon size="12" color="grey-darken-1">mdi-timer-outline</v-icon>
-                            {{ formatDuration(getStepDetailsForDisplay(index)?.duration || props.rtSteps[planStep.stepIndex].duration) }}
+                          <!-- Show record count ONLY for execution steps (API, SQL, API_SQL) -->
+                          <span v-if="(planStep.phase === 'api' || planStep.phase === 'sql' || planStep.phase === 'hybrid') && (getStepDetailsForDisplay(index)?.recordCount || props.rtSteps?.[planStep.stepIndex]?.record_count)" class="record-count">
+                            <v-icon size="12" color="grey-darken-1">mdi-database-outline</v-icon>
+                            {{ (getStepDetailsForDisplay(index)?.recordCount || props.rtSteps[planStep.stepIndex]?.record_count || 0).toLocaleString() }} records
                           </span>
                           
                           <!-- Show rate limit warning badge if rate limit occurred -->
@@ -55,20 +55,20 @@
                             <strong>Rate limit: {{ getRateLimitInfo(index).waitSeconds }}s</strong>
                           </span>
                           
-                          <!-- Show record count ONLY for execution steps (API, SQL, API_SQL) -->
-                          <span v-if="(planStep.phase === 'api' || planStep.phase === 'sql' || planStep.phase === 'hybrid') && (getStepDetailsForDisplay(index)?.recordCount || props.rtSteps?.[planStep.stepIndex]?.record_count)" class="record-count">
-                            <v-icon size="12" color="grey-darken-1">mdi-database-outline</v-icon>
-                            {{ (getStepDetailsForDisplay(index)?.recordCount || props.rtSteps[planStep.stepIndex]?.record_count || 0).toLocaleString() }} records
+                          <!-- Show duration - prefer execution details, fallback to rtSteps -->
+                          <span v-if="getStepDetailsForDisplay(index)?.duration || props.rtSteps?.[planStep.stepIndex]?.duration" class="duration">
+                            <v-icon size="12" color="grey-darken-1">mdi-timer-outline</v-icon>
+                            {{ formatDuration(getStepDetailsForDisplay(index)?.duration || props.rtSteps[planStep.stepIndex].duration) }}
                           </span>
                         </div>
                       </div>
                       <div class="step-description">
-                        <!-- Show execution step query context if available, otherwise show stepper context -->
-                        <div v-if="planStep.executionStep && planStep.executionStep.queryContext" class="step-context">
-                          {{ planStep.executionStep.queryContext }}
-                        </div>
-                        <div v-else-if="planStep.context" class="step-context">
+                        <!-- Show cleaned stepper context first, fallback to execution step context -->
+                        <div v-if="planStep.context" class="step-context">
                           {{ planStep.context }}
+                        </div>
+                        <div v-else-if="planStep.executionStep && planStep.executionStep.queryContext" class="step-context">
+                          {{ cleanQueryContext(planStep.executionStep.queryContext) }}
                         </div>
                         
                         <!-- API Progress Bar for active API steps -->
@@ -339,6 +339,19 @@ const getRateLimitInfo = (stepIndex) => {
   return stepDetails?.rateLimitInfo;
 };
 
+// Clean query context by removing PARAMETERS section
+const cleanQueryContext = (queryContext) => {
+  if (!queryContext) return queryContext;
+  
+  // Split on pipe and get the second part (description after |)
+  const parts = queryContext.split('|');
+  if (parts.length > 1) {
+    return parts[1].trim(); // Get everything after the | and trim whitespace
+  }
+  
+  return queryContext; // Fallback to original if no pipe found
+};
+
 // Convert plan to structured steps for modern display - CACHED as computed for performance
 const displaySteps = computed(() => {
   // If we have rtSteps from stepper, use those for consistent step display
@@ -392,6 +405,11 @@ const displaySteps = computed(() => {
           entity = step.entity || '';
           operation = step.operation || '';
           phase = 'hybrid';
+        } else if (tool === 'special_tool') {
+          badge = 'SPECIAL_TOOL';
+          entity = (step.entity || '').toUpperCase();
+          operation = ''; // Clear the operation for special tools
+          phase = 'special';
         } else {
           badge = (tool || step.name || `step_${originalIndex+1}`).toUpperCase();
           entity = step.entity || '';
@@ -401,9 +419,10 @@ const displaySteps = computed(() => {
 
         return {
           toolType: badge,
+          entity: entity, // Pass entity separately for template access
           operation: operation || entity,
           // ENHANCED: Use query_context first, then plan context, then reason, then meaningful fallback
-          context: step.query_context || getPlanContextForStep(originalIndex) || step.reason || 
+          context: cleanQueryContext(step.query_context) || getPlanContextForStep(originalIndex) || step.reason || 
                    (tool === 'finalizing_results' ? 'Compiling and formatting the final results' : `${badge} ${entity}`.trim()),
           stepStatus: step.status || 'pending',
           stepIndex: originalIndex, // Use original index for rtSteps access
@@ -939,6 +958,7 @@ const getEntityFromStep = (planStep) => {
 .step-badge-api { background: #e8f9f6 !important; color: #0f6f62 !important; }
 .step-badge-sql { background: #fff4e5 !important; color: #9a5a00 !important; }
 .step-badge-hybrid { background: #fce4ec !important; color: #ad1457 !important; }
+.step-badge-special { background: #f3e5f5 !important; color: #7b1fa2 !important; }
 .step-badge-other { background: #ececec !important; color: #555 !important; }
 
 .step-entity {
