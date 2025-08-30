@@ -1058,7 +1058,7 @@ class ModernExecutionManager:
                         logger.debug(f"Integrated special tool entities: {list(special_tool['entities'].keys())}")
                 
                 simple_ref['entities'] = entities
-                logger.info(f"Total entities available for pre-planning: {len(entities)}")
+                #logger.info(f"Total entities available for pre-planning: {len(entities)}")
                 
             except Exception as e:
                 logger.warning(f"Failed to load special tools: {e} - continuing with standard entities only")
@@ -2766,13 +2766,32 @@ class ModernExecutionManager:
                 # NEW STANDARDIZED: STEP-ERROR callback for API code execution failure
                 if self.step_error_callback:
                     try:
+                        # Classify error type based on error message content (same logic as realtime_hybrid.py)
+                        error_msg_lower = error_msg.lower()
+                        if "oauth2" in error_msg_lower or "insufficient scopes" in error_msg_lower or "insufficient permissions" in error_msg_lower:
+                            error_type = "oauth2_error"
+                            retry_possible = False  # OAuth2 scope issues usually require admin intervention
+                            technical_details = "OAuth2 authentication failed - check client credentials and granted scopes"
+                        elif "authentication failed" in error_msg_lower or "invalid or expired" in error_msg_lower:
+                            error_type = "auth_error"
+                            retry_possible = False  # Auth failures require credential/config fixes
+                            technical_details = "Authentication failed - check API token or OAuth2 configuration"
+                        elif "access forbidden" in error_msg_lower:
+                            error_type = "auth_error"
+                            retry_possible = False  # Permission issues require admin intervention
+                            technical_details = "Access forbidden - insufficient permissions for the requested operation"
+                        else:
+                            error_type = "code_execution_error"
+                            retry_possible = True   # Generic code execution errors can often be retried
+                            technical_details = "Generated API code failed to execute - may be due to API errors, network issues, or code logic problems"
+                        
                         await self.step_error_callback(
                             step_number=callback_step_number,  # Use consistent step numbering
                             step_type="api",
                             error_message=f"API code execution failed: {error_msg}",
-                            error_type="code_execution_error",
-                            retry_possible=True,  # Code execution errors can often be retried
-                            technical_details="Generated API code failed to execute - may be due to API errors, network issues, or code logic problems",
+                            error_type=error_type,
+                            retry_possible=retry_possible,
+                            technical_details=technical_details,
                             formatted_time=time.strftime('%H:%M:%S', time.localtime())
                         )
                     except Exception as callback_error:
@@ -2818,7 +2837,16 @@ class ModernExecutionManager:
             if execution_result.get('error'):
                 error_msg = execution_result.get('error', '').lower()
                 # Critical errors that should fail the step
-                critical_error_patterns = ['import', 'module', 'syntax', 'indentation', 'security violation']
+                critical_error_patterns = [
+                    'import', 'module', 'syntax', 'indentation', 'security violation',
+                    # Authentication and authorization errors
+                    'oauth2', 'insufficient scopes', 'insufficient permissions', 
+                    'authentication failed', 'invalid or expired', 'access forbidden',
+                    # API and HTTP errors (but not rate limits - those are retried automatically)
+                    'resource not found', 'server error', 'service temporarily unavailable',
+                    # Network and timeout errors
+                    'network error', 'request timeout', 'connection error', 'timeout'
+                ]
                 if any(critical in error_msg for critical in critical_error_patterns):
                     execution_successful = False
                     logger.error(f"[{correlation_id}] API step has critical execution error: {execution_result.get('error')}")

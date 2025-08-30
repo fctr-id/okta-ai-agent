@@ -38,6 +38,12 @@ from .network_security import (
     NetworkSecurityResult
 )
 
+from .oauth2_client import (
+    OktaOAuth2Manager,
+    OAuth2Error,
+    handle_oauth2_response_error
+)
+
 __all__ = [
     # Method whitelisting (consolidated into security_config)
     'validate_generated_code',
@@ -52,6 +58,11 @@ __all__ = [
     'get_security_headers',
     'NetworkSecurityValidator',
     'NetworkSecurityResult',
+    
+    # OAuth2 authentication
+    'OktaOAuth2Manager',
+    'OAuth2Error',
+    'handle_oauth2_response_error',
 ]
 
 # Version info

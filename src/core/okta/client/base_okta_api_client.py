@@ -17,6 +17,51 @@ except ImportError:
     # Fallback for different execution contexts
     settings = None
 
+# Import OAuth2 manager for modern authentication
+OktaOAuth2Manager = None
+import_success = False
+
+try:
+    from src.core.security.oauth2_client import OktaOAuth2Manager
+    import_success = "src.core.security.oauth2_client"
+except ImportError:
+    try:
+        # Alternative import path for different execution contexts
+        import sys
+        from pathlib import Path
+        
+        # Add the security module path
+        security_path = Path(__file__).parent.parent.parent / "security"
+        sys.path.insert(0, str(security_path))
+        
+        from oauth2_client import OktaOAuth2Manager
+        import_success = "oauth2_client (via security path)"
+    except ImportError:
+        try:
+            # Try relative import
+            import sys
+            import os
+            
+            # Get the project root directory
+            current_dir = Path(__file__).parent  # client folder
+            core_dir = current_dir.parent        # okta folder parent (core)
+            security_dir = core_dir / "security"
+            
+            sys.path.insert(0, str(security_dir))
+            from oauth2_client import OktaOAuth2Manager
+            import_success = f"oauth2_client (via {security_dir})"
+        except ImportError:
+            # Final fallback - OAuth2 not available
+            import_success = False
+            OktaOAuth2Manager = None
+
+# Import centralized logging - DISABLED to prevent stdout contamination in subprocess execution
+# Using self-contained logging instead to ensure logs go to stderr
+import logging
+
+# Debug: Print import result (will be logged later)
+oauth2_import_status = f"OAuth2Manager import: {'✅ ' + import_success if import_success else '❌ Failed'}"
+
 
 class OktaAPIClient:
     """
@@ -38,6 +83,10 @@ class OktaAPIClient:
         """
         self.timeout = timeout
         self.max_pages = max_pages
+        
+        # OAuth2 authentication support
+        self.oauth2_manager = None
+        self.auth_method = 'api_token'  # Default to existing method
         
         # Setup logging - self-contained logging setup
         self.logger = logging.getLogger(f"{__name__}.OktaAPIClient")
@@ -64,8 +113,9 @@ class OktaAPIClient:
         if self.okta_domain:
             self.okta_domain = self.okta_domain.replace('https://', '').rstrip('/')
         
-        # Get API token
-        self.api_token = os.getenv('OKTA_API_TOKEN') or os.getenv('SSWS_API_KEY')
+        if not self.okta_domain:
+            self.logger.error("Missing Okta configuration. Required: OKTA_CLIENT_ORGURL environment variable")
+            raise ValueError("Missing Okta configuration. Set OKTA_CLIENT_ORGURL environment variable.")
         
         # Get concurrent limit for chunked processing  
         # Based on testing: Trial accounts can handle ~3 concurrent, free accounts ~15
@@ -77,20 +127,84 @@ class OktaAPIClient:
         else:
             self.concurrent_limit = int(os.getenv('OKTA_CONCURRENT_LIMIT', '3'))
         
-        if not self.okta_domain or not self.api_token:
-            self.logger.error("Missing Okta configuration. Required: OKTA_CLIENT_ORGURL and OKTA_API_TOKEN environment variables")
-            raise ValueError("Missing Okta configuration. Set OKTA_CLIENT_ORGURL and OKTA_API_TOKEN environment variables.")
+        # NEW: Check authentication method
+        token_method = os.getenv('TOKEN_METHOD', 'API_TOKEN').upper()
         
-        # Setup headers
+        if token_method == 'OAUTH2' and OktaOAuth2Manager:
+            self._setup_oauth2_auth()
+        else:
+            self._setup_api_token_auth()
+        
+        # Set base URL
+        self.base_url = f"https://{self.okta_domain}"
+        
+        # Log authentication method for visibility
+        if self.auth_method == 'oauth2':
+            self.logger.info(f"Okta Base API client configured for OAuth2 private key JWT authentication (domain: {self.okta_domain})")
+        else:
+            self.logger.info(f"Okta Base API client configured for API token authentication (domain: {self.okta_domain})")
+            
+        self.logger.debug(f"Client settings - Timeout: {self.timeout}s, Max Pages: {self.max_pages}, Concurrent Limit: {self.concurrent_limit}")
+    
+    def _setup_oauth2_auth(self):
+        """Setup OAuth2 authentication."""
+        try:
+            # Check if OktaOAuth2Manager is available
+            if OktaOAuth2Manager is None:
+                raise ImportError("OktaOAuth2Manager not available - import failed")
+            
+            self.oauth2_manager = OktaOAuth2Manager(timeout=self.timeout)
+            # Note: OAuth2 client will be initialized async in first request
+            self.auth_method = 'oauth2'
+            
+            # For OAuth2, headers will be set dynamically per request
+            self.headers = {
+                "Accept": "application/json, text/xml, application/xml, */*",
+                "Content-Type": "application/json"
+            }
+            
+        except Exception as e:
+            self.logger.error(f"OAuth2 setup failed, falling back to API token: {type(e).__name__}: {str(e)}")
+            self._setup_api_token_auth()
+    
+    def _setup_api_token_auth(self):
+        """Setup API token authentication (existing logic)."""
+        # Get API token
+        self.api_token = os.getenv('OKTA_API_TOKEN') or os.getenv('SSWS_API_KEY')
+        
+        if not self.api_token:
+            self.logger.error("Missing Okta configuration. Required: OKTA_API_TOKEN environment variable")
+            raise ValueError("Missing Okta configuration. Set OKTA_API_TOKEN environment variable.")
+        
+        # Setup headers with SSWS token
         self.headers = {
             "Authorization": f"SSWS {self.api_token}",
             "Accept": "application/json, text/xml, application/xml, */*",
             "Content-Type": "application/json"
         }
         
-        self.base_url = f"https://{self.okta_domain}"
-        self.logger.info(f"Okta API client configured for domain: {self.okta_domain}")
-        self.logger.debug(f"Client settings - Timeout: {self.timeout}s, Max Pages: {self.max_pages}, Concurrent Limit: {self.concurrent_limit}")
+        self.auth_method = 'api_token'
+    
+    async def _get_auth_headers(self) -> Dict[str, str]:
+        """
+        Get appropriate authentication headers based on method.
+        
+        Returns:
+            Dict[str, str]: Headers with proper authorization
+        """
+        if self.auth_method == 'oauth2' and self.oauth2_manager:
+            # Initialize OAuth2 client if not done yet
+            if not self.oauth2_manager.is_configured():
+                success = await self.oauth2_manager.initialize_from_config(self.okta_domain)
+                if not success:
+                    self.logger.error("Failed to initialize OAuth2 client, falling back to static headers")
+                    return self.headers
+            
+            # Get dynamic OAuth2 headers
+            return await self.oauth2_manager.get_auth_headers()
+        else:
+            # Return static headers for API token method
+            return self.headers
     
     def _optimize_params(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
         """
@@ -558,6 +672,9 @@ class OktaAPIClient:
                             body: Optional[Dict] = None) -> Dict[str, Any]:
         """Make a single API request with comprehensive error handling and rate limit monitoring."""
         
+        # Get appropriate auth headers dynamically
+        request_headers = await self._get_auth_headers()
+        
         # Build URL - handle both full URLs and endpoints
         if endpoint.startswith('http'):
             # Full URL from pagination
@@ -580,7 +697,7 @@ class OktaAPIClient:
                     async with session.request(
                         method=method.upper(),
                         url=url,
-                        headers=self.headers,
+                        headers=request_headers,
                         json=body if body else None
                     ) as response:
                         
@@ -721,16 +838,26 @@ class OktaAPIClient:
         
         # Handle specific HTTP status codes
         if response.status == 401:
+            if self.auth_method == 'oauth2':
+                error_msg = "Authentication failed: Invalid or expired OAuth2 token"
+            else:
+                error_msg = "Authentication failed: Invalid or expired API token"
+            
             return {
                 "status": "error",
-                "error": "Authentication failed: Invalid or expired API token",
+                "error": error_msg,
                 "error_code": "E0000011"
             }
         
         if response.status == 403:
+            if self.auth_method == 'oauth2':
+                error_msg = "Access forbidden: Insufficient OAuth2 scopes or permissions"
+            else:
+                error_msg = "Access forbidden: Insufficient permissions for this operation"
+                
             return {
                 "status": "error", 
-                "error": "Access forbidden: Insufficient permissions for this operation",
+                "error": error_msg,
                 "error_code": "E0000006"
             }
         

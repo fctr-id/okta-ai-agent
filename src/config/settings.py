@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         
+        # Normalize Okta URL - remove trailing slash for consistency
+        if self.OKTA_CLIENT_ORGURL and self.OKTA_CLIENT_ORGURL.endswith('/'):
+            self.OKTA_CLIENT_ORGURL = self.OKTA_CLIENT_ORGURL.rstrip('/')
+        
         # Create database file path
         db_path = Path(self.DB_DIR) / self.DB_FILENAME
         

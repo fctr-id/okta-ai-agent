@@ -214,18 +214,51 @@ class OktaClientWrapper:
         self.tenant_id = tenant_id
         self.cancellation_flag = cancellation_flag  # Store cancellation flag
         configure_okta_sdk_logging(logger)
-        self.config = {
-            'orgUrl': settings.OKTA_CLIENT_ORGURL,
-            'token': settings.OKTA_API_TOKEN,
-            'requestTimeout': 30,
-            'rateLimit': {
-                'maxRetries': 1  # Increased from 1 to take advantage of SDK's built-in retry logic
-            },
-            'logging': {
-                'enabled': True,
-                'logLevel': 'INFO'
+        
+        # Determine authentication method based on TOKEN_METHOD environment variable
+        token_method = os.getenv('TOKEN_METHOD', 'api_token').lower()
+        
+        if token_method == 'oauth2':
+            # OAuth2 Private Key JWT configuration
+            self.config = {
+                'orgUrl': settings.OKTA_CLIENT_ORGURL,
+                'authorizationMode': 'PrivateKey',
+                'clientId': os.getenv('OKTA_OAUTH2_CLIENT_ID'),
+                'scopes': os.getenv('OKTA_OAUTH2_SCOPES', 'okta.users.read').split(' '),
+                'privateKey': os.getenv('OKTA_OAUTH2_PRIVATE_KEY_PEM'),
+                'requestTimeout': 30,
+                'rateLimit': {
+                    'maxRetries': 1  # Increased from 1 to take advantage of SDK's built-in retry logic
+                },
+                'logging': {
+                    'enabled': True,
+                    'logLevel': 'INFO'
+                }
             }
-        }
+            
+            # Validate OAuth2 configuration
+            if not self.config['clientId']:
+                raise ValueError("OKTA_OAUTH2_CLIENT_ID environment variable is required for OAuth2 authentication")
+            if not self.config['privateKey']:
+                raise ValueError("OKTA_OAUTH2_PRIVATE_KEY_PEM environment variable is required for OAuth2 authentication")
+            
+            logger.info(f"Okta SDK client configured for OAuth2 private key JWT authentication (domain: {settings.OKTA_CLIENT_ORGURL})")
+            
+        else:
+            # Default API Token configuration
+            self.config = {
+                'orgUrl': settings.OKTA_CLIENT_ORGURL,
+                'token': settings.OKTA_API_TOKEN,
+                'requestTimeout': 30,
+                'rateLimit': {
+                    'maxRetries': 1  # Increased from 1 to take advantage of SDK's built-in retry logic
+                },
+                'logging': {
+                    'enabled': True,
+                    'logLevel': 'INFO'
+                }
+            }
+            logger.info(f"Okta SDK client configured for API token authentication (domain: {settings.OKTA_CLIENT_ORGURL})")
         self.client = None
         
         # Initialize API request semaphore based on settings

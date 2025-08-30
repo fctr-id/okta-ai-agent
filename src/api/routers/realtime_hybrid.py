@@ -537,7 +537,7 @@ async def execute_plan_and_stream(
         modern_executor.subprocess_progress_callback = on_subprocess_progress
 
         # Execute using EXACT same pattern as test_query_1.py - ONE call only!
-        logger.info(f"[{process_id}] Executing with Modern Execution Manager (same as test_query_1.py)...")
+        logger.info(f"[{process_id}] Executing with Modern Execution Manager...")
         
         # CONCURRENT EXECUTION: Start execution and process events concurrently
         # Create a task for the execution
@@ -941,7 +941,13 @@ async def execute_plan_and_stream(
         user_message = "An unexpected error occurred during execution."
         
         # Classify error types for better frontend handling
-        if "planning" in error_str or "plan" in error_str:
+        if "oauth2" in error_str or "insufficient scopes" in error_str or "insufficient permissions" in error_str:
+            error_type = "oauth2_error"
+            user_message = "Authentication failed: Insufficient OAuth2 permissions. Please check your OAuth2 client configuration and scopes."
+        elif "authentication failed" in error_str or "invalid or expired" in error_str:
+            error_type = "auth_error"  
+            user_message = "Authentication failed: Invalid or expired credentials. Please check your API token or OAuth2 configuration."
+        elif "planning" in error_str or "plan" in error_str:
             error_type = "planning_error"
             user_message = "Planning failed: Unable to generate execution plan."
         elif "sql" in error_str and ("database" in error_str or "query" in error_str):

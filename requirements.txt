@@ -17,3 +17,4 @@ html-sanitizer~=2.6.0
 dateparser~=1.2.2
 #polars~=1.31.0
 polars-lts-cpu~=1.32.2
+authlib~=1.6.3
