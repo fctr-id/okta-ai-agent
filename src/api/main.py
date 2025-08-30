@@ -91,7 +91,7 @@ async def lifespan(app: FastAPI):
         logger.debug("Auth users table already exists. Do not have to create a new one")
     
     # Modern Execution Manager handles process lifecycle automatically
-    logger.info("Using Modern Execution Manager - no background cleanup needed")
+    #logger.info("Using Modern Execution Manager - no background cleanup needed")
     
     yield
     

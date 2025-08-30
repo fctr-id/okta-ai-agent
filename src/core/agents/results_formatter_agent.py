@@ -77,7 +77,7 @@ def _load_complete_data_prompt() -> str:
         if "{{ALLOWED_METHODS_PLACEHOLDER}}" in prompt_content:
             prompt_content = prompt_content.replace("{{ALLOWED_METHODS_PLACEHOLDER}}", allowed_methods_section)
         
-        logger.debug("Loaded complete data prompt with dynamic allowed methods for pure Python processing")
+        #logger.debug("Loaded complete data prompt with dynamic allowed methods for pure Python processing")
         return prompt_content
         
     except FileNotFoundError:
@@ -101,7 +101,7 @@ def _load_sample_data_prompt() -> str:
         if "{{ALLOWED_METHODS_PLACEHOLDER}}" in prompt_content:
             prompt_content = prompt_content.replace("{{ALLOWED_METHODS_PLACEHOLDER}}", allowed_methods_section)
         
-        logger.debug("Loaded sample data prompt with dynamic allowed methods for pure Python processing")
+        #logger.debug("Loaded sample data prompt with dynamic allowed methods for pure Python processing")
         return prompt_content
         
     except FileNotFoundError:
