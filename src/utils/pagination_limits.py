@@ -477,13 +477,53 @@ async def _paginate_direct_api(
         
         # Get auth config
         base_url = self.config['orgUrl'].rstrip('/')
-        api_token = self.config['token']
         
+        # Handle both OAuth2 and API token authentication
         headers = {
-            "Authorization": f"SSWS {api_token}",
             "Accept": "application/json",
             "Content-Type": "application/json"
         }
+        
+        # Check if using OAuth2 (when TOKEN_METHOD=OAUTH2)
+        if 'token' not in self.config and 'authorizationMode' in self.config and self.config['authorizationMode'] == 'PrivateKey':
+            # OAuth2 configuration detected - use OAuth2 client directly
+            logger.debug(f"{log_prefix}OAuth2 detected - using OAuth2 client for {entity_name}")
+            
+            # Import and setup OAuth2 client for authentication
+            from src.core.security.oauth2_client import OktaOAuth2Manager
+            
+            # Extract domain from base_url
+            oauth2_manager = OktaOAuth2Manager(timeout=300)
+            domain = base_url.replace('https://', '').replace('http://', '')
+            
+            # Initialize OAuth2 client
+            if not await oauth2_manager.initialize_from_config(domain):
+                logger.error(f"{log_prefix}Failed to initialize OAuth2 client for {entity_name}")
+                return [] if not processor_func else 0
+            
+            # Get OAuth2 headers
+            oauth_headers = await oauth2_manager.get_auth_headers()
+            if not oauth_headers:
+                logger.error(f"{log_prefix}Failed to get OAuth2 headers for {entity_name}")
+                return [] if not processor_func else 0
+            
+            headers.update(oauth_headers)
+            logger.debug(f"{log_prefix}Using OAuth2 authentication with Bearer token for {entity_name}")
+            
+        elif 'token' in self.config:
+            # API token authentication
+            api_token = self.config['token']
+            headers["Authorization"] = f"SSWS {api_token}"
+            logger.debug(f"{log_prefix}Using API token authentication for {entity_name}")
+        else:
+            # Fallback: try to get from environment
+            import os
+            api_token = os.getenv('OKTA_API_TOKEN')
+            if api_token:
+                headers["Authorization"] = f"SSWS {api_token}"
+                logger.debug(f"{log_prefix}Using API token from environment for {entity_name}")
+            else:
+                raise ValueError(f"No authentication method available for {entity_name}. Check OAuth2 configuration or API token.")
         
         all_items = []
         page_count = 0
