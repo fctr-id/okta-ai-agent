@@ -132,6 +132,7 @@ Tako leverages the power of leading AI providers with enhanced compatibility:
 ✅ Docker installed on your machine  
 ✅ Okta tenant with superadmin access  
 ✅ Access to any of the supported AI providers  
+✅ **Authentication Setup**: [Configure OAuth 2.0 or API Token authentication →](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens)  
 
 ### Docker Compose
 
@@ -275,6 +276,7 @@ Tako has been thoroughly tested with multiple LLM configurations to ensure optim
 - **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
 - ℹ️ **Additional Permissions**: Some entities (e.g., listing Okta admin roles) will need additional permissions on the token
 - **Custom Role Example**: You will need a custom role created with Permission: "View roles, resources, and admin assignments" and Resources: "All Identity and Access Management resources" assigned in addition to READ-ONLY administrator
+- 📚 **Setup Guide**: [Complete Authentication & Authorization Setup Guide →](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens)
 
 #### AI Provider Options
 - **LLM Flexibility**: 
