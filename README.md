@@ -2,141 +2,108 @@
   <a href="https://fctr.io">
     <img src="https://fctr.io/images/logo.svg" alt="fctr.io" width="110" height="auto">
   </a>
-</div>
-
-<div align="center">
+  
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
+  
+  <h1>Tako: AI Agent for Okta (v1.2.0)</h1>
+  
+  <p>🚨 MAJOR RELEASE: v1.2.0 "Anchor Drop" delivers consistent, deterministic results and much better UI experience. Update now for reliability boost!</strong> <a href="VERSION.md">📋 Changelog →</a></p>
 </div>
 
-<h2 style="margin-left: 10px" align="center">Tako: Unified AI Agent for Okta (v1.2.0)</h2>
 
-<div align="center">
+## What is Tako?
 
-> **🚨 MAJOR RELEASE: v1.2.0 "Anchor Drop" delivers consistent, deterministic results and much better UI experience. Update now for reliability boost!** [📋 Changelog →](VERSION.md)🚨
-
-</div>
-<br/>
-
-
-Meet Tako, the **world's first multi-agent system** for Okta administration. Powered by **advanced context engineering** and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query. With support for **107+ Okta GET API endpoints** and comprehensive database operations, Tako delivers enterprise-grade insights through natural language queries.
+Tako is the **world's first conversational AI agent system** for Okta administration. Ask questions in natural language and get instant answers - **no scripting required**. Powered by multiple specialized agents and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query.
 
 Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
 
-<div align="center">
-<h3>Revolutionary Multi-Agent Architecture</h3>
-<p align="center">
-  <img src="docs/media/tako-v1.gif" alt="Tako Unified Agent Demo" width="1024px" height="auto">
-</p>
-<p><em>Demo shows agent coordination - processing wait times trimmed for brevity</em></p>
-</div>
+**Key Features:**
+- 🗣️ **Natural language queries** - Ask questions in plain English, get instant results
+- 🤖 **Multiple AI agents** - Specialized agents work together for consistent, deterministic results  
+- 📊 **Real-time progress** - See exactly what each step is doing with live updates
+- 🔄 **Dual data sources** - Local SQLite sync + real-time API calls (107+ endpoints)
+- 🔒 **Security-first** - All data stays on your infrastructure, read-only by default
+- 🐳 **Easy deployment** - Docker support for AMD64 and ARM64 platforms
+- 🧩 **Full Coverage** - Automatic code generation across **107+ Okta GET endpoints** ([full list](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints))
 
 <div align="center">
-<h3>📖 Featured Articles</h3>
-<p>Learn more about Tako's journey and advanced multi-agent architecture:</p>
+  <img src="docs/media/tako-v1.gif" alt="Tako Multi-Agent Demo" width="800px" height="auto">
+  <p><em>Demo: Multiple agents coordinating with real-time progress updates and CSV download</em></p>
+</div>
+
+
+<div align="center">
+<h3>📖 Featured Articles & Demo Video</h3>
 <div style="margin: 20px 0;">
   <a href="https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/" style="margin-right: 20px;">
-    📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short: A Technical Reality Check for Skeptics
+    📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short
   </a>
-</div>
-</div>
-
-<div align="center">
-<h3>Installation and Demo Video</h3>
-<p>Watch our step-by-step installation guide and Tako feature demonstration:</p>
-<div align="center">
-      <a href="https://www.youtube.com/watch?v=PC8arYq5kZk">
-         <img src="https://img.youtube.com/vi/PC8arYq5kZk/0.jpg" style="width:500px">
-      </a>
+  <br><br>
+  <a href="https://www.youtube.com/watch?v=PC8arYq5kZk">
+    🎥 Installation and Demo Video
+  </a>
 </div>
 </div>
 
 ## 📋 Table of Contents
 
-- [📋 Table of Contents](#-table-of-contents)
-- [⚠️ MAJOR ARCHITECTURE UPGRADE](#️-major-architecture-upgrade)
-- [🆕 What Makes Tako Revolutionary?](#-what-makes-tako-revolutionary)
-  - [🚀 Game-Changing Multi-Agent Architecture](#-game-changing-multi-agent-architecture)
-  - [⚡ Multiple AI Provider Support](#-multiple-ai-provider-support)
-  - [🔄 Enterprise-Grade Performance & Security](#-enterprise-grade-performance--security)
-- [🚀 Quick Start (The No-Frills Docker Way)](#-quick-start-the-no-frills-docker-way)
+- [What is Tako?](#what-is-tako)
+- [What Makes Tako Revolutionary?](#-what-makes-tako-revolutionary)
+- [Quick Start (Docker)](#-quick-start-docker)
   - [Prerequisites](#prerequisites)
-  - [Docker Compose](#docker-compose)
-    - [Linux/macOS Instructions](#linuxmacos-instructions)
-    - [Windows Instructions](#windows-instructions)
-  - [🚨 Optimal API settings for maximum sync speed 🚨](#-optimal-api-settings-for-maximum-sync-speed-)
-  - [⚠️ Important: Monitor for Errors](#️-important-monitor-for-errors)
-  - [🆘 Need Help?](#-need-help)
-  - [Launching the Application](#launching-the-application)
-  - [Tailing docker logs](#tailing-docker-logs)
-  - [Access the Unified Agent Interface](#access-the-unified-agent-interface)
-- [🧠 Tested LLMs](#-tested-llms)
-- [🛡️ Security & Privacy](#️-security--privacy)
-  - [Tako Architecture](#tako-architecture)
-    - [Common Security Features](#common-security-features)
-    - [API Token](#api-token)
-    - [AI Provider Options](#ai-provider-options)
-    - [Data Security](#data-security)
-    - [Database Model](#database-model)
-- [⚠️ Good to Know](#️-good-to-know)
-  - [Beta Release 🧪](#beta-release-)
-  - [Security First 🛡️](#security-first-️)
-  - [Current Limitations 🔍](#current-limitations-)
-- [🗺️ Roadmap](#️-roadmap)
-- [🆘 Need Help?](#-need-help-1)
-- [💡 Feature Requests & Ideas](#-feature-requests--ideas)
-- [👥 Contributors](#-contributors)
-- [💌 Thank You](#-thank-you)
-- [⚖️ Legal Stuff](#️-legal-stuff)
-
-&nbsp;
-
-## ⚠️ MAJOR ARCHITECTURE UPGRADE
-> **IMPORTANT**: Version 1.2.0-beta builds upon the revolutionary multi-agent architecture, adding enhanced performance optimizations, advanced strategy planning, and refined user experience. This represents the evolution of the unified agent system with enterprise-grade improvements.
-> 
-> **Previous v0.6.x users:** This version uses an entirely different approach. Your existing setup will work, but to access the new unified agent capabilities, follow the new installation process.
-> 
-> **Legacy Documentation:** Previous architecture documentation has been moved to our [Wiki](https://github.com/fctr-id/okta-ai-agent/wiki/Previous-Architecture).
+  - [Installation](#installation)
+  - [Configure Rate Limits](#-configure-rate-limits-critical)
+  - [Launch Application](#launch-application)
+- [AI Provider Support](#ai-provider-support)
+  - [Supported Providers](#supported-providers)
+  - [Tested Model Combinations](#tested-model-combinations)
+- [Security & Privacy](#️-security--privacy)
+  - [Architecture Overview](#architecture-overview)
+  - [Security Features](#security-features)
+  - [Database Schema](#database-schema)
+- [Documentation & Support](#-documentation--support)
+  - [Documentation](#documentation)
+  - [Current Status](#current-status)
+  - [Get Help](#get-help)
+  - [Roadmap](#roadmap)
 
 ## 🆕 What Makes Tako Revolutionary?
 
-### **🚀 Game-Changing Multi-Agent Architecture**
-- **5 Specialized Agents**: Enhanced Planning with new Strategy Agent, Execution Management, SQL, API, and Results Formatting working in perfect coordination
-- **API-Only Operation**: Complete operation without database sync, access all data in real-time through 107+ API endpoints
-- **Intelligent Data Selection**: Automatically chooses between database and API based on query requirements and data freshness with enhanced hybrid indicators
-- **Universal API Support**: **Automatic code generation across ALL 107+ Okta GET endpoints** ([complete list →](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints)) - not restricted to a few like previous versions
-- **Performance Optimized**: 5x faster results streaming with intelligent batch processing and enhanced user interface
+### **Multi-Agent Architecture**
+Tako uses multiple specialized agents that work together to execute the necessary steps for planning, writing deterministic Python code for SQL or Okta API queries, and formatting results with real-time execution management and progress streaming.
 
-### **⚡ Multiple AI Provider Support**
-Tako leverages the power of leading AI providers with enhanced compatibility:
-- Google Vertex AI (Gemini 1.5 Pro, 2.5 Pro)
-- OpenAI (GPT-4, o4-mini) 
-- Azure OpenAI (GPT-4)
-- Anthropic (Claude 3.7 Sonnet)
-- AWS Bedrock (Claude, Nova, Llama models)
-- Ollama (Local, Self-hosted, use 32B+ models)
-- OpenAI Compatible APIs (Fireworks, Together AI, OpenRouter, etc.)
+### **Intelligent Data Selection**
+You can choose how Tako accesses your Okta data:
+- **Database Mode** - Fast queries against local SQLite with users, groups, apps, devices, factors
+- **API Mode** - Real-time calls to Okta APIs for latest data (no database sync required)
+- **Hybrid Mode** - Automatically chooses the best data source for each query
 
-### **🔄 Enterprise-Grade Performance & Security**
-- **Polars DataFrames**: Lightning-fast data processing and transformation
-- **Advanced Context Engineering**: 99% token reduction through intelligent context filtering between agents
-- **Multi-layered Security**: Comprehensive validation with enterprise security framework
-- **Optimized Operations**: Smart filtering and parallel processing for cost-effective operations
+### **No-Code Experience**
+- Natural language queries - no scripts, no complex syntax
+- Real-time progress visibility - see what each agent is doing
+- Deterministic results through advanced context engineering
 
-## 🚀 Quick Start (The No-Frills Docker Way)
+### **Enterprise-Grade Performance**
+- Polars DataFrames for lightning-fast data processing
+- 99% token reduction through intelligent context filtering
+- Multi-layered security with comprehensive validation
+- Optimized operations with smart filtering and parallel processing
 
-<h3>💡 Looking for alternative installation instructions?</h3>
-  <h4><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for more setup guides to get Tako running without Docker</h4>
+## 🚀 Quick Start (Docker)
+
+<h3>💡 Alternative Installation Options</h3>
+<p><a href="https://github.com/fctr-id/okta-ai-agent/wiki/Installation">Visit our Installation Wiki</a> for non-Docker setup guides</p>
 
 ### Prerequisites
 
 ✅ Docker installed on your machine  
 ✅ Okta tenant with superadmin access  
 ✅ Access to any of the supported AI providers  
-✅ **Authentication Setup**: [Configure OAuth 2.0 or API Token authentication →](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens)  
+✅ **Authentication Setup**: [Configure OAuth 2.0 or API Token authentication →](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens)
 
-### Docker Compose
+### Installation
 
-The easiest way to get started is with Docker Compose. **Tako supports multi-architecture deployment** with native images for both **AMD64** (Intel/AMD) and **ARM64** (Apple Silicon, AWS Graviton) platforms.
+**Tako supports multi-architecture deployment** with native images for both **AMD64** (Intel/AMD) and **ARM64** (Apple Silicon, AWS Graviton) platforms.
 
 #### Linux/macOS Instructions
 
@@ -146,8 +113,9 @@ mkdir okta-ai-agent
 cd okta-ai-agent
 
 # 2. Create required directories for data persistence
-### Upload your own key and cert pem files to certs directory if you need them
 mkdir -p sqlite_db logs certs
+
+# (Optional) Place your own TLS cert/key as certs/cert.pem and certs/key.pem for custom HTTPS
 
 # 3. Download the docker-compose.yml file
 curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml
@@ -157,7 +125,6 @@ curl -O https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/.env.sample
 mv .env.sample .env
 
 # ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
-# The app will not work without properly configured environment variables
 # nano .env (or use your favorite editor)
 ```
 
@@ -169,8 +136,9 @@ New-Item -ItemType Directory -Path okta-ai-agent
 Set-Location okta-ai-agent
 
 # 2. Create required directories for data persistence
-### Upload your own key and cert pem files to certs directory if you need them
 New-Item -ItemType Directory -Path sqlite_db, logs, certs -Force
+
+# (Optional) Place your own TLS cert.pem and key.pem files in the certs directory for custom HTTPS
 
 # 3. Download the docker-compose.yml file
 Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/main/docker-compose.yml" -OutFile "docker-compose.yml"
@@ -180,20 +148,16 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/fctr-id/okta-ai-agent/
 Rename-Item -Path ".env.sample" -NewName ".env"
 
 # ⚠️ IMPORTANT: Edit the .env file with your settings! ⚠️
-# The app will not work without properly configured environment variables
 # notepad .env (or use your favorite editor)
 ```
 
-### 🚨 Optimal API settings for maximum sync speed 🚨
+### 🚨 Configure Rate Limits (Critical)
 
-<p>
-<img src="docs/api-rate-limits.png" alt="API rate limits" width="550" height="auto"  style="margin-right: 20px">
-</p>
+**Step 1:** We recommend you set it to 100% but depending on whatever value you set, please read the table below to get the variable value:
 
-**For fastest sync times, set your API rate limit to 100% as shown above.**
+<img src="docs/api-rate-limits.png" alt="API Rate Limits Configuration" width="550" height="auto">
 
-
-If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT` in your `.env` file:
+**Step 2:** Set `OKTA_CONCURRENT_LIMIT` in your `.env` file based on your Okta plan:
 
 | Tenant Type | API Rate Limit % | Recommended Setting | Tested Maximum (CAUTION ⚠️) |
 |-------------|------------------|---------------------|------------------------------|
@@ -210,91 +174,114 @@ If you cannot use 100%, use this table to set the optimal `OKTA_CONCURRENT_LIMIT
 | Workforce Identity | 75% | 203 | 405 |
 | Workforce Identity | 100% | 270 | 540 |
 
-### ⚠️ Important: Monitor for Errors
+**⚠️ Monitor for Rate Limit Warnings:**
+```
+WARNING - Concurrent limit rate exceeded
+```
 
-**Check your sync logs for this warning:**
-```WARNING - Concurrent limit rate exceeded```
-
-**If you see this error frequently:**
-- Reduce your `OKTA_CONCURRENT_LIMIT` by 10-20 % and re-try
-- Cancel the sync, then try a lower value
+**If you see this frequently:**
+- Reduce your `OKTA_CONCURRENT_LIMIT` by 10-20%
+- Cancel the sync and try a lower value
 - Contact support@fctr.io if issues persist
 
-### 🆘 Need Help?
-If you experience frequent API rate limit errors, contact **support@fctr.io**
+### Launch Application
 
-### Launching the Application
-
-After configuring your .env file with your specific settings, launch the application:
+After configuring your .env file with rate limits:
 
 ```bash
+# Start Tako
 docker compose up -d
-```
 
-### Tailing docker logs
-```bash
+# View logs
 docker compose logs -f
+
+# Open browser
+https://localhost:8001
 ```
 
-### Access the Unified Agent Interface
-- 🌐 Open your browser and go to: https://localhost:8001 to start using Tako's new multi-agent system 🌐
+> ⚠️ **CRITICAL**: The application will not function unless your `.env` file is properly configured with all required authentication, AI provider, and rate limit variables. Double-check all settings before launching.
 
-## 🧠 Tested LLMs
+## AI Provider Support
 
-Tako has been thoroughly tested with multiple LLM configurations to ensure optimal performance across different AI providers:
+Tako works with multiple AI providers for maximum flexibility:
+
+### **Supported Providers**
+- **OpenAI** (GPT-4, o4-mini) - Reliable performance
+- **Google Vertex AI** (Gemini 1.5 Pro, 2.5 Pro) - Advanced reasoning
+- **Anthropic** (Claude 3.7 Sonnet) - Superior analysis
+- **Azure OpenAI** (GPT-4) - Enterprise deployment
+- **AWS Bedrock** (Claude, Nova, Llama models) - AWS integration
+- **Ollama** (Local, Self-hosted) - Air-gapped deployment
+- **OpenAI Compatible** (Fireworks, Together AI, OpenRouter, etc.)
+
+### **Dual Model Architecture**
+Tako can use separate models for reasoning and code generation, allowing cost optimization while maintaining enterprise-ready capabilities.
+
+### Tested Model Combinations
+These model classes have been validated for stability and cost/performance trade‑offs (you can still use others):
 
 ### **Reasoning Models** (Planning & Analysis)
+- **GPT-o4-mini** -  (preferred)
+- **OpenAI GPT-OSS 120B** 
+- **Claude Sonnet 4** 
+- **Gemini 2.5 Pro** 
 - **O3** - Advanced reasoning capabilities (very expensive)
 - **GPT-5-mini** - Works but is very slow (least expensive but needs more testing)
-- **GPT-o4-mini** - Fast and efficient reasoning  (preferred)
-- **OpenAI GPT-OSS 120B** - Open-source high-performance reasoning
-- **Claude Sonnet 4** - Superior analytical reasoning
-- **Gemini 2.5 Pro** - Google's latest reasoning model
+
 
 ### **Coding Models** (API Code Generation)
-- **GPT-4.1** - Reliable code generation (preferred)
-- **OpenAI GPT-OSS 120B** - Open-source coding excellence
-- **Claude Sonnet 4** - Advanced code understanding (works mostly)
-- **Gemini 2.5 Pro** - Latest Google coding model
+- **GPT-4.1** -  (preferred)
+- **Claude Sonnet 4**
+- **Gemini 2.5 Pro** 
+- **OpenAI GPT-OSS 120B**
 
-### **Performance Notes**
-- **Dual Model Setup**: Tako uses separate reasoning and coding models for optimal performance
-- **Provider Flexibility**: Switch between providers based on your requirements and access
-- **Cost Optimization**: Mix and match models (e.g., fast reasoning + powerful coding) for cost-effective operations
-- **Enterprise Ready**: All models support enterprise deployment scenarios
+**Notes**
+- Dual-model strategy: lighter reasoning + stronger coding model can reduce cost.
+- Provider variability: slight output format differences are normal.
+- You can override any pairing via environment variables.
 
-## ️ Security & Privacy
+## 🛡️ Security & Privacy
 
-### Tako Architecture
+### Architecture Overview
 
-<img src="docs/media/unified-architecture.png" alt="Tako Unified Multi-Datasource Architecture" width="800px" height="auto">
-  <p><em>Tako's revolutionary multi-agent architecture with intelligent data source selection</em></p>
+<img src="docs/media/unified-architecture.png" alt="Tako Multi-Agent Architecture" width="800px" height="auto">
+<p><em>Tako's multi-agent architecture with intelligent data source selection</em></p>
 
-#### Common Security Features
-#### API Token
-- **Your Token, Your Rules**: You create and control the Okta API token, including restricting its network access and role permissions
-- **Least-Privilege Design**: Operates with read-only permissions by default for safe exploration
-- ℹ️ **Additional Permissions**: Some entities (e.g., listing Okta admin roles) will need additional permissions on the token
-- **Custom Role Example**: You will need a custom role created with Permission: "View roles, resources, and admin assignments" and Resources: "All Identity and Access Management resources" assigned in addition to READ-ONLY administrator
-- 📚 **Setup Guide**: [Complete Authentication & Authorization Setup Guide →](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens)
+### Security Features
 
-#### AI Provider Options
-- **LLM Flexibility**: 
-  - Use your enterprise-approved AI providers
-  - Deploy Ollama locally for a completely air-gapped environment
-  - Full control over model selection and data boundaries
+**Authentication & Authorization**
+- **Your Token, Your Rules** - You create and control Okta API tokens with IP restrictions
+- **Read-Only by Default** - Operates with least-privilege permissions for safe exploration
+- **OAuth 2.0 & API Token Support** - Choose your preferred authentication method
 
-#### Data Security
+<details>
+<summary>🔓 <strong>Need Advanced Queries?</strong> Click to see optional permission setup</summary>
 
-**Local Storage & Privacy**
-- **Local Storage**: All Okta data is stored in SQLite DB - a file-based database that lives entirely on your PC/VM
-- **Zero Cloud Dependencies**: Your organizational data never leaves your infrastructure
-- **Limited Data Sampling**: Small samples of query results are sent to AI providers for processing
-- **Sandboxed Execution**: All code runs in a secure, isolated environment
-- **Data Minimization**: Only data necessary to fulfill specific queries is processed
+Some powerful features (like enumerating admin role assignments or advanced policy queries) require additional custom okta roles beyond basic read-only access.
 
-#### Database Model
-The following data model applies only when using Database Mode with a synced SQLite database:
+**Quick Setup:**
+1. Create a custom role with: **"View roles, resources, and admin assignments"**
+2. Set resources to: **"All Identity and Access Management resources"**
+3. Assign this custom role **in addition** to your existing READ-ONLY administrator role
+
+This unlocks Tako's full analytical capabilities while maintaining security best practices.
+</details>
+
+**Data Protection**
+- **Local Storage** - All Okta data stored in SQLite on your infrastructure
+- **Zero Cloud Dependencies** - Your organizational data never leaves your environment
+- **Limited Data Sampling** - Only small query samples sent to AI providers for processing
+- **Sandboxed Execution** - All code runs in secure, isolated containers
+- **Data Minimization** - Only necessary data processed for specific queries
+
+**AI Provider Flexibility**
+- Use enterprise-approved AI providers
+- Deploy Ollama locally for completely air-gapped environments
+- Full control over model selection and data boundaries
+
+### Database Schema
+
+When using Database Mode, Tako syncs these entities to local SQLite:
 
 | **Entity** | **Core Fields** |
 |------------|-----------------|
@@ -307,68 +294,72 @@ The following data model applies only when using Database Mode with a synced SQL
 | **UserDevices** | id, user_okta_id, device_okta_id, management_status, user_device_created_at, screen_lock_type, created_at, updated_at |
 | **Authenticators** | id, okta_id, name, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
 
-**Note**: You can view the data saved to your SQLite DB using tools like DB Browser for SQLite.
+**Note:** You can view the synced data using tools like DB Browser for SQLite.
 
-## ⚠️ Good to Know
+##  Documentation & Support
 
-### Beta Release 🧪
-- Tako is still in testing grounds - keep it out of production!
-- Currently focusing on core user fields
-- Large orgs might need a coffee break during sync
+### Documentation
+- 📖 [Installation Guide](https://github.com/fctr-id/okta-ai-agent/wiki/Installation)
+- 🔐 [Authentication Setup](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens)
+- 🔍 [Supported API Endpoints](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints)
+- 📋 [Version History](VERSION.md)
 
-### Security First 🛡️
-- Data lives safely in your local SQLite
-- AI/LLM sees only what it needs to
-- Proper token hygiene required
+### Current Status
+- **Beta Release** - Keep out of production environments
+- **Version Requirement** - Please use version 1.2.0 or above for best stability
+- **Identity Engine** - Tested on Okta Identity Engine only
+- **Single Tenant** - One Okta org at a time
+- **Stateless Queries** - Each query processed independently
+- **Sync Duration** - Large tenants may see longer initial sync times (if using Database Mode)
+- **Model Variability** - Wording differs slightly across AI providers
+- **Complex Queries** - Break very large, multi-part questions into smaller ones for best determinism
 
-### Current Limitations 🔍
-- The responses are stateless, i.e., every query is answered as is asked without any relevance to the previous queries / responses
-- Tested on Identity engine only
-- AI responses vary by provider
-- Complex questions might need simplifying
-- One tenant at a time
+### Get Help
 
-## 🗺️ Roadmap
-
-### ✅ Completed: Multi-Agent Foundation
-Revolutionary architecture with Planning, Execution, SQL, API, and Results agents. Enterprise security framework and comprehensive API coverage.
-
-### ✅ Completed: Enhanced Intelligence  
-Intelligent data source selection, Polars DataFrames operations, modern LLM integration, and advanced web interface.
-
-### 🚧 In Progress: Autonomous Operations
-Automated workflows, intelligent monitoring, self-service integration, and advanced analytics.
-
-### 🔮 Future: Full Enterprise Automation
-AI-driven policy management, complete user lifecycle automation, risk-based authentication, and autonomous administration.
-
-## 🆘 Need Help?
-
-Before raising an issue with Tako, check:
+**Before opening an issue, check:**
 1. 📝 `.env` configuration
-2. 🔑 Okta API permissions
+2. 🔑 Okta API permissions  
 3. 🤖 AI provider setup
-4. 📊 `logs` directory
+4. 📊 Logs in `logs/` directory
 
-Still having problems? Open an issue on GitHub, email support@fctr.io, or contact Dan directly:
-- Email: dan@fctr.io
-- Slack: dan@fctr.io
+**Support Channels:**
+- 🐛 [GitHub Issues](https://github.com/fctr-id/okta-ai-agent/issues) - Bug reports and feature requests
+- 📧 Email: support@fctr.io - General support  
+- 💬 Slack: dan@fctr.io - Quick support
 
-## 💡 Feature Requests & Ideas
+---
 
-Have an idea or suggestion? [Open a feature request](https://github.com/fctr-id/okta-ai-agent/issues/new?labels=enhancement) on GitHub!
+⭐ **Found Tako helpful?** [**Star this repo**](https://github.com/fctr-id/okta-ai-agent) to help other Okta admins discover it!
 
-## 👥 Contributors
+### Feature Requests & Ideas
+- Have an enhancement in mind? [Open a feature request](https://github.com/fctr-id/okta-ai-agent/issues/new?labels=enhancement) and describe the use case.
+- Clearly state data entities & outcome expected—this shortens triage time.
 
-Interested in contributing? We'd love to have you! Reach out to dan@fctr.io
+### Acknowledgements
+Thanks to early community testers providing feedback on rate limits, hybrid mode edge cases, and model selection strategies—your input directly improved stability.
 
-## 💌 Thank You
+### Roadmap
 
-Thank you for all the interest shown by users who have reached out to us for support and feature requests. We greatly appreciate your feedback and enthusiasm for Tako. Your suggestions help us make the product better!
+**✅ Completed:**
+- Multi-agent foundation with enterprise security
+- Intelligent data source selection and Polars optimization  
+- Modern LLM integration with advanced web interface
 
-## ⚖️ Legal Stuff
+**🚧 In Progress:**
+- Autonomous workflows and intelligent monitoring
+- Self-service integration and advanced analytics
 
-Check out [`License.md`](LICENSE) for the fine print.
+**🔮 Future:**
+- AI-driven policy management and user lifecycle automation
+- Risk-based authentication and autonomous administration
+
+## 💡 Contributing
+
+Interested in contributing? We'd love your help! Reach out to dan@fctr.io
+
+## ⚖️ License
+
+See [LICENSE](LICENSE) for details.
 
 ---
 
