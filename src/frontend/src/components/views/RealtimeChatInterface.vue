@@ -99,13 +99,24 @@
             <div class="tools-button-container">
               <v-btn
                 color="primary"
-                class="tools-action-button"
+                class="tools-action-button api-entities-btn"
                 prepend-icon="mdi-database"
                 @click="showToolsModal = true"
                 elevation="1"
                 rounded
               >
                 View API entities available
+              </v-btn>
+              
+              <v-btn
+                color="secondary"
+                class="tools-action-button special-tools-btn"
+                prepend-icon="mdi-shield-check"
+                @click="showSpecialToolsModal = true"
+                elevation="1"
+                rounded
+              >
+                Special Tools
               </v-btn>
             </div>
           </div>
@@ -228,6 +239,68 @@
           </v-card-text>
         </v-card>
       </v-dialog>
+
+      <!-- Special Tools Modal -->
+      <v-dialog v-model="showSpecialToolsModal" max-width="700px" scrollable>
+        <v-card class="special-tools-modal">
+          <v-toolbar class="special-tools-modal-toolbar">
+            <v-toolbar-title class="special-tools-modal-title">Special Tools</v-toolbar-title>
+            <v-spacer></v-spacer>
+            <v-btn icon @click="showSpecialToolsModal = false" class="close-btn">
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </v-toolbar>
+          
+          <v-card-text class="special-tools-modal-content">
+            <!-- Tools List Container -->
+            <div class="special-tools-list">
+              <!-- Access Analysis Tool -->
+              <div class="special-tool-row">
+                <div class="tool-header">
+                  <div class="tool-icon-wrapper">
+                    <v-icon color="primary" size="20" class="tool-icon">mdi-shield-check</v-icon>
+                  </div>
+                  <div class="tool-header-content">
+                    <h3 class="tool-title">Access Analysis</h3>
+                    <p class="tool-description">
+                      Check if a specific user or group has access to a particular application in your Okta tenant.
+                    </p>
+                  </div>
+                </div>
+                
+                <div class="tool-examples">
+                  <div class="example-queries">
+                    <div 
+                      class="example-query-item"
+                      @click="selectAccessAnalysisExample(`Can user dan@fctr.io access application 'Fctr Portal'?`)"
+                    >
+                      <v-icon size="12" class="example-icon">mdi-account</v-icon>
+                      <span>Can user dan@fctr.io access application 'Fctr Portal'?</span>
+                    </div>
+                    
+                    <div 
+                      class="example-query-item"
+                      @click="selectAccessAnalysisExample('Can the users assigned to group sso-workday access application workday?')"
+                    >
+                      <v-icon size="12" class="example-icon">mdi-account-group</v-icon>
+                      <span>Can the users assigned to group sso-workday access application workday?</span>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="tool-note">
+                  <v-icon color="info" size="14" class="note-icon">mdi-information</v-icon>
+                  <span class="note-text">
+                    Application and group names are case-sensitive and must be provided exactly as they exist in Okta.
+                  </span>
+                </div>
+              </div>
+
+              <!-- Future tools would be added as additional .special-tool-row divs -->
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-dialog>
     </main>
   </AppLayout>
 </template>
@@ -268,6 +341,7 @@ const isSubmitting = ref(false);
 const isCancelling = ref(false);
 const autoScroll = ref(true);
 const showToolsModal = ref(false);
+const showSpecialToolsModal = ref(false);
 const availableTools = ref([]);
 const isLoadingTools = ref(false);
 const toolSearch = ref('');
@@ -279,16 +353,19 @@ const CONFIG = {
 const messageHistory = ref([]);
 const historyIndex = ref(-1);
 
-// Comprehensive query suggestions for users (copied from ChatInterfaceV2.vue)
+// Comprehensive query suggestions for users (updated list)
 const suggestions = ref([
   'List all users along with their creation dates',
   'Show users with PUSH factor registered', 
-  'Find users with SMS registered with phone number ending with 2364',
-  'Show me all users who are in locked status',
-  'List all groups and their descriptions',
+  'Show me all users in locked status',
+  'Find users with SMS factor with phone number ending in 2364',
+  'List all users and factors using API calls only',
   'Show applications assigned to user dan@fctr.io',
-  'Find users in Engineering group with admin roles',
-  'How many users were created last month?'
+  'How many users were created in the last month',
+  'Find all users in Engineering group',
+  'Find groups that user A is part of and user B is not',
+  'Find groups with more than 50 members',
+  'Find the SAML certificate expiry date for all the active SAML applications',
 ]);
 
 const canSubmitQuery = computed(() => userInput.value.trim().length > 0 && !isProcessing.value);
@@ -396,10 +473,27 @@ const clearInput = () => {
   }
 };
 
-// Handle suggestion selection
+// Handle suggestion selection - just populate the query bar, don't submit
 const selectSuggestion = (suggestion) => {
   userInput.value = suggestion;
-  handleQuerySubmit();
+  nextTick(() => {
+    adjustTextareaHeight();
+    if (textareaRef.value) {
+      textareaRef.value.focus();
+    }
+  });
+};
+
+// Handle access analysis example selection
+const selectAccessAnalysisExample = (example) => {
+  userInput.value = example;
+  showSpecialToolsModal.value = false;
+  nextTick(() => {
+    adjustTextareaHeight();
+    if (textareaRef.value) {
+      textareaRef.value.focus();
+    }
+  });
 };
 
 // Map backend tool names to user-friendly display names (matching backend implementation)
@@ -1277,6 +1371,187 @@ watch(showToolsModal, (newVal) => {
 
 .entities-chips-container::-webkit-scrollbar-thumb:hover {
   background: #9ca3af;
+}
+
+/* Special Tools Modal Styling */
+.special-tools-modal {
+  border-radius: 16px !important;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.12) !important;
+}
+
+.special-tools-modal-toolbar {
+  background: linear-gradient(135deg, #667eea, #764ba2) !important;
+  color: white !important;
+  padding: 0 24px !important;
+  min-height: 72px !important;
+}
+
+.special-tools-modal-title {
+  font-size: 18px !important;
+  font-weight: 600 !important;
+  color: white !important;
+}
+
+.special-tools-modal-content {
+  padding: 24px !important;
+  background: #fafbfc;
+}
+
+.special-tools-modal-content {
+  padding: 24px !important;
+  background: #fafbfc;
+}
+
+/* Special Tools List Layout */
+.special-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* Individual Tool Row */
+.special-tool-row {
+  padding: 20px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.special-tool-row:last-child {
+  border-bottom: none;
+}
+
+/* Tool Header */
+.tool-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.tool-icon-wrapper {
+  background: rgba(76, 100, 226, 0.1);
+  padding: 8px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.tool-header-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.tool-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin: 0 0 8px 0;
+  line-height: 1.2;
+}
+
+.tool-description {
+  color: #666;
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* Examples Section */
+.tool-examples {
+  margin-left: 56px; /* Align with description */
+  margin-bottom: 16px;
+}
+
+.example-queries {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.example-query-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 13px;
+  color: #555;
+  line-height: 1.4;
+}
+
+.example-query-item:hover {
+  background: #f8f9ff;
+  border-color: #d1d5db;
+}
+
+.example-icon {
+  color: #999;
+  flex-shrink: 0;
+}
+
+/* Tool Note */
+.tool-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-left: 56px; /* Align with description */
+  padding: 8px 12px;
+  background: #f0f9ff;
+  border-left: 2px solid #0ea5e9;
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+}
+
+.note-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.note-text {
+  color: #0369a1;
+  line-height: 1.4;
+}
+
+/* Scrollbar for tools list */
+.special-tools-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.special-tools-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.special-tools-list::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+.special-tools-list::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+.tools-button-container {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.api-entities-btn {
+  background: linear-gradient(135deg, #4C64E2, #2C73D2, #0081CF) !important;
+  color: white !important;
+}
+
+.special-tools-btn {
+  background: linear-gradient(135deg, #667eea, #764ba2) !important;
+  color: white !important;
 }
 /* White search field with proper icon styling */
 .search-field {
