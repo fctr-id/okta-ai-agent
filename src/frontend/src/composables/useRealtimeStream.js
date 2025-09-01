@@ -863,17 +863,32 @@ export function useRealtimeStream() {
                     });
                 });
                 
-                // Add finalizing_results step at the end
-                const finalizingStepId = execution.steps.length;
-                execution.steps.push({
-                    id: finalizingStepId,
+                // Add finalizing_results step ONE MORE INDEX than we currently have
+                // This ensures it stays beyond any analyzing/relationship steps
+                const finalizingStepIndex = execution.steps.length + 1;
+                
+                // Ensure we have space for the finalizing step
+                while (execution.steps.length <= finalizingStepIndex) {
+                    execution.steps.push({
+                        id: execution.steps.length,
+                        tool_name: '',
+                        status: 'pending',
+                        duration: null,
+                        start_time: null,
+                        end_time: null,
+                        hidden: true  // Hide empty buffer slots
+                    });
+                }
+                
+                execution.steps[finalizingStepIndex] = {
+                    id: finalizingStepIndex,
                     tool_name: 'finalizing_results',
                     status: 'pending',
                     duration: null,
                     start_time: null,
                     end_time: null,
                     hidden: false
-                });
+                };
                 
                 execution.status = "executing";
                 // console.log(`📋 STEPS: Initialized ${execution.steps.length} steps for tracking`);
@@ -952,6 +967,24 @@ export function useRealtimeStream() {
             
             // Update execution.steps for ExecutionDetailsPanel (rtSteps prop)
             if (stepIndex >= 0) {
+                // SPECIAL CASE: Handle results_formatter by finding existing finalizing_results step
+                if (content.step_type === 'results_formatter') {
+                    const existingFinalizingIndex = execution.steps.findIndex(step => 
+                        step.tool_name === 'finalizing_results' && step.status === 'pending'
+                    );
+                    
+                    if (existingFinalizingIndex >= 0) {
+                        // Update the existing finalizing step instead of creating a new one
+                        execution.steps[existingFinalizingIndex].status = 'active';
+                        execution.steps[existingFinalizingIndex].start_time = content.formatted_time;
+                        execution.steps[existingFinalizingIndex].backend_step_number = content.step_number;
+                        execution.steps[existingFinalizingIndex].step_name = content.step_name;
+                        execution.currentStepIndex = existingFinalizingIndex;
+                        return; // Exit early to avoid normal step processing
+                    }
+                }
+                
+                // Normal step processing for all other steps
                 // Ensure we have enough steps in the array
                 while (execution.steps.length <= stepIndex) {
                     execution.steps.push({
@@ -961,18 +994,23 @@ export function useRealtimeStream() {
                         duration: null,
                         start_time: null,
                         end_time: null,
-                        hidden: false
+                        hidden: true  // Hide empty buffer slots
                     });
                 }
                 
                 // Update the step with start information - TRANSFORM BACKEND NAMES TO DISPLAY NAMES
                 const displayToolName = transformStepTypeToDisplayName(content.step_type);
-                execution.steps[stepIndex].tool_name = displayToolName;
-                execution.steps[stepIndex].status = 'active';
-                execution.steps[stepIndex].start_time = content.formatted_time;
-                // IMPORTANT: Store the actual backend step number for display
-                execution.steps[stepIndex].backend_step_number = content.step_number;
-                execution.steps[stepIndex].step_name = content.step_name;
+                const existingStep = execution.steps[stepIndex];
+                
+                // Preserve existing properties and update with new info
+                existingStep.tool_name = displayToolName;
+                existingStep.status = 'active';
+                existingStep.start_time = content.formatted_time;
+                existingStep.hidden = false; // Make sure the actual step is visible
+                existingStep.backend_step_number = content.step_number;
+                existingStep.step_name = content.step_name;
+                // PRESERVE entity and operation from plan initialization
+                // Don't overwrite these - they come from the original plan data
                 execution.currentStepIndex = stepIndex;
                 
                 // console.log(`🔄 STEPS: Updated step ${stepIndex} (${content.step_type}) to active`);
@@ -1034,6 +1072,26 @@ export function useRealtimeStream() {
             
             // Update execution.steps with completion information
             if (stepIndex >= 0 && stepIndex < execution.steps.length) {
+                // SPECIAL CASE: Handle results_formatter completion by finding active finalizing step
+                if (content.step_type === 'results_formatter') {
+                    const existingFinalizingIndex = execution.steps.findIndex(step => 
+                        step.tool_name === 'finalizing_results' && step.status === 'active'
+                    );
+                    
+                    if (existingFinalizingIndex >= 0) {
+                        // Complete the existing finalizing step
+                        const newStatus = content.success ? 'completed' : 'error';
+                        execution.steps[existingFinalizingIndex].status = newStatus;
+                        execution.steps[existingFinalizingIndex].duration = content.duration_seconds;
+                        execution.steps[existingFinalizingIndex].end_time = content.formatted_time;
+                        execution.steps[existingFinalizingIndex].record_count = content.record_count;
+                        execution.steps[existingFinalizingIndex].backend_step_number = content.step_number;
+                        execution.steps[existingFinalizingIndex].step_name = content.step_name;
+                        return; // Exit early to avoid normal step processing
+                    }
+                }
+                
+                // Normal step completion for all other steps
                 const newStatus = content.success ? 'completed' : 'error';
                 execution.steps[stepIndex].status = newStatus;
                 execution.steps[stepIndex].duration = content.duration_seconds;

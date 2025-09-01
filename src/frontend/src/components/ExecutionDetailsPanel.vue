@@ -33,7 +33,7 @@
                           <div class="step-type-container">
                             <span class="step-type" :class="`step-badge-${planStep.phase}`">
                               <span v-if="['API', 'SQL', 'SPECIAL_TOOL'].includes(planStep.toolType)">
-                                {{ planStep.toolType }}<span v-if="planStep.entity"> • {{ planStep.entity }}</span>
+                                {{ planStep.toolType }}<span v-if="planStep.entity"> • {{ planStep.entity }}</span><span v-if="planStep.operation && planStep.operation !== planStep.entity"> • {{ planStep.operation }}</span>
                               </span>
                               <span v-else>
                                 {{ planStep.toolType }}
@@ -88,7 +88,7 @@
                               {{ getProgressMessage(index) }}
                             </span>
                             <span v-else>
-                              {{ getProgressValue(index)?.toFixed(1) }}% - {{ getProgressMessage(index) }}
+                              {{ getProgressValue(index)?.toFixed(0) }}% - {{ getProgressMessage(index) }}
                             </span>
                           </div>
                         </div>
@@ -242,6 +242,22 @@ const formatDuration = (seconds) => {
   const s = (seconds % 60).toFixed(1);
   return `${m}m ${s}s`;
 };
+
+// Helper function to get descriptive text for different step types
+const getStepDescription = (tool, badge, entity) => {
+  if (tool === 'thinking') {
+    return 'Analyzing your query and crafting an intelligent strategy';
+  } else if (tool === 'generating_steps' || tool === 'generate_plan') {
+    return 'Creating optimized execution plan and steps';
+  } else if (tool === 'finalizing_results') {
+    return 'Compiling and formatting the final results';
+  } else if (tool === 'relationship_analysis' || tool === 'RELATIONSHIP_ANALYSIS') {
+    return 'Analyzing data relationships and dependencies';
+  } else {
+    return `${badge} ${entity}`.trim();
+  }
+};
+
 const isProgressVisible = (stepIndex) => {
   if (props.expansionPanelData.currentStepExecution) {
     const currentStepNumber = props.expansionPanelData.currentStepExecution.stepNumber;
@@ -423,7 +439,7 @@ const displaySteps = computed(() => {
           operation: operation || entity,
           // ENHANCED: Use query_context first, then plan context, then reason, then meaningful fallback
           context: cleanQueryContext(step.query_context) || getPlanContextForStep(originalIndex) || step.reason || 
-                   (tool === 'finalizing_results' ? 'Compiling and formatting the final results' : `${badge} ${entity}`.trim()),
+                   getStepDescription(tool, badge, entity),
           stepStatus: step.status || 'pending',
           stepIndex: originalIndex, // Use original index for rtSteps access
           originalIndex: originalIndex, // Keep track of original index
@@ -434,7 +450,10 @@ const displaySteps = computed(() => {
           executionStep: getExecutionStepForStepperIndex(originalIndex)
         };
       })
-      .filter(step => !props.rtSteps[step.originalIndex]?.hidden); // Filter hidden steps AFTER mapping
+      .filter(step => {
+        const rtStep = props.rtSteps[step.originalIndex];
+        return !rtStep?.hidden;
+      });
   }
 
   // Fallback to original plan-based logic if no rtSteps available yet
