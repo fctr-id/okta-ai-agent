@@ -327,7 +327,7 @@ async def execute_plan_and_stream(
     user: AuthUser | None
 ) -> AsyncGenerator[Dict[str, str], None]:
     """
-    Execute query using Modern Execution Manager exactly like test_query_1.py.
+    Execute query using Modern Execution Manager
     
     Uses execute_query() for complete end-to-end execution with:
     - Single correlation ID (process_id) for isolation between users
@@ -337,7 +337,7 @@ async def execute_plan_and_stream(
     """
     global active_processes
     set_correlation_id(process_id)
-    logger.info(f"[{process_id}] Starting Modern Execution Manager execution (test_query_1.py pattern) for query: \"{query}\"")
+    logger.info(f"[{process_id}] Starting Modern Execution Manager execution for query: \"{query}\"")
 
     def check_cancellation() -> bool:
         """Check if the process has been cancelled"""
@@ -588,10 +588,10 @@ async def execute_plan_and_stream(
         logger.info(f"[{process_id}] Successful Steps: {result.get('successful_steps', 0)}")
         logger.info(f"[{process_id}] Failed Steps: {result.get('failed_steps', 0)}")
         
-        # Get step results for logging and status updates (exact same as test_query_1.py)
+        # Get step results for logging and status updates 
         step_results = result.get('step_results', [])
         
-        # Log step details (exact same as test_query_1.py)
+        # Log step details 
         if step_results:
             logger.info(f"[{process_id}] STEP EXECUTION DETAILS:")
             for i, step_result in enumerate(step_results, 1):
@@ -1256,7 +1256,7 @@ async def execute_query_endpoint(
     """
     Execute query with Modern Execution Manager - Direct Query Execution
     
-    This endpoint replicates the functionality from test_query_1.py, providing
+    This endpoint replicates the functionality  providing
     complete end-to-end execution with comprehensive results including:
     - Planning → Execution → Results formatting
     - Success rates and step details
@@ -1281,7 +1281,6 @@ async def execute_query_endpoint(
 
     try:
         # Execute the query using Modern Execution Manager's complete execute_query method
-        # This replicates what test_query_1.py does: result = await modern_executor.execute_query(query)
         logger.info(f"[{correlation_id}] Executing with Modern Execution Manager's execute_query method...")
         result = await modern_executor.execute_query(sanitized_query)
         
