@@ -675,6 +675,19 @@ class OktaAPIClient:
         # Get appropriate auth headers dynamically
         request_headers = await self._get_auth_headers()
         
+        # Adjust headers for XML endpoints (SAML metadata and Identity Provider endpoints)
+        xml_endpoints = [
+            '/sso/saml/metadata',      # Application SAML metadata
+            '/metadata.xml',           # Identity Provider SAML metadata  
+            '/sso/saml2/'             # SAML assertion consumption service
+        ]
+        
+        if any(xml_pattern in endpoint for xml_pattern in xml_endpoints):
+            request_headers = request_headers.copy()
+            request_headers["Accept"] = "application/xml, text/xml"
+            request_headers.pop("Content-Type", None)  # Remove Content-Type for GET requests
+            self.logger.debug(f"Using XML headers for SAML endpoint: {endpoint}")
+        
         # Build URL - handle both full URLs and endpoints
         if endpoint.startswith('http'):
             # Full URL from pagination
