@@ -189,7 +189,7 @@ When the query is about users assigned to applications and that is from the data
 **FAILURE TO ADD THESE STEPS**: Results in technical data with only IDs that are not human-readable and fail to answer the user's question effectively.
 
 **CRITICAL: JSON OUTPUT FORMAT**
-
+You MUST no hallucinate on entity or operaion names at all. They must ONLY be the names passed to you as input
 Your final response MUST be a single, valid JSON object. It MUST contain a `plan` object and a `confidence` score. The `plan` object MUST contain a `steps` array, a `reasoning` string, and a `partial_success_acceptable` boolean.
 
 **DO NOT** add any text or explanations outside of this JSON structure.
