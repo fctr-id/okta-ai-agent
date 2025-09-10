@@ -1087,6 +1087,9 @@ export function useRealtimeStream() {
                         execution.steps[existingFinalizingIndex].record_count = content.record_count;
                         execution.steps[existingFinalizingIndex].backend_step_number = content.step_number;
                         execution.steps[existingFinalizingIndex].step_name = content.step_name;
+                        
+                        // CRITICAL: Force Vue reactivity by creating new array reference
+                        execution.steps = [...execution.steps];
                         return; // Exit early to avoid normal step processing
                     }
                 }
