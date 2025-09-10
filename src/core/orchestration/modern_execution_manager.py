@@ -1638,13 +1638,14 @@ class ModernExecutionManager:
                 for step in execution_plan.steps
             )
             
-            is_sql_only = len(execution_plan.steps) == 1 and execution_plan.steps[0].tool_name.lower() == 'sql'
+            is_single_step = len(execution_plan.steps) == 1  # ANY single step (SQL, API, or special_tool) - no relationships to analyze
             is_complete_data = estimated_tokens <= token_threshold or has_special_tool  # Complete data = under token threshold OR access analysis tools
             
-            logger.info(f"[{correlation_id}] Decision factors: SQL-only={is_sql_only}, tokens={estimated_tokens:,}, threshold={token_threshold:,}, access_analysis={has_special_tool}, complete_data={is_complete_data}")
+            logger.info(f"[{correlation_id}] Decision factors: single_step={is_single_step}, tokens={estimated_tokens:,}, threshold={token_threshold:,}, access_analysis={has_special_tool}, complete_data={is_complete_data}")
             
-            if is_sql_only:
-                logger.info(f"[{correlation_id}] SQL-only query detected - skipping relationship analysis, will use single SQL optimization in results formatter")
+            if is_single_step:
+                step_type = execution_plan.steps[0].tool_name.lower()
+                logger.info(f"[{correlation_id}] Single-step query detected ({step_type}) - skipping relationship analysis, no cross-step relationships to analyze")
                 relationship_analysis = None
             elif is_complete_data:
                 if has_special_tool:
