@@ -4,10 +4,6 @@ Shared utilities for Okta tool operations including pagination and rate limiting
 
 import asyncio
 import logging
-import os
-import inspect
-import traceback
-import aiohttp
 from typing import Dict, List, Any, Optional, Callable, Tuple, Union
 
 logger = logging.getLogger(__name__)
@@ -612,11 +608,9 @@ async def _paginate_direct_api(
                         if not current_url:
                             logger.debug(f"{log_prefix}No more pages - {entity_name} pagination complete")
                         
-                        # Safety check - configurable page limit to prevent infinite loops
-                        max_pages = int(os.getenv('OKTA_MAX_PAGINATION_PAGES', '1000'))  # Default 1000 pages, configurable
-                        if page_count > max_pages:
-                            logger.error(f"{log_prefix}Reached maximum page limit ({page_count} > {max_pages}), stopping {entity_name} pagination")
-                            logger.error(f"{log_prefix}To increase this limit, set OKTA_MAX_PAGINATION_PAGES environment variable")
+                        # Safety check
+                        if page_count > 1000:
+                            logger.error(f"{log_prefix}Too many pages ({page_count}), stopping {entity_name} pagination")
                             break
                 
                 # Add delay between requests
