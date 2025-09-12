@@ -1630,7 +1630,7 @@ class ModernExecutionManager:
                     step_results_dict_for_estimation[key] = dataframe
             
             estimated_tokens = estimate_token_count(step_results_dict_for_estimation)
-            token_threshold = 1000  # 1K tokens threshold
+            token_threshold = int(os.getenv('TOKEN_THRESHOLD', '5000'))  # Default 5K tokens threshold
             
             # Check if any step uses special tools that need complete processing
             has_special_tool = any(
