@@ -4,6 +4,11 @@ Shared utilities for Okta tool operations including pagination and rate limiting
 
 import asyncio
 import logging
+import os
+import re
+import traceback
+import aiohttp
+import inspect
 from typing import Dict, List, Any, Optional, Callable, Tuple, Union
 
 logger = logging.getLogger(__name__)
@@ -557,7 +562,8 @@ async def _paginate_direct_api(
                         logger.debug(f"{log_prefix}Retrieved page {page_count} with {len(items)} {entity_name}")
                         
                         if not items:
-                            logger.debug(f"{log_prefix}No {entity_name} returned, stopping pagination")
+                            logger.info(f"{log_prefix}No {entity_name} returned on page {page_count}, stopping pagination")
+                            logger.info(f"{log_prefix}Final pagination stats: {page_count} pages, {len(all_items)} total items")
                             break
                         
                         # Transform items if function provided
@@ -587,16 +593,18 @@ async def _paginate_direct_api(
                         # Handle pagination using Link headers
                         current_url = None
                         all_link_headers = response.headers.getall('Link')
+                        logger.debug(f"{log_prefix}Page {page_count} Link headers: {all_link_headers}")
                         
                         # Check each Link header for rel="next"
                         for link_header in all_link_headers:
                             if 'rel="next"' in link_header:
-                                logger.debug(f"{log_prefix}Found next link in page {page_count}")
+                                logger.debug(f"{log_prefix}Found next link in page {page_count}: {link_header}")
                                 
                                 # Extract URL from: <URL>; rel="next"
                                 next_match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)
                                 if next_match:
                                     full_next_url = next_match.group(1)
+                                    logger.debug(f"{log_prefix}Extracted next URL: {full_next_url}")
                                     
                                     # Extract path and query
                                     parsed_next = urlparse(full_next_url)
@@ -606,11 +614,13 @@ async def _paginate_direct_api(
                                     break
                         
                         if not current_url:
-                            logger.debug(f"{log_prefix}No more pages - {entity_name} pagination complete")
+                            logger.info(f"{log_prefix}No more pages - {entity_name} pagination complete")
+                            logger.info(f"{log_prefix}Final pagination stats: {page_count} pages, {len(all_items)} total items")
                         
                         # Safety check
                         if page_count > 1000:
-                            logger.error(f"{log_prefix}Too many pages ({page_count}), stopping {entity_name} pagination")
+                            logger.error(f"{log_prefix}Reached maximum page limit ({page_count} > 1000), stopping {entity_name} pagination")
+                            logger.error(f"{log_prefix}Current stats: {page_count} pages, {len(all_items)} total items")
                             break
                 
                 # Add delay between requests
