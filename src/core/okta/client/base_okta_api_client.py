@@ -7,7 +7,7 @@ import logging
 import random
 from typing import Dict, Any, Optional
 from urllib.parse import urlencode
-from datetime import datetime
+from datetime import datetime, timezone
 import json  # NEW: for structured progress events
 
 # Import settings for configuration
@@ -206,6 +206,42 @@ class OktaAPIClient:
             # Return static headers for API token method
             return self.headers
     
+    def _calculate_rate_limit_wait_time(self, rate_limit_reset: Optional[str], is_concurrent: bool = False) -> int:
+        """
+        Calculate proper wait time using Okta's X-Rate-Limit-Reset header.
+        
+        Args:
+            rate_limit_reset: Epoch timestamp string from X-Rate-Limit-Reset header
+            is_concurrent: Whether this is a concurrent rate limit (different behavior)
+        
+        Returns:
+            int: Seconds to wait before retrying
+        """
+        if is_concurrent:
+            # Concurrent limits don't reset by time - they reset when requests complete
+            # Use a reasonable fixed delay with jitter
+            return 15
+        
+        if not rate_limit_reset:
+            # Fallback if header is missing
+            return 60
+        
+        try:
+            # Calculate time until reset
+            reset_timestamp = int(rate_limit_reset)
+            current_timestamp = int(datetime.now(timezone.utc).timestamp())
+            wait_time = max(0, reset_timestamp - current_timestamp)
+            
+            # Add small buffer and cap at reasonable maximum
+            wait_time = min(wait_time + 5, 300)  # Add 5 second buffer, max 5 minutes
+            
+            return max(wait_time, 10)  # Minimum 10 seconds to avoid rapid retries
+            
+        except (ValueError, TypeError):
+            # Fallback if timestamp parsing fails
+            self.logger.warning(f"Failed to parse rate limit reset timestamp: {rate_limit_reset}")
+            return 60
+
     def _optimize_params(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
         """
         Optimize query parameters for better rate limit efficiency.
@@ -264,7 +300,7 @@ class OktaAPIClient:
             
             payload = {
                 "type": event_type,
-                "ts": datetime.utcnow().isoformat() + "Z",
+                "ts": datetime.now(timezone.utc).isoformat(),
                 **details
             }
             # Single line with sentinel so parsers can split cheaply
@@ -737,20 +773,18 @@ class OktaAPIClient:
                             # Check if this is concurrent or org-wide rate limit
                             is_concurrent = (rate_limit_limit == '0' and rate_limit_remaining == '0')
                             
+                            # Calculate proper wait time using Okta's actual headers
+                            calculated_wait = self._calculate_rate_limit_wait_time(rate_limit_reset, is_concurrent)
+                            
                             if is_concurrent:
-                                # Concurrent rate limit - shorter retry with backoff
-                                retry_after = min(int(response.headers.get('Retry-After', '15')), 30)
-                                self.logger.warning(f"Concurrent rate limit exceeded on {endpoint}. Waiting {retry_after} seconds for retry {retry_count + 1}/{max_retries}")
+                                self.logger.warning(f"Concurrent rate limit exceeded on {endpoint}. Waiting {calculated_wait} seconds for retry {retry_count + 1}/{max_retries}")
                             else:
-                                # Org-wide rate limit - use Retry-After header
-                                retry_after = int(response.headers.get('Retry-After', '60'))
-                                self.logger.warning(f"Org-wide rate limit exceeded on {endpoint}. Waiting {retry_after} seconds for retry {retry_count + 1}/{max_retries}")
+                                self.logger.warning(f"Org-wide rate limit exceeded on {endpoint}. Waiting {calculated_wait} seconds for retry {retry_count + 1}/{max_retries}")
                                 self.logger.info(f"Rate limit details: {rate_limit_remaining}/{rate_limit_limit} remaining, resets at epoch {rate_limit_reset}")
                             
                             if retry_count < max_retries - 1:  # Don't sleep on last retry
-                                # Use Okta's exact Retry-After header (no multiplier needed)
-                                # Okta's rate limits reset at specific times, so we trust their timing
-                                actual_wait = min(retry_after, 300)  # Max 5 min wait for safety
+                                # Use calculated wait time based on Okta's X-Rate-Limit-Reset header
+                                actual_wait = min(calculated_wait, 300)  # Max 5 min wait for safety
                                 
                                 # Add jitter to prevent retry storms for concurrent rate limits
                                 # Concurrent limits don't reset by time - they reset when requests complete
@@ -758,9 +792,9 @@ class OktaAPIClient:
                                 if is_concurrent:
                                     jitter = random.uniform(0, 3)  # 0-3 second random delay for concurrent limits
                                     actual_wait += jitter
-                                    self.logger.info(f"Concurrent rate limit: Waiting {actual_wait:.1f}s (base: {retry_after}s + jitter: {jitter:.1f}s)")
+                                    self.logger.info(f"Concurrent rate limit: Waiting {actual_wait:.1f}s (base: {calculated_wait}s + jitter: {jitter:.1f}s)")
                                 else:
-                                    self.logger.info(f"Org-wide rate limit: Waiting {actual_wait} seconds as specified by Okta Retry-After header")
+                                    self.logger.info(f"Org-wide rate limit: Waiting {actual_wait} seconds until X-Rate-Limit-Reset time")
                                 
                                 # Standardized rate_limit_wait event - fixed schema
                                 self._emit_progress("rate_limit_wait", {
@@ -885,27 +919,32 @@ class OktaAPIClient:
             # Rate limiting - check if concurrent or org-wide
             rate_limit_limit = response.headers.get('X-Rate-Limit-Limit', '0')
             rate_limit_remaining = response.headers.get('X-Rate-Limit-Remaining', '0')
-            retry_after = response.headers.get('Retry-After', '60')
+            rate_limit_reset = response.headers.get('X-Rate-Limit-Reset')
             
-            if rate_limit_limit == '0' and rate_limit_remaining == '0':
+            # Calculate proper wait time using Okta's actual headers
+            is_concurrent = (rate_limit_limit == '0' and rate_limit_remaining == '0')
+            calculated_wait = self._calculate_rate_limit_wait_time(rate_limit_reset, is_concurrent)
+            
+            if is_concurrent:
                 # Concurrent rate limit exceeded
                 return {
                     "status": "error",
                     "error": "Too many concurrent requests in flight. Reduce concurrent API calls.",
                     "error_code": "E0000047",
                     "rate_limit_type": "concurrent",
-                    "retry_after": retry_after
+                    "calculated_wait_seconds": calculated_wait
                 }
             else:
                 # Org-wide rate limit exceeded
                 return {
                     "status": "error",
-                    "error": f"Rate limit exceeded: {rate_limit_remaining}/{rate_limit_limit} requests remaining. Retry after {retry_after} seconds",
+                    "error": f"Rate limit exceeded: {rate_limit_remaining}/{rate_limit_limit} requests remaining. Wait {calculated_wait} seconds until reset",
                     "error_code": "E0000047",
                     "rate_limit_type": "org_wide",
-                    "retry_after": retry_after,
+                    "calculated_wait_seconds": calculated_wait,
                     "limit": rate_limit_limit,
-                    "remaining": rate_limit_remaining
+                    "remaining": rate_limit_remaining,
+                    "reset_epoch": rate_limit_reset
                 }
         
         if response.status >= 500:
