@@ -167,6 +167,10 @@ You will receive context and sample data from all previous steps.
 *   **Examine Samples**: Study sample data to understand data structures.
 *   **Adapt Queries**: Use this knowledge to make intelligent decisions about JOINs and filtering.
 
+### OKTA CONCEPTS:
+
+1. When users ask anything related to application name always search for app label , because that is what user's see as name in the frontend.
+
 ##### DATABASE SCHEMA (Source of Truth) #####
 # CRITICAL: Always reference this schema to determine if a field is a standard column or a custom attribute.
 # NEVER use JSON_EXTRACT for standard columns like user_type, department, title, organization, or manager.
