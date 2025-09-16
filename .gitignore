@@ -107,3 +107,4 @@ src/core/orchestration/moder_execution_manager_yesterday.py
 src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY copy.json
 src/core/data/testing/*
 README_old.md
+docs/entity-specific-sync-filtering.md
