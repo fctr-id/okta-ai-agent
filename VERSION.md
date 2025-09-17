@@ -1,7 +1,26 @@
 # Version History
 
 
-## Current latest: v1.2.0-beta (08-25-2025) - "Anchor Drop"
+## Current latest: v1.3-beta - "Takotastic"
+
+Major Security & Access Control Features:
+
+- **OAuth 2.0 Support**: Enterprise-grade authentication with Private Key JWT - Okta's recommended security approach for programmatic access. Supports scalable deployments with proper credential management and aligns with Okta security best practices.
+- **Access Analysis Special Tool**: Comprehensive "Can user X access application Y" analysis tool that collects all access-related data including user details, assignments, application info, policy rules, MFA factors, and network zones. Provides detailed access determination with specific reasoning based on user status, application assignments, and policy evaluation.
+
+Enhancements:
+- **Enhanced API Endpoint Documentation**: Comprehensive LLM-focused documentation updates across multiple API endpoints with improved reasoning guidance, parameter usage examples, and planning agent optimization notes for better grounding and decision-making
+- **System Prompt Updates**: Refined prompts for cleaner, more structured output formatting
+- **Frontend Updates**: Minor UI improvements and visual enhancements  
+- **Documentation Updates**: Enhanced OAuth 2.0 setup and configuration guidance
+- **Logging Improvements**: Better error handling and debugging information
+
+Bug Fixes:
+- **Fixed Okta Rate Limit Handling**: Replaced incorrect header with proper `X-Rate-Limit-Reset` epoch timestamp calculation for accurate wait times based on Okta's actual rate limit reset timing
+- **Device Sync Fix**: Resolved OAuth 2.0 device synchronization issues
+- Fixed pagination bug for devices sync
+
+## v1.2.0-beta (08-25-2025) - "Anchor Drop"
 
 This release focuses on delivering consistent, deterministic results and transforming the user experience from guesswork to clarity. While acknowledging the probabilistic nature of LLMs, we've engineered systematic improvements through advanced context-engineering that dramatically reduce variability and provide complete visibility into execution processes.
 

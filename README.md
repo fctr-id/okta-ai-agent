@@ -5,9 +5,9 @@
   
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
   
-  <h1>Tako: AI Agent for Okta (v1.2.0)</h1>
+  <h1>Tako: AI Agent for Okta (v1.3-beta)</h1>
   
-  <p>🚨 MAJOR RELEASE: v1.2.0 "Anchor Drop" delivers consistent, deterministic results and much better UI experience. Update now for reliability boost!</strong> <a href="VERSION.md">📋 Changelog →</a></p>
+  <p>🚨 MAJOR RELEASE: v1.3-beta "Takotastic" introduces OAuth 2.0 support and comprehensive access analysis capabilities. Update now for enhanced security and powerful access control features!</strong> <a href="VERSION.md">📋 Changelog →</a></p>
 </div>
 
 
@@ -34,6 +34,8 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
 
 <div align="center">
 <h3>📖 Featured Articles & Demo Video</h3>
+
+
 <div style="margin: 20px 0;">
   <a href="https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/" style="margin-right: 20px;">
     📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short
@@ -306,7 +308,7 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 
 ### Current Status
 - **Beta Release** - Keep out of production environments
-- **Version Requirement** - Please use version 1.2.0 or above for best stability
+- **Version Requirement** - Please use version 1.3-beta or above for best stability and latest security features
 - **Identity Engine** - Tested on Okta Identity Engine only
 - **Single Tenant** - One Okta org at a time
 - **Stateless Queries** - Each query processed independently
