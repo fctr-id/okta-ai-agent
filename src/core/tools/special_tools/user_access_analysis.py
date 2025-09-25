@@ -203,13 +203,8 @@ async def can_user_access_application(
     
     logger.info(f"can_user_access_application called with user='{user_identifier}', app='{app_identifier}', group='{group_identifier}'")
     
-    # User-friendly progress messages
-    print(f"STARTING ACCESS ANALYSIS", file=sys.stderr)
-    print(f"User: {user_identifier}", file=sys.stderr)
-    print(f"Application: {app_identifier}", file=sys.stderr)
-    if group_identifier:
-        print(f"Group: {group_identifier}", file=sys.stderr)
-    sys.stderr.flush()
+    # Basic progress indicator
+    logger.info(f"Starting access analysis for user='{user_identifier}', app='{app_identifier}', group='{group_identifier}'")
     
     # Basic validation
     if not app_identifier:
@@ -249,12 +244,6 @@ async def can_user_access_application(
         logger.info(f"Calling find_application with '{app_identifier}'")
         app = await find_application(client, app_identifier)
         if not app:
-            print(f"APPLICATION NOT FOUND: '{app_identifier}'", file=sys.stderr)
-            print(f"This could mean:", file=sys.stderr) 
-            print(f"  - The application name must match exactly (case sensitive)", file=sys.stderr)
-            print(f"  - Provide the exact name/label as shown in Okta Admin Portal", file=sys.stderr)
-            print(f"  - It's a privileged app (like 'Okta Admin Console') that cannot be queried via API", file=sys.stderr)
-            sys.stderr.flush()
             error_result = {
                 "status": "success",
                 "result_type": "application_not_found",
@@ -301,7 +290,7 @@ async def can_user_access_application(
     # Step 2: Process User or Group
     if user_identifier:
         try:
-            print(f"DEBUG: Starting Step 2 - Find user '{user_identifier}'", file=sys.stderr)
+            logger.debug(f"Starting Step 2 - Find user '{user_identifier}'")
             user = await find_user(client, user_identifier)
             if not user:
                 error_result = {
@@ -315,10 +304,10 @@ async def can_user_access_application(
                     "can_access": False,
                     "reason": "User not found - verify email address or username is correct"
                 }
-                print(f"DEBUG: User not found: {user_identifier}", file=sys.stderr)
+                logger.debug(f"User not found: {user_identifier}")
                 return error_result
             
-            print(f"DEBUG: User found: {user.get('id')} - {user.get('profile', {}).get('email')}", file=sys.stderr)
+            logger.debug(f"User found: {user.get('id')} - {user.get('profile', {}).get('email')}")
             
             result["user_details"] = {
                 "id": user.get("id"),
@@ -331,14 +320,14 @@ async def can_user_access_application(
             
             user_id = user.get("id")
             
-            print(f"DEBUG: Getting MFA factors for user {user_id}", file=sys.stderr)
+            logger.debug(f"Getting MFA factors for user {user_id}")
             # Get user's MFA factors
             factors_response = await client.make_request(f"/api/v1/users/{user_id}/factors")
             if factors_response.get("status") == "success":
                 factors_data = factors_response.get("data", [])
                 result["users_registered_factors"] = []
                 
-                print(f"DEBUG: Found {len(factors_data)} MFA factors", file=sys.stderr)
+                logger.debug(f"Found {len(factors_data)} MFA factors")
                 
                 for factor in factors_data:
                     result["users_registered_factors"].append({
@@ -349,7 +338,7 @@ async def can_user_access_application(
                         "name": factor.get("profile", {}).get("name", "")
                     })
             else:
-                print(f"DEBUG: Failed to get MFA factors: {factors_response}", file=sys.stderr)
+                logger.debug(f"Failed to get MFA factors: {factors_response}")
             
         except Exception as e:
             error_result = {
@@ -357,7 +346,7 @@ async def can_user_access_application(
                 "error": f"Failed to find user: {str(e)}",
                 "tool": "access_analysis"
             }
-            print(f"DEBUG: Exception in find_user: {str(e)}", file=sys.stderr)
+            logger.error(f"Exception in find_user: {str(e)}")
             return error_result
 
     elif group_identifier:
@@ -434,9 +423,6 @@ async def can_user_access_application(
                         rules_data = rules_response.get("data", [])
                         result["policy_rules"] = []
                         
-                        # Track zone IDs used in rules
-                        zone_ids = set()
-                        
                         for rule in rules_data:
                             rule_info = {
                                 "id": rule.get("id"),
@@ -449,19 +435,95 @@ async def can_user_access_application(
                             # Extract rule conditions
                             conditions = rule.get("conditions", {})
                             if conditions:
-                                # Network zones
+                                # Network zones - fetch and inject zone details directly
                                 if "network" in conditions:
                                     network_conditions = conditions.get("network", {})
-                                    rule_info["network_conditions"] = network_conditions
+                                    enhanced_network_conditions = network_conditions.copy()
                                     
-                                    # Collect zone IDs for later retrieval
-                                    if network_conditions.get("connection") == "ZONE" and "include" in network_conditions:
-                                        for zone_id in network_conditions.get("include", []):
-                                            zone_ids.add(zone_id)
+                                    # Fetch and inject zone details for both include and exclude
+                                    if network_conditions.get("connection") == "ZONE":
+                                        # Process include zones - replace original include array with detailed objects
+                                        if "include" in network_conditions:
+                                            enhanced_include = []
+                                            for zone_id in network_conditions.get("include", []):
+                                                zone_details = await fetch_zone_details(client, zone_id)
+                                                enhanced_include.append({
+                                                    "zone_id": zone_id,
+                                                    "zone_details": zone_details
+                                                })
+                                            enhanced_network_conditions["include"] = enhanced_include
+                                        
+                                        # Process exclude zones - replace original exclude array with detailed objects
+                                        if "exclude" in network_conditions:
+                                            enhanced_exclude = []
+                                            for zone_id in network_conditions.get("exclude", []):
+                                                zone_details = await fetch_zone_details(client, zone_id)
+                                                enhanced_exclude.append({
+                                                    "zone_id": zone_id,
+                                                    "zone_details": zone_details
+                                                })
+                                            enhanced_network_conditions["exclude"] = enhanced_exclude
+                                    
+                                    rule_info["network_conditions"] = enhanced_network_conditions
                                 
-                                # User type conditions
+                                # User conditions - fetch and inject user details
                                 if "people" in conditions:
-                                    rule_info["people_conditions"] = conditions.get("people", {})
+                                    people_conditions = conditions.get("people", {})
+                                    enhanced_people_conditions = people_conditions.copy()
+                                    
+                                    # Process users in include list - replace original include array with detailed objects
+                                    if "users" in people_conditions and "include" in people_conditions["users"]:
+                                        enhanced_include_users = []
+                                        for user_id in people_conditions["users"].get("include", []):
+                                            user_details = await fetch_user_details(client, user_id)
+                                            enhanced_include_users.append({
+                                                "user_id": user_id,
+                                                "user_details": user_details
+                                            })
+                                        if "users" not in enhanced_people_conditions:
+                                            enhanced_people_conditions["users"] = {}
+                                        enhanced_people_conditions["users"]["include"] = enhanced_include_users
+                                    
+                                    # Process users in exclude list - replace original exclude array with detailed objects
+                                    if "users" in people_conditions and "exclude" in people_conditions["users"]:
+                                        enhanced_exclude_users = []
+                                        for user_id in people_conditions["users"].get("exclude", []):
+                                            user_details = await fetch_user_details(client, user_id)
+                                            enhanced_exclude_users.append({
+                                                "user_id": user_id,
+                                                "user_details": user_details
+                                            })
+                                        if "users" not in enhanced_people_conditions:
+                                            enhanced_people_conditions["users"] = {}
+                                        enhanced_people_conditions["users"]["exclude"] = enhanced_exclude_users
+                                    
+                                    # Process groups in include list - replace original include array with detailed objects
+                                    if "groups" in people_conditions and "include" in people_conditions["groups"]:
+                                        enhanced_include_groups = []
+                                        for group_id in people_conditions["groups"].get("include", []):
+                                            group_details = await fetch_group_details(client, group_id)
+                                            enhanced_include_groups.append({
+                                                "group_id": group_id,
+                                                "group_details": group_details
+                                            })
+                                        if "groups" not in enhanced_people_conditions:
+                                            enhanced_people_conditions["groups"] = {}
+                                        enhanced_people_conditions["groups"]["include"] = enhanced_include_groups
+                                    
+                                    # Process groups in exclude list - replace original exclude array with detailed objects
+                                    if "groups" in people_conditions and "exclude" in people_conditions["groups"]:
+                                        enhanced_exclude_groups = []
+                                        for group_id in people_conditions["groups"].get("exclude", []):
+                                            group_details = await fetch_group_details(client, group_id)
+                                            enhanced_exclude_groups.append({
+                                                "group_id": group_id,
+                                                "group_details": group_details
+                                            })
+                                        if "groups" not in enhanced_people_conditions:
+                                            enhanced_people_conditions["groups"] = {}
+                                        enhanced_people_conditions["groups"]["exclude"] = enhanced_exclude_groups
+                                    
+                                    rule_info["people_conditions"] = enhanced_people_conditions
                                 
                                 # Device conditions
                                 if "device" in conditions:
@@ -485,28 +547,6 @@ async def can_user_access_application(
                                     }
                             
                             result["policy_rules"].append(rule_info)
-                        
-                        # Fetch network zone details
-                        if zone_ids:
-                            result["network_zones"] = {}
-                            
-                            for zone_id in zone_ids:
-                                try:
-                                    zone_response = await client.make_request(f"/api/v1/zones/{zone_id}")
-                                    if zone_response.get("status") == "success":
-                                        zone_data = zone_response.get("data")
-                                        
-                                        result["network_zones"][zone_id] = {
-                                            "id": zone_data.get("id"),
-                                            "name": zone_data.get("name"),
-                                            "type": zone_data.get("type"),
-                                            "status": zone_data.get("status"),
-                                            "usage": zone_data.get("usage"),
-                                            "gateways": zone_data.get("gateways", []),
-                                            "proxies": zone_data.get("proxies", [])
-                                        }
-                                except Exception as e:
-                                    result["network_zones"][zone_id] = {"error": str(e)}
             
             except Exception as e:
                 result["policy_error"] = str(e)
@@ -514,8 +554,8 @@ async def can_user_access_application(
         # DO NOT MAKE DECISIONS - Just return raw data for LLM analysis
         result["status"] = "success"
         
-        print(f"DEBUG: Analysis completed successfully. Result keys: {list(result.keys())}", file=sys.stderr)
-        print(f"DEBUG: Total result size: {len(str(result))} characters", file=sys.stderr)
+        logger.debug(f"Analysis completed successfully. Result keys: {list(result.keys())}")
+        logger.debug(f"Total result size: {len(str(result))} characters")
         
         # Add comprehensive analysis notes for LLM
         result["notes_must_read"] = {
@@ -536,7 +576,12 @@ async def can_user_access_application(
                 "network_zones": "Details about network zones referenced in policy rules",
                 "network_zones[].name": "Human readable name of the network zone (e.g. 'Corporate Network')",
                 "network_zones[].type": "Zone type: 'IP' for IP ranges, 'DYNAMIC' for dynamic zones",
-                "network_zones[].gateways": "IP ranges or addresses included in this zone"
+                "network_zones[].gateways": "FINAL decision IP ranges (CIDR/single IPs) that determine zone membership - user's effective IP must match these for zone inclusion",
+                "network_zones[].proxies": "TRUSTED proxy IP ranges that Okta skips over - when request comes from these IPs, Okta looks at X-Forwarded-For to find real client IP for evaluation",
+                "policy_rules[].people_conditions.users.include": "Users explicitly granted access in this rule - contains user_id and full user_details with name, email, status",
+                "policy_rules[].people_conditions.users.exclude": "Users explicitly denied access in this rule - contains user_id and full user_details with name, email, status", 
+                "policy_rules[].people_conditions.groups.include": "Groups explicitly granted access in this rule - contains group_id and full group_details with name, description, type",
+                "policy_rules[].people_conditions.groups.exclude": "Groups explicitly denied access in this rule - contains group_id and full group_details with name, description, type"
             },
             
             "access_decision_examples": {
@@ -552,10 +597,19 @@ async def can_user_access_application(
                 "default_behavior": "If no explicit DENY rules match and at least one ALLOW rule matches, access is typically granted"
             },
             
+            "network_zone_ip_evaluation": {
+                "gateways_definition": "GATEWAYS are the 'final' IP addresses that act as decision endpoints for network zone evaluation. These are the trusted IP ranges (CIDR blocks) or specific IPs that Okta considers as the authoritative source location for access decisions",
+                "proxies_definition": "PROXIES are trusted intermediary IP addresses that Okta's threat scorer will SKIP OVER when determining the user's actual location. When a request comes through these proxy IPs, Okta looks at the next IP in the X-Forwarded-For chain to find the real client IP",
+                "gateway_evaluation_logic": "When evaluating network zones, Okta compares the user's effective IP address against the GATEWAY ranges. If the IP matches a gateway range in an 'include' zone, the user is considered inside that network zone. If it matches an 'exclude' zone gateway, they are blocked",
+                "proxy_chain_logic": "If a request comes from a PROXY IP address, Okta does not use that IP for zone evaluation. Instead, it examines the X-Forwarded-For header to find the next IP in the chain (the actual client IP behind the proxy) and evaluates that IP against the gateway ranges",
+                "practical_example": "Example: User connects from IP 192.168.1.100 → Corporate Proxy 203.0.113.50 → Internet. If 203.0.113.50 is listed in proxies[], Okta ignores it and evaluates 192.168.1.100 against the gateway ranges to determine zone membership",
+                "threat_scoring_impact": "This proxy-skipping behavior is crucial for threat scoring accuracy - it ensures that legitimate users behind corporate proxies/NAT are evaluated based on their actual internal IP, not the shared proxy IP that many users would have"
+            },
+            
             "response_format_instructions": "Provide clear explanation like: 'User [Name] can/cannot access [App] because: [specific reasons based on status, assignment, and policy evaluation]. For conditional access, specify network zones and MFA requirements clearly.'"
         }
         
-        print(f"DEBUG: Returning successful result", file=sys.stderr)
+        logger.debug("Returning successful result")
         return result
         
     except Exception as e:
@@ -568,67 +622,176 @@ async def can_user_access_application(
         return error_result
 
 
+async def fetch_zone_details(client, zone_id: str) -> Dict[str, Any]:
+    """Fetch detailed information for a network zone."""
+    try:
+        zone_response = await client.make_request(f"/api/v1/zones/{zone_id}")
+        if zone_response.get("status") == "success":
+            zone_data = zone_response.get("data")
+            
+            # Handle different response formats
+            if isinstance(zone_data, list):
+                # Special case: API returned a list of gateway/proxy definitions
+                if zone_data and isinstance(zone_data[0], dict) and "type" in zone_data[0] and "value" in zone_data[0]:
+                    return {
+                        "id": zone_id,
+                        "name": f"Network Zone {zone_id}",
+                        "type": "IP_RANGE",
+                        "status": "ACTIVE",
+                        "usage": "POLICY", 
+                        "gateways": zone_data,
+                        "ip_ranges": [item["value"] for item in zone_data if "value" in item]
+                    }
+                else:
+                    # Normal list format - use first item
+                    zone_data = zone_data[0] if zone_data else {}
+            
+            if isinstance(zone_data, dict):
+                return {
+                    "id": zone_data.get("id", zone_id),
+                    "name": zone_data.get("name", f"Zone {zone_id}"),
+                    "type": zone_data.get("type", "UNKNOWN"),
+                    "status": zone_data.get("status", "UNKNOWN"),
+                    "usage": zone_data.get("usage", "UNKNOWN"),
+                    "gateways": zone_data.get("gateways", []),
+                    "proxies": zone_data.get("proxies", [])
+                }
+        
+        return {"error": f"Failed to fetch zone details: {zone_response.get('status')}"}
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def fetch_user_details(client, user_id: str) -> Dict[str, Any]:
+    """Fetch detailed information for a user."""
+    try:
+        user_response = await client.make_request(f"/api/v1/users/{user_id}")
+        if user_response.get("status") == "success":
+            user_data = user_response.get("data")
+            
+            # Handle different response formats (similar to network zones)
+            if isinstance(user_data, list):
+                user_data = user_data[0] if user_data else {}
+            
+            if isinstance(user_data, dict):
+                profile = user_data.get("profile", {})
+                return {
+                    "id": user_data.get("id", user_id),
+                    "email": profile.get("email", "No email"),
+                    "login": profile.get("login", "No login"),
+                    "firstName": profile.get("firstName", ""),
+                    "lastName": profile.get("lastName", ""),
+                    "displayName": f"{profile.get('firstName', '')} {profile.get('lastName', '')}".strip() or profile.get("email", user_id),
+                    "status": user_data.get("status", "UNKNOWN")
+                }
+            else:
+                return {"error": f"Unexpected user data format: {type(user_data)}"}
+        else:
+            return {"error": f"API call failed with status: {user_response.get('status')}, message: {user_response.get('error', 'No error message')}"}
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def fetch_group_details(client, group_id: str) -> Dict[str, Any]:
+    """Fetch detailed information for a group using search API."""
+    try:
+        # Use groups list API with search filter instead of direct ID lookup
+        search_filter = f'id eq "{group_id}"'
+        group_response = await client.make_request("/api/v1/groups", params={"search": search_filter})
+        
+        if group_response.get("status") == "success":
+            group_data = group_response.get("data")
+            
+            # Handle search results - should be a list of groups
+            if isinstance(group_data, list):
+                if group_data and isinstance(group_data[0], dict):
+                    # Found the group - use the first (and should be only) result
+                    group_obj = group_data[0]
+                    profile = group_obj.get("profile", {})
+                    return {
+                        "id": group_obj.get("id", group_id),
+                        "name": profile.get("name", f"Group {group_id[-8:]}"),
+                        "description": profile.get("description", "No description"),
+                        "type": group_obj.get("type", "OKTA_GROUP"),
+                        "displayName": profile.get("name", f"Group {group_id[-8:]}"),
+                        "created": group_obj.get("created"),
+                        "lastUpdated": group_obj.get("lastUpdated"),
+                        "lastMembershipUpdated": group_obj.get("lastMembershipUpdated"),
+                        "objectClass": group_obj.get("objectClass", [])
+                    }
+                else:
+                    # No results found or unexpected format
+                    return {
+                        "id": group_id,
+                        "name": f"Group {group_id[-8:]}",
+                        "description": "Group not found in search results",
+                        "type": "UNKNOWN",
+                        "displayName": f"Group {group_id[-8:]}",
+                        "error": f"Group not found with search: {search_filter}"
+                    }
+            else:
+                # Fallback for unexpected response format
+                return {
+                    "id": group_id,
+                    "name": f"Group {group_id[-8:]}",
+                    "description": "Group details unavailable - unexpected search response format",
+                    "type": "UNKNOWN",
+                    "displayName": f"Group {group_id[-8:]}",
+                    "error": f"Unexpected search response format: {type(group_data)}"
+                }
+        else:
+            return {
+                "id": group_id,
+                "name": f"Group {group_id[-8:]}",
+                "description": "Group details unavailable - API call failed",
+                "type": "UNKNOWN",
+                "displayName": f"Group {group_id[-8:]}",
+                "error": f"API call failed with status: {group_response.get('status')}, message: {group_response.get('error', 'No error message')}"
+            }
+        
+    except Exception as e:
+        return {
+            "id": group_id,
+            "name": f"Group {group_id[-8:]}",
+            "description": "Group details unavailable - exception occurred",
+            "type": "UNKNOWN", 
+            "displayName": f"Group {group_id[-8:]}",
+            "error": str(e)
+        }
+
+
 async def find_application(client, app_identifier: str) -> Optional[Dict[str, Any]]:
     """Find application by ID, name, or label using base_okta_api_client."""
-    import sys
-    
-    print(f"SEARCHING FOR APPLICATION: '{app_identifier}'", file=sys.stderr)
-    sys.stderr.flush()
     
     # Try direct lookup by ID first if it looks like an Okta ID
     if app_identifier.startswith("0oa"):
-        print(f"Trying direct ID lookup for {app_identifier}...", file=sys.stderr)
         response = await client.make_request(f"/api/v1/apps/{app_identifier}")
         if response.get("status") == "success":
-            found_label = response.get('data', {}).get('label', 'Unknown')
-            print(f"Found app by ID: '{found_label}'", file=sys.stderr)
             return response.get("data")
-        else:
-            print(f"Direct ID lookup failed: {response.get('status')}", file=sys.stderr)
     
     # Search by query parameter
-    print(f"Trying query-based search for '{app_identifier}'...", file=sys.stderr)
     response = await client.make_request("/api/v1/apps", params={"q": app_identifier})
     if response.get("status") == "success":
         apps = response.get("data", [])
-        print(f"Query search returned {len(apps)} applications", file=sys.stderr)
         if apps:
-            # Show what we found
-            print(f"Found apps from query search:", file=sys.stderr)
-            for i, app in enumerate(apps[:3]):  # Show first 3
-                print(f"   {i+1}. '{app.get('label', 'No Label')}' (name: {app.get('name', 'No Name')})", file=sys.stderr)
-            
             # Look for exact match first
             for app in apps:
                 label = app.get("label", "").lower()
                 name = app.get("name", "").lower()
                 search_term = app_identifier.lower()
                 if (label == search_term or name == search_term):
-                    print(f"Found EXACT match: '{app.get('label')}'", file=sys.stderr)
                     return app
             
             # Return first match if no exact match
-            print(f"No exact match found. Using first result: '{apps[0].get('label')}'", file=sys.stderr)
             return apps[0]
-        else:
-            print("Query search returned no results", file=sys.stderr)
-    else:
-        print(f"Query search failed: {response.get('status')}", file=sys.stderr)
     
     # Final attempt: list all and search
-    print("Trying full application list search (this may take a moment)...", file=sys.stderr)
     response = await client.make_request("/api/v1/apps")
     if response.get("status") == "success":
         apps = response.get("data", [])
         search_term = app_identifier.lower()
-        print(f"Retrieved {len(apps)} total applications from Okta", file=sys.stderr)
-        
-        # Show sample of available apps for debugging
-        print(f"Sample of available applications:", file=sys.stderr)
-        for i, app in enumerate(apps[:10]):  # Show first 10
-            print(f"   {i+1}. '{app.get('label', 'No Label')}' (name: {app.get('name', 'No Name')})", file=sys.stderr)
-        if len(apps) > 10:
-            print(f"   ... and {len(apps) - 10} more applications", file=sys.stderr)
         
         # Search for partial matches
         matches_found = []
@@ -641,18 +804,8 @@ async def find_application(client, app_identifier: str) -> Optional[Dict[str, An
                 matches_found.append(app)
         
         if matches_found:
-            print(f"Found {len(matches_found)} partial matches:", file=sys.stderr)
-            for i, app in enumerate(matches_found[:5]):  # Show first 5 matches
-                print(f"   {i+1}. '{app.get('label')}' (name: {app.get('name')})", file=sys.stderr)
-            print(f"Using first match: '{matches_found[0].get('label')}'", file=sys.stderr)
             return matches_found[0]
-        else:
-            print(f"No matches found for '{app_identifier}' in {len(apps)} applications", file=sys.stderr)
-    else:
-        print(f"Full list search failed: {response.get('status')}", file=sys.stderr)
     
-    print(f"APPLICATION NOT FOUND: '{app_identifier}' does not exist in this Okta organization", file=sys.stderr)
-    sys.stderr.flush()
     return None
 
 
@@ -813,39 +966,3 @@ async def check_group_app_assignment(client, app_id: str, group_id: str) -> Dict
     return assignment_result
 
 
-# COMMENTED OUT - WE DO NOT MAKE DECISIONS, JUST COLLECT DATA
-# def generate_access_decision(result: Dict[str, Any]) -> Dict[str, Any]:
-#     """Generate comprehensive access decision based on analysis results."""
-#     decision = {
-#         "final_decision": "denied",
-#         "decision_factors": [],
-#         "confidence": "high"
-#     }
-#     
-#     # Check application status
-#     app_details = result.get("application_details", {})
-#     if app_details.get("status") != "ACTIVE":
-#         decision["decision_factors"].append(f"Application status is {app_details.get('status')}")
-#         return decision
-#     
-#     # Check user status
-#     user_details = result.get("user_details", {})
-#     user_status = user_details.get("status")
-#     if user_status not in ["ACTIVE", "PASSWORD_EXPIRED"]:
-#         decision["decision_factors"].append(f"User status is {user_status}")
-#         return decision
-#     
-#     # Check assignment
-#     assignment = result.get("assignment", {})
-#     if assignment.get("is_assigned"):
-#         decision["final_decision"] = "allowed"
-#         assignment_type = assignment.get("assignment_type")
-#         decision["decision_factors"].append(f"User has {assignment_type} assignment to application")
-#         
-#         if assignment_type == "group":
-#             group_name = assignment.get("assigned_via_group", "unknown group")
-#             decision["decision_factors"].append(f"Access granted via group: {group_name}")
-#     else:
-#         decision["decision_factors"].append("No application assignment found (direct or group-based)")
-#     
-#     return decision
