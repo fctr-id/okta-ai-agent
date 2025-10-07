@@ -115,7 +115,7 @@ mkdir okta-ai-agent
 cd okta-ai-agent
 
 # 2. Create required directories for data persistence
-mkdir -p sqlite_db logs certs
+mkdir -p sqlite_db graph_db logs certs
 
 # (Optional) Place your own TLS cert/key as certs/cert.pem and certs/key.pem for custom HTTPS
 
@@ -138,7 +138,7 @@ New-Item -ItemType Directory -Path okta-ai-agent
 Set-Location okta-ai-agent
 
 # 2. Create required directories for data persistence
-New-Item -ItemType Directory -Path sqlite_db, logs, certs -Force
+New-Item -ItemType Directory -Path sqlite_db, graph_db, logs, certs -Force
 
 # (Optional) Place your own TLS cert.pem and key.pem files in the certs directory for custom HTTPS
 

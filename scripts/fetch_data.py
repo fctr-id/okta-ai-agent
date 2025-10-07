@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import os
+import argparse
 # Add parent directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Change working directory to root so .env file can be found
@@ -13,7 +14,16 @@ from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import SyncStatus, SyncHistory
 from sqlalchemy import select, func, and_
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
+
+# GraphDB support
+GRAPHDB_ENABLED = False
+try:
+    from src.core.okta.graph_db import GraphDBOrchestrator
+    GRAPHDB_ENABLED = True
+    logger.info("GraphDB support available")
+except ImportError:
+    logger.warning("GraphDB not available (kuzu not installed)")
 
 def get_utc_now():
     """Return current UTC datetime with timezone info"""
@@ -29,33 +39,71 @@ async def cleanup(db: DatabaseOperations):
         logger.error(f"Error during cleanup: {str(e)}")
         return False
 
-async def run_sync(tenant_id: str, db: DatabaseOperations):
-    """Run a single sync operation"""
+async def run_sync(tenant_id: str, db: DatabaseOperations, enable_graphdb: bool = False) -> bool:
+    """Run the sync operation with optional GraphDB-only mode
+    
+    Args:
+        tenant_id: The tenant ID to sync
+        db: Database operations instance
+        enable_graphdb: If True, sync to GraphDB only (no SQLite). If False, sync to SQLite only.
+        
+    Returns:
+        True if sync was successful, False otherwise
+    """
+    
+    graph_db_path = os.getenv('GRAPH_DB_PATH', './graph_db/okta_graph.db')
+    
     try:
-        # Set the tenant_id attribute on db operations for compatibility with sync.py
+        # ========== GraphDB-ONLY mode ==========
+        if enable_graphdb and GRAPHDB_ENABLED:
+            logger.info("🎯 GraphDB-ONLY mode: Syncing directly from Okta to GraphDB (no SQLite)")
+            
+            orchestrator = GraphDBOrchestrator(
+                tenant_id=tenant_id,
+                graph_db_path=graph_db_path
+            )
+            
+            # Run direct Okta → GraphDB sync
+            counts = await orchestrator.run_sync()
+            logger.info(f"✅ GraphDB sync complete: {counts}")
+            
+            # Clean up
+            orchestrator.close()
+            return True
+        
+        # If GraphDB was requested but not available
+        if enable_graphdb and not GRAPHDB_ENABLED:
+            logger.error("❌ GraphDB mode requested but kuzu not installed. Install with: pip install kuzu")
+            return False
+        
+        # ========== SQLite mode (existing behavior) ==========
+        logger.info("💾 SQLite mode: Syncing to SQLite database")
+        
+        # Set the tenant_id attribute on db operations for compatibility
         db.tenant_id = tenant_id
         
-        # Create an overall sync history record like the API does
+        # Create sync history record
         overall_sync_id = None
         async with db.get_session() as session:
-            # Assign the session for method compatibility
             db.session = session
             
-            # Create sync history record
+            from src.core.okta.sync.models import SyncType
+            
             sync_history = SyncHistory(
                 tenant_id=tenant_id,
-                status=SyncStatus.RUNNING,
+                sync_type=SyncType.FULL,
+                status=SyncStatus.IN_PROGRESS,
                 start_time=get_utc_now(),
-                progress_percentage=25
+                progress_percentage=0,
+                success=False
             )
             session.add(sync_history)
             await session.commit()
-            await session.refresh(sync_history)
             overall_sync_id = sync_history.id
             
             logger.info(f"Created sync history record with ID: {overall_sync_id}")
         
-        # Run the sync operation
+        # Run the SQLite sync operation
         orchestrator = SyncOrchestrator(tenant_id, db)
         await orchestrator.run_sync()
         
@@ -110,15 +158,21 @@ async def run_sync(tenant_id: str, db: DatabaseOperations):
                 sync_history.policies_count = policies_count
                 await session.commit()
                 
-            #  clean up old sync history records
+            # Clean up old sync history records
             await db.cleanup_sync_history(tenant_id, keep_count=30)    
             
         logger.info(f"Sync completed successfully for tenant: {tenant_id}")
         logger.info(f"Synced: {users_count} users, {groups_count} groups, {apps_count} apps, {policies_count} policies")
         return True
+        
     except Exception as e:
-        # Update sync history with error status if we have an ID
-        if overall_sync_id:
+        # GraphDB mode error handling
+        if enable_graphdb:
+            logger.error(f"❌ GraphDB sync failed for tenant {tenant_id}: {str(e)}")
+            return False
+        
+        # SQLite mode error handling - update sync history
+        if 'overall_sync_id' in locals() and overall_sync_id:
             try:
                 async with db.get_session() as session:
                     db.session = session
@@ -151,7 +205,19 @@ async def startup_checks():
         return False
 
 async def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Okta Data Sync Service')
+    parser.add_argument('--graphdb', action='store_true', 
+                       help='Enable parallel sync to GraphDB (requires kuzu installed)')
+    args = parser.parse_args()
+    
     logger.info(f"Starting Okta sync service v{VERSION} for tenant: {settings.tenant_id}")
+    if args.graphdb:
+        if GRAPHDB_ENABLED:
+            logger.info("GraphDB parallel sync: ENABLED")
+        else:
+            logger.warning("GraphDB requested but not available (install kuzu: pip install kuzu)")
+            args.graphdb = False
 
     if not await startup_checks():
         sys.exit(1)
@@ -160,7 +226,7 @@ async def main():
     await db.init_db()
 
     try:
-        if not await run_sync(settings.tenant_id, db):
+        if not await run_sync(settings.tenant_id, db, enable_graphdb=args.graphdb):
             sys.exit(2)
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
