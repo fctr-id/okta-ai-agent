@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 class GraphDBSyncOperations:
     """Handle all GraphDB sync operations for Okta data"""
     
-    def __init__(self, db_path: str = "./graph_db/okta_graph.db"):
+    def __init__(self, db_path: str = "./db/tenant_graph_v1.db"):
         """
         Initialize GraphDB sync operations
         
@@ -620,6 +620,145 @@ class GraphDBSyncOperations:
                 
         logger.info(f"Application sync complete: {synced_count} synced, {error_count} errors")
     
+    def sync_policies(self, policies: List[Dict], tenant_id: str):
+        """
+        Sync policies to graph database
+        
+        Args:
+            policies: List of policy dictionaries from Okta API
+            tenant_id: Tenant identifier for multi-tenancy
+        """
+        logger.info(f"Syncing {len(policies)} policies to GraphDB")
+        
+        synced_count = 0
+        error_count = 0
+        
+        for policy in policies:
+            try:
+                # Get current timestamp
+                now = datetime.now(timezone.utc)
+                
+                # Create/update policy node
+                self.conn.execute("""
+                    MERGE (p:Policy {okta_id: $okta_id})
+                    SET p.tenant_id = $tenant_id,
+                        p.name = $name,
+                        p.description = $description,
+                        p.type = $type,
+                        p.status = $status,
+                        p.priority = $priority,
+                        p.system = $system,
+                        p.created_at = $created_at,
+                        p.last_updated_at = $last_updated_at,
+                        p.last_synced_at = $last_synced_at,
+                        p.is_deleted = false
+                """, {
+                    'okta_id': policy['okta_id'],
+                    'tenant_id': tenant_id,
+                    'name': policy.get('name'),
+                    'description': policy.get('description'),
+                    'type': policy.get('type'),
+                    'status': policy.get('status'),
+                    'priority': policy.get('priority'),
+                    'system': policy.get('system', False),
+                    'created_at': policy.get('created_at'),
+                    'last_updated_at': policy.get('last_updated_at'),
+                    'last_synced_at': now
+                })
+                
+                synced_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error syncing policy {policy.get('okta_id')}: {e}")
+                error_count += 1
+        
+        logger.info(f"Policy sync complete: {synced_count} synced, {error_count} errors")
+    
+    def sync_devices(self, devices: List[Dict], tenant_id: str):
+        """
+        Sync devices to graph database with user relationships
+        
+        Args:
+            devices: List of device dictionaries from Okta API (with embedded user relationships)
+            tenant_id: Tenant identifier for multi-tenancy
+        """
+        logger.info(f"Syncing {len(devices)} devices to GraphDB")
+        
+        synced_count = 0
+        error_count = 0
+        
+        for device in devices:
+            try:
+                # Get current timestamp
+                now = datetime.now(timezone.utc)
+                
+                # Create/update device node
+                self.conn.execute("""
+                    MERGE (d:Device {okta_id: $okta_id})
+                    SET d.tenant_id = $tenant_id,
+                        d.status = $status,
+                        d.display_name = $display_name,
+                        d.platform = $platform,
+                        d.manufacturer = $manufacturer,
+                        d.model = $model,
+                        d.os_version = $os_version,
+                        d.serial_number = $serial_number,
+                        d.udid = $udid,
+                        d.registered = $registered,
+                        d.secure_hardware_present = $secure_hardware_present,
+                        d.disk_encryption_type = $disk_encryption_type,
+                        d.created_at = $created_at,
+                        d.last_updated_at = $last_updated_at,
+                        d.last_synced_at = $last_synced_at,
+                        d.is_deleted = false
+                """, {
+                    'okta_id': device['okta_id'],
+                    'tenant_id': tenant_id,
+                    'status': device.get('status'),
+                    'display_name': device.get('display_name'),
+                    'platform': device.get('platform'),
+                    'manufacturer': device.get('manufacturer'),
+                    'model': device.get('model'),
+                    'os_version': device.get('os_version'),
+                    'serial_number': device.get('serial_number'),
+                    'udid': device.get('udid'),
+                    'registered': device.get('registered', False),
+                    'secure_hardware_present': device.get('secure_hardware_present', False),
+                    'disk_encryption_type': device.get('disk_encryption_type'),
+                    'created_at': device.get('created_at'),
+                    'last_updated_at': device.get('last_updated_at'),
+                    'last_synced_at': now
+                })
+                
+                # Sync device-to-user relationships (from embedded users)
+                device_users = device.get('device_users', [])
+                for user_relation in device_users:
+                    try:
+                        self.conn.execute("""
+                            MATCH (u:User {okta_id: $user_id})
+                            MATCH (d:Device {okta_id: $device_id})
+                            MERGE (u)-[r:OWNS]->(d)
+                            SET r.tenant_id = $tenant_id,
+                                r.managed = $managed,
+                                r.assigned_at = $assigned_at
+                        """, {
+                            'user_id': user_relation['user_okta_id'],
+                            'device_id': device['okta_id'],
+                            'tenant_id': tenant_id,
+                            'managed': user_relation.get('managementStatus') == 'MANAGED',
+                            'assigned_at': datetime.now(timezone.utc)
+                        })
+                    except Exception as e:
+                        logger.error(f"Error syncing device-user relationship: {e}")
+                
+                synced_count += 1
+                
+            except Exception as e:
+                logger.error(f"Error syncing device {device.get('okta_id')}: {e}")
+                error_count += 1
+        
+        logger.info(f"Device sync complete: {synced_count} synced, {error_count} errors")
+    
     def get_entity_counts(self, tenant_id: str) -> Dict[str, int]:
         """
         Get counts of all entities for sync reporting
@@ -677,6 +816,15 @@ class GraphDBSyncOperations:
             """, {'tenant_id': tenant_id})
             row = result.get_next()
             counts['devices'] = int(row[0]) if row else 0
+            
+            # Count policies
+            result = self.conn.execute("""
+                MATCH (p:Policy)
+                WHERE p.tenant_id = $tenant_id
+                RETURN COUNT(p) as count
+            """, {'tenant_id': tenant_id})
+            row = result.get_next()
+            counts['policies'] = int(row[0]) if row else 0
             
         except Exception as e:
             logger.error(f"Error getting entity counts: {e}")

@@ -477,7 +477,7 @@ CREATE REL TABLE REPORTS_TO (
 """
 
 
-def initialize_enhanced_schema(db_path: str = "./graph_db/okta_graph.db") -> tuple:
+def initialize_enhanced_schema(db_path: str = "./db/tenant_graph_v1.db") -> tuple:
     """
     Initialize GraphDB with enhanced Okta schema optimized for LLM queries
     
@@ -614,386 +614,6 @@ def create_enhanced_indexes(conn: kuzu.Connection):
     logger.info("  ✓ Factor: factor_type")
 
 
-# ==============================================================================
-# LLM SCHEMA DOCUMENTATION
-# ==============================================================================
-# This will be provided to LLMs for query generation
-
-LLM_SCHEMA_GUIDE = """
-# Okta GraphDB Schema - LLM Query Generation Guide
-
-## Node Types
-
-### User
-**Purpose:** Represents an Okta user
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `email` (STRING): User's email ⚡ INDEXED
-- `login` (STRING): User's login ⚡ INDEXED
-- `display_name` (STRING): Full name for visualization
-- `status` (STRING): ACTIVE | SUSPENDED | DEPROVISIONED | STAGED | PROVISIONED | PASSWORD_RESET | PASSWORD_EXPIRED | LOCKED_OUT ⚡ INDEXED
-- `department` (STRING): Department ⚡ INDEXED
-- `user_type` (STRING): Employee, Contractor, etc. ⚡ INDEXED
-- `manager` (STRING): Manager's login (use to find manager User node) ⚡ INDEXED
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `MATCH (u:User {email: $email})` - Email lookup
-- `MATCH (u:User {login: $login})` - Login lookup  
-- `WHERE u.status = 'ACTIVE'` - Status filter
-- `WHERE u.department = 'Engineering'` - Department filter
-- `WHERE u.tenant_id = $tenant AND u.status = 'ACTIVE'` - Composite filter
-
-**Outgoing Relationships:**
-- `MEMBER_OF` → OktaGroup (user belongs to group)
-- `ASSIGNED_TO` → Application (direct app assignment)
-- `ENROLLED` → Factor (MFA enrollment)
-- `OWNS` → Device (device ownership)
-- `REPORTS_TO` → User (manager relationship)
-
-### OktaGroup
-**Purpose:** Represents an Okta group
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `name` (STRING): Group name ⚡ INDEXED
-- `source_type` (STRING): AD | LDAP | OKTA_NATIVE | APP_GROUP | BUILT_IN ⚡ INDEXED
-- `group_type` (STRING): OKTA_GROUP | BUILT_IN | APP_GROUP ⚡ INDEXED
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `MATCH (g:OktaGroup {name: $name})` - Name lookup
-- `WHERE g.source_type = 'AD'` - Source filter
-- `WHERE g.group_type = 'OKTA_GROUP'` - Type filter
-
-**Outgoing Relationships:**
-- `HAS_ACCESS` → Application (group can access app)
-
-**Incoming Relationships:**
-- User → `MEMBER_OF` → OktaGroup
-
-### Application
-**Purpose:** Represents an Okta application (SAML or OIDC)
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `label` (STRING): User-visible name (what users see) ⚡ INDEXED
-- `name` (STRING): Technical name ⚡ INDEXED
-- `status` (STRING): ACTIVE | INACTIVE ⚡ INDEXED
-- `sign_on_mode` (STRING): SAML_2_0 | OPENID_CONNECT | SECURE_PASSWORD_STORE | AUTO_LOGIN ⚡ INDEXED
-- `policy_id` (STRING): References Policy node ⚡ INDEXED
-- `saml_attribute_statements` (STRING[]): SAML attributes (only for SAML apps)
-- `oidc_scopes` (STRING[]): OAuth scopes (only for OIDC apps)
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `MATCH (a:Application {label: $label})` - Label lookup
-- `MATCH (a:Application {name: $name})` - Name lookup
-- `WHERE a.status = 'ACTIVE'` - Status filter
-- `WHERE a.sign_on_mode = 'SAML_2_0'` - Protocol filter
-- `WHERE a.policy_id = $policy_id` - Policy filter
-- `WHERE a.tenant_id = $tenant AND a.status = 'ACTIVE'` - Composite filter
-
-**Outgoing Relationships:**
-- `GOVERNED_BY` → Policy (app uses this policy)
-
-**Incoming Relationships:**
-- User → `ASSIGNED_TO` → Application (direct assignment)
-- OktaGroup → `HAS_ACCESS` → Application (group assignment)
-
-### Policy
-**Purpose:** Represents an Okta policy
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `name` (STRING): Policy name ⚡ INDEXED
-- `type` (STRING): OKTA_SIGN_ON | PASSWORD | MFA_ENROLL | ACCESS_POLICY ⚡ INDEXED
-- `status` (STRING): ACTIVE | INACTIVE ⚡ INDEXED
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `MATCH (p:Policy {name: $name})` - Name lookup
-- `WHERE p.type = 'OKTA_SIGN_ON'` - Type filter
-- `WHERE p.status = 'ACTIVE'` - Status filter
-
-**Outgoing Relationships:**
-- `CONTAINS_RULE` → PolicyRule (policy has rules)
-
-**Incoming Relationships:**
-- Application → `GOVERNED_BY` → Policy
-
-### PolicyRule
-**Purpose:** Represents a rule within a policy
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `policy_id` (STRING): References Policy ⚡ INDEXED
-- `priority` (INT32): Lower = evaluated first
-- `access` (STRING): ALLOW | DENY ⚡ INDEXED
-- `require_mfa` (BOOLEAN): MFA required? ⚡ INDEXED
-- `status` (STRING): ACTIVE | INACTIVE ⚡ INDEXED
-- `network_zone_ids` (STRING[]): Network zones for this rule
-- `network_zone_names` (STRING[]): Zone names (denormalized for queries)
-- `factor_types` (STRING[]): Allowed MFA types
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `WHERE r.policy_id = $policy_id` - Policy filter
-- `WHERE r.access = 'ALLOW'` - Access filter
-- `WHERE r.require_mfa = true` - MFA filter
-- `WHERE r.policy_id = $policy_id AND r.priority <= $priority` - Composite filter
-
-**Outgoing Relationships:**
-- `APPLIES_TO_ZONE` → NetworkZone (rule uses zone)
-- `APPLIES_TO_USER` → User (rule applies to user)
-- `APPLIES_TO_GROUP` → OktaGroup (rule applies to group)
-
-**Incoming Relationships:**
-- Policy → `CONTAINS_RULE` → PolicyRule
-
-### Factor
-**Purpose:** Represents an MFA factor/authenticator
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `factor_type` (STRING): sms | email | push | token:software:totp | signed_nonce | webauthn ⚡ INDEXED
-- `provider` (STRING): OKTA | GOOGLE | DUO | RSA ⚡ INDEXED
-- `status` (STRING): ACTIVE | INACTIVE | PENDING_ACTIVATION ⚡ INDEXED
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `WHERE f.factor_type = 'signed_nonce'` - Type filter
-- `WHERE f.provider = 'OKTA'` - Provider filter
-- `WHERE f.status = 'ACTIVE'` - Status filter
-
-**Incoming Relationships:**
-- User → `ENROLLED` → Factor
-
-### Device
-**Purpose:** Represents a physical device
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `platform` (STRING): ANDROID | IOS | WINDOWS | MACOS ⚡ INDEXED
-- `manufacturer` (STRING): Device manufacturer ⚡ INDEXED
-- `status` (STRING): ACTIVE | CREATED | SUSPENDED | DEACTIVATED ⚡ INDEXED
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `WHERE d.platform = 'IOS'` - Platform filter
-- `WHERE d.manufacturer = 'Apple'` - Manufacturer filter
-- `WHERE d.status = 'ACTIVE'` - Status filter
-
-**Incoming Relationships:**
-- User → `OWNS` → Device (with `management_status` property)
-
-### NetworkZone
-**Purpose:** Represents IP ranges for policy rules
-**Key Properties:**
-- `okta_id` (STRING): Unique identifier
-- `name` (STRING): Zone name ⚡ INDEXED
-- `type` (STRING): IP | DYNAMIC ⚡ INDEXED
-- `status` (STRING): ACTIVE | INACTIVE ⚡ INDEXED
-- `gateway_ips` (STRING[]): IP addresses
-- `tenant_id` (STRING): Tenant identifier ⚡ INDEXED
-
-**Indexed Queries (FAST):**
-- `MATCH (z:NetworkZone {name: $name})` - Name lookup
-- `WHERE z.type = 'IP'` - Type filter
-- `WHERE z.status = 'ACTIVE'` - Status filter
-
-**Incoming Relationships:**
-- PolicyRule → `APPLIES_TO_ZONE` → NetworkZone
-
-## Performance Guidelines
-
-### ⚡ FAST Queries (Use Indexed Properties)
-
-**RECOMMENDED - Uses indexes:**
-```cypher
-# Email lookup (indexed)
-MATCH (u:User {email: 'user@example.com'})
-RETURN u
-
-# Status filter (indexed)
-MATCH (u:User)
-WHERE u.status = 'ACTIVE'
-RETURN u
-
-# Composite filter (indexed)
-MATCH (u:User)
-WHERE u.tenant_id = 'trial-8499881' AND u.status = 'ACTIVE'
-RETURN u
-
-# Group name lookup (indexed)
-MATCH (g:OktaGroup {name: 'sso-super-admins'})
-RETURN g
-
-# Application label lookup (indexed)
-MATCH (a:Application {label: 'Salesforce'})
-WHERE a.status = 'ACTIVE'
-RETURN a
-```
-
-### 🐌 SLOW Queries (Avoid Unindexed Properties)
-
-**NOT RECOMMENDED - No indexes (table scan):**
-```cypher
-# First name filter (NOT indexed)
-MATCH (u:User)
-WHERE u.first_name = 'John'  # ⚠️ SLOW - full table scan
-RETURN u
-
-# Mobile phone filter (NOT indexed)
-MATCH (u:User)
-WHERE u.mobile_phone = '+1234567890'  # ⚠️ SLOW
-RETURN u
-
-# Device model filter (NOT indexed)
-MATCH (d:Device)
-WHERE d.model = 'iPhone 13'  # ⚠️ SLOW
-RETURN d
-```
-
-**BETTER - Combine with indexed properties:**
-```cypher
-# Start with indexed property, then filter
-MATCH (u:User)
-WHERE u.status = 'ACTIVE'  # ⚡ Fast
-  AND u.first_name = 'John'  # Then filter in memory
-RETURN u
-
-# Or use email if known
-MATCH (u:User {email: 'john@example.com'})  # ⚡ Fast
-RETURN u
-```
-
-### 🎯 Query Optimization Tips
-
-1. **Always filter by tenant_id first** (multi-tenant support)
-   ```cypher
-   WHERE u.tenant_id = $tenant AND u.status = 'ACTIVE'
-   ```
-
-2. **Use indexed properties in MATCH clauses**
-   ```cypher
-   MATCH (u:User {email: $email})  # ⚡ Fast
-   # Better than:
-   MATCH (u:User) WHERE u.email = $email  # Slower
-   ```
-
-3. **Combine indexed filters for best performance**
-   ```cypher
-   WHERE a.tenant_id = $tenant 
-     AND a.status = 'ACTIVE'
-     AND a.sign_on_mode = 'SAML_2_0'
-   ```
-
-4. **Filter early in multi-hop queries**
-   ```cypher
-   # Good - filter users first
-   MATCH (u:User {email: $email})-[:MEMBER_OF]->(g:OktaGroup)
-   
-   # Bad - scan all memberships first
-   MATCH (u:User)-[:MEMBER_OF]->(g:OktaGroup)
-   WHERE u.email = $email
-   ```
-
-5. **Use EXISTS for optional relationship checks**
-   ```cypher
-   # Find users without MFA
-   MATCH (u:User)
-   WHERE u.status = 'ACTIVE'
-     AND NOT EXISTS { MATCH (u)-[:ENROLLED]->(:Factor) }
-   RETURN u
-   ```
-
-## Index Coverage Summary
-
-| Node Type | Indexed Properties | Use Case |
-|-----------|-------------------|----------|
-| **User** | email, login, status, department, user_type, tenant_id, manager | User lookups, status filters, org queries |
-| **OktaGroup** | name, source_type, group_type, tenant_id | Group lookups, source filters |
-| **Application** | label, name, status, sign_on_mode, policy_id, tenant_id | App lookups, protocol filters |
-| **Policy** | name, type, status, tenant_id | Policy lookups, type filters |
-| **PolicyRule** | policy_id, access, require_mfa, status, tenant_id | Rule queries, MFA filters |
-| **Factor** | factor_type, provider, status, tenant_id | Factor type queries |
-| **Device** | platform, manufacturer, status, tenant_id | Device platform queries |
-| **NetworkZone** | name, type, status, tenant_id | Zone lookups |
-
-## Composite Indexes
-
-These indexes optimize common multi-property filters:
-
-1. **User (tenant_id, status)** - Most common user filter
-2. **Application (tenant_id, status)** - Most common app filter
-3. **PolicyRule (policy_id, priority)** - Rule evaluation order
-
-**Usage:**
-```cypher
-# Automatically uses composite index
-MATCH (u:User)
-WHERE u.tenant_id = 'trial-8499881' AND u.status = 'ACTIVE'
-RETURN u
-```
-
-## Query Pattern Examples
-
-### "List apps assigned to user (direct + via groups)"
-```cypher
-MATCH (u:User {email: $email})
-OPTIONAL MATCH (u)-[:ASSIGNED_TO]->(a1:Application)
-OPTIONAL MATCH (u)-[:MEMBER_OF]->(g)-[:HAS_ACCESS]->(a2:Application)
-WITH collect(a1) + collect(a2) AS apps
-UNWIND apps AS app
-WHERE app IS NOT NULL
-RETURN DISTINCT app.label, app.status
-ORDER BY app.label
-```
-
-### "Users with MFA factor X"
-```cypher
-MATCH (u:User)-[:ENROLLED]->(f:Factor {factor_type: $factor_type})
-WHERE u.status = 'ACTIVE'
-RETURN u.display_name, u.email
-ORDER BY u.display_name
-```
-
-### "Users in group with no MFA"
-```cypher
-MATCH (g:OktaGroup {name: $group_name})<-[:MEMBER_OF]-(u:User)
-WHERE NOT EXISTS { MATCH (u)-[:ENROLLED]->(:Factor) }
-RETURN u.display_name, u.email
-ORDER BY u.display_name
-```
-
-### "Apps governed by policy X"
-```cypher
-MATCH (p:Policy {name: $policy_name})<-[:GOVERNED_BY]-(a:Application)
-WHERE a.status = 'ACTIVE'
-RETURN a.label, a.sign_on_mode
-ORDER BY a.label
-```
-
-### "Policy rules requiring MFA from specific zone"
-```cypher
-MATCH (p:Policy {name: $policy_name})-[:CONTAINS_RULE]->(r:PolicyRule)
-WHERE r.require_mfa = true
-OPTIONAL MATCH (r)-[:APPLIES_TO_ZONE]->(z:NetworkZone)
-RETURN r.name, r.priority, collect(z.name) AS zones
-ORDER BY r.priority
-```
-
-### "Manager's direct reports"
-```cypher
-MATCH (m:User {email: $manager_email})<-[:REPORTS_TO]-(u:User)
-WHERE u.status = 'ACTIVE'
-RETURN u.display_name, u.email, u.title
-ORDER BY u.display_name
-```
-
-### "Devices owned by user"
-```cypher
-MATCH (u:User {email: $email})-[o:OWNS]->(d:Device)
-RETURN d.display_name, d.platform, o.management_status, d.status
-ORDER BY d.display_name
-```
-"""
-
 
 def get_graph_schema_description() -> str:
     """
@@ -1021,127 +641,139 @@ all fields from the original SQLite models for comprehensive data access.
 ### 1. User
 Represents an Okta user account with profile, status, and custom attributes.
 
-**Core Properties** (26 base properties + dynamic custom attributes):
+**Properties** (23 base properties + dynamic custom attributes):
 - okta_id (STRING, PRIMARY KEY) - Unique Okta user identifier (e.g., '00u...')
+- tenant_id (STRING) - Tenant identifier
+- display_name (STRING) - Full display name
 - email (STRING) - User's primary email address
 - login (STRING) - User's login username
 - first_name (STRING) - Given name
 - last_name (STRING) - Family name
-- display_name (STRING) - Full display name
-- status (STRING) - User account status (ACTIVE, SUSPENDED, DEPROVISIONED, etc.)
-- user_type (STRING) - Type of user account
-- title (STRING) - Job title
-- department (STRING) - Department name
-- organization (STRING) - Organization name
-- manager (STRING) - Manager's login username
-- employee_number (STRING) - Employee ID
-- cost_center (STRING) - Cost center code
-- division (STRING) - Division name
-- preferred_language (STRING) - Language preference
-- locale (STRING) - Locale setting
-- timezone (STRING) - Timezone
 - mobile_phone (STRING) - Mobile phone number
 - primary_phone (STRING) - Primary phone number
-- street_address (STRING) - Street address
-- city (STRING) - City
-- state (STRING) - State/province
-- zip_code (STRING) - Postal code
+- employee_number (STRING) - Employee ID
+- department (STRING) - Department name
+- title (STRING) - Job title
+- organization (STRING) - Organization name
+- manager (STRING) - Manager's login username (can be used to find manager User node)
+- user_type (STRING) - Type of user account (Employee, Contractor, etc.)
 - country_code (STRING) - Country code
-- mfa_enrolled (BOOLEAN) - Whether MFA is enrolled
+- status (STRING) - User account status (ACTIVE, SUSPENDED, DEPROVISIONED, STAGED, PROVISIONED, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT)
+- created_at (TIMESTAMP) - API timestamp
+- last_updated_at (TIMESTAMP) - API timestamp
+- password_changed_at (TIMESTAMP) - Password change timestamp
+- status_changed_at (TIMESTAMP) - Status change timestamp
+- last_synced_at (TIMESTAMP) - Local sync timestamp
+- updated_at (TIMESTAMP) - Local tracking timestamp
+- is_deleted (BOOLEAN) - Sync metadata flag
 
-**Dynamic Custom Attributes** (created at sync time from env config):
-- custom_attrib_1, custom_attrib_2, custom_attrib_3, custom_attrib_4, custom_attrib_5, testAttrib
-- These are dynamically added based on OKTA_USER_CUSTOM_ATTRIBUTES environment variable
-- Access them directly: `WHERE u.custom_attrib_1 = 'value'`
+**Dynamic Custom Attributes** (created at sync time from OKTA_USER_CUSTOM_ATTRIBUTES env variable):
+- Custom attribute properties are created dynamically at sync time
+- Property names match actual Okta custom attribute names (e.g., SLT_DEPARTMENT, costCenter, employeeType)
+- Access them directly: `WHERE u.SLT_DEPARTMENT = 'Engineering'`
+- No pre-defined schema needed - Kuzu supports schema-less properties
 
 **Indexed Properties**: email, login, status, custom_attrib_1
 
 ### 2. OktaGroup
 Represents an Okta group for organizing users and managing access.
 
-**Properties** (12):
+**Properties** (13):
 - okta_id (STRING, PRIMARY KEY) - Unique group identifier (e.g., '00g...')
+- tenant_id (STRING) - Tenant identifier
 - name (STRING) - Group name
 - description (STRING) - Group description
+- display_name (STRING) - Friendly name for visualization
+- source_type (STRING) - Source type (AD, LDAP, OKTA_NATIVE, APP_GROUP, BUILT_IN)
+- source_id (STRING) - External directory ID if synced
 - group_type (STRING) - Type of group (OKTA_GROUP, BUILT_IN, APP_GROUP)
-- profile (STRING) - JSON string of additional profile data
-- source (STRING) - Source system (Okta, AD, LDAP, etc.)
-- source_id (STRING) - External source identifier
-- is_managed (BOOLEAN) - Whether group is managed externally
-- is_assigned_role (BOOLEAN) - Whether group has admin role assignments
-- member_count (INT64) - Number of members in group
-- app_count (INT64) - Number of apps assigned to group
-- last_membership_updated (STRING) - Last membership change timestamp
+- created_at (TIMESTAMP) - Creation timestamp
+- last_updated_at (TIMESTAMP) - Last update timestamp
+- last_synced_at (TIMESTAMP) - Last sync timestamp
+- updated_at (TIMESTAMP) - Local tracking timestamp
+- is_deleted (BOOLEAN) - Sync metadata flag
 
 **Indexed Properties**: name
 
 ### 3. Application
 Represents an application integrated with Okta for SSO/authentication.
 
-**Properties** (24):
+**Properties** (25):
 - okta_id (STRING, PRIMARY KEY) - Unique application identifier (e.g., '0oa...')
-- label (STRING) - User-facing application name (what users see)
+- tenant_id (STRING) - Tenant identifier
 - name (STRING) - Technical application name
+- label (STRING) - User-visible name (what users see in frontend)
+- display_name (STRING) - Friendly name for visualization
 - status (STRING) - Application status (ACTIVE, INACTIVE)
-- sign_on_mode (STRING) - Authentication method (SAML_2_0, OPENID_CONNECT, etc.)
-- app_type (STRING) - Application type/category
-- features (STRING[]) - Array of enabled features
-- visibility_auto_submit_toolbar (BOOLEAN) - Auto-submit on toolbar
-- visibility_hide_ios (BOOLEAN) - Hide on iOS
-- visibility_hide_web (BOOLEAN) - Hide on web
-- accessibility_self_service (BOOLEAN) - Self-service enabled
-- accessibility_error_redirect_url (STRING) - Error redirect URL
-- profile (STRING) - JSON string of app profile data
-- settings (STRING) - JSON string of app settings
-- credentials_scheme (STRING) - Credential scheme
-- credentials_username_template (STRING) - Username template for app
-- saml_audience (STRING) - SAML audience URI
-- saml_recipient (STRING) - SAML recipient URL
-- saml_destination (STRING) - SAML destination URL
-- saml_subject_name_id_template (STRING) - SAML name ID template
-- saml_subject_name_id_format (STRING) - SAML name ID format
-- attribute_statements (STRING[]) - SAML attribute statements (JSON strings)
-- created (STRING) - Creation timestamp
-- last_updated (STRING) - Last update timestamp
+- sign_on_mode (STRING) - Authentication method (SAML_2_0, OPENID_CONNECT, SECURE_PASSWORD_STORE, AUTO_LOGIN, etc.)
+- metadata_url (STRING) - SAML metadata URL
+- sign_on_url (STRING) - Sign-on URL
+- audience (STRING) - SAML audience
+- destination (STRING) - SAML destination
+- signing_kid (STRING) - Key ID for signing
+- username_template (STRING) - Username template
+- username_template_type (STRING) - Username template type
+- implicit_assignment (BOOLEAN) - Auto-assign to all users?
+- admin_note (STRING) - Admin notes
+- attribute_statements (STRING[]) - JSON array of SAML attributes
+- honor_force_authn (BOOLEAN) - Honor force authentication
+- hide_ios (BOOLEAN) - Hide on iOS
+- hide_web (BOOLEAN) - Hide on web
+- policy_id (STRING) - FK to Policy.okta_id (each app has ONE policy)
+- created_at (TIMESTAMP) - Creation timestamp
+- last_updated_at (TIMESTAMP) - Last update timestamp
+- last_synced_at (TIMESTAMP) - Last sync timestamp
+- updated_at (TIMESTAMP) - Local tracking timestamp
+- is_deleted (BOOLEAN) - Sync metadata flag
 
 **Indexed Properties**: label, status
 
 ### 4. Policy
 Represents an Okta authentication or authorization policy.
 
-**Properties** (12):
+**Properties** (11):
 - okta_id (STRING, PRIMARY KEY) - Unique policy identifier
+- tenant_id (STRING) - Tenant identifier
 - name (STRING) - Policy name
 - description (STRING) - Policy description
-- policy_type (STRING) - Type of policy (OKTA_SIGN_ON, MFA_ENROLL, etc.)
+- display_name (STRING) - Display name
+- type (STRING) - Type of policy (OKTA_SIGN_ON, PASSWORD, MFA_ENROLL, ACCESS_POLICY, etc.)
 - status (STRING) - Policy status (ACTIVE, INACTIVE)
-- priority (INT64) - Policy priority order
-- system (BOOLEAN) - Whether system-managed policy
-- conditions (STRING) - JSON string of policy conditions
-- created (STRING) - Creation timestamp
-- last_updated (STRING) - Last update timestamp
-- app_count (INT64) - Number of apps using this policy
-- rule_count (INT64) - Number of rules in this policy
+- priority (INT32) - Policy priority order (lower number = higher priority)
+- system (BOOLEAN) - System-managed policy?
+- created_at (TIMESTAMP) - Creation timestamp
+- last_updated_at (TIMESTAMP) - Last update timestamp
+- last_synced_at (TIMESTAMP) - Last sync timestamp
+- is_deleted (BOOLEAN) - Sync metadata flag
 
 **Indexed Properties**: name
 
 ### 5. PolicyRule
 Represents a rule within a policy with specific conditions and actions.
 
-**Properties** (13):
+**Properties** (21):
 - okta_id (STRING, PRIMARY KEY) - Unique rule identifier
+- tenant_id (STRING) - Tenant identifier
+- policy_id (STRING) - FK to Policy.okta_id
 - name (STRING) - Rule name
+- priority (INT32) - Rule priority order (lower = evaluated first)
 - status (STRING) - Rule status (ACTIVE, INACTIVE)
-- priority (INT64) - Rule priority order
-- rule_type (STRING) - Type of rule
-- conditions (STRING) - JSON string of rule conditions
-- actions (STRING) - JSON string of rule actions
+- access (STRING) - Access decision (ALLOW, DENY)
 - require_mfa (BOOLEAN) - Whether MFA is required
-- allowed_factors (STRING[]) - List of allowed MFA factors
-- session_lifetime (INT64) - Session lifetime in minutes
-- session_idle (INT64) - Idle timeout in minutes
-- created (STRING) - Creation timestamp
-- last_updated (STRING) - Last update timestamp
+- mfa_lifetime_minutes (INT32) - MFA lifetime in minutes
+- mfa_prompt (STRING) - MFA prompt setting (ALWAYS, DEVICE, SESSION)
+- factor_types (STRING[]) - Array of allowed factor types
+- network_connection (STRING) - Network connection type (ANYWHERE, ZONE, ON_NETWORK, OFF_NETWORK)
+- network_zone_ids (STRING[]) - Array of network zone IDs
+- network_zone_names (STRING[]) - Array of network zone names (denormalized for LLM)
+- network_includes (STRING[]) - IP ranges included
+- network_excludes (STRING[]) - IP ranges excluded
+- user_ids (STRING[]) - Specific users this rule applies to
+- group_ids (STRING[]) - Specific groups this rule applies to
+- session_lifetime_minutes (INT32) - Session lifetime in minutes
+- session_persistent (BOOLEAN) - Session persistence setting
+- created_at (TIMESTAMP) - Creation timestamp
+- last_updated_at (TIMESTAMP) - Last update timestamp
 
 ### 6. Factor
 Represents an MFA factor/device enrolled by a user.
@@ -1151,118 +783,148 @@ Represents an MFA factor/device enrolled by a user.
 - factor_type (STRING) - Type of MFA (sms, call, email, push, totp, webauthn, etc.)
 - provider (STRING) - MFA provider (OKTA, GOOGLE, RSA, etc.)
 - vendor_name (STRING) - Vendor name
-- device_type (STRING) - Device type for factor
+- device_type (STRING) - Device type for factor (Android, iOS, etc.)
+- device_name (STRING) - Device name (e.g., "Samsung Galaxy S24", "iPhone 15 Pro")
+- platform (STRING) - Device platform
 - status (STRING) - Factor status (ACTIVE, INACTIVE, PENDING_ACTIVATION, etc.)
-- profile (STRING) - JSON string of factor profile
 - phone_number (STRING) - Phone number for SMS/voice factors
+- email (STRING) - Email for email factors
 - credential_id (STRING) - Credential identifier
 - verification (STRING) - Verification details
-- enrolled (STRING) - Enrollment timestamp
-- last_verified (STRING) - Last verification timestamp
-- last_updated (STRING) - Last update timestamp
-- created (STRING) - Creation timestamp
+- created_at (TIMESTAMP) - Creation timestamp
+- last_updated_at (TIMESTAMP) - Last update timestamp
+- last_synced_at (TIMESTAMP) - Last sync timestamp
 
 **Indexed Properties**: factor_type
 
 ### 7. Device
 Represents a device registered with Okta.
 
-**Properties** (16):
+**Properties** (17):
 - okta_id (STRING, PRIMARY KEY) - Unique device identifier
-- device_id (STRING) - Device ID
-- status (STRING) - Device status
-- platform (STRING) - Platform (IOS, ANDROID, WINDOWS, MACOS, etc.)
+- tenant_id (STRING) - Tenant identifier
 - display_name (STRING) - User-friendly device name
+- serial_number (STRING) - Device serial number
+- udid (STRING) - Unique device identifier
+- platform (STRING) - Platform (ANDROID, IOS, WINDOWS, MACOS, etc.)
+- manufacturer (STRING) - Device manufacturer (Apple, Samsung, Dell, etc.)
 - model (STRING) - Device model
 - os_version (STRING) - Operating system version
-- manufacturer (STRING) - Device manufacturer
-- serial_number (STRING) - Device serial number
-- imei (STRING) - IMEI number
-- meid (STRING) - MEID number
-- udid (STRING) - UDID
-- sid (STRING) - Security identifier
-- registered (STRING) - Registration timestamp
-- last_updated (STRING) - Last update timestamp
-- profile (STRING) - JSON string of device profile
+- status (STRING) - Device status (ACTIVE, CREATED, SUSPENDED, DEACTIVATED)
+- registered (BOOLEAN) - Registration status
+- secure_hardware_present (BOOLEAN) - Secure hardware present
+- disk_encryption_type (STRING) - Disk encryption type (USER, FULL, NONE)
+- registered_at (TIMESTAMP) - Registration timestamp
+- created_at (TIMESTAMP) - Creation timestamp
+- last_updated_at (TIMESTAMP) - Last update timestamp
+- last_synced_at (TIMESTAMP) - Last sync timestamp
+- is_deleted (BOOLEAN) - Sync metadata flag
 
 ### 8. NetworkZone
 Represents a network zone (IP allowlist/blocklist) in Okta.
 
 **Properties** (10):
 - okta_id (STRING, PRIMARY KEY) - Unique zone identifier
+- tenant_id (STRING) - Tenant identifier
 - name (STRING) - Zone name
-- zone_type (STRING) - Type (IP, DYNAMIC, etc.)
+- type (STRING) - Zone type (IP, DYNAMIC)
 - status (STRING) - Zone status (ACTIVE, INACTIVE)
-- usage (STRING) - Usage type (POLICY, BLOCKLIST, etc.)
-- gateways (STRING[]) - Array of gateway IPs/CIDRs
-- proxies (STRING[]) - Array of proxy IPs/CIDRs
-- asns (STRING[]) - Array of ASN numbers
-- locations (STRING[]) - Array of geographic locations
-- created (STRING) - Creation timestamp
+- gateway_ips (STRING[]) - Array of gateway IPs
+- proxy_ips (STRING[]) - Array of proxy IPs
+- locations (STRING[]) - Array of location codes
+- asns (STRING[]) - Array of ASNs
+- created_at (TIMESTAMP) - Creation timestamp
+- last_updated_at (TIMESTAMP) - Last update timestamp
 
 ## RELATIONSHIP TYPES (11 total)
 
 ### 1. MEMBER_OF
 User→OktaGroup: User is a member of a group
-**Properties**: None
+**Properties**:
+- tenant_id (STRING) - Tenant identifier
+- assigned_at (TIMESTAMP) - Assignment timestamp
+- membership_type (STRING) - Membership type (DIRECT, IMPORTED from AD/LDAP, RULE_BASED)
 **Example**: `(u:User)-[:MEMBER_OF]->(g:OktaGroup)`
 
 ### 2. HAS_ACCESS
-User→Application: User has direct access to an application
+User→Application: User has **direct** access to an application.
+**Note**: For complete access checks, you MUST also check for indirect access via the `GROUP_HAS_ACCESS` relationship. See the "CRITICAL QUERY PATTERNS" section for the mandatory UNION pattern.
 **Properties**:
+- tenant_id (STRING) - Tenant identifier
+- assignment_id (STRING) - Okta assignment ID
+- app_instance_id (STRING) - App instance ID
 - scope (STRING) - Assignment scope (USER, GROUP)
-- assigned_at (STRING) - Assignment timestamp
+- credentials_setup (BOOLEAN) - Credentials setup flag
+- hidden (BOOLEAN) - Hidden from user's app portal?
+- assigned_at (TIMESTAMP) - Assignment timestamp
 **Example**: `(u:User)-[:HAS_ACCESS]->(a:Application)`
 
 ### 3. GROUP_HAS_ACCESS
 OktaGroup→Application: Group has access to an application (group-based assignment)
 **Properties**:
-- priority (INT64) - Assignment priority
-- assigned_at (STRING) - Assignment timestamp
+- tenant_id (STRING) - Tenant identifier
+- assignment_id (STRING) - Okta assignment ID
+- priority (INT32) - Assignment priority (0 = highest)
+- assigned_at (TIMESTAMP) - Assignment timestamp
 **Example**: `(g:OktaGroup)-[:GROUP_HAS_ACCESS]->(a:Application)`
 
 ### 4. ENROLLED
 User→Factor: User has enrolled an MFA factor
 **Properties**:
-- enrolled_at (STRING) - Enrollment timestamp
-- last_used (STRING) - Last usage timestamp
+- tenant_id (STRING) - Tenant identifier
+- enrolled_at (TIMESTAMP) - Enrollment timestamp
+- last_verified_at (TIMESTAMP) - Last verification timestamp
 **Example**: `(u:User)-[:ENROLLED]->(f:Factor)`
 
 ### 5. OWNS
 User→Device: User owns a device
 **Properties**:
-- management_status (STRING) - Device management status
-- registered_at (STRING) - Registration timestamp
+- tenant_id (STRING) - Tenant identifier
+- management_status (STRING) - Device management status (NOT_MANAGED, MANAGED, etc.)
+- screen_lock_type (STRING) - Screen lock type (BIOMETRIC, PIN, PASSWORD, NONE)
+- registered_at (TIMESTAMP) - Registration timestamp
+- user_device_created_at (TIMESTAMP) - User device creation timestamp
 **Example**: `(u:User)-[:OWNS]->(d:Device)`
 
 ### 6. GOVERNED_BY
 Application→Policy: Application is governed by a policy
-**Properties**: None
+**Properties**:
+- tenant_id (STRING) - Tenant identifier
+- assigned_at (TIMESTAMP) - Assignment timestamp
 **Example**: `(a:Application)-[:GOVERNED_BY]->(p:Policy)`
 
 ### 7. CONTAINS_RULE
 Policy→PolicyRule: Policy contains a rule
-**Properties**: None
+**Properties**:
+- tenant_id (STRING) - Tenant identifier
+- rule_priority (INT32) - Rule priority (denormalized for faster queries)
+- created_at (TIMESTAMP) - Creation timestamp
 **Example**: `(p:Policy)-[:CONTAINS_RULE]->(r:PolicyRule)`
 
 ### 8. APPLIES_TO_ZONE
 PolicyRule→NetworkZone: Rule applies to a network zone
-**Properties**: None
+**Properties**:
+- tenant_id (STRING) - Tenant identifier
+- include_or_exclude (STRING) - Include or exclude flag (INCLUDE, EXCLUDE)
 **Example**: `(r:PolicyRule)-[:APPLIES_TO_ZONE]->(z:NetworkZone)`
 
 ### 9. APPLIES_TO_USER
 PolicyRule→User: Rule applies to specific user
-**Properties**: None
+**Properties**:
+- tenant_id (STRING) - Tenant identifier
 **Example**: `(r:PolicyRule)-[:APPLIES_TO_USER]->(u:User)`
 
 ### 10. APPLIES_TO_GROUP
 PolicyRule→OktaGroup: Rule applies to specific group
-**Properties**: None
+**Properties**:
+- tenant_id (STRING) - Tenant identifier
 **Example**: `(r:PolicyRule)-[:APPLIES_TO_GROUP]->(g:OktaGroup)`
 
 ### 11. REPORTS_TO
 User→User: Manager/report hierarchy
-**Properties**: None
+**Properties**:
+- tenant_id (STRING) - Tenant identifier
+- established_at (TIMESTAMP) - Relationship establishment timestamp
 **Example**: `(u:User)-[:REPORTS_TO]->(m:User)`
 
 ## CRITICAL QUERY PATTERNS

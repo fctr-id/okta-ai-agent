@@ -69,7 +69,7 @@ class GraphDBOrchestrator:
             self.graph_db_path = self.version_manager.get_staging_db_path()
             logger.info(f"Using version manager: writing to staging v{self.version_manager.current_version + 1}")
         else:
-            self.graph_db_path = graph_db_path or "./graph_db/okta_graph.db"
+            self.graph_db_path = graph_db_path or "./db/tenant_graph_v1.db"
             self.version_manager = None
         
         self.graph_db = GraphDBSyncOperations(self.graph_db_path)
@@ -126,12 +126,26 @@ class GraphDBOrchestrator:
                 if self.cancellation_flag and self.cancellation_flag.is_set():
                     raise asyncio.CancelledError("Sync cancelled after applications")
                 
-                # Sync users (with relationships)
+                # Sync users (with relationships) - MUST be before devices
                 await self._sync_users(okta_client)
                 
                 # Check cancellation
                 if self.cancellation_flag and self.cancellation_flag.is_set():
                     raise asyncio.CancelledError("Sync cancelled after users")
+                
+                # Sync devices (depends on users for OWNS relationships)
+                await self._sync_devices(okta_client)
+                
+                # Check cancellation
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    raise asyncio.CancelledError("Sync cancelled after devices")
+                
+                # Sync policies (depends on applications for GOVERNED_BY relationships)
+                await self._sync_policies(okta_client)
+                
+                # Check cancellation
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    raise asyncio.CancelledError("Sync cancelled after policies")
             
             # Get final counts
             counts = self.graph_db.get_entity_counts(self.tenant_id)
@@ -160,9 +174,12 @@ class GraphDBOrchestrator:
                 "status": "completed",
                 "end_time": datetime.now(timezone.utc),
                 "success": True,
+                "progress_percentage": 100,  # Mark as 100% complete
                 "users_count": counts.get('users', 0),
                 "groups_count": counts.get('groups', 0),
-                "apps_count": counts.get('applications', 0),
+                "apps_count": counts.get('apps', 0),
+                "policies_count": counts.get('policies', 0),
+                "devices_count": counts.get('devices', 0),
                 "graphdb_version": self.version_manager.current_version if self.version_manager else None,
                 "graphdb_promoted": promoted
             })
@@ -264,6 +281,86 @@ class GraphDBOrchestrator:
             logger.error(f"Error syncing applications: {e}", exc_info=True)
             raise
     
+    async def _sync_policies(self, okta_client) -> None:
+        """Fetch policies from Okta and sync to GraphDB"""
+        logger.info("Syncing policies from Okta API...")
+        
+        try:
+            # Fetch all policies from Okta
+            policies_data = await okta_client.list_policies()
+            
+            if not policies_data:
+                logger.warning("No policies found in Okta")
+                return
+            
+            logger.info(f"Retrieved {len(policies_data)} policies from Okta")
+            
+            # Filter out None entries (failed transformations)
+            valid_policies = [p for p in policies_data if p is not None and p.get('okta_id')]
+            
+            if len(valid_policies) < len(policies_data):
+                skipped = len(policies_data) - len(valid_policies)
+                logger.warning(f"Skipped {skipped} policies with missing or invalid data")
+            
+            if not valid_policies:
+                logger.warning("No valid policies after filtering")
+                return
+            
+            # Sync policies to GraphDB
+            self.graph_db.sync_policies(valid_policies, self.tenant_id)
+            logger.info(f"Synced {len(valid_policies)} policies to GraphDB")
+            
+            # Update progress in metadata
+            if self.sync_id:
+                await self.meta_ops.update_sync_record(self.sync_id, {
+                    "policies_count": len(valid_policies),
+                    "progress_percentage": 90
+                })
+            
+        except Exception as e:
+            logger.error(f"Error syncing policies: {e}", exc_info=True)
+            raise
+    
+    async def _sync_devices(self, okta_client) -> None:
+        """Fetch devices from Okta and sync to GraphDB"""
+        logger.info("Syncing devices from Okta API...")
+        
+        try:
+            # Fetch all devices from Okta
+            devices_data = await okta_client.list_devices()
+            
+            if not devices_data:
+                logger.warning("No devices found in Okta")
+                return
+            
+            logger.info(f"Retrieved {len(devices_data)} devices from Okta")
+            
+            # Filter out None entries (failed transformations)
+            valid_devices = [d for d in devices_data if d is not None and d.get('okta_id')]
+            
+            if len(valid_devices) < len(devices_data):
+                skipped = len(devices_data) - len(valid_devices)
+                logger.warning(f"Skipped {skipped} devices with missing or invalid data")
+            
+            if not valid_devices:
+                logger.warning("No valid devices after filtering")
+                return
+            
+            # Sync devices to GraphDB
+            self.graph_db.sync_devices(valid_devices, self.tenant_id)
+            logger.info(f"Synced {len(valid_devices)} devices to GraphDB")
+            
+            # Update progress in metadata
+            if self.sync_id:
+                await self.meta_ops.update_sync_record(self.sync_id, {
+                    "devices_count": len(valid_devices),
+                    "progress_percentage": 83
+                })
+            
+        except Exception as e:
+            logger.error(f"Error syncing devices: {e}", exc_info=True)
+            raise
+    
     async def _sync_users(self, okta_client) -> None:
         """
         Fetch users from Okta and sync to GraphDB with TRUE STREAMING.
@@ -313,7 +410,7 @@ class GraphDBOrchestrator:
             if self.sync_id:
                 await self.meta_ops.update_sync_record(self.sync_id, {
                     "users_count": self.user_sync_count,
-                    "progress_percentage": 90
+                    "progress_percentage": 75
                 })
             
         except Exception as e:

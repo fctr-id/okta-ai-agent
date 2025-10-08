@@ -44,8 +44,8 @@ COPY src/utils /app/src/utils
 # Frontend builds to ../api/static relative to the frontend directory
 COPY --from=frontend-builder /app/api/static/ /app/src/api/static/
 
-# Create necessary directories
-RUN mkdir -p /app/certs /app/sqlite_db /app/graph_db /app/logs
+# Create necessary directories (consolidated db for SQLite and GraphDB)
+RUN mkdir -p /app/certs /app/db /app/logs
 
 # Create startup script for SSL and server
 RUN echo '#!/bin/bash \n\

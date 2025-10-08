@@ -157,7 +157,7 @@ CREATE REL TABLE GOVERNED_BY (
 """
 
 
-def initialize_graph_schema(db_path: str = "./graph_db/okta_graph.db") -> tuple:
+def initialize_graph_schema(db_path: str = "./db/tenant_graph_v1.db") -> tuple:
     """
     Initialize GraphDB with Okta schema
     

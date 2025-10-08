@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     OKTA_CLIENT_ORGURL: str
     OKTA_API_TOKEN: str
     
-    # Database settings with sensible defaults
-    DB_DIR: str = str(os.getenv("DB_DIR", str(BASE_DIR / "sqlite_db")))
-    DB_FILENAME: str = os.getenv("DB_FILENAME", "okta_sync.db")
+    # Database settings with sensible defaults (consolidated in ./db/)
+    DB_DIR: str = str(os.getenv("DB_DIR", str(BASE_DIR / "db")))
+    DB_FILENAME: str = os.getenv("DB_FILENAME", "tako-ai.db")
     
     # No longer needed in .env - computed from DB_DIR and DB_FILENAME
     DATABASE_URL: Optional[str] = None  

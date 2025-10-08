@@ -7,13 +7,18 @@ Manages multiple database versions for zero-downtime updates:
 - Immediate cleanup keeping latest 2 versions (current + previous)
 
 Architecture:
-    ./graph_db/okta_v1.db  ← Current (queries use this)
-    ./graph_db/okta_v2.db  ← Staging (sync writes here)
+    ./db/tenant_graph_v1.db  ← Current (queries use this)
+    ./db/tenant_graph_v2.db  ← Staging (sync writes here)
     
 After sync:
     version_manager.promote_staging()  # Instant switch!
-    ./graph_db/okta_v1.db  ← Previous (kept for old connections)
-    ./graph_db/okta_v2.db  ← Current (queries NOW use this)
+    ./db/tenant_graph_v1.db  ← Previous (kept for old connections)
+    ./db/tenant_graph_v2.db  ← Current (queries NOW use this)
+    
+Database naming: tenant_graph_v{version}.db
+- Consistent naming regardless of Okta tenant
+- .db extension for clarity (even though Kuzu may store as file or directory)
+- Stored in ./db/ alongside SQLite metadata database
 """
 
 import os
@@ -32,14 +37,19 @@ class GraphDBVersionManager:
     
     Allows zero-downtime database updates by managing versioned database files.
     Queries always use the current version while syncs write to the next version.
+    
+    Database naming: tenant_graph_v{version}.db
+    - Simple, consistent naming
+    - .db extension for clarity
+    - Stored in ./db/ folder alongside SQLite metadata
     """
     
-    def __init__(self, db_dir: str = "./graph_db", keep_versions: int = 2):
+    def __init__(self, db_dir: str = "./db", keep_versions: int = 2):
         """
         Initialize version manager
         
         Args:
-            db_dir: Directory containing database files
+            db_dir: Directory containing database files (default: "./db")
             keep_versions: Number of versions to keep (default: 2 = current + previous)
         """
         self.db_dir = Path(db_dir)
@@ -55,16 +65,29 @@ class GraphDBVersionManager:
         logger.info(f"Database directory: {self.db_dir.absolute()}")
     
     def _detect_current_version(self) -> int:
-        """Detect the highest version number from existing database files"""
+        """
+        Detect the highest version number from existing database files.
+        
+        Looks for files matching pattern: tenant_graph_v{number}.db
+        
+        Returns:
+            Highest version number found, or 1 if no databases exist
+        """
         max_version = 0
         
         if not self.db_dir.exists():
             return 1
         
+        # Pattern to match: tenant_graph_v{number}.db
+        prefix = "tenant_graph_v"
+        suffix = ".db"
+        
         for file in self.db_dir.iterdir():
-            if file.is_dir() and file.name.startswith("okta_v"):
+            if file.name.startswith(prefix) and file.name.endswith(suffix):
                 try:
-                    version = int(file.name.replace("okta_v", ""))
+                    # Extract version number from "tenant_graph_v2.db" -> "2"
+                    version_str = file.name.replace(prefix, "").replace(suffix, "")
+                    version = int(version_str)
                     max_version = max(max_version, version)
                 except ValueError:
                     continue
@@ -76,10 +99,10 @@ class GraphDBVersionManager:
         Get path to current ACTIVE database (for queries)
         
         Returns:
-            Absolute path to current database directory
+            Absolute path to current database (e.g., "./db/tenant_graph_v2.db")
         """
         with self._lock:
-            current_path = self.db_dir / f"okta_v{self.current_version}"
+            current_path = self.db_dir / f"tenant_graph_v{self.current_version}.db"
             return str(current_path.absolute())
     
     def get_staging_db_path(self) -> str:
@@ -87,11 +110,11 @@ class GraphDBVersionManager:
         Get path to STAGING database (for sync writes)
         
         Returns:
-            Absolute path to staging database directory
+            Absolute path to staging database (e.g., "./db/tenant_graph_v3.db")
         """
         with self._lock:
             staging_version = self.current_version + 1
-            staging_path = self.db_dir / f"okta_v{staging_version}"
+            staging_path = self.db_dir / f"tenant_graph_v{staging_version}.db"
             return str(staging_path.absolute())
     
     def promote_staging(self, validate_metadata: bool = True) -> bool:
@@ -110,7 +133,7 @@ class GraphDBVersionManager:
         """
         with self._lock:
             staging_version = self.current_version + 1
-            staging_path = self.db_dir / f"okta_v{staging_version}"
+            staging_path = self.db_dir / f"tenant_graph_v{staging_version}.db"
             
             # Verify staging database exists
             if not staging_path.exists():
@@ -128,12 +151,11 @@ class GraphDBVersionManager:
             
             # Record old version for cleanup
             old_version = self.current_version
-            old_version_path = self.db_dir / f"okta_v{old_version}"
             
             # ATOMIC PROMOTION: Just increment the version number!
             self.current_version = staging_version
             
-            logger.info(f"✅ Database promoted: v{old_version} → v{self.current_version}")
+            logger.info(f"✅ Database promoted: tenant_graph_v{old_version}.db → tenant_graph_v{self.current_version}.db")
             logger.info(f"   Active database: {staging_path}")
             
             # Immediate cleanup: keep only the configured number of versions
@@ -158,7 +180,7 @@ class GraphDBVersionManager:
         try:
             import kuzu
             
-            staging_path = self.db_dir / f"okta_v{staging_version}"
+            staging_path = self.db_dir / f"tenant_graph_v{staging_version}.db"
             
             # Open database in read-only mode for validation
             db = kuzu.Database(str(staging_path), read_only=True)
@@ -206,12 +228,16 @@ class GraphDBVersionManager:
         cleaned = 0
         
         try:
-            # Find all version directories
+            # Find all version files
             versions = []
+            prefix = "tenant_graph_v"
+            suffix = ".db"
+            
             for file in self.db_dir.iterdir():
-                if file.is_dir() and file.name.startswith("okta_v"):
+                if file.name.startswith(prefix) and file.name.endswith(suffix):
                     try:
-                        version_num = int(file.name.replace("okta_v", ""))
+                        version_str = file.name.replace(prefix, "").replace(suffix, "")
+                        version_num = int(version_str)
                         versions.append((version_num, file))
                     except ValueError:
                         continue
@@ -222,11 +248,15 @@ class GraphDBVersionManager:
             # Delete versions beyond keep count
             for version_num, path in versions[keep:]:
                 try:
-                    shutil.rmtree(path)
-                    logger.info(f"🗑️  Cleaned up old version: v{version_num}")
+                    # Handle both file and directory (Kuzu can create either)
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+                    logger.info(f"🗑️  Cleaned up old version: tenant_graph_v{version_num}.db")
                     cleaned += 1
                 except Exception as e:
-                    logger.error(f"Failed to cleanup v{version_num}: {e}")
+                    logger.error(f"Failed to cleanup tenant_graph_v{version_num}.db: {e}")
             
             if cleaned > 0:
                 logger.info(f"✅ Cleanup complete: removed {cleaned} old version(s), kept latest {keep}")
@@ -244,8 +274,8 @@ class GraphDBVersionManager:
             Dict with version information
         """
         with self._lock:
-            current_path = self.db_dir / f"okta_v{self.current_version}"
-            staging_path = self.db_dir / f"okta_v{self.current_version + 1}"
+            current_path = self.db_dir / f"tenant_graph_v{self.current_version}.db"
+            staging_path = self.db_dir / f"tenant_graph_v{self.current_version + 1}.db"
             
             return {
                 "current_version": self.current_version,

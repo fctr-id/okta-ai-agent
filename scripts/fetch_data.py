@@ -51,16 +51,20 @@ async def run_sync(tenant_id: str, db: DatabaseOperations, enable_graphdb: bool 
         True if sync was successful, False otherwise
     """
     
-    graph_db_path = os.getenv('GRAPH_DB_PATH', './graph_db/okta_graph.db')
+    # Note: graph_db_path is only used when versioning is disabled
+    # With versioning enabled (default), the version manager controls the path
+    graph_db_path = os.getenv('GRAPH_DB_PATH', './db/tenant_graph_v1.db')
     
     try:
         # ========== GraphDB-ONLY mode ==========
         if enable_graphdb and GRAPHDB_ENABLED:
             logger.info("🎯 GraphDB-ONLY mode: Syncing directly from Okta to GraphDB (no SQLite)")
             
+            # Orchestrator uses version manager by default (use_versioning=True)
+            # This ignores graph_db_path and creates tenant_graph_v{N}.db automatically
             orchestrator = GraphDBOrchestrator(
                 tenant_id=tenant_id,
-                graph_db_path=graph_db_path
+                graph_db_path=graph_db_path  # Only used if use_versioning=False
             )
             
             # Run direct Okta → GraphDB sync

@@ -47,11 +47,9 @@ htmlcov/
 .idea/
 
 # Databases
-sqlite_db/*
-sqlite_db/*.db
-graph_db/*
-graph_db/*.db
-!graph_db/.gitkeep
+db/*
+db/*.db
+!db/.gitkeep
 okta.yaml
 
 results/*

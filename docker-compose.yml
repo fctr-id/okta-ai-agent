@@ -8,9 +8,8 @@ services:
     ports:
       - "8001:8001"  # Expose HTTPS port
     volumes:
-      # Database directories
-      - ./sqlite_db:/app/sqlite_db      # SQLite database (auth, metadata)
-      - ./graph_db:/app/graph_db        # Graph database (Okta business data)
+      # Database directory (consolidated: SQLite metadata + GraphDB)
+      - ./db:/app/db
       
       # SSL certificates for HTTPS
       - ./certs:/app/src/backend/certs
@@ -21,9 +20,9 @@ services:
       - .env  # Use variables from .env file
     environment:
       # Database locations inside container
-      - DB_DIR=/app/sqlite_db
-      - DB_FILENAME=okta_sync.db
-      - GRAPH_DB_PATH=/app/graph_db/okta_graph.db
+      - DB_DIR=/app/db
+      - DB_FILENAME=tako-ai.db
+      - GRAPH_DB_DIR=/app/db
       
       # CORS settings
       - ALLOWED_ORIGINS=https://localhost:*,https://127.0.0.1:*

@@ -2,14 +2,14 @@
 SQLite Metadata Operations
 
 Handles operational metadata for:
-- Authentication (local_users)
+- Authentication (auth_users)
 - Sync status tracking (sync_history)
 - Session management (sessions)
 
 This is separate from business data operations and is used for both
 SQLite and GraphDB sync modes.
 
-Database Location: ./sqlite_db/okta_meta.db
+Database Location: ./db/tako-ai.db (consolidated with business data)
 Schema Location: src/core/okta/sqlite_meta/schema.sql
 """
 
@@ -31,22 +31,22 @@ class MetadataOperations:
     Manages operational metadata stored in SQLite.
     
     Used for:
-    - User authentication (local_users table)
+    - User authentication (auth_users table)
     - Sync status tracking (sync_history table) 
     - Session management (sessions table)
     
     This operates independently of business data storage (SQLite or GraphDB).
     
-    Database file: ./sqlite_db/okta_meta.db
+    Database file: ./db/tako-ai.db (consolidated database)
     Schema file: src/core/okta/sqlite_meta/schema.sql
     """
     
-    def __init__(self, db_path: str = "./sqlite_db/okta_meta.db"):
+    def __init__(self, db_path: str = "./db/tako-ai.db"):
         """
         Initialize metadata operations.
         
         Args:
-            db_path: Path to SQLite metadata database (relative to project root)
+            db_path: Path to SQLite database (default: ./db/tako-ai.db)
         """
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -103,8 +103,8 @@ class MetadataOperations:
             async with aiosqlite.connect(self.db_path) as db:
                 cursor = await db.execute(
                     """
-                    INSERT INTO sync_history (tenant_id, sync_type, status)
-                    VALUES (?, ?, 'running')
+                    INSERT INTO sync_history (tenant_id, sync_type, status, start_time)
+                    VALUES (?, ?, 'running', CURRENT_TIMESTAMP)
                     """,
                     (tenant_id, sync_type)
                 )
@@ -366,12 +366,12 @@ class MetadataOperations:
 _metadata_ops: Optional[MetadataOperations] = None
 
 
-def get_metadata_ops(db_path: str = "./sqlite_db/okta_meta.db") -> MetadataOperations:
+def get_metadata_ops(db_path: str = "./db/tako-ai.db") -> MetadataOperations:
     """
     Get singleton MetadataOperations instance.
     
     Args:
-        db_path: Path to metadata database
+        db_path: Path to consolidated database (default: ./db/tako-ai.db)
         
     Returns:
         MetadataOperations instance

@@ -495,8 +495,8 @@ class SyncOrchestrator:
         1. Groups first (for initial sync)
         2. Applications second
         3. Authenticators third (no dependencies)
-        4. Devices fourth (conditional sync, no dependencies) 
-        5. Users fifth (depends on groups and apps)
+        4. Users fourth (depends on groups and apps)
+        5. Devices fifth (conditional sync, depends on users for relationships)
         6. Policies last (depends on apps)
         
         Supports cancellation via cancellation_flag attribute.
@@ -533,7 +533,7 @@ class SyncOrchestrator:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return
                 
-                # 4. Users last (depends on groups and apps)
+                # 4. Users (depends on groups and apps)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     logger.info("Step 4: Syncing Users")
                     await self.sync_model_streaming(User, okta.list_users)
@@ -541,15 +541,15 @@ class SyncOrchestrator:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return                
                 
-                # 5. Devices fourth (conditional sync)
+                # 5. Devices (conditional sync, depends on users for relationships)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     # Check if device sync is enabled
                     from src.config.settings import settings
                     if settings.SYNC_OKTA_DEVICES:
-                        logger.info("Step 4: Syncing Devices")
+                        logger.info("Step 5: Syncing Devices")
                         await self.sync_model_streaming(Device, okta.list_devices)
                     else:
-                        logger.info("Step 4: Skipping Devices (SYNC_OKTA_DEVICES=false)")
+                        logger.info("Step 5: Skipping Devices (SYNC_OKTA_DEVICES=false)")
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return                
@@ -557,7 +557,7 @@ class SyncOrchestrator:
     
                 # 6. Policies (depends on apps)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
-                    logger.info("Step 5: Syncing Policies")
+                    logger.info("Step 6: Syncing Policies")
                     await self.sync_model_streaming(Policy, okta.list_policies)
                     
                     logger.info(f"Sync completed for tenant {self.tenant_id}")
