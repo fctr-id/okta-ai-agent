@@ -50,6 +50,30 @@ try {
 # Get parent directory for context
 $contextPath = (Get-Item -Path "../").FullName
 
+# Inject version number into AppLayout.vue footer
+$footerPath = Join-Path $contextPath "src/frontend/src/components/layout/AppLayout.vue"
+Write-Host "Injecting version $Version into AppLayout.vue..."
+
+if (Test-Path $footerPath) {
+    # Read the current footer content
+    $footerContent = Get-Content $footerPath -Raw
+    
+    # Backup the original file
+    $backupPath = "$footerPath.backup"
+    Copy-Item $footerPath $backupPath -Force
+    
+    # Replace the entire version-tag span content with the new version
+    # This matches: <span class="version-tag">(...anything...)</span>
+    $footerContent = $footerContent -replace '<span class="version-tag">\([^)]+\)</span>', "<span class=`"version-tag`">(v$Version)</span>"
+    
+    # Write the modified content back
+    Set-Content -Path $footerPath -Value $footerContent -NoNewline
+    
+    Write-Host "Version injected successfully. Original backed up to AppLayout.vue.backup" -ForegroundColor Green
+} else {
+    Write-Warning "AppLayout.vue not found at $footerPath. Continuing without version injection."
+}
+
 # Build multi-architecture images (but don't push yet)
 Write-Host "Building multi-architecture Docker images (linux/amd64, linux/arm64)..."
 if ($latestTag) {
@@ -78,10 +102,23 @@ if ($latestTag) {
     
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Multi-architecture build failed with exit code $LASTEXITCODE"
+    
+    # Restore original AppLayout.vue on failure
+    if (Test-Path $backupPath) {
+        Move-Item $backupPath $footerPath -Force
+        Write-Host "Restored original AppLayout.vue after build failure" -ForegroundColor Yellow
+    }
+    
     exit $LASTEXITCODE
 }
 
 Write-Host "Multi-architecture images built successfully."
+
+# Restore original AppLayout.vue after successful build
+if (Test-Path $backupPath) {
+    Move-Item $backupPath $footerPath -Force
+    Write-Host "Restored original AppLayout.vue" -ForegroundColor Green
+}
 
 # Ask user if they want to keep them published
 $pushConfirm = Read-Host "Images were built and pushed to registry (buildx requirement). Keep them published? (y/n)"

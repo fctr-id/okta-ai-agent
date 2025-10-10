@@ -43,6 +43,7 @@
                 <a href="https://fctr.io" target="_blank" class="branded-link">
                     Fctr Identity
                 </a>
+                <span class="version-tag">(v1.0.0-dev)</span>
                 <span class="disclaimer">• Responses may require verification</span>
             </div>
         </footer>
@@ -274,6 +275,13 @@ const handleLogout = async () => {
 .disclaimer {
     color: #7d8bb2;
     margin-left: 4px;
+}
+
+.version-tag {
+    color: var(--primary);
+    font-weight: 500;
+    margin-left: 4px;
+    font-size: 12px;
 }
 
 .v-tooltip .v-overlay__content {
