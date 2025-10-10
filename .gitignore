@@ -111,3 +111,4 @@ src/core/data/testing/*
 README_old.md
 docs/entity-specific-sync-filtering.md
 docs/GRAPHDB_MIGRATION_PLAN.md
+src/data/gemma_finetuning_examples.jsonl

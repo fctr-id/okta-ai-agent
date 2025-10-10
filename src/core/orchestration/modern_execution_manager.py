@@ -8,7 +8,6 @@ from typing import Dict, List, Any, Optional
 import asyncio
 import os
 import sys
-import sqlite3
 import json
 import time  # For step timing and formatting
 import polars as pl  # High-performance DataFrame operations replacing temp tables
@@ -18,11 +17,16 @@ from pydantic import BaseModel
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
 
 # Import existing agents from agents directory
-from src.core.agents.sql_code_gen_agent import sql_agent, SQLDependencies, generate_sql_query_with_logging, is_safe_sql
+from src.core.agents.cypher_code_gen_agent import (
+    generate_cypher_query_with_logging, 
+    is_safe_cypher,
+    cypher_enrichment_agent,
+    CypherQueryOutput,
+    PolarsOptimizedOutput
+)
 from src.core.agents.api_code_gen_agent import api_code_gen_agent, ApiCodeGenDependencies, generate_api_code  
 from src.core.agents.planning_agent import ExecutionPlan, ExecutionStep, planning_agent, PlanningDependencies
 from src.core.agents.results_formatter_agent import format_results as process_results_formatter  # Unified token-based results formatting
-from src.core.agents.api_sql_code_gen_agent import api_sql_code_gen_agent  # NEW: Internal API-SQL agent
 from src.core.agents.relationship_analysis_agent import analyze_data_relationships  # Stage 1: Relationship analysis for three-stage pipeline
 
 # Import special tools support
@@ -50,80 +54,16 @@ logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
 # 
 # CURRENT TIMEOUT VALUES:
 # - API Operations: 180s (3 min) - Standard API calls with pagination
-# - SQL Operations: 60s (1 min) - Database queries
 #
 # REASONING FOR VALUES:
 # - API calls (including system logs) need 3 minutes for multiple paginated calls
-# - SQL queries are fast, 1 minute is sufficient
+# - Cypher queries execute directly against GraphDB (no timeout needed here)
 # ================================================================
 
 # API Execution Timeouts (in seconds) - Read from environment with fallbacks
 API_EXECUTION_TIMEOUT = int(os.getenv('API_EXECUTION_TIMEOUT', 180))           # Subprocess timeout for API code execution (3 minutes)
-SQL_EXECUTION_TIMEOUT = int(os.getenv('SQL_EXECUTION_TIMEOUT', 60))            # Subprocess timeout for SQL operations (1 minute)
 
 # ================================================================
-
-
-def _create_sql_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
-    """
-    Create Polars DataFrame from SQL query results with enhanced robustness.
-    
-    Uses native Polars json_normalize first for consistent handling, then falls back
-    to traditional schema inference strategies for simpler SQL results.
-    
-    Handles complex SQL scenarios including:
-    - CTE queries with multiple result sets
-    - UNION queries with mixed schemas (direct vs group assignments)
-    - Complex joins with duplicate/null columns  
-    - JSON columns (custom_attributes) with mixed data types
-    - Datetime columns with inconsistent formats
-    
-    Args:
-        data: List of dictionaries from SQL query results (SQLAlchemy models)
-        
-    Returns:
-        Polars DataFrame with proper schema handling for SQL data
-    """
-    if not data:
-        return pl.DataFrame()
-        
-    try:
-        # Strategy 1: Try json_normalize first - handles mixed schemas beautifully
-        # Benefits: UNION queries, JSON columns, complex CTE results
-        return pl.json_normalize(
-            data,
-            separator='_',           # Flatten any nested structures
-            max_level=2,            # SQL is less nested than APIs, so limit levels
-            infer_schema_length=None # Scan all records for consistent schema
-        )
-    except Exception as e:
-        logger.debug(f"SQL json_normalize failed, trying traditional approach: {e}")
-        try:
-            # Strategy 2: Enhanced schema inference for complex SQL results
-            # Scan more records to handle UNION queries with mixed schemas
-            return pl.DataFrame(data, infer_schema_length=500)
-        except Exception as e2:
-            logger.warning(f"SQL DataFrame creation failed with full inference: {e2}")
-            try:
-                # Strategy 3: Conservative inference for datetime conflicts
-                # Common issue: mixed datetime formats from different tables
-                return pl.DataFrame(data, infer_schema_length=100)
-            except Exception as e3:
-                logger.warning(f"SQL DataFrame creation failed with limited inference: {e3}")
-                try:
-                    # Strategy 4: Minimal inference - force string types first
-                    # Handles complex CTEs with inconsistent column types
-                    return pl.DataFrame(data, infer_schema_length=1)
-                except Exception as e4:
-                    logger.warning(f"SQL DataFrame creation failed with minimal inference: {e4}")
-                    try:
-                        # Strategy 5: No inference - all columns as strings
-                        # Last resort for highly complex UNION/CTE results
-                        return pl.DataFrame(data, infer_schema_length=0)
-                    except Exception as e5:
-                        logger.error(f"All SQL DataFrame creation strategies failed: {e5}")
-                        # Absolute last resort - empty DataFrame
-                        return pl.DataFrame()
 
 
 def _create_api_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
@@ -155,9 +95,9 @@ def _create_api_dataframe(data: List[Dict[str, Any]]) -> pl.DataFrame:
             infer_schema_length=None # Scan all records for consistent schema
         )
     except Exception as e:
-        # Fallback to existing robust function for compatibility
+        # Fallback: Try basic DataFrame creation with schema inference
         try:
-            return _create_sql_dataframe(data)
+            return pl.DataFrame(data, infer_schema_length=None)
         except Exception:
             # Absolute last resort - empty DataFrame
             return pl.DataFrame()
@@ -176,6 +116,14 @@ class SQLExecutionResult:
     """SQL execution result object with query details and data"""
     def __init__(self, sql_text: str, explanation: str, data: List[Dict[str, Any]]):
         self.sql = sql_text
+        self.explanation = explanation
+        self.data = data
+
+
+class CypherExecutionResult:
+    """Cypher execution result object with query details and data"""
+    def __init__(self, cypher_text: str, explanation: str, data: List[Dict[str, Any]]):
+        self.cypher = cypher_text
         self.explanation = explanation
         self.data = data
 
@@ -253,8 +201,10 @@ class ModernExecutionManager:
         self.available_entities = list(entities_dict.keys())
         self.entity_summary = {entity_name: {'operations': entity_data['operations'], 'methods': []} 
                               for entity_name, entity_data in entities_dict.items()}
-        self.sql_tables = {table['name']: {'columns': table['columns']} 
-                          for table in self.simple_ref_data.get('sql_tables', [])}
+        
+        # Build GraphDB schema for planning (instead of SQL tables)
+        self.graph_schema = self._build_graph_schema()
+        
         self.endpoints = self.full_api_data.get('endpoints', [])  # Load endpoints for filtering
         
         # SPECIAL TOOLS INTEGRATION: Add special tool endpoints to main endpoints list
@@ -313,59 +263,58 @@ class ModernExecutionManager:
         # MINIMAL CANCELLATION SYSTEM: Aggressive termination on user request
         self.cancelled_queries = set()  # Just store correlation_ids that are cancelled
         
-        logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, {len(self.sql_tables)} SQL tables, {len(self.endpoints)} endpoints")
+        logger.info(f"Modern Execution Manager initialized: {len(self.available_entities)} API entities, GraphDB schema: {len(self.graph_schema)} characters, {len(self.endpoints)} endpoints")
     
     # DATABASE HEALTH CHECK METHODS
     
     def _check_database_health(self) -> bool:
         """
-        Check if the SQLite database exists and is populated with users.
+        Check if the GraphDB database exists and is populated with users.
         
         Returns:
-            bool: True if database exists and has users (>= 1), False otherwise
+            bool: True if GraphDB exists and has User nodes (>= 1), False otherwise
         """
         try:
-            # Get database path from settings or default location
-            from src.config.settings import Settings
-            settings = Settings()
+            # Import GraphDB sync operations (same class used for queries)
+            from src.core.okta.graph_db.sync_operations import GraphDBSyncOperations
+            from src.core.okta.graph_db.version_manager import get_version_manager
             
-            # Try multiple possible database locations
-            possible_db_paths = [
-                getattr(settings, 'database_path', None),
-                os.path.join(os.getcwd(), 'sqlite_db', 'okta_sync.db'),
-                os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db'),
-                'sqlite_db/okta_sync.db'
-            ]
+            # Get current database path from version manager
+            version_manager = get_version_manager()
+            db_path = version_manager.get_current_db_path()
             
-            db_path = None
-            for path in possible_db_paths:
-                if path and os.path.exists(path):
-                    db_path = path
-                    break
-            
-            if not db_path:
-                logger.warning("Database file not found in any expected location")
+            if not db_path or not os.path.exists(db_path):
+                logger.warning(f"GraphDB file not found: {db_path}")
                 return False
             
-            # Check if database is accessible and has users
-            with sqlite3.connect(db_path, timeout=5) as conn:
-                cursor = conn.cursor()
+            logger.debug(f"Checking GraphDB health: {db_path}")
+            
+            # Try to connect and check for User nodes
+            try:
+                graph_db = GraphDBSyncOperations(db_path=db_path)
                 
-                # Check if users table exists
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-                if not cursor.fetchone():
-                    logger.warning("Users table not found in database")
+                # Check if there are any User nodes
+                result = graph_db.conn.execute(
+                    "MATCH (u:User) RETURN count(u) as user_count LIMIT 1"
+                )
+                
+                # Convert result to Polars DataFrame
+                results_df = result.get_as_pl()
+                
+                if results_df is not None and len(results_df) > 0:
+                    user_count = results_df[0, 'user_count']  # Get first row's user_count column
+                    logger.info(f"GraphDB health check: Found {user_count} User nodes in database")
+                    return user_count >= 1
+                else:
+                    logger.warning("GraphDB query returned no results")
                     return False
-                
-                # Check if users table has at least 1 record
-                cursor.execute("SELECT COUNT(*) FROM users")
-                user_count = cursor.fetchone()[0]
-                
-                logger.info(f"Database health check: Found {user_count} users in database")
-                return user_count >= 1
+                    
+            except Exception as db_error:
+                logger.warning(f"GraphDB connection/query failed: {db_error}")
+                return False
                 
         except Exception as e:
-            logger.warning(f"Database health check failed: {e}")
+            logger.warning(f"GraphDB health check failed: {e}")
             return False
     
     def _sanitize_planning_error(self, error_msg: str) -> str:
@@ -490,70 +439,67 @@ class ModernExecutionManager:
     
     def is_database_healthy(self) -> Dict[str, Any]:
         """
-        Public method to check database health status.
+        Public method to check GraphDB health status.
         
         Returns:
-            Dict with database health information for API endpoints/frontend
+            Dict with GraphDB health information for API endpoints/frontend
         """
         try:
             is_healthy = self._check_database_health()
             
-            # Get additional database info
-            from src.config.settings import Settings
-            settings = Settings()
-            
-            # Try to get database path and stats
-            possible_db_paths = [
-                getattr(settings, 'database_path', None),
-                os.path.join(os.getcwd(), 'sqlite_db', 'okta_sync.db'),
-                os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db'),
-                'sqlite_db/okta_sync.db'
-            ]
-            
+            # Get GraphDB info
+            db_dir = os.path.join(os.getcwd(), 'db')
             db_path = None
             db_size = 0
             user_count = 0
-            table_count = 0
+            node_count = 0
             
-            for path in possible_db_paths:
-                if path and os.path.exists(path):
-                    db_path = path
-                    db_size = os.path.getsize(path)
-                    break
-            
-            if db_path and is_healthy:
-                try:
-                    with sqlite3.connect(db_path, timeout=5) as conn:
-                        cursor = conn.cursor()
-                        
-                        # Get user count
-                        cursor.execute("SELECT COUNT(*) FROM users")
-                        user_count = cursor.fetchone()[0]
-                        
-                        # Get table count
-                        cursor.execute("SELECT COUNT(*) FROM sqlite_master WHERE type='table'")
-                        table_count = cursor.fetchone()[0]
-                        
-                except Exception as e:
-                    logger.warning(f"Failed to get database stats: {e}")
+            if os.path.exists(db_dir):
+                import glob
+                graph_files = glob.glob(os.path.join(db_dir, 'tenant_graph_v*.db'))
+                
+                if graph_files:
+                    # Get current database (highest version)
+                    db_path = max(graph_files, key=lambda f: int(f.split('_v')[-1].split('.db')[0]))
+                    db_size = os.path.getsize(db_path)
+                    
+                    if is_healthy:
+                        try:
+                            from src.core.okta.graph_db.sync_operations import GraphDBSyncOperations
+                            graph_db = GraphDBSyncOperations(db_path=db_path)
+                            
+                            # Get user count
+                            result = graph_db.conn.execute("MATCH (u:User) RETURN count(u) as count")
+                            results_df = result.get_as_pl()
+                            if results_df is not None and len(results_df) > 0:
+                                user_count = results_df[0, 'count']
+                            
+                            # Get total node count across all types
+                            result = graph_db.conn.execute("MATCH (n) RETURN count(n) as count")
+                            results_df = result.get_as_pl()
+                            if results_df is not None and len(results_df) > 0:
+                                node_count = results_df[0, 'count']
+                            
+                        except Exception as e:
+                            logger.warning(f"Failed to get GraphDB stats: {e}")
             
             return {
                 "healthy": is_healthy,
                 "database_path": db_path,
                 "database_size_bytes": db_size,
                 "user_count": user_count,
-                "table_count": table_count,
-                "sql_available": is_healthy,
+                "node_count": node_count,
+                "cypher_available": is_healthy,
                 "api_available": True,  # API is always available
-                "recommendation": "SQL and API modes available" if is_healthy else "API-only mode recommended"
+                "recommendation": "Cypher and API modes available" if is_healthy else "API-only mode recommended"
             }
             
         except Exception as e:
-            logger.error(f"Database health check failed: {e}")
+            logger.error(f"GraphDB health check failed: {e}")
             return {
                 "healthy": False,
                 "error": str(e),
-                "sql_available": False,
+                "cypher_available": False,
                 "api_available": True,
                 "recommendation": "API-only mode required"
             }
@@ -586,15 +532,9 @@ class ModernExecutionManager:
                 logger.warning(f"Created empty Polars DataFrame for {variable_name}: all API results were empty arrays")
             else:
                 try:
-                    # Choose DataFrame creation method based on step type
-                    if step_type in ('api', 'api_sql'):
-                        # Use native Polars json_normalize for complex API responses and API_SQL (which contains API-like nested data)
-                        df = _create_api_dataframe(data)
-                        # logger.debug(f"Created API Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
-                    else:
-                        # Use robust handling for SQL and other step types
-                        df = _create_sql_dataframe(data)
-                        # logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
+                    # Use native Polars json_normalize for all complex nested data (API, Cypher results, etc.)
+                    df = _create_api_dataframe(data)
+                    # logger.debug(f"Created Polars DataFrame: {df.shape[0]} rows × {df.shape[1]} columns")
                     
                     self.polars_dataframes[variable_name] = df
                 except Exception as e:
@@ -865,6 +805,7 @@ class ModernExecutionManager:
                 if variable_name in self.polars_dataframes:
                     df = self.polars_dataframes[variable_name]
                     step_data = df.to_dicts()  # Convert to dict ONLY for injection
+                    # NOTE: Datetime objects are already converted to strings at Cypher query execution
                 else:
                     step_data = []
                     
@@ -886,19 +827,10 @@ class ModernExecutionManager:
                 # Get step context
                 step_context = self.step_metadata[step_key].get("step_context", f"Step {step_num} context")
                 
-                # MEMORY OPTIMIZATION: Generate the injection code with lazy DataFrame conversion
-                # Instead of converting to dicts and storing, generate code that accesses DataFrames directly
-                injection_lines.append(f"# Step {step_num} ({step_type}) data injection - LAZY LOADING")
+                # Inject sample data and full results for code generation
+                injection_lines.append(f"# Step {step_num} ({step_type}) data injection")
                 injection_lines.append(f"{step_sample_var} = {repr(sample_data)}")
                 injection_lines.append(f"{step_context_var} = {repr(step_context)}")
-                
-                # Instead of copying full data, provide a function to get it on demand
-                injection_lines.append(f"# MEMORY EFFICIENT: Access full data via variable name: {variable_name}")
-                injection_lines.append(f"def get_step_{step_num}_data():")
-                injection_lines.append(f"    # Lazy access to full dataset")
-                injection_lines.append(f"    return {repr(step_data)}")
-                
-                # For compatibility, still provide full_results but with reference
                 injection_lines.append(f"full_results['{full_results_key}'] = {repr(step_data)}")
                 injection_lines.append("")
         
@@ -1085,6 +1017,35 @@ class ModernExecutionManager:
             logger.error(f"Failed to load full API data: {e}")
             return {'endpoints': []}
     
+    def _build_graph_schema(self) -> str:
+        """
+        Get the complete GraphDB schema description for planning agents.
+        
+        Returns the full schema text from get_graph_schema_description() which includes:
+        - All node types with complete property lists
+        - All relationship types with properties
+        - Query examples and patterns
+        - Status values and common patterns
+        
+        This is returned as a string (not Dict) to provide maximum context to LLMs.
+        """
+        try:
+            # Use the existing comprehensive schema documentation
+            from src.core.okta.graph_db.schema_v2_enhanced import get_graph_schema_description
+            
+            # Get the full schema description text
+            schema_text = get_graph_schema_description()
+            
+            # Log the schema length to verify it's being loaded
+            logger.info(f"GraphDB schema description loaded: {len(schema_text)} characters")
+            logger.debug(f"GraphDB schema first 500 chars: {schema_text[:500]}")
+            
+            return schema_text
+            
+        except Exception as e:
+            logger.warning(f"Failed to load GraphDB schema: {e}")
+            # Return minimal schema as fallback
+            return "GraphDB schema unavailable"
 
     
     def _get_entity_endpoints_for_entity(self, entity_name: str) -> List[Dict[str, Any]]:
@@ -1305,7 +1266,7 @@ class ModernExecutionManager:
             preplan_result = await select_relevant_entities(
                 query=modified_query,
                 entity_summary=self.entity_summary,
-                sql_tables=self.sql_tables,
+                graph_schema=self.graph_schema,
                 flow_id=correlation_id,
                 available_entities=list(entities_dict.keys()) if entities_dict else None,
                 entities=entities_dict
@@ -1461,7 +1422,7 @@ class ModernExecutionManager:
             planning_deps = PlanningDependencies(
                 available_entities=list(endpoint_based_entities.keys()),  # Use filtered entity names
                 entity_summary=filtered_entity_summary,  # Use filtered entity summary
-                sql_tables=self.sql_tables,
+                graph_schema=self.graph_schema,
                 flow_id=correlation_id,
                 entities=endpoint_based_entities  # Pass the filtered entity-grouped format
             )
@@ -2030,8 +1991,8 @@ class ModernExecutionManager:
             
             try:
                 # Execute step based on type
-                if step.tool_name == "sql":
-                    result = await self._execute_sql_step(step, correlation_id, step_num)
+                if step.tool_name == "cypher":
+                    result = await self._execute_cypher_step(step, correlation_id, step_num)
                 elif step.tool_name == "api":
                     result = await self._execute_api_step(step, correlation_id, step_num)
                 elif step.tool_name == "special_tool":
@@ -2150,9 +2111,9 @@ class ModernExecutionManager:
         
         return execution_results
     
-    async def _execute_sql_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
+    async def _execute_cypher_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
         """
-        Execute SQL step using repeatable variable-based data flow pattern.
+        Execute Cypher step using repeatable variable-based data flow pattern.
         
         REPEATABLE PATTERN: 
         - Get sample data for LLM context (max 3 records)
@@ -2164,39 +2125,39 @@ class ModernExecutionManager:
             full_previous_data = self._get_polars_data_from_previous_step(step_number)
             logger.debug(f"[{correlation_id}] Retrieved {len(full_previous_data)} records from Polars DataFrame")
             
-            # Determine which SQL agent to use based on step position
-            if step_number == 1:
-                logger.info(f"[{correlation_id}] Step {step_number}: First SQL step, using User SQL Agent")
-                return await self._execute_user_sql_step(step, correlation_id, step_number)
+            # Determine which Cypher agent to use based on step position
+            if step_number == 1 or len(full_previous_data) == 0:
+                logger.info(f"[{correlation_id}] Step {step_number}: First Cypher step (direct mode), using Direct Cypher Agent")
+                return await self._execute_direct_cypher_step(step, correlation_id, step_number)
             else:
-                logger.info(f"[{correlation_id}] Step {step_number}: Multi-step SQL processing, using Internal API-SQL Agent")
-                return await self._execute_api_sql_step(step, full_previous_data, correlation_id, step_number)
+                logger.info(f"[{correlation_id}] Step {step_number}: Multi-step Cypher processing (enrichment mode), using Cypher Enrichment Agent")
+                return await self._execute_enrichment_cypher_step(step, full_previous_data, correlation_id, step_number)
                 
         except Exception as e:
             return self.error_handler.handle_step_error(step, e, correlation_id, step_number)
 
-    async def _execute_user_sql_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
+    async def _execute_direct_cypher_step(self, step: ExecutionStep, correlation_id: str, step_number: int) -> StepResult:
         """
-        Execute standard user SQL step using repeatable pattern.
+        Execute direct Cypher step (user question → Cypher query).
         
         REPEATABLE PATTERN:
         - Get enhanced context from all previous steps
-        - Execute SQL to get full results
+        - Execute Cypher to get full results
         - Store full results using variable-based storage
         """
         # IMMEDIATE CANCELLATION CHECK - Don't start step if already cancelled
         if correlation_id in self.cancelled_queries:
-            logger.warning(f"[{correlation_id}] User SQL Step {step_number} CANCELLED before execution - Skipping")
+            logger.warning(f"[{correlation_id}] Direct Cypher Step {step_number} CANCELLED before execution - Skipping")
             return StepResult(
                 step_number=step_number,
-                step_type="sql",
+                step_type="cypher",
                 success=False,
                 error="Query cancelled before step execution"
             )
         
-        # logger.debug(f"[{correlation_id}] Executing user SQL step")
+        # logger.debug(f"[{correlation_id}] Executing direct Cypher step")
         
-        # NEW STANDARDIZED: STEP-START callback for SQL step
+        # NEW STANDARDIZED: STEP-START callback for Cypher step
         step_start_time = time.time()
         # Calculate correct step number: execution steps start at step 2 (after thinking=0, generating_steps=1)
         callback_step_number = step_number + 1  # step_number is 0-based execution step index, callback needs 2, 3, 4, etc.
@@ -2204,108 +2165,53 @@ class ModernExecutionManager:
             try:
                 await self.step_start_callback(
                     step_number=callback_step_number,
-                    step_type="sql",
+                    step_type="cypher",
                     step_name=f"Step {callback_step_number}: {step.tool_name}",
                     query_context=step.query_context,
                     critical=getattr(step, 'critical', True),
                     formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
                 )
             except Exception as callback_error:
-                logger.warning(f"[{correlation_id}] SQL step start callback error: {callback_error}")
+                logger.warning(f"[{correlation_id}] Cypher step start callback error: {callback_error}")
         
         # Get enhanced context from all previous steps
         all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
         logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
         
-        # Call existing SQL Agent with enhanced logging using wrapper function
-        # logger.debug(f"[{correlation_id}] Calling User SQL Agent with context: {step.query_context}")
+        # Call Cypher Agent with enhanced logging
+        # logger.debug(f"[{correlation_id}] Calling Direct Cypher Agent with context: {step.query_context}")
         
-        sql_result_dict = await generate_sql_query_with_logging(
-            question=step.query_context,
-            tenant_id=self.tenant_id,  # Keep this for SQL agent (different from API-SQL agent)
-            include_deleted=False,
-            flow_id=correlation_id,
-            all_step_contexts=all_step_contexts  # NEW: Enhanced context from all previous steps
+        cypher_result = await generate_cypher_query_with_logging(
+            question=step.query_context
         )
         
-        # Handle both dictionary response and AgentRunResult response
-        if hasattr(sql_result_dict, 'output'):
-            sql_dict = {
-                'success': True,
-                'sql': sql_result_dict.output.sql,
-                'explanation': sql_result_dict.output.explanation,
-                'usage': getattr(sql_result_dict, 'usage', lambda: None)()
-            }
-        else:
-            sql_dict = sql_result_dict
+        # Cypher generation returns CypherQueryOutput directly (not a dict)
+        cypher_query = cypher_result.cypher_query
+        explanation = cypher_result.explanation
         
-        # NEW STANDARDIZED: STEP-TOKENS callback after SQL generation
-        if self.step_tokens_callback and sql_dict.get('success', False):
-            try:
-                # Extract token usage from SQL generation (if available)
-                usage = sql_dict.get('usage', {})
-                input_tokens = usage.get('input_tokens', 0) if usage else 0
-                output_tokens = usage.get('output_tokens', 0) if usage else 0
-                total_tokens = input_tokens + output_tokens
-                
-                await self.step_tokens_callback(
-                    step_number=callback_step_number,  # Use consistent step numbering
-                    step_type=step.tool_name,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    agent_name="SQL Generation Agent",
-                    formatted_time=time.strftime('%H:%M:%S', time.localtime())
-                )
-            except Exception as callback_error:
-                logger.warning(f"[{correlation_id}] Step tokens callback error: {callback_error}")
+        # Security validation already done in generate_cypher_query_with_logging
         
-        # Check if the operation was successful
-        if not sql_dict.get('success', False):
-            error_msg = sql_dict.get('error', 'Unknown SQL generation error')
-            
-            # NEW STANDARDIZED: STEP-ERROR callback for SQL generation failure
-            if self.step_error_callback:
-                try:
-                    await self.step_error_callback(
-                        step_number=callback_step_number,  # Use consistent step numbering
-                        step_type=step.tool_name,
-                        error_message=error_msg,
-                        error_type="sql_generation_error",
-                        retry_possible=True,  # SQL generation errors can usually be retried
-                        technical_details="SQL query generation failed - may be due to schema complexity or LLM errors",
-                        formatted_time=time.strftime('%H:%M:%S', time.localtime())
-                    )
-                except Exception as callback_error:
-                    logger.warning(f"[{correlation_id}] Step error callback error: {callback_error}")
-            
-            return StepResult(
-                step_number=step_number,
-                step_type="SQL",
-                success=False,
-                error=error_msg
-            )
-        
-        # NEW STANDARDIZED: STEP-PROGRESS callback before SQL execution
+        # NEW STANDARDIZED: STEP-PROGRESS callback before Cypher execution
         if self.step_progress_callback:
             try:
                 await self.step_progress_callback(
                     step_number=step_number,
                     step_type=step.tool_name,
-                    progress_percentage=50.0,  # 50% - SQL generated, about to execute
+                    progress_percentage=50.0,  # 50% - Cypher generated, about to execute
                     current=50,
                     total=100,
-                    message="Executing SQL query against database",
+                    message="Executing Cypher query against GraphDB",
                     formatted_time=time.strftime('%H:%M:%S', time.localtime())
                 )
             except Exception as callback_error:
                 logger.warning(f"[{correlation_id}] Step progress callback error: {callback_error}")
         
-        # Execute the generated SQL query against the database
-        if sql_dict['sql'] and sql_dict['sql'].strip():
-            db_data = await self._execute_raw_sql_query(sql_dict['sql'], correlation_id)
-            logger.info(f"[{correlation_id}] SQL execution completed: {len(db_data)} records returned")
+        # Execute the generated Cypher query against GraphDB
+        if cypher_query and cypher_query.strip():
+            db_data = await self._execute_raw_cypher_query(cypher_query, correlation_id)
+            logger.info(f"[{correlation_id}] Cypher execution completed: {len(db_data)} records returned")
             
-            # NEW STANDARDIZED: STEP-PROGRESS callback after SQL execution
+            # NEW STANDARDIZED: STEP-PROGRESS callback after Cypher execution
             if self.step_progress_callback:
                 try:
                     await self.step_progress_callback(
@@ -2314,86 +2220,83 @@ class ModernExecutionManager:
                         progress_percentage=100.0,  # 100% - execution complete
                         current=100,
                         total=100,
-                        message=f"SQL execution completed: {len(db_data)} records retrieved",
+                        message=f"Cypher execution completed: {len(db_data)} records retrieved",
                         formatted_time=time.strftime('%H:%M:%S', time.localtime())
                     )
                 except Exception as callback_error:
                     logger.warning(f"[{correlation_id}] Step progress callback error: {callback_error}")
-                    
-            # if db_data:
-            #     logger.debug(f"[{correlation_id}] Sample SQL record (1 of {len(db_data)}): {db_data[0]}")
         else:
-            logger.warning(f"[{correlation_id}] No SQL query generated or empty query")
+            logger.warning(f"[{correlation_id}] No Cypher query generated or empty query")
             db_data = []
         
         # REPEATABLE PATTERN: Store full results for next step access
         variable_name = self._store_step_data(
             step_number=step_number,
-            step_type="sql",
+            step_type="cypher",
             data=db_data,
             metadata={
-                "sql_query": sql_dict['sql'],
-                "explanation": sql_dict['explanation']
+                "cypher_query": cypher_query,
+                "explanation": explanation
             }
         )
         
-        logger.info(f"[{correlation_id}] SQL step completed: {len(db_data)} records stored as {variable_name}")
+        logger.info(f"[{correlation_id}] Cypher step completed: {len(db_data)} records stored as {variable_name}")
         
-        # Check if SQL execution was successful
+        # Check if Cypher execution was successful
         has_meaningful_data = isinstance(db_data, list) and len(db_data) > 0
-        sql_executed_successfully = bool(sql_dict and sql_dict.get('sql'))
+        cypher_executed_successfully = bool(cypher_query)
         
-        # SQL step is successful if SQL was generated and executed, regardless of result count
+        # Cypher step is successful if query was generated and executed, regardless of result count
         # "No results found" is a valid successful outcome, not an error
-        step_success = sql_executed_successfully
+        step_success = cypher_executed_successfully
         
-        if not sql_executed_successfully:
-            logger.warning(f"[{correlation_id}] SQL step marked as FAILED: SQL generation or execution failed")
+        if not cypher_executed_successfully:
+            logger.warning(f"[{correlation_id}] Cypher step marked as FAILED: Cypher generation or execution failed")
         elif not has_meaningful_data:
-            logger.info(f"[{correlation_id}] SQL step completed successfully: no results found (query returned 0 records)")
+            logger.info(f"[{correlation_id}] Cypher step completed successfully: no results found (query returned 0 records)")
         
-        # Create result with SQL execution data
-        result_data = SQLExecutionResult(sql_dict['sql'], sql_dict['explanation'], db_data)
+        # Create result with Cypher execution data
+        result_data = CypherExecutionResult(cypher_query, explanation, db_data)
         
-        # NEW STANDARDIZED: STEP-END callback for SQL step
+        # NEW STANDARDIZED: STEP-END callback for Cypher step
         step_end_time = time.time()
         step_duration = step_end_time - step_start_time
         if self.step_end_callback:
             try:
                 await self.step_end_callback(
-                    step_number=callback_step_number,  # Use consistent step numbering
-                    step_type="sql",
+                    step_number=callback_step_number,
+                    step_type="cypher",
                     success=step_success,
                     duration_seconds=step_duration,
                     record_count=len(db_data) if isinstance(db_data, list) else 0,
                     formatted_time=time.strftime('%H:%M:%S', time.localtime(step_end_time)),
-                    error_message=None if step_success else "SQL execution failed"
+                    error_message=None if step_success else "Cypher execution failed"
                 )
             except Exception as callback_error:
-                logger.warning(f"[{correlation_id}] SQL step end callback error: {callback_error}")
+                logger.warning(f"[{correlation_id}] Cypher step end callback error: {callback_error}")
         
         return StepResult(
             step_number=step_number,
-            step_type="SQL",
+            step_type="CYPHER",
             success=step_success,
             result=result_data
         )
     
-    async def _execute_api_sql_step(self, step: ExecutionStep, full_data: List[Dict[str, Any]], correlation_id: str, step_number: int) -> StepResult:
+    async def _execute_enrichment_cypher_step(self, step: ExecutionStep, full_data: List[Dict[str, Any]], correlation_id: str, step_number: int) -> StepResult:
         """
-        Execute API - SQL step using repeatable pattern with Internal API-SQL Agent.
+        Execute API - Cypher enrichment step using Polars optimization.
         
         REPEATABLE PATTERN:
         - Use enhanced context from all previous steps
         - Use full data for processing (full API data from previous step)
-        - Store full SQL results for next step access
+        - Store full Cypher results for next step access
         """
         # IMMEDIATE CANCELLATION CHECK - Don't start step if already cancelled
         if correlation_id in self.cancelled_queries:
-            logger.warning(f"[{correlation_id}] API-SQL Step {step_number} CANCELLED before execution - Skipping")
+            logger.warning(f"[{correlation_id}] Cypher Enrichment Step {step_number} CANCELLED before execution - Skipping")
             return StepResult(
                 step_number=step_number,
-                step_type="sql",
+                step_type="cypher",
                 success=False,
                 error="Query cancelled before step execution"
             )
@@ -2401,7 +2304,7 @@ class ModernExecutionManager:
         # ENHANCED PATTERN: Get context and samples from ALL previous steps
         all_step_contexts = self._get_all_previous_step_contexts_and_samples(step_number, max_samples=3)
         
-        # NEW STANDARDIZED: STEP-START callback for API-SQL step
+        # NEW STANDARDIZED: STEP-START callback for Cypher enrichment step
         step_start_time = time.time()
         # Calculate correct step number: execution steps start at step 2 (after thinking=0, generating_steps=1)
         callback_step_number = step_number + 1  # step_number is 0-based execution step index, callback needs 2, 3, 4, etc.
@@ -2409,84 +2312,76 @@ class ModernExecutionManager:
             try:
                 await self.step_start_callback(
                     step_number=callback_step_number,
-                    step_type="sql",  # Display as SQL step since it's primarily SQL operations
+                    step_type="cypher",
                     step_name=f"Step {callback_step_number}: {step.tool_name}",
                     query_context=step.query_context,
                     critical=getattr(step, 'critical', True),
                     formatted_time=time.strftime('%H:%M:%S', time.localtime(step_start_time))
                 )
             except Exception as callback_error:
-                logger.warning(f"[{correlation_id}] API-SQL step start callback error: {callback_error}")
+                logger.warning(f"[{correlation_id}] Cypher enrichment step start callback error: {callback_error}")
         
-        # DON'T PROCESS DATA - Just pass it through as-is, let LLM handle it
-        # Only fix the data count calculation for logging
+        # Calculate data count for logging
         if isinstance(full_data, list):
             data_count = len(full_data)
         elif isinstance(full_data, dict):
-            # For dict responses, try to estimate records for logging only
             data_count = full_data.get('total_active_users', 1) if 'total_active_users' in full_data else 1
         else:
             data_count = 1 if full_data else 0
             
-        logger.info(f"[{correlation_id}] Processing API data with Internal API-SQL Agent: {data_count} full records")
+        logger.info(f"[{correlation_id}] Processing API data with Cypher Enrichment Agent: {data_count} full records")
         logger.debug(f"[{correlation_id}] Enhanced context: {len(all_step_contexts)} previous step contexts provided")
         
-        # ALWAYS use Polars DataFrame processing (13,964x performance improvement)
-        # logger.debug(f"[{correlation_id}] Using Polars DataFrame processing for all API-SQL operations")
-        
-        # Call Internal API-SQL Agent with Polars optimization (ONLY mode)
-        result = await api_sql_code_gen_agent.process_api_data(
+        # Call Cypher Enrichment Agent with Polars optimization
+        result = await cypher_enrichment_agent.process_api_data(
             api_data=full_data,
             processing_context=step.query_context,
             correlation_id=correlation_id,
-            all_step_contexts=all_step_contexts,
-            sql_tables=self.sql_tables,
-            use_polars_optimization=True  # Always use Polars optimization
+            all_step_contexts=all_step_contexts
         )
         
-        # Execute Polars-optimized workflow (ONLY flow)
+        # Execute Polars-optimized workflow for Cypher
         try:
-            db_data = await self._execute_polars_optimized_workflow(
-                polars_output=result.output,
+            db_data = await self._execute_polars_optimized_workflow_cypher(
+                polars_output=result,
                 api_data=full_data,
                 correlation_id=correlation_id
             )
-            logger.info(f"[{correlation_id}] Polars optimization completed: {len(db_data)} results")
+            logger.info(f"[{correlation_id}] Cypher Polars optimization completed: {len(db_data)} results")
             
         except Exception as e:
-            logger.error(f"[{correlation_id}] Polars optimization failed: {e}")
+            logger.error(f"[{correlation_id}] Cypher Polars optimization failed: {e}")
             db_data = []
         
-        # REPEATABLE PATTERN: Store full SQL results for next step access
+        # REPEATABLE PATTERN: Store full Cypher results for next step access
         variable_name = self._store_step_data(
             step_number=step_number,
-            step_type="api_sql",
+            step_type="cypher_enrichment",
             data=db_data,
             metadata={
-                "sql_query": result.output.sql_query_template,  # Use Polars template
-                "explanation": result.output.explanation,
+                "cypher_query": result.cypher_query_template,
+                "explanation": result.explanation,
                 "input_record_count": data_count,
-                "polars_processing": True,  # Track that we used Polars processing
-                "polars_optimization": True,  # Polars optimization mode
-                "id_extraction_path": result.output.id_extraction_path
+                "polars_processing": True,
+                "polars_optimization": True,
+                "id_extraction_path": result.id_extraction_path
             },
-            step_context=step.query_context  # NEW: Store step context
+            step_context=step.query_context
         )
         
-        logger.info(f"[{correlation_id}] API-SQL step completed: {len(db_data)} records stored as {variable_name}")
+        logger.info(f"[{correlation_id}] Cypher enrichment step completed: {len(db_data)} records stored as {variable_name}")
         
-        # Create result object that matches expected structure
-        sql_query = result.output.sql_query_template  # Use Polars template
-        result_data = SQLExecutionResult(sql_query, result.output.explanation, db_data)
+        # Create result object
+        result_data = CypherExecutionResult(result.cypher_query_template, result.explanation, db_data)
         
-        # NEW STANDARDIZED: STEP-END callback for API-SQL step
+        # NEW STANDARDIZED: STEP-END callback for Cypher enrichment step
         step_end_time = time.time()
         step_duration = step_end_time - step_start_time
         if self.step_end_callback:
             try:
                 await self.step_end_callback(
-                    step_number=callback_step_number,  # Use consistent step numbering
-                    step_type="sql",  # Display as SQL step since it's primarily SQL operations
+                    step_number=callback_step_number,
+                    step_type="cypher",
                     success=True,
                     duration_seconds=step_duration,
                     record_count=len(db_data) if isinstance(db_data, list) else 0,
@@ -2494,11 +2389,11 @@ class ModernExecutionManager:
                     error_message=None
                 )
             except Exception as callback_error:
-                logger.warning(f"[{correlation_id}] API-SQL step end callback error: {callback_error}")
+                logger.warning(f"[{correlation_id}] Cypher enrichment step end callback error: {callback_error}")
         
         return StepResult(
             step_number=step_number,
-            step_type="API_SQL",
+            step_type="CYPHER_ENRICHMENT",
             success=True,
             result=result_data
         )
@@ -3153,6 +3048,7 @@ class ModernExecutionManager:
 import sys
 import json
 import asyncio
+import datetime
 {data_injection_code}
 try:
 {indented_code}
@@ -3184,6 +3080,10 @@ except Exception as e:
                 
                 with open(temp_file_path, 'w', encoding='utf-8') as temp_file:
                     temp_file.write(wrapped_code)
+                
+                # LOG TEMP FILE PATH for debugging
+                logger.info(f"[{correlation_id}] Generated code written to: {temp_file_path}")
+                logger.debug(f"[{correlation_id}] Wrapped code size: {len(wrapped_code)} bytes")
             
                 # Execute the code with appropriate timeout based on entity type
                 logger.debug(f"[{correlation_id}] Executing generated code in subprocess...")
@@ -3310,6 +3210,11 @@ except Exception as e:
                         'stderr': result.stderr
                     }
             else:
+                # Log stdout/stderr for failed subprocess to help debugging
+                logger.error(f"[{correlation_id}] Subprocess failed - returncode: {result.returncode}")
+                logger.error(f"[{correlation_id}] Subprocess stdout: {result.stdout}")
+                logger.error(f"[{correlation_id}] Subprocess stderr: {result.stderr}")
+                
                 error_msg = result.stderr or f"Process failed with return code {result.returncode}"
                 logger.error(f"[{correlation_id}] Code execution failed: {error_msg}")
                 return {
@@ -3363,6 +3268,7 @@ except Exception as e:
             )
             
             stdout_lines = []
+            stderr_lines = []  # COLLECT STDERR for debugging
             
             # Define async stream readers
             async def read_stdout(stream, line_list):
@@ -3373,14 +3279,15 @@ except Exception as e:
                         break
                     line_list.append(line.decode('utf-8').strip())
             
-            async def read_stderr_with_callback(stream, callback):
-                """Reads all lines from stderr and calls async callback for each line."""
+            async def read_stderr_with_callback(stream, callback, stderr_list):
+                """Reads all lines from stderr, calls callback, AND saves for debugging."""
                 while True:
                     line = await stream.readline()
                     if not line:
                         break
                     decoded_line = line.decode('utf-8').strip()
                     if decoded_line:  # Only process non-empty lines
+                        stderr_list.append(decoded_line)  # SAVE stderr for debugging
                         await callback(decoded_line)
             
             # Run both stream readers concurrently with timeout
@@ -3388,7 +3295,7 @@ except Exception as e:
                 await asyncio.wait_for(
                     asyncio.gather(
                         read_stdout(proc.stdout, stdout_lines),
-                        read_stderr_with_callback(proc.stderr, progress_callback)
+                        read_stderr_with_callback(proc.stderr, progress_callback, stderr_lines)
                     ),
                     timeout=timeout_seconds
                 )
@@ -3408,7 +3315,9 @@ except Exception as e:
             
             if return_code != 0:
                 error_output = "\n".join(stdout_lines)
-                logger.error(f"[{correlation_id}] Subprocess failed with exit code {return_code}. Output: {error_output}")
+                error_stderr = "\n".join(stderr_lines)  # Include stderr
+                logger.error(f"[{correlation_id}] Subprocess failed with exit code {return_code}. Stdout: {error_output}")
+                logger.error(f"[{correlation_id}] Subprocess stderr: {error_stderr}")
             
             # Create result object compatible with previous code
             class ProcessResult:
@@ -3420,214 +3329,100 @@ except Exception as e:
             return ProcessResult(
                 returncode=return_code,
                 stdout="\n".join(stdout_lines),
-                stderr=""  # stderr was processed via callback
+                stderr="\n".join(stderr_lines)  # Return collected stderr
             )
             
         except Exception as e:
             logger.error(f"[{correlation_id}] Pure asyncio subprocess execution failed: {e}")
             raise
 
-    async def _execute_raw_sql_query(self, sql_query: str, correlation_id: str, use_internal_validation: bool = False) -> List[Dict]:
+    async def _execute_raw_cypher_query(self, cypher_query: str, correlation_id: str) -> List[Dict]:
         """
-        Execute raw SQL query against the database and return results.
-        Uses thread pool to avoid blocking the event loop.
+        Execute raw Cypher query against GraphDB and return results.
         
         Args:
-            sql_query: The SQL query to execute
+            cypher_query: The Cypher query to execute
             correlation_id: Correlation ID for logging
-            use_internal_validation: If True, use internal SQL validation (legacy mode)
             
         Returns:
             List of dictionaries containing query results
         """
-        # logger.debug(f"[{correlation_id}] Executing SQL query against database...")
+        logger.debug(f"[{correlation_id}] Executing Cypher query against GraphDB...")
         
-        # Safety check - use internal validation for legacy operations
-        if use_internal_validation:
-            from src.core.security.sql_security_validator import validate_internal_sql
-            is_valid, error_msg = validate_internal_sql(sql_query, correlation_id)
-            if not is_valid:
-                logger.warning(f"[{correlation_id}] Internal SQL validation failed: {error_msg}")
-                logger.warning(f"[{correlation_id}] Unsafe query: {sql_query}")
-                return []
-        else:
-            # Use standard user validation
-            if not is_safe_sql(sql_query):
-                logger.warning(f"[{correlation_id}] SQL query failed safety check - blocking execution")
-                logger.warning(f"[{correlation_id}] Unsafe query: {sql_query}")
-                return []
-        
-        # Execute in thread pool to avoid blocking event loop
-        import asyncio
-        import concurrent.futures
-        
-        def _sync_sql_execute():
-            try:
-                import sqlite3
-                
-                # Database path (correct for new structure)
-                db_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'sqlite_db', 'okta_sync.db')
-                db_path = os.path.abspath(db_path)
-                
-                # Connect to database
-                conn = sqlite3.connect(db_path)
-                conn.row_factory = sqlite3.Row  # Enable column access by name
-                
-                # Enable WAL mode for concurrent access
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA synchronous=NORMAL")
-                conn.execute("PRAGMA cache_size=10000")
-                conn.execute("PRAGMA temp_store=memory")
-                
-                cursor = conn.cursor()
-                
-                # Execute query
-                cursor.execute(sql_query)
-                rows = cursor.fetchall()
-                
-                # Convert to list of dictionaries
-                data = [dict(row) for row in rows]
-                
-                conn.close()
-                
-                return data
-                
-            except Exception as e:
-                logger.error(f"[{correlation_id}] Database query failed: {e}")
-                return []
+        # Safety check - Cypher validation already done in agent
+        if not is_safe_cypher(cypher_query):
+            logger.warning(f"[{correlation_id}] Cypher query failed safety check - blocking execution")
+            logger.warning(f"[{correlation_id}] Unsafe query: {cypher_query}")
+            return []
         
         try:
-            # Run SQL in thread pool
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                data = await loop.run_in_executor(executor, _sync_sql_execute)
+            # Import GraphDB sync operations (same class used for sync)
+            from src.core.okta.graph_db.sync_operations import GraphDBSyncOperations
+            from src.core.okta.graph_db.version_manager import get_version_manager
+            from src.config.settings import settings
             
-            logger.info(f"[{correlation_id}] SQL query executed successfully: {len(data)} records returned")
+            # Get current database path from version manager
+            version_manager = get_version_manager()
+            db_path = version_manager.get_current_db_path()
+            
+            # Create GraphDB connection
+            graph_db = GraphDBSyncOperations(db_path=db_path)
+            
+            # Execute Cypher query (no tenant_id parameter needed - using separate DB per tenant)
+            result = graph_db.conn.execute(cypher_query)
+            
+            # Convert result to Polars DataFrame then to list of dicts
+            results_df = result.get_as_pl()
+            
+            if results_df is not None and len(results_df) > 0:
+                # Convert datetime columns to local timezone strings for JSON serialization
+                # Assumes source data is UTC (from Okta API), converts to system local timezone
+                import polars as pl
+                from datetime import datetime
+                import time
+                
+                # Get system timezone offset
+                local_tz_offset = -time.timezone if time.daylight == 0 else -time.altzone
+                local_tz_hours = local_tz_offset // 3600
+                local_tz_minutes = abs(local_tz_offset % 3600) // 60
+                local_tz_name = f"{local_tz_hours:+03d}:{local_tz_minutes:02d}"
+                
+                for col in results_df.columns:
+                    if results_df[col].dtype in [pl.Datetime, pl.Date]:
+                        # Replace timezone to UTC first (since Okta returns UTC), then convert to local
+                        results_df = results_df.with_columns(
+                            results_df[col]
+                            .dt.replace_time_zone("UTC")  # Assume UTC from Okta
+                            .dt.convert_time_zone(local_tz_name)  # Convert to local timezone with explicit offset
+                            .dt.to_string("%Y-%m-%dT%H:%M:%S%z")  # Format with timezone offset
+                            .alias(col)
+                        )
+                data = results_df.to_dicts()
+            else:
+                data = []
+            
+            logger.info(f"[{correlation_id}] Cypher query executed successfully: {len(data)} records returned")
             if data:
                 logger.debug(f"[{correlation_id}] Sample record keys: {list(data[0].keys())}")
             
             return data
             
         except Exception as e:
-            logger.error(f"[{correlation_id}] Database query failed: {e}")
+            logger.error(f"[{correlation_id}] GraphDB query failed: {e}")
+            logger.exception(e)  # Full stack trace for debugging
             return []
 
-    async def _execute_sql_statements_sequence(self, sql_statements: List[str], correlation_id: str) -> List[Dict[str, Any]]:
+    async def _execute_polars_optimized_workflow_cypher(self, polars_output, api_data, correlation_id: str) -> List[Dict[str, Any]]:
         """
-        Execute a sequence of SQL statements and return results from the final SELECT.
-        This is for the enhanced API-SQL agent that generates complete SQL solutions.
-        
-        Args:
-            sql_statements: List of SQL statements (CREATE, INSERT, SELECT)
-            correlation_id: Correlation ID for logging
-            
-        Returns:
-            List of query results from the final SELECT statement
-        """
-        # logger.debug(f"[{correlation_id}] Executing {len(sql_statements)} SQL statements in sequence")
-        
-        # Import security validation
-        from src.utils.security_config import validate_sql_for_execution
-        
-        # Validate all SQL statements first
-        is_valid, error_msg = validate_sql_for_execution(sql_statements)
-        if not is_valid:
-            logger.error(f"[{correlation_id}] SQL statements failed security validation: {error_msg}")
-            return []
-        
-        logger.debug(f"[{correlation_id}] All {len(sql_statements)} SQL statements passed security validation")
-        
-        # Execute in thread pool to avoid blocking event loop
-        import asyncio
-        import concurrent.futures
-        
-        def _sync_sql_sequence_execute():
-            """Synchronous SQL sequence execution in thread pool"""
-            try:
-                import sqlite3
-                from src.config.settings import settings
-                
-                # Connect to database using same pattern as other methods
-                import os
-                
-                # Derive database path using same logic as other methods
-                database_paths = [
-                    os.path.join(os.getcwd(), "sqlite_db", "okta_sync.db"),
-                    os.path.join(os.path.dirname(__file__), "..", "..", "..", "sqlite_db", "okta_sync.db"),
-                    "sqlite_db/okta_sync.db"
-                ]
-                
-                db_path = None
-                for path in database_paths:
-                    if os.path.exists(path):
-                        db_path = path
-                        break
-                
-                if not db_path:
-                    logger.error(f"[{correlation_id}] Database file not found in any expected location")
-                    return []
-                
-                conn = sqlite3.connect(db_path)
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                
-                results = []
-                
-                # Execute all statements in sequence
-                for i, sql_stmt in enumerate(sql_statements):
-                    # logger.debug(f"[{correlation_id}] Executing statement {i+1}: {sql_stmt[:100]}...")
-                    
-                    cursor.execute(sql_stmt)
-                    
-                    # Only collect results from SELECT statements
-                    if sql_stmt.strip().upper().startswith('SELECT'):
-                        rows = cursor.fetchall()
-                        statement_results = [dict(row) for row in rows]
-                        results.extend(statement_results)
-                        logger.debug(f"[{correlation_id}] SELECT statement {i+1} returned {len(statement_results)} rows")
-                    else:
-                        logger.debug(f"[{correlation_id}] Non-SELECT statement {i+1} executed successfully")
-                
-                # Commit all changes
-                conn.commit()
-                conn.close()
-                
-                logger.info(f"[{correlation_id}] SQL sequence execution completed: {len(results)} total results")
-                return results
-                
-            except Exception as e:
-                logger.error(f"[{correlation_id}] SQL sequence execution failed: {e}")
-                return []
-        
-        try:
-            # Run SQL sequence in thread pool
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                data = await loop.run_in_executor(executor, _sync_sql_sequence_execute)
-            
-            return data
-            
-        except Exception as e:
-            logger.error(f"[{correlation_id}] SQL sequence execution failed: {e}")
-            return []
-
-    async def _execute_polars_optimized_workflow(self, polars_output, api_data, correlation_id: str) -> List[Dict[str, Any]]:
-        """
-        Execute the new Polars-optimized workflow with flexible data handling.
+        Execute the Polars-optimized workflow for Cypher enrichment.
         
         1. Normalize API data to consistent format
         2. Extract IDs from API data using JSONPath
-        3. Execute SQL query with IN clause  
-        4. Return filtered SQL results directly (simplified JOIN)
+        3. Execute Cypher query with IN clause parameter
+        4. Return filtered GraphDB results
         
         Args:
-            polars_output: PolarsOptimizedOutput from the API-SQL agent
+            polars_output: PolarsOptimizedOutput from the Cypher enrichment agent
             api_data: Raw API data to process (can be dict or list)
             correlation_id: Correlation ID for logging
             
@@ -3646,186 +3441,96 @@ except Exception as e:
                 logger.warning(f"[{correlation_id}] Unexpected API data type: {type(api_data)}")
                 return []
             
-            logger.debug(f"[{correlation_id}] Starting Polars-optimized workflow with {len(api_records)} API records")
-            logger.debug(f"[{correlation_id}] Sample API data structure: {api_records[:2] if api_records else 'No data'}")
+            logger.debug(f"[{correlation_id}] Starting Cypher Polars-optimized workflow with {len(api_records)} API records")
             
             if not api_records:
                 logger.warning(f"[{correlation_id}] No API data to process")
                 return []
             
-            # Step 2: Extract IDs dynamically using the specified path
+            # Extract IDs dynamically using the specified path
             id_extraction_path = polars_output.id_extraction_path
             logger.debug(f"[{correlation_id}] Extracting IDs using path: {id_extraction_path}")
             
-            # Dynamic ID extraction using JSONPath-like logic
             extracted_ids = []
-            
-            # logger.debug(f"[{correlation_id}] Processing {len(api_records)} API records for ID extraction")
-            
             for i, record in enumerate(api_records):
                 try:
-                    # Handle special case where API data is simple strings (like user IDs)
                     if isinstance(record, str) and id_extraction_path in ['identity', 'self', '']:
                         extracted_ids.append(record)
                         continue
                     
-                    # Handle normal dictionary records with path navigation
                     if isinstance(record, dict):
                         extracted_values = self._extract_values_from_record(record, id_extraction_path)
                         extracted_ids.extend(extracted_values)
                     else:
-                        # For other data types, try to convert to string if it's a simple value
                         if id_extraction_path in ['identity', 'self', '']:
                             extracted_ids.append(str(record))
                 except Exception as e:
-                    logger.debug(f"[{correlation_id}] Failed to extract from record {i} using path '{id_extraction_path}': {e}")
+                    logger.debug(f"[{correlation_id}] Failed to extract from record {i}: {e}")
                     continue
             
             # Remove None values and duplicates
             user_ids = list(set([uid for uid in extracted_ids if uid is not None and uid != ""]))
-            logger.info(f"[{correlation_id}] Extracted {len(user_ids)} unique IDs from {len(api_data)} API records using path: {id_extraction_path}")
+            logger.info(f"[{correlation_id}] Extracted {len(user_ids)} unique IDs from {len(api_data)} API records")
             
             if not user_ids:
                 logger.warning(f"[{correlation_id}] No IDs extracted from API data using path: {id_extraction_path}")
-                logger.debug(f"[{correlation_id}] Sample API data structure: {api_records[:2] if api_records else 'No data'}")
                 return []
             
-            # Step 2.5: Create API DataFrame for potential JOIN operations with schema normalization
-            try:
-                # Normalize API data for consistent schema
-                normalized_api_records = []
-                for record in api_records:
-                    if isinstance(record, dict):
-                        normalized_record = {}
-                        for key, value in record.items():
-                            # Ensure consistent data types
-                            if value is None:
-                                normalized_record[key] = ""
-                            elif isinstance(value, (list, dict)):
-                                normalized_record[key] = str(value)  # Convert complex types to strings
-                            else:
-                                normalized_record[key] = value
-                        normalized_api_records.append(normalized_record)
-                    else:
-                        # Handle non-dict records
-                        normalized_api_records.append({'value': str(record)})
-                
-                # Check if all normalized records are empty or problematic
-                if not normalized_api_records:
-                    api_df = pl.DataFrame()
-                    # logger.debug(f"[{correlation_id}] Created empty API DataFrame: no records to normalize")
-                elif all(not record or (isinstance(record, dict) and not record) for record in normalized_api_records):
-                    api_df = pl.DataFrame()
-                    # logger.debug(f"[{correlation_id}] Created empty API DataFrame: all normalized records were empty")
-                else:
-                    try:
-                        api_df = pl.DataFrame(normalized_api_records, infer_schema_length=None)
-                        # logger.debug(f"[{correlation_id}] Created API DataFrame with schema normalization: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
-                    except Exception as e:
-                        logger.warning(f"[{correlation_id}] Could not create API DataFrame with full schema, trying with limited inference: {e}")
-                        try:
-                            # Try with limited schema inference to handle mixed types
-                            api_df = pl.DataFrame(normalized_api_records, infer_schema_length=100)
-                            # logger.debug(f"[{correlation_id}] Created API DataFrame with limited schema inference: {api_df.shape[0]} rows × {api_df.shape[1]} columns")
-                        except Exception as e2:
-                            logger.warning(f"[{correlation_id}] Could not create API DataFrame at all: {e2}")
-                            api_df = None
-            except Exception as e:
-                logger.warning(f"[{correlation_id}] Could not create API DataFrame: {e}")
-                api_df = None
+            # Execute Cypher query with parameter (not string replacement!)
+            cypher_template = polars_output.cypher_query_template
             
-            # Step 3: Execute SQL query with IN clause
-            sql_template = polars_output.sql_query_template
+            logger.debug(f"[{correlation_id}] Generated Cypher query template: {cypher_template}")
+            logger.debug(f"[{correlation_id}] Executing Cypher query with {len(user_ids)} IDs...")
             
-            # Format the IN clause with proper SQL escaping
-            id_placeholders = ', '.join([f"'{str(uid).replace(chr(39), chr(39) + chr(39))}'" for uid in user_ids])
-            sql_query = sql_template.replace('{user_ids}', id_placeholders)
+            # Import GraphDB sync operations and version manager
+            from src.core.okta.graph_db.sync_operations import GraphDBSyncOperations
+            from src.core.okta.graph_db.version_manager import get_version_manager
+            from src.config.settings import settings
             
-            # logger.debug(f"[{correlation_id}] Executing SQL query: {sql_query[:200]}...")
+            # Get current database path from version manager
+            version_manager = get_version_manager()
+            db_path = version_manager.get_current_db_path()
             
-            # Execute the SQL query
-            db_results = await self._execute_raw_sql_query(sql_query, correlation_id)
-            logger.info(f"[{correlation_id}] SQL query returned {len(db_results)} database records")
+            # Create GraphDB connection
+            graph_db = GraphDBSyncOperations(db_path=db_path)
+            
+            # Extract parameter names used in the query (e.g., $user_ids, $group_ids)
+            # Only pass the parameters that are actually referenced in the query
+            import re
+            used_param_names = set(re.findall(r'\$(\w+)', cypher_template))
+            
+            # Build parameters dict dynamically based on what the query uses
+            parameters = {param_name: user_ids for param_name in used_param_names}
+            
+            logger.debug(f"[{correlation_id}] Detected parameters in query: {list(parameters.keys())}")
+            
+            # Execute Cypher query with parameters (proper parameterization!)
+            result = graph_db.conn.execute(
+                cypher_template,
+                parameters=parameters
+            )
+            
+            # Convert result to Polars DataFrame then to list of dicts
+            results_df = result.get_as_pl()
+            
+            if results_df is not None and len(results_df) > 0:
+                db_results = results_df.to_dicts()
+            else:
+                db_results = []
+            
+            logger.info(f"[{correlation_id}] Cypher query returned {len(db_results)} GraphDB records")
             
             if not db_results:
-                logger.warning(f"[{correlation_id}] No database records found for extracted user IDs")
+                logger.warning(f"[{correlation_id}] No GraphDB records found for extracted IDs")
                 return []
             
-            # Step 4: Create database DataFrame - comprehensive NULL and schema handling
-            try:
-                # Clean and normalize database results
-                clean_results = []
-                for row in db_results:
-                    # Create a clean copy of the row
-                    clean_row = {}
-                    for key, value in row.items():
-                        # Handle NULL values
-                        if value is None:
-                            clean_row[key] = ""  # Convert NULL to empty string
-                        elif isinstance(value, (list, dict)):
-                            clean_row[key] = str(value)  # Convert complex types to strings
-                        else:
-                            clean_row[key] = value
-                    clean_results.append(clean_row)
-                
-                if clean_results:
-                    try:
-                        # Try creating DataFrame with full schema inference
-                        db_df = pl.DataFrame(clean_results, infer_schema_length=None)
-                        # logger.debug(f"[{correlation_id}] Created database DataFrame (cleaned {len(db_results)} rows): {db_df.shape[0]} rows × {db_df.shape[1]} columns")
-                    except Exception as e:
-                        logger.warning(f"[{correlation_id}] Full schema inference failed, trying limited: {e}")
-                        try:
-                            # Try with limited schema inference
-                            db_df = pl.DataFrame(clean_results, infer_schema_length=100)
-                            # logger.debug(f"[{correlation_id}] Created database DataFrame with limited schema inference: {db_df.shape[0]} rows × {db_df.shape[1]} columns")
-                        except Exception as e2:
-                            logger.error(f"[{correlation_id}] All DataFrame creation attempts failed: {e2}")
-                            # Fallback: return raw database results
-                            logger.warning(f"[{correlation_id}] Falling back to raw database results due to DataFrame creation error")
-                            return db_results
-                else:
-                    logger.warning(f"[{correlation_id}] No clean results after processing, returning raw data")
-                    return db_results
-            except Exception as e:
-                logger.error(f"[{correlation_id}] Unexpected error in database DataFrame processing: {e}")
-                # Fallback: return raw database results
-                logger.warning(f"[{correlation_id}] Falling back to raw database results due to unexpected error")
-                return db_results
-            
-            # Prepare API DataFrame with only needed fields
-            api_fields = polars_output.api_dataframe_fields
-            if api_fields and api_df is not None and not (len(api_records) > 0 and isinstance(api_records[0], str)):
-                # Only filter fields if we have structured data (not raw strings)
-                try:
-                    # Select only the specified fields from API data
-                    api_df_filtered = api_df.select(api_fields)
-                    logger.debug(f"[{correlation_id}] Filtered API DataFrame to {len(api_fields)} fields: {api_fields}")
-                except Exception as e:
-                    logger.warning(f"[{correlation_id}] Failed to filter API fields, using all: {e}")
-                    api_df_filtered = api_df
-            else:
-                api_df_filtered = api_df if api_df is not None else pl.DataFrame()
-            
-            # Handle JOIN based on data type
-            join_field = polars_output.join_field
-            logger.debug(f"[{correlation_id}] Joining on field: {join_field}")
-            
-            try:
-                # Since the SQL query already filtered by the extracted IDs,
-                # we can return the database results directly
-                # The API data was only used for ID extraction
-                result_data = db_results
-                logger.info(f"[{correlation_id}] SQL results already filtered by extracted IDs: {len(result_data)} records")
-                
-                return result_data
-                
-            except Exception as e:
-                logger.error(f"[{correlation_id}] Result processing failed: {e}")
-                return db_results  # Fallback to raw database results
+            # Return GraphDB results (already filtered by the query)
+            logger.info(f"[{correlation_id}] Cypher results already filtered by extracted IDs: {len(db_results)} records")
+            return db_results
             
         except Exception as e:
-            logger.error(f"[{correlation_id}] Polars-optimized workflow failed: {e}")
+            logger.error(f"[{correlation_id}] Cypher Polars-optimized workflow failed: {e}")
+            logger.exception(e)  # Full stack trace for debugging
             return []
 
     # Legacy methods removed - only Polars optimization supported
@@ -3836,14 +3541,19 @@ except Exception as e:
             # 1. Log the cancellation
             logger.warning(f"[{correlation_id}] EMERGENCY CLEANUP: Clearing DataFrames and stopping all operations")
             
-            # 2. Clear Polars DataFrames (memory cleanup)
-            if hasattr(self, 'polars_dataframes') and correlation_id in self.polars_dataframes:
-                del self.polars_dataframes[correlation_id]
-                logger.info(f"[{correlation_id}] Polars DataFrames cleared from memory")
+            # 2. Clear ALL Polars DataFrames (memory cleanup)
+            # Note: polars_dataframes is keyed by variable names like "api_data_step_1", not correlation_id
+            if hasattr(self, 'polars_dataframes'):
+                df_count = len(self.polars_dataframes)
+                self.polars_dataframes.clear()
+                logger.info(f"[{correlation_id}] Cleared {df_count} Polars DataFrames from memory")
             
-            # 3. Clear any stored data for this query (MEMORY OPTIMIZED)
+            # 3. Clear any stored metadata for this query (MEMORY OPTIMIZED)
             # Note: data_variables removed during memory optimization - using polars_dataframes only
-            self.step_metadata.clear()
+            if hasattr(self, 'step_metadata'):
+                meta_count = len(self.step_metadata)
+                self.step_metadata.clear()
+                logger.info(f"[{correlation_id}] Cleared {meta_count} step metadata entries")
             
             # 4. Remove from cancelled set
             self.cancelled_queries.discard(correlation_id)

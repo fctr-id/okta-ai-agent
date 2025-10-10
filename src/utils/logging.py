@@ -62,13 +62,14 @@ class SafeRotatingFileHandler(RotatingFileHandler):
                 super().doRollover()
                 return
             except PermissionError:
-                logging.getLogger(__name__).warning(
-                    "Log rotation skipped due to locked file (PermissionError). Continuing without rotating this cycle."  # noqa: E501
-                )
+                # Don't use logging here - it causes infinite recursion!
+                # Just print to stderr and continue
+                import sys
+                print("Log rotation skipped due to locked file (PermissionError).", file=sys.stderr)
             except Exception as e:  # noqa: BLE001
-                logging.getLogger(__name__).warning(
-                    f"Unexpected error during log rollover retry: {e}. Continuing without rotating."
-                )
+                # Don't use logging here - it causes infinite recursion!
+                import sys
+                print(f"Unexpected error during log rollover: {e}", file=sys.stderr)
 
 
 def _close_file_handler():

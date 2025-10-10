@@ -50,7 +50,7 @@ class PlanningDependencies:
     """Dependencies for the Planning Agent with dynamic context"""
     available_entities: List[str]
     entity_summary: Dict[str, Any]
-    sql_tables: Dict[str, Any]
+    graph_schema: str                   # GraphDB schema documentation (full text from get_graph_schema_description)
     flow_id: str = ""  # Correlation ID for flow tracking
     entities: Optional[Dict[str, Any]] = None  # New entity-grouped format
 
@@ -58,15 +58,15 @@ class ExecutionStep(BaseModel):
     """Individual execution step in the plan"""
     
     tool_name: str = Field(
-        description='Execution method: "sql", "api", or "special_tool"',
-        pattern=r'^(sql|api|special_tool)$'
+        description='Execution method: "cypher", "api", or "special_tool"',
+        pattern=r'^(cypher|api|special_tool)$'
     )
     entity: str = Field(
         description='The actual entity/table name (e.g., "users", "system_log", "groups")',
         min_length=1
     )
     operation: Optional[str] = Field(
-        description='Exact operation name for API steps, null for SQL steps',
+        description='Exact operation name for API steps, null for Cypher steps',
         default=None
     )
     parameters: Optional[Dict[str, Any]] = Field(
@@ -141,15 +141,8 @@ def load_system_prompt(deps: PlanningDependencies) -> str:
         
         entities_with_operations = "\n".join(entity_operations_text)
         
-        # Build SQL schema information
-        sql_table_names = list(deps.sql_tables.keys())
-        sql_schema_text = []
-        for table_name, table_info in deps.sql_tables.items():
-            columns = table_info.get('columns', [])
-            column_names = [col['name'] if isinstance(col, dict) else str(col) for col in columns]
-            sql_schema_text.append(f"  • {table_name}: columns=[{', '.join(column_names[:10])}{'...' if len(column_names) > 10 else ''}]")
-        
-        sql_schema_info = "\n".join(sql_schema_text)
+        # GraphDB schema is now a complete documentation string - use it directly
+        # No need to rebuild or parse it
         
         # Create complete dynamic section
         complete_section = f"""
@@ -157,11 +150,10 @@ def load_system_prompt(deps: PlanningDependencies) -> str:
 AVAILABLE ENTITIES AND OPERATIONS:
 {entities_with_operations}
 
-AVAILABLE SQL TABLES AND SCHEMAS:
-{sql_schema_info}
+AVAILABLE GRAPHDB SCHEMA:
+{deps.graph_schema}
 
-API ENTITIES: {deps.available_entities}
-SQL TABLES: {sql_table_names}"""
+API ENTITIES: {deps.available_entities}"""
         
         # Replace the placeholder section with dynamic content
         pattern = r"AVAILABLE ENTITIES AND OPERATIONS:.*?(?=\n\n[A-Z]|\Z)"
@@ -173,7 +165,7 @@ SQL TABLES: {sql_table_names}"""
             updated_prompt = base_prompt + f"\n{complete_section}"
             logger.debug(f"[{deps.flow_id}] Appended dynamic content to system prompt")
         
-        logger.debug(f"[{deps.flow_id}] System prompt built with {len(deps.available_entities)} entities, {len(deps.sql_tables)} SQL tables")
+        logger.debug(f"[{deps.flow_id}] System prompt built with {len(deps.available_entities)} entities, GraphDB schema: {len(deps.graph_schema)} characters")
         
         return updated_prompt
         
@@ -282,28 +274,8 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
             entity_operations = [f"{entity}_{op}" for op in operations[:8]]
             api_entities[entity] = {"operations": entity_operations}
     
-    # Build SQL tables in clean JSON format
-    sql_tables = {}
-    for table_name, table_info in deps.sql_tables.items():
-        columns = table_info.get('columns', [])
-        
-        # Show key columns for planning
-        key_columns = []
-        priority_cols = ['id', 'okta_id', 'name', 'email', 'login', 'status', 'user_okta_id', 'group_okta_id', 'application_okta_id']
-        
-        for col in columns:
-            col_name = col['name'] if isinstance(col, dict) else str(col)
-            if col_name in priority_cols or 'okta_id' in col_name.lower():
-                key_columns.append(col_name)
-        
-        # Add other important columns
-        for col in columns:
-            col_name = col['name'] if isinstance(col, dict) else str(col)
-            if col_name not in key_columns:
-                key_columns.append(col_name)
-        
-        # Simple clean format - just the columns list
-        sql_tables[table_name] = key_columns
+    # GraphDB schema is now passed as a complete documentation string
+    # No need to rebuild or parse it - use it directly in the context
     
     # Add parameter efficiency hints for planning decisions
     parameter_hints = {
@@ -333,15 +305,15 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
         "group_list_members": "INEFFICIENT - prefer expand=stats on group_list for counts instead of fetching all members"
     }
     
-    # Create context data with SQL tables, detailed API endpoints, and efficiency hints
+    # Create context data with GraphDB schema (as string), detailed API endpoints, and efficiency hints
     context_data = {
-        "sql_tables": sql_tables,
+        "graph_schema": deps.graph_schema,  # Full schema documentation string
         "api_endpoints": api_entities,  # Changed from api_entities to api_endpoints for clarity
         "parameter_efficiency_hints": parameter_hints
     }
     
     # Debug: Log final context structure
-    logger.debug(f"[{deps.flow_id}] Final planning context: {len(context_data['sql_tables'])} SQL tables, {len(context_data['api_endpoints'])} API entities")
+    logger.debug(f"[{deps.flow_id}] Final planning context: GraphDB schema {len(deps.graph_schema)} characters, {len(context_data['api_endpoints'])} API entities")
     for entity_name, entity_info in context_data['api_endpoints'].items():
         if 'endpoints' in entity_info:
             logger.debug(f"[{deps.flow_id}]   {entity_name}: {len(entity_info['endpoints'])} detailed endpoints")
@@ -392,13 +364,22 @@ def get_dynamic_instructions(ctx: RunContext[PlanningDependencies]) -> str:
                         result += ","
                     result += "\n"
             else:
-                # Standard formatting for other sections
-                for j, (sub_key, sub_value) in enumerate(value.items()):
-                    array_str = json.dumps(sub_value, separators=(', ', ': '))
-                    result += f'    "{sub_key}": {array_str}'
-                    if j < len(value) - 1:
-                        result += ","
-                    result += "\n"
+                # Handle string values (like graph_schema which is now full schema text)
+                if isinstance(value, str):
+                    # For string values, just include them as text
+                    escaped_value = value.replace('"', '\\"').replace('\n', '\\n')
+                    result += f'    "{escaped_value}"\n'
+                elif isinstance(value, dict):
+                    # Standard formatting for dictionary sections
+                    for j, (sub_key, sub_value) in enumerate(value.items()):
+                        array_str = json.dumps(sub_value, separators=(', ', ': '))
+                        result += f'    "{sub_key}": {array_str}'
+                        if j < len(value) - 1:
+                            result += ","
+                        result += "\n"
+                else:
+                    # For other types, use JSON dumps
+                    result += f'    {json.dumps(value)}\n'
             
             result += "  }"
             if i < len(data) - 1:
@@ -419,7 +400,7 @@ async def generate_execution_plan(
     query: str,
     available_entities: List[str],
     entity_summary: Dict[str, Any], 
-    sql_tables: Dict[str, Any],
+    graph_schema: str,
     flow_id: str
 ) -> Dict[str, Any]:
     """
@@ -429,7 +410,7 @@ async def generate_execution_plan(
         query: User query to plan for
         available_entities: List of available API entities
         entity_summary: Summary of entity operations and methods
-        sql_tables: Available SQL tables and schemas
+        graph_schema: GraphDB schema documentation (full text string)
         flow_id: Correlation ID for tracking
         
     Returns:
@@ -438,20 +419,20 @@ async def generate_execution_plan(
     logger.info(f"[{flow_id}] Planning Agent: Starting execution plan generation")
     logger.debug(f"[{flow_id}] Input query: {query}")
     logger.debug(f"[{flow_id}] Available entities: {len(available_entities)}")
-    logger.debug(f"[{flow_id}] SQL tables: {len(sql_tables)}")
+    logger.debug(f"[{flow_id}] GraphDB schema: {len(graph_schema)} characters")
     
     try:
         # Set up dependencies with current context
         deps = PlanningDependencies(
             available_entities=available_entities,
             entity_summary=entity_summary,
-            sql_tables=sql_tables,
+            graph_schema=graph_schema,
             flow_id=flow_id
         )
         
         # Debug: Log what we're about to send to the agent
         logger.info(f"[{flow_id}] About to call planning agent with query: {query}")
-        logger.debug(f"[{flow_id}] Dependencies: entities={len(available_entities)}, sql_tables={len(sql_tables)}")
+        logger.debug(f"[{flow_id}] Dependencies: entities={len(available_entities)}, graph_schema={len(graph_schema)} characters")
         
         # Debug: Capture and log the complete system prompt BEFORE calling the agent
         try:

@@ -47,7 +47,7 @@ class PrePlanDependencies:
     """Dependencies for the Pre-Planning Agent with dynamic context"""
     query: str
     entity_summary: Dict[str, Any]      # Entity summary for analysis
-    sql_tables: Dict[str, Any]          # SQL schema information
+    graph_schema: str                   # GraphDB schema documentation (full text from get_graph_schema_description)
     available_entities: Optional[List[str]] = None  # Available entity list
     entities: Optional[Dict[str, Any]] = None  # New entity-grouped format
     flow_id: str = ""
@@ -127,29 +127,29 @@ def get_preplan_dynamic_instructions(ctx: RunContext[PrePlanDependencies]) -> st
 
     return f"""
 
-CURRENT EXECUTION CONTEXT - HYBRID API + SQL DECISION MAKING:
+CURRENT EXECUTION CONTEXT - HYBRID API + GRAPHDB DECISION MAKING:
 
 API_ENTITIES:
 {json.dumps(api_entities, indent=2)}
 
-SQL_TABLES:
-{json.dumps(list(deps.sql_tables.keys()), indent=2)}
+GRAPHDB_SCHEMA:
+{deps.graph_schema}
 
 SELECTION CRITERIA FOR HYBRID APPROACH:
-- FIRST: Check if data exists in SQL tables - if YES, DO NOT select API entities for that data
-- ONLY select API entities for data NOT available in SQL or requiring real-time access
-- SQL tables contain: users, groups, applications, user_group_memberships, user_application_assignments, etc.
-- If ALL required data is in SQL tables, return EMPTY selected_entity_operations array
-- Be BROAD and INCLUSIVE in your API selection for qualifying data (data not in SQL)
+- FIRST: Check if data exists in GraphDB nodes/relationships - if YES, DO NOT select API entities for that data
+- ONLY select API entities for data NOT available in GraphDB or requiring real-time access
+- GraphDB schema above shows ALL available nodes, relationships, and properties
+- If ALL required data is in GraphDB nodes/relationships, return EMPTY selected_entity_operations array
+- Be BROAD and INCLUSIVE in your API selection for qualifying data (data not in GraphDB)
 - Include entity-operation pairs that might provide context or supporting data
-- NEVER select API entities if the same data is available in SQL tables
+- NEVER select API entities if the same data is available in GraphDB nodes/relationships
 - Focus on comprehensive coverage for API-only data rather than minimal selection
 """
 
 async def select_relevant_entities(
     query: str,
     entity_summary: Dict[str, Any],
-    sql_tables: Dict[str, Any],
+    graph_schema: str,
     flow_id: str,
     available_entities: Optional[List[str]] = None,
     entities: Optional[Dict[str, Any]] = None
@@ -160,7 +160,7 @@ async def select_relevant_entities(
     Args:
         query: User query to analyze
         entity_summary: Summary of entity operations and methods
-        sql_tables: Available SQL tables and schemas
+        graph_schema: GraphDB schema documentation (full text string)
         flow_id: Flow ID for tracking
         available_entities: Available entity list (optional)
         entities: Entity-grouped format (optional)
@@ -171,14 +171,23 @@ async def select_relevant_entities(
     logger.info(f"[{flow_id}] Pre-Planning Agent: Starting entity-operation selection")
     logger.debug(f"[{flow_id}] Input query: {query}")
     logger.debug(f"[{flow_id}] Available entities: {len(entity_summary)}")
-    logger.debug(f"[{flow_id}] SQL tables: {len(sql_tables)}")
+    logger.debug(f"[{flow_id}] GraphDB schema: {len(graph_schema)} characters")
+    logger.debug(f"[{flow_id}] GraphDB schema preview: {graph_schema[:500]}...")
+    
+    # Check if User node information is in schema
+    if 'User' in graph_schema and 'created_at' in graph_schema:
+        logger.info(f"[{flow_id}] ✓ GraphDB schema includes User node with created_at property")
+    elif 'User' in graph_schema:
+        logger.warning(f"[{flow_id}] GraphDB schema includes User node but created_at not found in text")
+    else:
+        logger.warning(f"[{flow_id}] GraphDB schema does not mention User node")
     
     try:
         # Set up dependencies with current context
         deps = PrePlanDependencies(
             query=query,
             entity_summary=entity_summary,
-            sql_tables=sql_tables,
+            graph_schema=graph_schema,
             available_entities=available_entities,
             entities=entities,
             flow_id=flow_id

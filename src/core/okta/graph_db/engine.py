@@ -76,12 +76,13 @@ class GraphDBOrchestrator:
         
         # Schema is automatically initialized when GraphDBSyncOperations connects
         
-    async def run_sync(self, auto_promote: bool = True) -> Dict[str, int]:
+    async def run_sync(self, auto_promote: bool = True, sync_id: Optional[int] = None) -> Dict[str, int]:
         """
         Run complete Okta → GraphDB sync operation
         
         Args:
             auto_promote: If True and using versioning, automatically promote staging after successful sync
+            sync_id: Optional existing sync record ID (if None, creates new record)
         
         Returns:
             Dict with entity counts: {'users': N, 'groups': N, 'apps': N, ...}
@@ -98,12 +99,17 @@ class GraphDBOrchestrator:
             self._metadata_initialized = True
             logger.info("Metadata database initialized")
         
-        # Create sync record in metadata database
-        self.sync_id = await self.meta_ops.create_sync_record(
-            tenant_id=self.tenant_id,
-            sync_type="graphdb"
-        )
-        logger.info(f"Created sync record ID: {self.sync_id}")
+        # Use existing sync_id or create new one
+        if sync_id is not None:
+            self.sync_id = sync_id
+            logger.info(f"Using existing sync record ID: {self.sync_id}")
+        else:
+            # Create sync record in metadata database
+            self.sync_id = await self.meta_ops.create_sync_record(
+                tenant_id=self.tenant_id,
+                sync_type="graphdb"
+            )
+            logger.info(f"Created sync record ID: {self.sync_id}")
         
         try:
             # Use OktaClientWrapper as async context manager
@@ -393,7 +399,14 @@ class GraphDBOrchestrator:
                 self.graph_db.sync_users(valid_batch, self.tenant_id)
                 self.user_sync_count += len(valid_batch)
                 
-                # Log progress every 50 users
+                # Update metadata after EVERY batch so frontend polling sees real-time progress
+                if self.sync_id:
+                    await self.meta_ops.update_sync_record(self.sync_id, {
+                        "users_count": self.user_sync_count,
+                        "progress_percentage": min(33 + int((self.user_sync_count / 500) * 40), 73)  # 33-73% for users phase
+                    })
+                
+                # Log progress every 50 users to avoid log spam
                 if self.user_sync_count % 50 == 0:
                     logger.info(f"Streamed {self.user_sync_count} users to GraphDB so far...")
         
