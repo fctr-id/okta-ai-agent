@@ -1037,8 +1037,8 @@ class ModernExecutionManager:
             schema_text = get_graph_schema_description()
             
             # Log the schema length to verify it's being loaded
-            logger.info(f"GraphDB schema description loaded: {len(schema_text)} characters")
-            logger.debug(f"GraphDB schema first 500 chars: {schema_text[:500]}")
+            #logger.info(f"GraphDB schema description loaded: {len(schema_text)} characters")
+            #logger.debug(f"GraphDB schema first 500 chars: {schema_text[:500]}")
             
             return schema_text
             
@@ -3348,6 +3348,9 @@ except Exception as e:
             List of dictionaries containing query results
         """
         logger.debug(f"[{correlation_id}] Executing Cypher query against GraphDB...")
+        
+        # Log the actual query for debugging
+        logger.info(f"[{correlation_id}] Generated Cypher query:\n{cypher_query}")
         
         # Safety check - Cypher validation already done in agent
         if not is_safe_cypher(cypher_query):
