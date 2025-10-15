@@ -18,11 +18,11 @@ Your RESPONSE MUST be in this format
 {
   "display_type": "table",
   "content": [
-    {"User Name": "John Doe", "Email": "john@example.com", "Groups": "Admin, Sales", "Applications": "Slack, Office365", "Roles": "Admin Role, User Role"},
-    {"User Name": "Jane Smith", "Email": "jane@example.com", "Groups": "Sales", "Applications": "Slack", "Roles": "User Role"}
+    {"User Name": "John Doe", "Email": "john@example.com", "Groups": "Admin, Sales", "Applications": "Slack, Office365"},
+    {"User Name": "Jane Smith", "Email": "jane@example.com", "Groups": "Sales", "Applications": "Slack"}
   ],
   "metadata": {
-    "execution_summary": "Retrieved 2 users with their group memberships, application assignments, and roles",
+    "execution_summary": "Retrieved 2 users with their group memberships and application assignments",
     "confidence_level": "High",
     "headers": [
       {"value": "User Name", "text": "User Name", "sortable": true},
@@ -30,13 +30,14 @@ Your RESPONSE MUST be in this format
       {"value": "Login", "text": "Login", "sortable": true},
       {"value": "Status", "text": "Status", "sortable": true},
       {"value": "Groups", "text": "Groups", "sortable": true},
-      {"value": "Applications", "text": "Applications", "sortable": true},
-      {"value": "Roles", "text": "Roles", "sortable": true}
+      {"value": "Applications", "text": "Applications", "sortable": true}
     ]
   },
   "processing_code": "python_code_here"
 }
 ```
+
+**CRITICAL: Only include columns for data that exists in the actual query results. Do NOT add columns (like "Roles") if that data was not requested or retrieved.**
 
 **YOUR FIRST CHARACTER MUST BE `{` AND YOUR LAST CHARACTER MUST BE `}`**
 

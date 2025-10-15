@@ -171,8 +171,8 @@ async def select_relevant_entities(
     logger.info(f"[{flow_id}] Pre-Planning Agent: Starting entity-operation selection")
     logger.debug(f"[{flow_id}] Input query: {query}")
     logger.debug(f"[{flow_id}] Available entities: {len(entity_summary)}")
-    logger.debug(f"[{flow_id}] GraphDB schema: {len(graph_schema)} characters")
-    logger.debug(f"[{flow_id}] GraphDB schema preview: {graph_schema[:500]}...")
+    #logger.debug(f"[{flow_id}] GraphDB schema: {len(graph_schema)} characters")
+    #logger.debug(f"[{flow_id}] GraphDB schema preview: {graph_schema[:500]}...")
     
     # Check if User node information is in schema
     if 'User' in graph_schema and 'created_at' in graph_schema:
