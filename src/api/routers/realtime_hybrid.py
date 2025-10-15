@@ -833,7 +833,13 @@ async def execute_plan_and_stream(
                         final_result_content = "Execution completed successfully"
             
             # Determine data source types used in execution
-            used_sql = any('SQL' in step_result.get('step_type', '').upper() for step_result in step_results)
+            # Check for database queries (SQL or Cypher/Kuzu)
+            used_sql = any(
+                'SQL' in step_result.get('step_type', '').upper() or 
+                'CYPHER' in step_result.get('step_type', '').upper() or
+                step_result.get('step_type', '').lower() == 'cypher'
+                for step_result in step_results
+            )
             used_api = any('API' in step_result.get('step_type', '').upper() for step_result in step_results)
             
             # Determine display mode for frontend (use data_source_type to match frontend expectation)
