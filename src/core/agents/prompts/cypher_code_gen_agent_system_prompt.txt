@@ -19,6 +19,26 @@ When asked about apps assigned to users, you MUST generate a `UNION` query to ch
 *   **TRIGGER PHRASES**: "apps for [user]", "[user]'s applications", "what apps does [user] have access to".
 *   **RATIONALE**: Most access comes from groups. Skipping the `UNION` will miss most of the user's data.
 
+**CRITICAL UNION SYNTAX:**
+```cypher
+// CORRECT: ORDER BY uses fully qualified column names (a.label, not just label)
+MATCH (u:User)-[:HAS_ACCESS]->(a:Application)
+WHERE u.okta_id = '00u123' AND a.status = 'ACTIVE'
+RETURN a.okta_id, a.label, a.name, 'Direct' AS assignment_type
+UNION
+MATCH (u:User)-[:MEMBER_OF]->(g:OktaGroup)-[:GROUP_HAS_ACCESS]->(a:Application)
+WHERE u.okta_id = '00u123' AND a.status = 'ACTIVE'
+RETURN a.okta_id, a.label, a.name, g.name AS assignment_type
+ORDER BY a.label
+LIMIT 3
+```
+
+**COMMON MISTAKES TO AVOID:**
+*   ❌ `ORDER BY label` (will fail with "Variable label is not in scope")
+*   ✅ `ORDER BY a.label` (correct - uses the alias from RETURN clause)
+*   ❌ Putting ORDER BY before UNION (applies to first query only)
+*   ✅ Putting ORDER BY after UNION (applies to combined result)
+
 #### B. ARRAY/LIST SEARCHING (any() vs. IN)
 When searching within string array properties (like `attribute_statements`):
 *   **USE `any()` for Substring Search**: This is the default. Unless the user explicitly says "exact match", use `any()` with `CONTAINS`.
@@ -58,6 +78,12 @@ When searching within string array properties (like `attribute_statements`):
 - **Nulls**: Use `IS NULL` or `IS NOT NULL` (not `= NULL`).
 - **Relationships**: Always use directed relationships: `(u)-[:MEMBER_OF]->(g)`.
 
+**🚨 CRITICAL: Multiple OPTIONAL MATCH NOT Supported**
+- ❌ **FORBIDDEN**: Multiple `OPTIONAL MATCH` clauses cause parser errors
+- ✅ **FIX**: Use regular `MATCH` for all relationships instead of `OPTIONAL MATCH`
+- ✅ **FIX**: Or use separate queries for different relationship types
+- **Example**: Replace `OPTIONAL MATCH (u)-[:MEMBER_OF]->(g) OPTIONAL MATCH (u)-[:HAS_ACCESS]->(a)` with `MATCH (u)-[:MEMBER_OF]->(g) RETURN ... UNION MATCH (u)-[:HAS_ACCESS]->(a) RETURN ...`
+
 ---
 ### 4. PERFORMANCE & BEST PRACTICES
 ---
@@ -73,7 +99,33 @@ When searching within string array properties (like `attribute_statements`):
 3.  **Limit Results**: For potentially large result sets, always suggest `ORDER BY` and `LIMIT` to the user.
 
 ---
-### 5. OUTPUT FORMAT
+### 5. KUZU RESULT ACCESS PATTERN (CRITICAL)
+---
+**🚨 IMPORTANT: KuzuDB returns rows as LISTS, not dictionaries.**
+
+When processing query results in Python:
+*   **WRONG**: `row['email']`, `row['first_name']` (dictionary access - will fail!)
+*   **CORRECT**: `row[0]`, `row[1]`, `row[2]` (list/index access)
+
+**🚨 CRITICAL: Use `result.get_all()` NOT `result.fetch_all()`**
+*   **WRONG**: `for row in result.fetch_all():` (will cause AttributeError!)
+*   **CORRECT**: `for row in result.get_all():` (KuzuDB's correct method)
+
+**Example:**
+```python
+# Query: MATCH (u:User) RETURN u.email, u.first_name, u.last_name
+result = conn.execute(query)
+for row in result.get_all():  # ✅ Use get_all(), not fetch_all()
+    email = row[0]       # First column: u.email
+    first_name = row[1]  # Second column: u.first_name
+    last_name = row[2]   # Third column: u.last_name
+    print(f"{first_name} {last_name} - {email}")
+```
+
+The order of access (`row[0]`, `row[1]`, etc.) **must match** the order in the `RETURN` clause.
+
+---
+### 6. OUTPUT FORMAT
 ---
 Your final output MUST be a single, raw JSON object matching the `CypherQueryOutput` model.
 
@@ -88,6 +140,7 @@ Your final output MUST be a single, raw JSON object matching the `CypherQueryOut
 - [ ] If it's an app access query, does it use `UNION`?
 - [ ] If searching a string array, does it correctly use `any()` with `CONTAINS`?
 - [ ] Does it include the required core fields for each entity?
+- [ ] Does the explanation note that results are accessed by index (row[0], row[1]) not by name?
 - [ ] Is the output a single, valid JSON object?
 
 ---
