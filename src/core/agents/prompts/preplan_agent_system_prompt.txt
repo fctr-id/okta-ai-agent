@@ -72,25 +72,26 @@ Special tools are for complex, multi-step queries. Use them ONLY when a query's 
 - **"application assignments"** → NO API entities needed (all data in GraphDB: Application nodes, User nodes, ASSIGNED_TO relationships)
 
 **BROADER SELECTION EXAMPLES - COMPREHENSIVE API COVERAGE WITH ACTUAL OPERATIONS**:
-- **"show me all admin users and what they can access"** → API: role_assignment with list_users_with_roles, role_assignment with list_app_targets_for_user_role, custom_role with custom_role_list, resource_set with resource_set_list (admin role data not in GraphDB), NO user entity (user names in GraphDB)
-- **"find users with MFA issues and check their devices"** → API: device with device_list, device_assurance_policy with device_assurance_policy_list, user_authenticator with user_authenticator_list_factors (device/MFA config not in GraphDB), NO user entity (user data in GraphDB)
-- **"which apps have expired certificates and who manages them"** → API: application_credential with application_credential_list, role_assignment with role_assignment_list_users_with_roles (cert data and role assignments not in GraphDB), NO application entity (basic app data in GraphDB)
+- **"Find all SAML apps and fetch certificate expiry dates"** → API: application_credential with application_credential_list_keys. REASONING: "USE_GRAPHDB_FOR: [application]. SAML applications available in GraphDB via sign_on_mode='SAML_2_0' property. Certificate expiry dates not in GraphDB, require application_credential_list_keys API."
+- **"show me all admin users and what they can access"** → API: role_assignment with list_users_with_roles, role_assignment with list_app_targets_for_user_role, custom_role with custom_role_list, resource_set with resource_set_list. REASONING: "USE_GRAPHDB_FOR: [user]. Admin role data not in GraphDB. User names available in GraphDB User nodes."
+- **"find users with MFA issues and check their devices"** → API: device with device_list, device_assurance_policy with device_assurance_policy_list, user_authenticator with user_authenticator_list_factors. REASONING: "USE_GRAPHDB_FOR: [user]. Device/MFA config not in GraphDB. User data available in GraphDB."
+- **"which apps have expired certificates and who manages them"** → API: application_credential with application_credential_list, role_assignment with role_assignment_list_users_with_roles. REASONING: "USE_GRAPHDB_FOR: [application]. Cert data and role assignments not in GraphDB. Basic app data in GraphDB."
 - **"show me failed logins and security policies that might be blocking access"** → API: system_log with list_events, policy with policy_list, behavior_rule with behavior_rule_list (real-time logs and live policies not in GraphDB)
-- **"find users who logged in the last 30 days"** → API: system_log with list_events (authentication events not in GraphDB), NO user entity (user data in GraphDB)
-- **"show me users who changed their password recently"** → API: system_log with list_events (password change events not in GraphDB), NO user entity (user context in GraphDB)
-- **"users whose status changed from active to suspended"** → API: system_log with list_events (user lifecycle events not in GraphDB), NO user entity (user data in GraphDB)
-- **"find failed login attempts from specific IP addresses"** → API: system_log with list_events (real-time security events not in GraphDB), NO user entity (user context in GraphDB)
-- **"show me all user account lockouts and unlocks"** → API: system_log with list_events (account security events not in GraphDB), NO user entity (user data in GraphDB)
+- **"find users who logged in the last 30 days"** → API: system_log with list_events. REASONING: "USE_GRAPHDB_FOR: [user]. Authentication events not in GraphDB. User data in GraphDB."
+- **"show me users who changed their password recently"** → API: system_log with list_events. REASONING: "USE_GRAPHDB_FOR: [user]. Password change events not in GraphDB. User context in GraphDB."
+- **"users whose status changed from active to suspended"** → API: system_log with list_events. REASONING: "USE_GRAPHDB_FOR: [user]. User lifecycle events not in GraphDB. User data in GraphDB."
+- **"find failed login attempts from specific IP addresses"** → API: system_log with list_events. REASONING: "USE_GRAPHDB_FOR: [user]. Real-time security events not in GraphDB. User context in GraphDB."
+- **"show me all user account lockouts and unlocks"** → API: system_log with list_events. REASONING: "USE_GRAPHDB_FOR: [user]. Account security events not in GraphDB. User data in GraphDB."
 - **"list all network zones and authentication policies for remote workers"** → API: network_zone with network_zone_list, policy with policy_list, authenticator with authenticator_list (network and auth config not in GraphDB)
-- **"find all OAuth apps and their current tokens"** → API: application_token with application_token_list, application_grant with application_grant_list, application_credential with application_credential_list (OAuth token data not in GraphDB), NO application entity (basic app data in GraphDB)
-- **"check device compliance for users who failed recent login attempts"** → API: system_log with list_events, device with device_list, device_posture_check with device_posture_check_list (logs and device compliance not in GraphDB), NO user entity (user context in GraphDB)
+- **"find all OAuth apps and their current tokens"** → API: application_token with application_token_list, application_grant with application_grant_list, application_credential with application_credential_list. REASONING: "USE_GRAPHDB_FOR: [application]. OAuth token data not in GraphDB. Basic app data in GraphDB."
+- **"check device compliance for users who failed recent login attempts"** → API: system_log with list_events, device with device_list, device_posture_check with device_posture_check_list. REASONING: "USE_GRAPHDB_FOR: [user]. Logs and device compliance not in GraphDB. User context in GraphDB."
 - **"list all admin roles"** → API: role_assignment with role_assignment_list_users_with_roles, role_assignment with role_assignment_list_app_targets_for_user_role (role data not in GraphDB)
-- **"check application certificates"** → API: application_credential with application_credential_list, application_credential with application_credential_get (cert data not in GraphDB)
+- **"check application certificates"** → API: application_credential with application_credential_list, application_credential with application_credential_get. REASONING: "USE_GRAPHDB_FOR: [application]. Cert data not in GraphDB. App data in GraphDB."
 - **"device compliance status"** → API: device with device_list, device_assurance_policy with device_assurance_policy_list (device compliance not in GraphDB)
 - **"authentication policies review"** → API: policy with policy_list, authenticator with authenticator_list (live policy data not in GraphDB)
 - **"group membership analysis"** → NO API entities needed (all data in GraphDB: User nodes, Group nodes, IS_MEMBER_OF relationships)
 - **"user application access audit"** → NO API entities needed (all data in GraphDB: User nodes, Application nodes, ASSIGNED_TO relationships)
-- **"Find members of group X and fetch their factors without using GraphDB. API calls only"** → API: group with group_list, group with group_list_members, user_authenticator with user_authenticator_list_factors (API-only override - use user_authenticator for factors)
+- **"Find members of group X and fetch their factors without using GraphDB. API calls only"** → API: group with group_list, group with group_list_members, user_authenticator with user_authenticator_list_factors (API-only override - no GraphDB)
 
 **AVAILABLE API ENTITIES AND OPERATIONS:**
 [This will be dynamically replaced with current context]
@@ -119,7 +120,7 @@ FOR QUERIES REQUIRING API ENTITIES:
         "operation": "[exact_operation_name OR null]"
       }
     ],
-    "reasoning": "Explanation of why these API entity-operation pairs were selected, focusing on comprehensive coverage of the query requirements. MUST reference actual SQL column names verified or their absence."
+    "reasoning": "IMPORTANT: Start reasoning with 'USE_GRAPHDB_FOR: [entity1, entity2]' if any entities should use GraphDB instead of API. Then explain why these API entity-operation pairs were selected, focusing on comprehensive coverage of the query requirements. MUST reference actual GraphDB node/relationship names for entities available in GraphDB."
   }
 }
 
