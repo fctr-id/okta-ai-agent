@@ -275,9 +275,7 @@ class EnhancedSecurityValidator:
         if url_pattern.startswith('/special-tools/'):
             # Special tools have their own validation rules
             pass
-        elif not url_pattern.startswith('/api/v1/'):
-            violations.append(f"Invalid API endpoint pattern: {url_pattern}")
-            risk_level = 'MEDIUM'
+        elif not (url_pattern.startswith('/api/v1/') or url_pattern.startswith('/oauth2/v1/')):
             violations.append(f"Invalid API endpoint pattern: {url_pattern}")
             risk_level = 'MEDIUM'
         
