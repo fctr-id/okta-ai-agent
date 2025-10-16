@@ -112,3 +112,5 @@ README_old.md
 docs/entity-specific-sync-filtering.md
 docs/GRAPHDB_MIGRATION_PLAN.md
 src/data/gemma_finetuning_examples.jsonl
+docs/Tako_ai_Architecture.md
+src/core/agents/prompts/one_react_agent_prompt_old.txt
