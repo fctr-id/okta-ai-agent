@@ -21,6 +21,58 @@ Generate secure, efficient Python code that follows these directives exactly.
 - **REQUIRED - Final variable**: Store final data in variable named `result_data`
 - **STRICTLY FORBIDDEN - No debug prints**: Remove any debug print statements
 
+### 2.5 USER INPUT HANDLING - FUZZY MATCHING FOR NAMES (CRITICAL)
+**ABSOLUTE RULE**: Users do NOT provide exact, case-sensitive names. You MUST use flexible/fuzzy matching.
+
+**WRONG - Exact matching (will fail most of the time):**
+```python
+# ❌ FORBIDDEN: Exact string comparison
+if role.get("label") == "Super Administrator":
+    return role
+```
+
+**CORRECT - Flexible matching strategies:**
+```python
+# ✅ Case-insensitive partial match (PREFERRED)
+user_input = "super administrator"  # What user typed
+role_label = role.get("label", "").lower()  # "super administrator" from API
+
+if user_input.lower() in role_label or role_label in user_input.lower():
+    return role
+
+# ✅ Alternative: Case-insensitive word-based match
+user_words = set(user_input.lower().split())
+label_words = set(role_label.split())
+if user_words & label_words:  # Any overlap in words
+    return role
+
+# ✅ Alternative: Case-insensitive startswith
+if role_label.startswith(user_input.lower()):
+    return role
+```
+
+**Common Scenarios:**
+- User says: `"super admin"` → Matches: `"Super Administrator"`, `"SUPER_ADMIN"`, `"superadmin"`
+- User says: `"sales team"` → Matches: `"Sales-Team"`, `"SalesTeam"`, `"Team Sales"`
+- User says: `"okta admin"` → Matches: `"Okta Administrators"`, `"okta-admins"`, `"OktaAdmin"`
+
+**Why This Matters:**
+- Okta entity names vary: `"Super Administrator"` vs `"SUPER_ADMIN"` vs `"super_admin"`
+- Users rarely know exact capitalization/spacing
+- Partial matches are more user-friendly than exact matches
+
+**Implementation Pattern:**
+```python
+def flexible_match(user_input: str, api_value: str) -> bool:
+    """Case-insensitive partial match for user-provided names."""
+    return user_input.lower() in api_value.lower() or api_value.lower() in user_input.lower()
+
+# Usage:
+for item in api_response:
+    if flexible_match("super admin", item.get("label", "")):
+        # Found it!
+```
+
 ### 3. DATA ACCESS PATTERNS
 **CRITICAL SECURITY RULE: NEVER use globals() or locals()! Variables are injected directly.**
 

@@ -34,6 +34,17 @@ You MUST generate only one SQL query. Do not use placeholders (`?`) - all values
 
 ### 3. QUERY CONSTRUCTION RULES
 
+*   **User Input Handling - Fuzzy Matching for Names (CRITICAL)**:
+    *   **ABSOLUTE RULE**: Users do NOT provide exact, case-sensitive names. You MUST use case-insensitive LIKE patterns.
+    *   **WRONG**: `WHERE group_name = 'sales team'` ❌ (will fail if actual name is "Sales-Team" or "SALES_TEAM")
+    *   **CORRECT**: `WHERE LOWER(group_name) LIKE LOWER('%sales%team%')` ✅ (matches "Sales-Team", "sales_team", "Team Sales")
+    *   **CORRECT**: `WHERE LOWER(group_name) LIKE LOWER('%sales%')` ✅ (broader match)
+    *   **Common Scenarios**:
+        - User says: `"super admin"` → Use: `WHERE LOWER(role_label) LIKE '%super%admin%'` (matches "Super Administrator", "SUPER_ADMIN")
+        - User says: `"okta admin"` → Use: `WHERE LOWER(group_name) LIKE '%okta%admin%'` (matches "Okta Administrators", "okta-admins")
+        - User says: `"john smith"` → Use: `WHERE LOWER(first_name) LIKE '%john%' AND LOWER(last_name) LIKE '%smith%'`
+    *   **Why This Matters**: Okta entity names vary in capitalization, spacing, and formatting. Users rarely know exact names.
+
 *   **Status Filtering**: 
     *   **Users**: Default to `status = 'ACTIVE'` unless user asks for "all users", "users of all statuses", or specific statuses.
     *   **Applications**: Default to `status = 'ACTIVE'` unless user asks for other statuses.
