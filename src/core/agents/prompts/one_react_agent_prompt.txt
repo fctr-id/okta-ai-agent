@@ -333,11 +333,35 @@ async def main():
         raise
     
     # --- FINAL OUTPUT ---
-    # 9. Format and print the final, human-readable output.
+    # 9. Save results to a CSV file in src/core/data/ directory.
+    #    Include timestamp in filename for easy tracking.
+    import csv
+    
+    output_dir = Path(__file__).parent.parent.parent / "core" / "data"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_filename = output_dir / f"results_{timestamp}.csv"
+    
+    # Write results to CSV file
+    with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
+        if all_results:
+            # Get field names from the first result
+            fieldnames = list(all_results[0].keys())
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            writer.writeheader()
+            writer.writerows(all_results)
+            
+            print(f"\nResults saved to: {csv_filename}")
+            print(f"Total records: {len(all_results)}")
+        else:
+            print("No results to save.")
+    
+    # Print summary to console
     print("=" * 80)
-    print("QUERY RESULTS")
+    print(f"QUERY RESULTS - {len(all_results)} records")
     print("=" * 80)
-    # [Your formatted output logic here]
     
     # --- CLEANUP ---
     # 10. Close the database connection.

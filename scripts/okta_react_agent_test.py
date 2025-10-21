@@ -202,8 +202,8 @@ async def run_react_test_and_save(query: str):
         timestamp = int(time.time())
         
         if result.complete_production_code:
-            # Save production code to src/data/testing folder
-            code_output_dir = project_root / "src" / "data" / "testing"
+            # Save production code to src/core/data folder
+            code_output_dir = project_root / "src" / "core" / "data"
             code_output_dir.mkdir(parents=True, exist_ok=True)
             code_output_file = code_output_dir / f"generated_code_{timestamp}.py"
             
@@ -211,37 +211,17 @@ async def run_react_test_and_save(query: str):
                 f.write(result.complete_production_code)
             
             print(f"💾 Generated code saved to: {code_output_file}")
-            print(f"   You can now run: python {code_output_file}")
+            print(f"\n▶️  To execute the script, run:")
+            print(f"   python {code_output_file}")
         else:
             print(f"⚠️ No production code generated - skipping code file creation")
             code_output_file = None
-        
-        # Save a summary metadata file (lightweight JSON)
-        metadata_output_dir = project_root / "src" / "data" / "testing"
-        metadata_output_dir.mkdir(parents=True, exist_ok=True)
-        metadata_file = metadata_output_dir / f"test_metadata_{timestamp}.json"
-        
-        test_metadata = {
-            "timestamp": timestamp,
-            "query": query,
-            "response_time": response_time,
-            "correlation_id": correlation_id,
-            "success": result.success,
-            "execution_plan": result.execution_plan,
-            "steps_taken": result.steps_taken,
-            "error": result.error,
-            "total_steps": len(result.steps_taken),
-            "code_file": str(code_output_file) if code_output_file else None
-        }
-        
-        with open(metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(test_metadata, f, indent=2, ensure_ascii=False, default=str)
-        
-        print(f"💾 Test metadata saved to: {metadata_file}")
         print()
         
         # Brief summary
-        print("📝 TEST SUMMARY:")
+        print("=" * 80)
+        print("📝 TEST SUMMARY")
+        print("=" * 80)
         print(f"Query: {query}")
         print(f"Status: {'✅ SUCCESS' if result.success else '❌ FAILED'}")
         print(f"Time taken: {response_time:.1f}s")
@@ -250,7 +230,11 @@ async def run_react_test_and_save(query: str):
         if code_output_file:
             print(f"Generated code: {code_output_file}")
         
-        return test_metadata
+        return {
+            "success": result.success,
+            "query": query,
+            "response_time": response_time
+        }
         
     except Exception as e:
         end_time = time.time()
@@ -268,28 +252,10 @@ async def run_react_test_and_save(query: str):
         print("Traceback:")
         print(traceback.format_exc())
         
-        # Save error metadata (lightweight)
-        timestamp = int(time.time())
-        metadata_output_dir = project_root / "src" / "data" / "testing"
-        metadata_output_dir.mkdir(parents=True, exist_ok=True)
-        metadata_file = metadata_output_dir / f"test_metadata_{timestamp}.json"
-        
-        test_metadata = {
-            "timestamp": timestamp,
-            "query": query,
-            "response_time": response_time,
-            "correlation_id": correlation_id,
+        return {
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }
-        
-        with open(metadata_file, 'w', encoding='utf-8') as f:
-            json.dump(test_metadata, f, indent=2, ensure_ascii=False, default=str)
-        
-        print(f"💾 Error metadata saved to: {metadata_file}")
-        
-        return test_metadata
 
 def main():
     if len(sys.argv) != 2:
