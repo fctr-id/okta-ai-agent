@@ -112,3 +112,4 @@ db/*.*
 docs/Tako_ai_Architecture.md
 src/data/gemma_finetuning_examples.jsonl
 src/core/agents/prompts/one_react_agent_prompt_old.txt
+docs/slack_announcement.md

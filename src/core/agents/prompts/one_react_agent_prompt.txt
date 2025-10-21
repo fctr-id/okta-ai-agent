@@ -43,7 +43,8 @@ These are hard constraints to prevent common failures. You MUST follow them.
 
 #### Rule 4: Be Efficient with Tool Calls
 - **Call Guidance Tools ONCE**: Fetch `get_sql_code_generation_prompt()` and `get_api_code_generation_prompt()` only once per task. Reference them from your scratchpad afterward.
-- **Fetch Endpoints Just-in-Time**: Only call `filter_endpoints_by_entities()` for an entity right when you need to make an API call for it. Do not pre-fetch.
+- **Use Dot Notation for Operations**: When calling `filter_endpoints_by_operations()`, use dot notation format: `"entity.operation"` (e.g., `["application_credential.list_keys", "user.list"]`). This fetches only the endpoints you need.
+- **Review Endpoint Notes BEFORE Coding**: After filtering endpoints, read the `notes` field carefully. If the notes indicate the endpoint won't efficiently answer the user's query, filter for a different specific operation instead of proceeding.
 
 #### Rule 5: Always Validate and Explain
 - **Explain Your Reasoning**: State your intent before each tool call.
@@ -203,6 +204,13 @@ Users Without MFA Enrolled: 3
 #### Complete Script Blueprint (CRITICAL - Use This Structure)
 Your final production script MUST follow this exact structure.
 
+**PERFORMANCE REQUIREMENTS:**
+- **Use `client.concurrent_limit`** for batch size (never hardcode batch sizes)
+- **Use `asyncio.gather()`** for concurrent API calls when fetching data for multiple entities
+- **Use progress tracking** (`start_entity_progress`, `update_entity_progress`, `complete_entity_progress`) for operations with known totals
+- **Use `entity_label` parameter** in `make_request()` for automatic error tracking
+- **Remove `max_results=3`** from all API calls in production code
+
 ```python
 #!/usr/bin/env python3
 """
@@ -273,21 +281,56 @@ async def main():
     
     # --- DATA PROCESSING & ORCHESTRATION ---
     # 8. Process database data and make API calls for any data gaps.
-    for row in rows:
-        # Access using row[0], row[1], etc. (tuple indices)
-        # Or convert to dict: dict(zip([col[0] for col in cursor.description], row))
-        entity_id = row[0]
+    
+    # IMPORTANT: For multiple API calls, use CONCURRENT BATCHING for performance
+    # Extract entity IDs from database results
+    entity_ids = [row[0] for row in rows]  # Adjust index based on your query
+    
+    # Use client.concurrent_limit for optimal batch size (respects rate limits)
+    concurrent_limit = client.concurrent_limit
+    all_results = []
+    
+    # Start progress tracking for percentage-based updates
+    client.start_entity_progress("entity_operations", len(entity_ids))
+    
+    processed_count = 0
+    try:
+        for i in range(0, len(entity_ids), concurrent_limit):
+            chunk = entity_ids[i:i + concurrent_limit]
+            
+            # Make concurrent API calls with entity_label for automatic error tracking
+            tasks = [
+                client.make_request(
+                    endpoint=f"/api/v1/users/{entity_id}/roles",
+                    method="GET",
+                    entity_label="entity_operations"  # Enables automatic error counting
+                ) for entity_id in chunk
+            ]
+            chunk_results = await asyncio.gather(*tasks)
+            
+            # Process results
+            for idx, response in enumerate(chunk_results):
+                if response["status"] == "success":
+                    all_results.append({
+                        'entity_id': chunk[idx],
+                        'data': response.get('data')
+                    })
+                processed_count += 1
+                
+                # Update progress (throttled automatically)
+                client.update_entity_progress("entity_operations", processed_count)
+            
+            # Small delay between chunks to respect rate limits
+            if i + concurrent_limit < len(entity_ids):
+                await asyncio.sleep(0.1)
         
-        # Make API calls if needed (remove max_results=3 for production).
-        # Always check the response status for error handling.
-        response = await client.make_request(
-            method="GET",
-            endpoint=f"/api/v1/users/{entity_id}/roles"
-        )
+        # Complete progress tracking
+        client.complete_entity_progress("entity_operations", success=True)
         
-        if response["status"] == "success":
-            # Process API response here
-            pass
+    except Exception as e:
+        # Complete with error if something goes wrong
+        client.complete_entity_progress("entity_operations", success=False)
+        raise
     
     # --- FINAL OUTPUT ---
     # 9. Format and print the final, human-readable output.
@@ -357,14 +400,31 @@ VALIDATION CHECKPOINT:
 
 #### Your Toolbox:
 - **Progress**: `log_progress()` - Keep users informed of your actions and reasoning
-- **Discovery**: `load_sql_schema()`, `load_comprehensive_api_endpoints()`, `filter_endpoints_by_entities()`
+- **Discovery**: `load_sql_schema()`, `load_comprehensive_api_endpoints()`, `filter_endpoints_by_operations()`
 - **Guidance (Call Once)**: `get_sql_code_generation_prompt()`, `get_api_code_generation_prompt()`
 - **Testing**: `execute_test_query()`
 
-#### Tool 3 Data Extraction:
-`filter_endpoints_by_entities()` returns nested structure. To pass endpoints to Tool 5:
+#### Tool 3 - Filtering Endpoints:
+`filter_endpoints_by_operations()` accepts operations in **dot notation format**: `"entity.operation"`
+
+**CORRECT** (dot notation):
 ```python
-endpoints = result["endpoint_based_entities"]["entity_name"]["endpoints"]
+filter_endpoints_by_operations(operation_names=["application_credential.list_keys", "application.list", "user.get"])
+```
+
+**ALSO WORKS** (plain operation name - matches any entity):
+```python
+filter_endpoints_by_operations(operation_names=["list_keys"])  # Matches application_credential.list_keys
+```
+
+**LEGACY FORMAT** (still supported but not recommended):
+```python
+filter_endpoints_by_operations(operation_names=["application_credential_list_keys"])  # Old compound format
+```
+
+Extract endpoints from result:
+```python
+endpoints = result["endpoints"]  # Returns list of matching endpoint objects
 ```
 
 ---

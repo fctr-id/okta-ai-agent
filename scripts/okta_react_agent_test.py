@@ -33,6 +33,43 @@ from src.core.agents.one_react_agent import execute_react_query, ReactAgentDepen
 from src.core.okta.client.base_okta_api_client import OktaAPIClient
 import sqlite3
 
+def check_database_health(db_path: Path) -> bool:
+    """
+    Check if the SQLite database exists and is populated with users.
+    
+    Args:
+        db_path: Path to the SQLite database file
+        
+    Returns:
+        bool: True if database exists and has users (>= 1), False otherwise
+    """
+    try:
+        if not db_path.exists():
+            print(f"⚠️ Database file not found: {db_path}")
+            return False
+        
+        # Check if database is accessible and has users
+        with sqlite3.connect(str(db_path), timeout=5) as conn:
+            cursor = conn.cursor()
+            
+            # Check if users table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cursor.fetchone():
+                print("⚠️ Users table not found in database")
+                return False
+            
+            # Check if users table has at least 1 record
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+            
+            print(f"✅ Database health check: Found {user_count} users in database")
+            return user_count >= 1
+            
+    except Exception as e:
+        print(f"⚠️ Database health check failed: {e}")
+        return False
+
+
 async def run_react_test_and_save(query: str):
     """Run the ReAct agent test and save results to file"""
     print(f"🚀 Running ReAct agent test with query: {query}")
@@ -48,12 +85,19 @@ async def run_react_test_and_save(query: str):
     print("Initializing SQLite database...")
     db_path = project_root / "sqlite_db" / "okta_sync.db"
     
-    if not db_path.exists():
-        print(f"⚠️ WARNING: SQLite database not found at {db_path}")
-        print("The agent will fall back to API-only mode")
-    else:
-        print(f"✅ Using SQLite database: {db_path}")
+    # Check database health
+    db_healthy = check_database_health(db_path)
     
+    # Modify query if database is not healthy (force API-only mode)
+    modified_query = query
+    if not db_healthy:
+        print("⚠️ Database unavailable or empty - forcing API-only mode")
+        modified_query = f"{query}. Do NOT use SQL and only use APIs"
+        print(f"📝 Modified query: {modified_query}")
+    else:
+        print("✅ Database is healthy - SQL and API modes both available")
+    
+    # Still establish connection for agent (even if DB is unhealthy, agent may need schema info)
     conn = sqlite3.connect(str(db_path))
     
     # Schema will be loaded on-demand by the agent via Tool 1
@@ -62,14 +106,14 @@ async def run_react_test_and_save(query: str):
     # Load API endpoints
     print("Loading API endpoints...")
     
-    # Load lightweight reference for Tool 2 (entity list)
-    lightweight_file = project_root / "src" / "data" / "schemas" / "lightweight_api_reference.json"
+    # Load lightweight reference for Tool 2 (minimal operations list)
+    lightweight_file = project_root / "src" / "data" / "schemas" / "lightweight_onereact.json"
     
     # Load full endpoint reference for Tool 3 (detailed endpoint info)
     full_endpoints_file = project_root / "src" / "data" / "schemas" / "Okta_API_entitity_endpoint_reference_GET_ONLY.json"
     
     try:
-        # Load lightweight reference (entity-operation mapping)
+        # Load lightweight reference (minimal operations list in dot notation)
         with open(lightweight_file, 'r', encoding='utf-8') as f:
             lightweight_data = json.load(f)
         
@@ -78,11 +122,11 @@ async def run_react_test_and_save(query: str):
             full_api_data = json.load(f)
             endpoints = full_api_data.get('endpoints', [])
         
-        print(f"✅ Loaded {len(lightweight_data.get('entities', {}))} entities from lightweight reference")
+        print(f"✅ Loaded {len(lightweight_data.get('operations', []))} operations from lightweight reference (dot notation)")
         print(f"✅ Loaded {len(endpoints)} full endpoint details")
     except Exception as e:
         print(f"⚠️ Warning loading endpoints: {e}")
-        lightweight_data = {"entities": {}}
+        lightweight_data = {"operations": [], "sql_tables": []}
         endpoints = []
     
     # Operation mapping is not needed for ReAct agent - it uses endpoints directly
@@ -96,11 +140,11 @@ async def run_react_test_and_save(query: str):
     deps = ReactAgentDependencies(
         correlation_id=correlation_id,
         endpoints=endpoints,  # Full endpoint details for Tool 3
-        lightweight_entities=lightweight_data.get('entities', {}),  # Lightweight entity list for Tool 2
+        lightweight_entities=lightweight_data,  # Minimal operations list for Tool 2 (new format)
         okta_client=okta_client,
         sqlite_connection=conn,
         operation_mapping=operation_mapping,
-        user_query=query
+        user_query=modified_query  # Use modified query with API-only instruction if DB is unhealthy
     )
     
     print()
@@ -110,7 +154,7 @@ async def run_react_test_and_save(query: str):
     
     # Execute query
     try:
-        result, usage = await execute_react_query(query, deps)
+        result, usage = await execute_react_query(modified_query, deps)
         
         end_time = time.time()
         response_time = end_time - start_time

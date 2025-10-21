@@ -35,6 +35,103 @@ except ImportError:
     model = os.getenv('LLM_MODEL', 'openai:gpt-4o-mini')
 
 # ============================================================================
+# Lightweight JSON Generation for One React Agent
+# ============================================================================
+
+def generate_lightweight_onereact_json(force_regenerate: bool = False) -> Dict[str, Any]:
+    """
+    Generate a minimal lightweight JSON structure for one_react_agent.
+    Uses simple dot notation: entity.operation (e.g., "application.list")
+    
+    This structure is optimized for small LLMs:
+    - Flat array of strings with dot notation
+    - No nested objects to parse
+    - Minimal token count
+    - Easy to filter by splitting on '.'
+    
+    Args:
+        force_regenerate: If True, regenerate even if file exists
+        
+    Returns:
+        Dict with 'operations' (list of strings) and 'sql_tables' (list of strings)
+    """
+    schemas_dir = Path("src/data/schemas")
+    lightweight_path = schemas_dir / "lightweight_onereact.json"
+    source_path = schemas_dir / "Okta_API_entitity_endpoint_reference_GET_ONLY.json"
+    
+    # Load existing file if it exists and regeneration not forced
+    if lightweight_path.exists() and not force_regenerate:
+        logger.info(f"Loading existing lightweight_onereact.json from {lightweight_path}")
+        try:
+            with open(lightweight_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load existing file: {e}. Regenerating...")
+    
+    # Generate new lightweight structure
+    logger.info("Generating new lightweight_onereact.json...")
+    
+    # Load source endpoint data
+    if not source_path.exists():
+        logger.error(f"Source file not found: {source_path}")
+        return {"operations": [], "sql_tables": []}
+    
+    try:
+        with open(source_path, 'r', encoding='utf-8') as f:
+            source_data = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load source file: {e}")
+        return {"operations": [], "sql_tables": []}
+    
+    # Extract operations in dot notation format
+    operations = []
+    seen_operations = set()  # Deduplicate
+    
+    endpoints = source_data.get('endpoints', [])
+    for endpoint in endpoints:
+        entity = endpoint.get('entity', '')
+        operation = endpoint.get('operation', '')
+        
+        if entity and operation:
+            # Create dot notation: entity.operation
+            op_string = f"{entity}.{operation}"
+            if op_string not in seen_operations:
+                operations.append(op_string)
+                seen_operations.add(op_string)
+    
+    # Sort for consistency
+    operations.sort()
+    
+    # SQL tables (from SQLite schema)
+    sql_tables = [
+        "applications",
+        "users",
+        "groups",
+        "group_memberships",
+        "application_users",
+        "application_groups",
+        "roles",
+        "user_roles"
+    ]
+    
+    # Create minimal structure
+    lightweight_data = {
+        "operations": operations,
+        "sql_tables": sql_tables
+    }
+    
+    # Save to file
+    try:
+        schemas_dir.mkdir(parents=True, exist_ok=True)
+        with open(lightweight_path, 'w', encoding='utf-8') as f:
+            json.dump(lightweight_data, f, indent=2)
+        logger.info(f"Generated lightweight_onereact.json with {len(operations)} operations")
+    except Exception as e:
+        logger.error(f"Failed to save lightweight_onereact.json: {e}")
+    
+    return lightweight_data
+
+# ============================================================================
 # Schema Helper Function
 # ============================================================================
 
@@ -445,6 +542,18 @@ class ReactAgentDependencies:
     operation_mapping: Dict[str, Any]
     user_query: str  # Original user query for context
     progress_callback: Optional[Any] = None  # Optional callback for progress updates
+    
+    # Circuit breaker counters for tool execution limits
+    sql_execution_count: int = 0
+    api_execution_count: int = 0
+    schema_load_count: int = 0
+    endpoint_filter_count: int = 0
+    
+    # Circuit breaker limits (configurable via environment variables)
+    MAX_SQL_EXECUTIONS: int = int(os.getenv('REACT_AGENT_MAX_SQL_EXECUTIONS', '5'))
+    MAX_API_EXECUTIONS: int = int(os.getenv('REACT_AGENT_MAX_API_EXECUTIONS', '20'))
+    MAX_SCHEMA_LOADS: int = int(os.getenv('REACT_AGENT_MAX_SCHEMA_LOADS', '3'))
+    MAX_ENDPOINT_FILTERS: int = int(os.getenv('REACT_AGENT_MAX_ENDPOINT_FILTERS', '10'))
 
 # ============================================================================
 # Structured Outputs
@@ -479,7 +588,17 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Complete schema description with tables, columns, indexes, and relationships
         """
-        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQLite schema on-demand")
+        # Circuit breaker check
+        if deps.schema_load_count >= deps.MAX_SCHEMA_LOADS:
+            logger.warning(f"[{deps.correlation_id}] Schema load circuit breaker triggered: {deps.schema_load_count}/{deps.MAX_SCHEMA_LOADS}")
+            return {
+                "status": "error",
+                "schema": "",
+                "error": f"⚠️ CIRCUIT BREAKER: Schema loaded {deps.schema_load_count} times (max: {deps.MAX_SCHEMA_LOADS}). You MUST call stop_execution() tool now with reason='Schema load limit exceeded' and a clear user message explaining the query couldn't be completed due to repeated schema loads."
+            }
+        
+        deps.schema_load_count += 1
+        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQLite schema on-demand (load #{deps.schema_load_count}/{deps.MAX_SCHEMA_LOADS})")
         
         try:
             # Generate the full schema description
@@ -505,110 +624,149 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
     async def load_comprehensive_api_endpoints() -> Dict[str, Any]:
         """
         Load lightweight summary of all API entities and operations.
-        Does NOT include full endpoint details (parameters, descriptions).
+        Returns operations in simple dot notation (e.g., "application.list", "user.get").
         
         Returns:
-            Dictionary with entity names, operation names, and counts
+            Dictionary with operations list (in entity.operation format)
         """
         logger.info(f"[{deps.correlation_id}] Tool 2: Loading comprehensive API endpoints (lightweight)")
         
-        # Use lightweight_entities directly instead of parsing endpoints
-        entities = deps.lightweight_entities
-        
-        # Add operation counts
-        result_entities = {}
-        for entity_name, entity_data in entities.items():
-            result_entities[entity_name] = {
-                'operations': entity_data.get('operations', []),
-                'methods': entity_data.get('methods', ['GET']),  # Default to GET if not specified
-                'operation_count': len(entity_data.get('operations', []))
+        # Handle both old format (entity-grouped dict) and new format (operations list)
+        if isinstance(deps.lightweight_entities, dict):
+            # Check if it's the new format with "operations" key
+            if 'operations' in deps.lightweight_entities:
+                # New minimal format: {"operations": ["entity.operation", ...], "sql_tables": [...]}
+                operations = deps.lightweight_entities.get('operations', [])
+                
+                # Group by entity for easier browsing
+                entities_grouped = {}
+                for op in operations:
+                    if '.' in op:
+                        entity, operation = op.split('.', 1)
+                        if entity not in entities_grouped:
+                            entities_grouped[entity] = []
+                        entities_grouped[entity].append(operation)
+                
+                result = {
+                    "operations": operations,  # Full list in dot notation
+                    "entities": entities_grouped,  # Grouped by entity for easier browsing
+                    "total_entities": len(entities_grouped),
+                    "total_operations": len(operations),
+                    "format": "dot_notation"
+                }
+            else:
+                # Old format: {"entity_name": {"operations": [...], "methods": [...]}}
+                result_entities = {}
+                for entity_name, entity_data in deps.lightweight_entities.items():
+                    result_entities[entity_name] = {
+                        'operations': entity_data.get('operations', []),
+                        'methods': entity_data.get('methods', ['GET']),
+                        'operation_count': len(entity_data.get('operations', []))
+                    }
+                
+                result = {
+                    "entities": result_entities,
+                    "total_entities": len(result_entities),
+                    "total_operations": sum(e['operation_count'] for e in result_entities.values()),
+                    "format": "entity_grouped"
+                }
+        else:
+            # Fallback for unexpected format
+            result = {
+                "entities": {},
+                "total_entities": 0,
+                "total_operations": 0,
+                "format": "unknown",
+                "error": "Unexpected lightweight_entities format"
             }
         
-        result = {
-            "entities": result_entities,
-            "total_entities": len(result_entities),
-            "total_operations": sum(e['operation_count'] for e in result_entities.values())
-        }
-        
-        logger.info(f"[{deps.correlation_id}] Loaded {result['total_entities']} entities with {result['total_operations']} operations")
+        logger.info(f"[{deps.correlation_id}] Loaded {result['total_entities']} entities with {result['total_operations']} operations (format: {result.get('format')})")
         
         return result
     
     # ========================================================================
-    # Tool 3: Filter Endpoints by Entities
+    # Tool 3: Filter Endpoints by Operations
     # ========================================================================
     
-    async def filter_endpoints_by_entities(
-        entity_names: List[str],
-        include_operations: Optional[List[str]] = None
+    async def filter_endpoints_by_operations(
+        operation_names: List[str]
     ) -> Dict[str, Any]:
         """
-        Get FULL detailed endpoint information for specified entities.
+        Get FULL detailed endpoint information for specific operations.
         
         Args:
-            entity_names: List of entity names to get details for
-            include_operations: Optional list of specific operations to include
+            operation_names: List of operation identifiers in one of these formats:
+                - Dot notation: "entity.operation" (e.g., "application_credential.list_keys")
+                - Plain operation: "operation" (e.g., "list_keys")
+                - Old compound format: "entity_operation" (e.g., "application_credential_list_keys")
         
         Returns:
-            Dictionary with full endpoint details for selected entities
+            Dictionary with full endpoint details for selected operations
         """
-        logger.info(f"[{deps.correlation_id}] Tool 3: Filtering endpoints for entities: {entity_names}")
+        # Circuit breaker check
+        if deps.endpoint_filter_count >= deps.MAX_ENDPOINT_FILTERS:
+            logger.warning(f"[{deps.correlation_id}] Endpoint filter circuit breaker triggered: {deps.endpoint_filter_count}/{deps.MAX_ENDPOINT_FILTERS}")
+            return {
+                "endpoints": [],
+                "total_endpoints_returned": 0,
+                "error": f"⚠️ CIRCUIT BREAKER: Endpoint filtering called {deps.endpoint_filter_count} times (max: {deps.MAX_ENDPOINT_FILTERS}). You MUST call stop_execution() tool now with reason='Endpoint filter limit exceeded' and a clear user message explaining the query couldn't be completed."
+            }
         
-        endpoint_based_entities = {}
-        filtered_entity_summary = {}
-        all_endpoints = []
+        deps.endpoint_filter_count += 1
+        logger.info(f"[{deps.correlation_id}] Tool 3: Filtering endpoints for operations: {operation_names} (call #{deps.endpoint_filter_count}/{deps.MAX_ENDPOINT_FILTERS})")
         
-        for entity_name in entity_names:
-            entity_lower = entity_name.lower()
-            entity_endpoints = []
+        selected_endpoints = []
+        
+        # Parse operation_names to extract entity and operation pairs
+        # Supports: "entity.operation", "operation", or "entity_operation"
+        search_pairs = []
+        for op_name in operation_names:
+            if '.' in op_name:
+                # Dot notation: "application_credential.list_keys"
+                parts = op_name.split('.', 1)
+                if len(parts) == 2:
+                    search_pairs.append((parts[0], parts[1]))
+            else:
+                # Plain operation or compound format - search by operation only
+                search_pairs.append((None, op_name))
+        
+        # Match endpoints by entity + operation
+        for endpoint in deps.endpoints:
+            endpoint_entity = endpoint.get('entity', '')
+            endpoint_operation = endpoint.get('operation', '')
             
-            # Get all endpoints for this entity
-            for endpoint in deps.endpoints:
-                if endpoint.get('entity', '').lower() == entity_lower:
-                    # Apply operation filter if provided
-                    if include_operations:
-                        endpoint_op = endpoint.get('operation', '')
-                        if endpoint_op not in include_operations:
-                            continue
-                    
-                    # Security validation
-                    from src.core.security import validate_api_endpoint
-                    security_result = validate_api_endpoint(endpoint)
-                    if security_result.is_valid:
-                        entity_endpoints.append(endpoint)
-                    else:
-                        logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
-            
-            if entity_endpoints:
-                # Store full endpoint details
-                endpoint_based_entities[entity_name] = {
-                    'endpoints': entity_endpoints
-                }
-                
-                # Build summary
-                filtered_entity_summary[entity_name] = {
-                    'operations': [],
-                    'methods': []
-                }
-                
-                for ep in entity_endpoints:
-                    operation = ep.get('operation', '')
-                    method = ep.get('method', 'GET')
-                    
-                    if operation and operation not in filtered_entity_summary[entity_name]['operations']:
-                        filtered_entity_summary[entity_name]['operations'].append(operation)
-                    if method and method not in filtered_entity_summary[entity_name]['methods']:
-                        filtered_entity_summary[entity_name]['methods'].append(method)
-                
-                all_endpoints.extend(entity_endpoints)
+            # Check if this endpoint matches any search pair
+            for search_entity, search_operation in search_pairs:
+                if search_entity:
+                    # Entity specified - must match both
+                    if endpoint_entity == search_entity and endpoint_operation == search_operation:
+                        # Security validation
+                        from src.core.security import validate_api_endpoint
+                        security_result = validate_api_endpoint(endpoint)
+                        if security_result.is_valid:
+                            selected_endpoints.append(endpoint)
+                        else:
+                            logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
+                        break  # Found match, move to next endpoint
+                else:
+                    # No entity specified - match by operation only
+                    if endpoint_operation == search_operation:
+                        # Security validation
+                        from src.core.security import validate_api_endpoint
+                        security_result = validate_api_endpoint(endpoint)
+                        if security_result.is_valid:
+                            selected_endpoints.append(endpoint)
+                        else:
+                            logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
+                        break  # Found match, move to next endpoint
         
         result = {
-            "endpoint_based_entities": endpoint_based_entities,
-            "filtered_entity_summary": filtered_entity_summary,
-            "total_endpoints_returned": len(all_endpoints)
+            "endpoints": selected_endpoints,
+            "total_endpoints_returned": len(selected_endpoints),
+            "operations_found": [f"{ep.get('entity')}.{ep.get('operation')}" for ep in selected_endpoints]
         }
         
-        logger.info(f"[{deps.correlation_id}] Filtered to {len(all_endpoints)} endpoints for {len(entity_names)} entities")
+        logger.info(f"[{deps.correlation_id}] Found {len(selected_endpoints)} endpoints for {len(operation_names)} operation queries")
         
         return result
     
@@ -740,7 +898,34 @@ Rules:
         Returns:
             Dictionary with execution results and metadata
         """
-        logger.info(f"[{deps.correlation_id}] Tool 6: Executing test query (type: {code_type})")
+        # Circuit breaker checks BEFORE execution
+        if code_type == "sql":
+            if deps.sql_execution_count >= deps.MAX_SQL_EXECUTIONS:
+                logger.warning(f"[{deps.correlation_id}] SQL circuit breaker triggered: {deps.sql_execution_count}/{deps.MAX_SQL_EXECUTIONS}")
+                return {
+                    "success": False,
+                    "sample_results": None,
+                    "total_records": 0,
+                    "execution_time_ms": 0,
+                    "columns": [],
+                    "error": f"⚠️ CIRCUIT BREAKER: {deps.sql_execution_count} SQL queries attempted (max: {deps.MAX_SQL_EXECUTIONS}). You MUST call stop_execution() tool now with reason='SQL execution limit exceeded' and user_message='Unable to find an answer to your query after {deps.sql_execution_count} SQL attempts. The data may not be available in the database, or the query is too complex. Please try rephrasing or breaking it into smaller parts.'"
+                }
+            deps.sql_execution_count += 1
+            logger.info(f"[{deps.correlation_id}] Tool 6: Executing SQL test query (execution #{deps.sql_execution_count}/{deps.MAX_SQL_EXECUTIONS})")
+            
+        elif code_type == "python_sdk":
+            if deps.api_execution_count >= deps.MAX_API_EXECUTIONS:
+                logger.warning(f"[{deps.correlation_id}] API circuit breaker triggered: {deps.api_execution_count}/{deps.MAX_API_EXECUTIONS}")
+                return {
+                    "success": False,
+                    "sample_results": None,
+                    "total_records": 0,
+                    "execution_time_ms": 0,
+                    "columns": [],
+                    "error": f"⚠️ CIRCUIT BREAKER: {deps.api_execution_count} API calls attempted (max: {deps.MAX_API_EXECUTIONS}). You MUST call stop_execution() tool now with reason='API execution limit exceeded' and user_message='Unable to find an answer to your query after {deps.api_execution_count} API attempts. The required data may not be accessible via the API, or the query is too complex. Please try rephrasing or breaking it into smaller parts.'"
+                }
+            deps.api_execution_count += 1
+            logger.info(f"[{deps.correlation_id}] Tool 6: Executing API test query (execution #{deps.api_execution_count}/{deps.MAX_API_EXECUTIONS})")
         
         # Log the generated code for debugging
         logger.debug(f"[{deps.correlation_id}] Generated code to execute:\n{code}")
@@ -788,15 +973,18 @@ Rules:
                 }
             
             elif code_type == "python_sdk":
-                # VALIDATION: Check for max_results=3 in Python SDK code
-                if "max_results=3" not in code and "max_results = 3" not in code:
+                # VALIDATION: Check for max_results=3 or less in Python SDK code
+                # Accept max_results=1, max_results=2, or max_results=3
+                import re
+                max_results_pattern = r'max_results\s*=\s*([123])\b'
+                if not re.search(max_results_pattern, code):
                     return {
                         "success": False,
                         "sample_results": None,
                         "total_records": 0,
                         "execution_time_ms": 0,
                         "columns": [],
-                        "error": "❌ VALIDATION FAILED: API code is missing 'max_results=3'. All test API calls MUST include 'max_results=3' in the client.make_request() call to prevent excessive API requests during testing. Please add 'max_results=3' to your API call and try again."
+                        "error": "❌ VALIDATION FAILED: API code is missing 'max_results=3' (or 1, 2). All test API calls MUST include 'max_results' with a value of 3 or less in the client.make_request() call to prevent excessive API requests during testing. Please add 'max_results=3' to your API call and try again."
                     }
                 
                 # Execute Python SDK code
@@ -967,14 +1155,69 @@ Rules:
             "original_test_code": test_code
         }
     
-    # Add all tools to the toolset (7 tools total)
-    toolset.tool(log_progress)  # Tool 7: Progress logging (NEW for UX)
-    toolset.tool(load_sql_schema)
-    toolset.tool(load_comprehensive_api_endpoints)
-    toolset.tool(filter_endpoints_by_entities)
-    toolset.tool(get_sql_code_generation_prompt)
-    toolset.tool(get_api_code_generation_prompt)
-    toolset.tool(execute_test_query)
+    # ========================================================================
+    # Tool 8: STOP Execution (NEW - for graceful termination)
+    # ========================================================================
+    
+    async def stop_execution(
+        reason: str,
+        user_message: str,
+        attempted_steps: List[str]
+    ) -> Dict[str, Any]:
+        """
+        STOP execution and return a final result when unable to proceed.
+        
+        Call this tool when you've hit a circuit breaker limit, exhausted all approaches,
+        or determined that the query cannot be answered with available data.
+        
+        This gracefully terminates the agent run and returns a clear message to the user.
+        
+        Args:
+            reason: Internal reason for stopping (e.g., "SQL circuit breaker hit", "Data not available")
+            user_message: Clear message to show the user explaining why we couldn't answer
+            attempted_steps: List of steps you tried before stopping
+        
+        Returns:
+            Stop signal that will terminate the agent
+        """
+        logger.warning(f"[{deps.correlation_id}] 🛑 STOP_EXECUTION called: {reason}")
+        logger.info(f"[{deps.correlation_id}] User message: {user_message}")
+        logger.info(f"[{deps.correlation_id}] Attempted steps: {attempted_steps}")
+        
+        # If progress callback is provided, send stop event to frontend
+        if hasattr(deps, 'progress_callback') and deps.progress_callback:
+            await deps.progress_callback({
+                "type": "agent_stopped",
+                "reason": reason,
+                "user_message": user_message,
+                "attempted_steps": attempted_steps,
+                "timestamp": time.time()
+            })
+        
+        return {
+            "stop": True,
+            "reason": reason,
+            "user_message": user_message,
+            "attempted_steps": attempted_steps,
+            "final_result": ExecutionResult(
+                success=False,
+                results=None,
+                execution_plan=f"Attempted: {', '.join(attempted_steps)}",
+                steps_taken=attempted_steps,
+                error=user_message,
+                complete_production_code=""
+            )
+        }
+    
+    # Add all tools to the toolset (8 tools total)
+    toolset.tool(log_progress)  # Tool 7: Progress logging
+    toolset.tool(stop_execution)  # Tool 8: Stop execution (NEW)
+    toolset.tool(load_sql_schema)  # Tool 1
+    toolset.tool(load_comprehensive_api_endpoints)  # Tool 2
+    toolset.tool(filter_endpoints_by_operations)  # Tool 3 (RENAMED from filter_endpoints_by_entities)
+    toolset.tool(get_sql_code_generation_prompt)  # Tool 4
+    toolset.tool(get_api_code_generation_prompt)  # Tool 5
+    toolset.tool(execute_test_query)  # Tool 6
     # Note: generate_production_code removed - agent synthesizes final script directly
     
     return toolset
