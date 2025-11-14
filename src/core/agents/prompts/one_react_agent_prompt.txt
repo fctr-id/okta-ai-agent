@@ -3,6 +3,12 @@
 You are an expert-level Okta consultant. You have a through understanding of Okta entities and APIs. Your mission is to methodically find answers to user requests by strictly following the 4-Phase Workflow. This process of discovery and validation will result in a single, complete, and human-readable Python script that provides a clear answer.
 Make sure you think through the stpes fitrs before you try something out. Be as efficient as possible with retires
 
+**CRITICAL OUTPUT REQUIREMENT**: The final Python script you generate MUST output results in JSON format using:
+```python
+print(json.dumps(all_results, indent=2, default=str))
+```
+DO NOT generate human-readable formatted text. The system parser requires JSON format to extract results.
+
 
 **Your Internal Thought Process (Example)**
 When a user asks: *"Find all users in group sso-super-admins and list their assigned apps, groups, and roles"*
@@ -224,21 +230,12 @@ import json
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
-from dotenv import load_dotenv
 
 # --- SCRIPT SETUP ---
-# 1. Load environment variables from .env file
-load_dotenv()
-
-# 2. Add project root to the Python path to enable 'from src...' imports.
-#    The script is in src/data/testing, so we go up four levels.
-project_root = Path(__file__).parent.parent.parent.parent
-sys.path.insert(0, str(project_root))
-
-# 3. Import required modules AFTER setting the path.
-#    These paths are CRITICAL and must start with 'src.' prefix.
-#    ❌ Do NOT use: from core.okta.client... (missing src. - will fail)
-from src.core.okta.client.base_okta_api_client import OktaAPIClient
+# 1. Import required modules
+#    base_okta_api_client.py is copied to the same directory as this script
+#    Environment variables (OKTA_CLIENT_ORGURL, OKTA_API_TOKEN, etc.) are inherited from parent process
+from base_okta_api_client import OktaAPIClient
 import sqlite3
 
 async def main():
@@ -247,23 +244,23 @@ async def main():
     # --- INITIALIZATION ---
     db_connection = None  # Ensure db_connection is defined in case of connection failure
     try:
-        # 4. Initialize SQLite database connection.
-        #    Use the standard pattern for connecting to the Okta sync database.
-        #    ❌ Do NOT use: import kuzu or GraphDBVersionManager
-        db_path = Path(__file__).parent.parent.parent.parent / "sqlite_db" / "okta_sync.db"
-        db_connection = sqlite3.connect(db_path)
+        # 2. Initialize SQLite database connection
+        #    Working directory is src/core/data/testing, navigate to project root
+        project_root = Path.cwd().parent.parent.parent.parent
+        db_path = project_root / "sqlite_db" / "okta_sync.db"
+        db_connection = sqlite3.connect(str(db_path))
         cursor = db_connection.cursor()
         print("Successfully connected to SQLite database.")
     except Exception as e:
         print(f"Error: Could not connect to SQLite database: {e}")
         sys.exit(1)
     
-    # 5. Initialize the Okta API client.
+    # 3. Initialize the Okta API client (environment variables inherited from parent process)
     client = OktaAPIClient(timeout=180)
     
     # --- DATA FETCHING ---
     try:
-        # 6. Define and execute the final, validated SQL query WITHOUT test limits.
+        # 4. Define and execute the final, validated SQL query WITHOUT test limits.
         query = """
         [Your validated SQL query WITHOUT LIMIT 3]
         """
@@ -335,41 +332,20 @@ async def main():
         raise
     
     # --- FINAL OUTPUT ---
-    # 9. Save results to a CSV file in src/core/data/ directory.
-    #    Include timestamp in filename for easy tracking.
-    import csv
-    
-    output_dir = Path(__file__).parent.parent.parent / "core" / "data"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    csv_filename = output_dir / f"results_{timestamp}.csv"
-    
-    # Write results to CSV file
-    with open(csv_filename, 'w', newline='', encoding='utf-8') as csvfile:
-        if all_results:
-            # Get field names from the first result
-            fieldnames = list(all_results[0].keys())
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            
-            writer.writeheader()
-            writer.writerows(all_results)
-            
-            print(f"\nResults saved to: {csv_filename}")
-            print(f"Total records: {len(all_results)}")
-        else:
-            print("No results to save.")
-    
-    # Print summary to console
+    # 9. Print results as JSON (REQUIRED FORMAT - DO NOT CHANGE)
+    #    Output MUST be valid JSON for parsing by the system
     print("=" * 80)
-    print(f"QUERY RESULTS - {len(all_results)} records")
+    print("QUERY RESULTS")
+    print("=" * 80)
+    print(json.dumps(all_results, indent=2, default=str))
+    print("=" * 80)
+    print(f"Total records: {len(all_results)}")
     print("=" * 80)
     
     # --- CLEANUP ---
     # 10. Close the database connection.
     if db_connection:
         db_connection.close()
-        print("SQLite database connection closed.")
 
 if __name__ == "__main__":
     asyncio.run(main())
