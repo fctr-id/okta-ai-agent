@@ -350,8 +350,8 @@ async def generate_api_code(
         # Log usage information in standardized format
         usage_info = result.usage()
         if usage_info:
-            input_tokens = getattr(usage_info, 'request_tokens', getattr(usage_info, 'input_tokens', 0))
-            output_tokens = getattr(usage_info, 'response_tokens', getattr(usage_info, 'output_tokens', 0))
+            input_tokens = getattr(usage_info, 'input_tokens', 0)
+            output_tokens = getattr(usage_info, 'output_tokens', 0)
             logger.info(f"[{correlation_id}] API code generation completed - {input_tokens} in, {output_tokens} out tokens")
         else:
             logger.info(f"[{correlation_id}] API code generation completed - no token usage available")

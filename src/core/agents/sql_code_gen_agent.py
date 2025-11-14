@@ -167,8 +167,8 @@ async def main():
             # Simple token usage reporting (keeping it minimal)
             if hasattr(result, 'usage') and result.usage():
                 usage = result.usage()
-                input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-                output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+                input_tokens = getattr(usage, 'input_tokens', 0)
+                output_tokens = getattr(usage, 'output_tokens', 0)
                 logger.info(f"[{flow_id}] SQL generation completed - {input_tokens} in, {output_tokens} out tokens")
                 print(f"Token Usage: {input_tokens} in, {output_tokens} out")
 
@@ -252,8 +252,8 @@ async def generate_sql_query_with_logging(question: str, tenant_id: str = "defau
         # Token usage reporting
         if hasattr(result, 'usage') and result.usage():
             usage = result.usage()
-            input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-            output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+            input_tokens = getattr(usage, 'input_tokens', 0)
+            output_tokens = getattr(usage, 'output_tokens', 0)
             logger.info(f"[{flow_id}] SQL generation completed - {input_tokens} in, {output_tokens} out tokens")
 
         return {

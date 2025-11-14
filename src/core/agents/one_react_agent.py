@@ -580,7 +580,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
     # Tool 1: Load SQLite Schema
     # ========================================================================
     
-    async def load_sql_schema() -> Dict[str, Any]:
+    async def load_sql_schema(ctx: RunContext[ReactAgentDependencies]) -> Dict[str, Any]:
         """
         Load SQLite database schema to understand what data is available in the database.
         Call this FIRST to see what tables, columns, and relationships exist.
@@ -621,7 +621,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
     # Tool 2: Load Comprehensive API Endpoints
     # ========================================================================
     
-    async def load_comprehensive_api_endpoints() -> Dict[str, Any]:
+    async def load_comprehensive_api_endpoints(ctx: RunContext[ReactAgentDependencies]) -> Dict[str, Any]:
         """
         Load lightweight summary of all API entities and operations.
         Returns operations in simple dot notation (e.g., "application.list", "user.get").
@@ -1332,7 +1332,7 @@ async def execute_react_query(
     # Log token usage (accumulated across all LLM calls)
     if result.usage():
         usage = result.usage()
-        logger.info(f"[{deps.correlation_id}] Token Usage: {usage.request_tokens} input, {usage.response_tokens} output, {usage.total_tokens} total (across {usage.requests} API calls)")
+        logger.info(f"[{deps.correlation_id}] Token Usage: {usage.input_tokens} input, {usage.output_tokens} output, {usage.total_tokens} total (across {usage.requests} API calls)")
     
     logger.info(f"[{deps.correlation_id}] ReAct agent completed: success={execution_result.success}")
     

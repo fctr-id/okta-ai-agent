@@ -501,8 +501,8 @@ async def generate_execution_plan(
         # Token usage tracking
         if hasattr(result, 'usage') and result.usage():
             usage = result.usage()
-            input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-            output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+            input_tokens = getattr(usage, 'input_tokens', 0)
+            output_tokens = getattr(usage, 'output_tokens', 0)
             logger.info(f"[{flow_id}] Planning completed - {input_tokens} in, {output_tokens} out tokens")
         
         return {
@@ -510,8 +510,8 @@ async def generate_execution_plan(
             'plan': result.output.plan.model_dump(),
             'confidence': result.output.confidence,
             'usage': {
-                'input_tokens': getattr(result.usage(), 'request_tokens', 0) if result.usage() else 0,
-                'output_tokens': getattr(result.usage(), 'response_tokens', 0) if result.usage() else 0,
+                'input_tokens': getattr(result.usage(), 'input_tokens', 0) if result.usage() else 0,
+                'output_tokens': getattr(result.usage(), 'output_tokens', 0) if result.usage() else 0,
                 'total_tokens': getattr(result.usage(), 'total_tokens', 0) if result.usage() else 0
             } if result.usage() else None
         }

@@ -53,15 +53,17 @@ These are hard constraints to prevent common failures. You MUST follow them.
 - **Do Not Output Raw JSON**: Never use raw JSON as the final human-readable output unless the user explicitly asks for it.
 - **Answer What Was Asked**: Your final script MUST retrieve ALL data points the user requested. When reviewing test results, check: "Did I get the specific data the user asked for?" If not, investigate alternative endpoints or data processing.
 
-#### Rule 6: Keep Users Informed
-- **Before major actions**: Call `log_progress(action="...", reasoning="...", status="starting")`
-- **After key completions**: Call `log_progress(action="...", reasoning="...", status="completed")`
-- **Use concise, generic statements** - avoid first-person ("I'll", "I need"). Use present participle or imperative form.
+#### Rule 6: Keep Users Informed with Numbered Steps
+- **Format**: Use "STEP N: Brief description" where N increments (STEP 1, STEP 2, STEP 3...)
+- **Call log_progress()**: Before major actions with `status="starting"`, after completions with `status="completed"`
+- **Keep concise and professional**: No first-person ("I'll", "I need"), use action-oriented language
 - **Examples**:
-  - BAD: `log_progress("Loading schema", "I need to understand available tables", "starting")`
-  - GOOD: `log_progress("Loading database schema", "Understanding available tables and columns", "starting")`
-  - BAD: `log_progress("Creating script", "Now I'll generate the final production script removing LIMIT 3", "starting")`
-  - GOOD: `log_progress("Creating production script", "Generating final code removing LIMIT 3 restriction", "starting")`
+  - GOOD: `log_progress("STEP 1: Load database schema", "Understanding available tables and columns", "starting")`
+  - GOOD: `log_progress("STEP 2: Search for target group", "Locating group in database", "starting")`
+  - GOOD: `log_progress("STEP 3: Fetch group members", "Retrieving users in target group", "starting")`
+  - GOOD: `log_progress("STEP 4: Fetch user applications", "Getting app assignments via API", "starting")`
+  - BAD: `log_progress("Phase 3d: Probe user roles endpoint", "...", "starting")` ❌ Uses "Phase"
+  - BAD: `log_progress("Loading schema", "I need to check tables", "starting")` ❌ No step number, uses "I"
 
 ---
 

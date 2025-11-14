@@ -176,8 +176,8 @@ async def run_react_test_and_save(query: str):
             print("=" * 80)
             print("🪙 TOKEN USAGE:")
             print("=" * 80)
-            print(f"Input tokens:  {usage.request_tokens:,}")
-            print(f"Output tokens: {usage.response_tokens:,}")
+            print(f"Input tokens:  {usage.input_tokens:,}")
+            print(f"Output tokens: {usage.output_tokens:,}")
             print(f"Total tokens:  {usage.total_tokens:,}")
             print(f"API requests:  {usage.requests}")
             print("=" * 80)
@@ -226,7 +226,7 @@ async def run_react_test_and_save(query: str):
         print(f"Status: {'✅ SUCCESS' if result.success else '❌ FAILED'}")
         print(f"Time taken: {response_time:.1f}s")
         if usage:
-            print(f"Token usage: {usage.request_tokens:,} input / {usage.response_tokens:,} output / {usage.total_tokens:,} total")
+            print(f"Token usage: {usage.input_tokens:,} input / {usage.output_tokens:,} output / {usage.total_tokens:,} total")
         if code_output_file:
             print(f"Generated code: {code_output_file}")
         

@@ -202,8 +202,8 @@ async def select_relevant_entities(
         # Token usage tracking
         if hasattr(result, 'usage') and result.usage():
             usage = result.usage()
-            input_tokens = getattr(usage, 'request_tokens', getattr(usage, 'input_tokens', 0))
-            output_tokens = getattr(usage, 'response_tokens', getattr(usage, 'output_tokens', 0))
+            input_tokens = getattr(usage, 'input_tokens', 0)
+            output_tokens = getattr(usage, 'output_tokens', 0)
             logger.info(f"[{flow_id}] Pre-planning completed - {input_tokens} in, {output_tokens} out tokens")
         
         return {
@@ -211,8 +211,8 @@ async def select_relevant_entities(
             'selected_entity_operations': selected_entity_operations,
             'reasoning': reasoning,
             'usage': {
-                'input_tokens': getattr(result.usage(), 'request_tokens', 0) if result.usage() else 0,
-                'output_tokens': getattr(result.usage(), 'response_tokens', 0) if result.usage() else 0,
+                'input_tokens': getattr(result.usage(), 'input_tokens', 0) if result.usage() else 0,
+                'output_tokens': getattr(result.usage(), 'output_tokens', 0) if result.usage() else 0,
                 'total_tokens': getattr(result.usage(), 'total_tokens', 0) if result.usage() else 0
             } if result.usage() else None
         }
