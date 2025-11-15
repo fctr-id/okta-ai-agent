@@ -17,6 +17,8 @@ declare module 'vue' {
     ExecutionDetailsPanel: typeof import('./src/components/ExecutionDetailsPanel.vue')['default']
     LoginView: typeof import('./src/components/views/LoginView.vue')['default']
     NotFoundView: typeof import('./src/components/views/NotFoundView.vue')['default']
+    ReactChatInterface: typeof import('./src/components/views/ReactChatInterface.vue')['default']
+    ReActThinkingSteps: typeof import('./src/components/messages/ReActThinkingSteps.vue')['default']
     RealtimeChatInterface: typeof import('./src/components/views/RealtimeChatInterface.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']

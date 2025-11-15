@@ -9,8 +9,7 @@ This agent follows the ReAct (Reasoning + Acting) pattern:
 4. Repeat until query is answered or max retries exceeded
 """
 
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai import Agent, RunContext, FunctionToolset
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Any, Optional, Literal
 from dataclasses import dataclass
@@ -542,6 +541,11 @@ class ReactAgentDependencies:
     operation_mapping: Dict[str, Any]
     user_query: str  # Original user query for context
     progress_callback: Optional[Any] = None  # Optional callback for progress updates
+    
+    # NEW: SSE streaming callbacks for real-time UI updates
+    step_start_callback: Optional[callable] = None  # Called when a discovery step starts
+    step_end_callback: Optional[callable] = None    # Called when a discovery step completes
+    step_tokens_callback: Optional[callable] = None # Called to report token usage per step
     
     # Circuit breaker counters for tool execution limits
     sql_execution_count: int = 0
@@ -1089,13 +1093,27 @@ Rules:
         logger.info(f"[{deps.correlation_id}] 🎯 {status.upper()}: {action}")
         logger.info(f"[{deps.correlation_id}] 💭 Reasoning: {reasoning}")
         
-        # If progress callback is provided, send event to frontend
+        # If progress callback is provided, send event to frontend (legacy)
         if hasattr(deps, 'progress_callback') and deps.progress_callback:
             await deps.progress_callback({
                 "type": "agent_progress",
                 "action": action,
                 "reasoning": reasoning,
                 "status": status,
+                "timestamp": time.time()
+            })
+        
+        # NEW: SSE streaming callbacks for real-time UI
+        if status == "starting" and hasattr(deps, 'step_start_callback') and deps.step_start_callback:
+            await deps.step_start_callback({
+                "title": action,
+                "text": reasoning,
+                "timestamp": time.time()
+            })
+        elif status == "completed" and hasattr(deps, 'step_end_callback') and deps.step_end_callback:
+            await deps.step_end_callback({
+                "title": action,
+                "text": reasoning,
                 "timestamp": time.time()
             })
         
@@ -1333,6 +1351,15 @@ async def execute_react_query(
     if result.usage():
         usage = result.usage()
         logger.info(f"[{deps.correlation_id}] Token Usage: {usage.input_tokens} input, {usage.output_tokens} output, {usage.total_tokens} total (across {usage.requests} API calls)")
+        
+        # NEW: Report token usage via SSE callback
+        if hasattr(deps, 'step_tokens_callback') and deps.step_tokens_callback:
+            await deps.step_tokens_callback({
+                "input_tokens": usage.input_tokens,
+                "output_tokens": usage.output_tokens,
+                "total_tokens": usage.total_tokens,
+                "requests": usage.requests
+            })
     
     logger.info(f"[{deps.correlation_id}] ReAct agent completed: success={execution_result.success}")
     

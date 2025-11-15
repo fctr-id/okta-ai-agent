@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
-from .routers import auth, sync, realtime_hybrid
+from .routers import auth, sync, realtime_hybrid, react_stream
 from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import AuthUser
@@ -127,6 +127,7 @@ app.add_middleware(
 app.include_router(auth.router) 
 app.include_router(sync.router, prefix="/api")
 app.include_router(realtime_hybrid.router, prefix="/api/realtime")
+app.include_router(react_stream.router, prefix="/api")  # ReAct agent streaming
 
 # Mount static files
 app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")

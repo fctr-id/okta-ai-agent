@@ -78,6 +78,9 @@ ALLOWED_MODULES: Set[str] = {
     'cryptography.x509',  # X.509 certificate handling
     'ssl',  # SSL/TLS certificate processing for SAML metadata
     
+    # Database
+    'sqlite3',  # For ReAct SQL mode database access
+    
     # HTTP and networking
     'aiohttp',
     
@@ -120,6 +123,10 @@ ALLOWED_PYTHON_METHODS = {
     
     # JSON methods
     'loads', 'dumps', 'load', 'dump', 'JSONDecodeError',
+    
+    # Database methods (sqlite3) - READ ONLY
+    'connect', 'cursor', 'execute', 'fetchall', 'fetchone', 'fetchmany',
+    'close', 'row_factory', 'Row',  # Removed: commit, rollback (no write operations)
     
     # Data structure operations
     'items', 'keys', 'values', 'get', 'append', 'extend', 'insert',

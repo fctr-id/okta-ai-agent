@@ -112,8 +112,9 @@
                         <!-- Token Usage -->
                         <div v-if="tokenUsage" class="token-usage">
                             <v-icon size="small">mdi-chip</v-icon>
-                            Tokens: {{ tokenUsage.total_tokens }} 
-                            ({{ tokenUsage.prompt_tokens }} in / {{ tokenUsage.completion_tokens }} out)
+                            Tokens: {{ tokenUsage.totalTokens }} 
+                            ({{ tokenUsage.inputTokens }} in / {{ tokenUsage.outputTokens }} out)
+                            • Requests: {{ tokenUsage.requests }}
                         </div>
                     </div>
                 </transition>

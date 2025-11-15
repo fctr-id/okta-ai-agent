@@ -28,7 +28,7 @@ from typing import Dict, Any, AsyncGenerator
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
@@ -153,7 +153,7 @@ async def stream_react_updates(
             detail="Not authorized to access this process"
         )
     
-    async def event_generator() -> AsyncGenerator[Dict[str, Any], None]:
+    async def event_generator() -> AsyncGenerator[str, None]:
         """Generate SSE events from ReAct execution"""
         try:
             # Update status
@@ -182,12 +182,12 @@ async def stream_react_updates(
                         "error": "Process cancelled by user",
                         "timestamp": time.time()
                     }
-                    yield f"event: ERROR\ndata: {json.dumps(error_data)}\n\n"
+                    yield f"data: {json.dumps(error_data)}\n\n"
                     break
                 
-                # Convert event to SSE format (string)
-                event_type = event.get("type", "message")
-                yield f"event: {event_type}\ndata: {json.dumps(event)}\n\n"
+                # Rename event_type to type for frontend routing
+                event["type"] = event.pop("event_type", "message")
+                yield f"data: {json.dumps(event)}\n\n"
                 
                 # Small delay to prevent overwhelming frontend
                 await asyncio.sleep(0.01)
@@ -205,13 +205,21 @@ async def stream_react_updates(
                 "error": str(e),
                 "timestamp": time.time()
             }
-            yield f"event: ERROR\ndata: {json.dumps(error_data)}\n\n"
+            yield f"data: {json.dumps(error_data)}\n\n"
         
         finally:
             # Cleanup after 5 minutes
             asyncio.create_task(_cleanup_process(process_id, delay=300))
     
-    return EventSourceResponse(event_generator())
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @router.post("/cancel")

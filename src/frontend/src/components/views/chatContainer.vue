@@ -1,7 +1,5 @@
 <template>
   <div class="chat-container">
-
-    
     <!-- Dynamically render chat interface based on mode -->
     <transition name="fade" mode="out-in">
       <component :is="currentChatComponent" />
@@ -10,14 +8,31 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import ChatInterfaceV2 from '@/components/ChatInterfaceV2.vue'
 import RealtimeChatInterface from '@/components/views/RealtimeChatInterface.vue'
 import { isRealtimeMode } from '@/state/chatMode.js'
 
-// Dynamically select component based on mode
+// Detect ReAct mode from URL parameter
+const urlParams = new URLSearchParams(window.location.search)
+const isReActMode = urlParams.get('mode') === 'react'
+
+// ChatInterfaceV2 handles ReAct mode internally based on ?mode=react URL parameter
+// ReAct mode takes precedence over realtime mode
 const currentChatComponent = computed(() => {
-  return isRealtimeMode.value ? RealtimeChatInterface : ChatInterfaceV2
+  // If ?mode=react is set, always use ChatInterfaceV2 (it will activate ReAct mode internally)
+  if (isReActMode) {
+    console.log('🚀 [ChatContainer] Loading ChatInterfaceV2 with ReAct mode')
+    return ChatInterfaceV2
+  }
+  // Otherwise, check isRealtimeMode for Tako Modern vs Tako Legacy
+  else if (isRealtimeMode.value) {
+    console.log('🤖 [ChatContainer] Loading RealtimeChatInterface (Tako Modern Execution)')
+    return RealtimeChatInterface
+  } else {
+    console.log('📊 [ChatContainer] Loading ChatInterfaceV2 (Tako Legacy mode)')
+    return ChatInterfaceV2
+  }
 })
 </script>
 

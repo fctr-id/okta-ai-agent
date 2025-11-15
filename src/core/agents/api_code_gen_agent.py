@@ -18,8 +18,7 @@ import sys
 import re
 from dataclasses import dataclass
 from pydantic import BaseModel, Field, ConfigDict
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai import Agent, RunContext, FunctionToolset
 
 from pydantic_ai.exceptions import ModelRetry, UnexpectedModelBehavior, UsageLimitExceeded
 from dotenv import load_dotenv
