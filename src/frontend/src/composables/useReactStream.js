@@ -90,22 +90,51 @@ export function useReactStream() {
             withCredentials: true
         })
         
-        // Handle different event types
-        eventSource.addEventListener('STEP-START', handleStepStart)
-        eventSource.addEventListener('STEP-END', handleStepEnd)
-        eventSource.addEventListener('STEP-PROGRESS', handleStepProgress)
-        eventSource.addEventListener('STEP-TOKENS', handleStepTokens)
-        eventSource.addEventListener('COMPLETE', handleComplete)
-        eventSource.addEventListener('ERROR', handleError)
-        
-        // Generic message handler
+        // Handle all messages with unified JSON format {type: "...", ...data}
         eventSource.onmessage = (event) => {
-            console.log('SSE message:', event.data)
+            try {
+                const data = JSON.parse(event.data)
+                
+                // Route messages based on the 'type' field in the data
+                switch (data.type) {
+                    case 'STEP-START':
+                        handleStepStart(data)
+                        break
+                    case 'STEP-END':
+                        handleStepEnd(data)
+                        break
+                    case 'STEP-PROGRESS':
+                        handleStepProgress(data)
+                        break
+                    case 'STEP-TOKENS':
+                        handleStepTokens(data)
+                        break
+                    case 'COMPLETE':
+                        handleComplete(data)
+                        break
+                    case 'ERROR':
+                        handleError(data)
+                        break
+                    default:
+                        console.log('[useReactStream] Unknown message type:', data.type)
+                        break
+                }
+            } catch (err) {
+                console.error('[useReactStream] Error parsing SSE message:', err, event.data)
+            }
         }
         
         eventSource.onerror = (err) => {
-            console.error('SSE error:', err)
-            error.value = 'Stream connection lost'
+            console.error('[useReactStream] SSE error:', err)
+            
+            // Only treat as error if we haven't completed successfully
+            if (isProcessing.value && !results.value) {
+                error.value = 'Stream connection lost'
+                isLoading.value = false
+                isProcessing.value = false
+            }
+            
+            // Close the stream (this is called when server closes connection normally too)
             closeStream()
         }
     }
@@ -113,8 +142,9 @@ export function useReactStream() {
     /**
      * Handle STEP-START event
      */
-    const handleStepStart = (event) => {
-        const data = JSON.parse(event.data)
+    const handleStepStart = (data) => {
+        console.log('[useReactStream] handleStepStart called')
+        console.log('[useReactStream] STEP-START data:', data)
         
         currentStep.value = data.title
         
@@ -126,13 +156,15 @@ export function useReactStream() {
             status: 'running',
             timestamp: new Date(data.timestamp * 1000).toLocaleTimeString()
         })
+        console.log('[useReactStream] discoverySteps updated:', discoverySteps.value)
     }
     
     /**
      * Handle STEP-END event
      */
-    const handleStepEnd = (event) => {
-        const data = JSON.parse(event.data)
+    const handleStepEnd = (data) => {
+        console.log('[useReactStream] handleStepEnd called')
+        console.log('[useReactStream] STEP-END data:', data)
         
         // Update last step status
         const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
@@ -147,9 +179,7 @@ export function useReactStream() {
     /**
      * Handle STEP-PROGRESS event (subprocess execution)
      */
-    const handleStepProgress = (event) => {
-        const data = JSON.parse(event.data)
-        
+    const handleStepProgress = (data) => {
         // Update current step with progress
         currentStep.value = `${data.entity}: ${data.current}/${data.total}`
         
@@ -167,8 +197,9 @@ export function useReactStream() {
     /**
      * Handle STEP-TOKENS event
      */
-    const handleStepTokens = (event) => {
-        const data = JSON.parse(event.data)
+    const handleStepTokens = (data) => {
+        console.log('[useReactStream] handleStepTokens called')
+        console.log('[useReactStream] STEP-TOKENS data:', data)
         
         tokenUsage.value = {
             inputTokens: data.input_tokens,
@@ -181,21 +212,46 @@ export function useReactStream() {
     /**
      * Handle COMPLETE event
      */
-    const handleComplete = (event) => {
-        const data = JSON.parse(event.data)
+    const handleComplete = (data) => {
+        console.log('[useReactStream] handleComplete called')
+        console.log('[useReactStream] COMPLETE data:', data)
+        console.log('[useReactStream] data.results:', data.results)
+        console.log('[useReactStream] data.results is array:', Array.isArray(data.results))
+        console.log('[useReactStream] data.results length:', data.results?.length)
+        console.log('[useReactStream] data.headers:', data.headers)
         
-        // Store results
+        // Mark last step as completed
+        if (discoverySteps.value.length > 0) {
+            const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
+            if (lastStep.status === 'running') {
+                lastStep.status = 'completed'
+            }
+        }
+        
+        // Store results with headers if provided
         if (data.results) {
             results.value = {
-                display_type: 'table', // or 'markdown', 'json'
-                content: data.results.results || [],
+                display_type: 'table',
+                content: data.results, // This is the array of results
                 metadata: {
-                    headers: [], // Would be extracted from results
                     isStreaming: false,
-                    execution_plan: data.results.execution_plan,
-                    steps_taken: data.results.steps_taken
+                    execution_plan: data.execution_plan,
+                    count: data.count
                 }
             }
+            
+            // Include headers if provided by backend
+            if (data.headers && Array.isArray(data.headers) && data.headers.length > 0) {
+                results.value.metadata.headers = data.headers
+                console.log('[useReactStream] Headers received from backend:', data.headers.length, 'columns')
+            }
+            
+            console.log('[useReactStream] Results stored:')
+            console.log('  - display_type:', results.value.display_type)
+            console.log('  - content:', results.value.content)
+            console.log('  - content is array:', Array.isArray(results.value.content))
+            console.log('  - content length:', results.value.content?.length)
+            console.log('  - metadata:', results.value.metadata)
         }
         
         isLoading.value = false
@@ -208,9 +264,7 @@ export function useReactStream() {
     /**
      * Handle ERROR event
      */
-    const handleError = (event) => {
-        const data = JSON.parse(event.data)
-        
+    const handleError = (data) => {
         error.value = data.error
         isLoading.value = false
         isProcessing.value = false

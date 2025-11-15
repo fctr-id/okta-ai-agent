@@ -87,6 +87,8 @@ const getStepIcon = (step) => {
 <style scoped>
 .react-thinking-steps {
     max-width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
 }
 
 .step-content {
@@ -98,4 +100,75 @@ const getStepIcon = (step) => {
     font-size: 14px;
     line-height: 1.5;
 }
+
+/* Animated icon for running status */
+:deep(.mdi-loading) {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* Status chip styling */
+:deep(.v-chip) {
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Timeline styling */
+:deep(.v-timeline) {
+    padding-top: 8px;
+}
+
+:deep(.v-timeline-item) {
+    padding-bottom: 16px;
+}
+
+:deep(.v-timeline-item:last-child) {
+    padding-bottom: 0;
+}
+
+/* Progress linear styling */
+:deep(.v-progress-linear) {
+    border-radius: 2px;
+}
+
+/* Card title styling */
+:deep(.v-card-title) {
+    background: linear-gradient(135deg, rgba(76, 100, 226, 0.05) 0%, rgba(125, 76, 226, 0.05) 100%);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    font-weight: 600;
+    padding: 16px 20px;
+}
+
+:deep(.v-card-text) {
+    padding: 20px;
+}
+
+/* Step color transitions */
+:deep(.v-timeline-item__dot) {
+    transition: all 0.3s ease;
+}
+
+/* Running step pulse animation */
+:deep(.v-timeline-item__dot[style*="primary"]) {
+    animation: pulse 2s ease infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(76, 100, 226, 0.4);
+    }
+    50% {
+        box-shadow: 0 0 0 8px rgba(76, 100, 226, 0);
+    }
+}
 </style>
+

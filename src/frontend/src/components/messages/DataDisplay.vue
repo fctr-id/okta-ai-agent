@@ -172,13 +172,13 @@ const isTextData = computed(() => {
 });
 
 const displayedItems = computed(() => {
-    // console.log('📋 DataDisplay: displayedItems computed called:', {
-    //     propsType: props.type,
-    //     contentIsArray: Array.isArray(props.content),
-    //     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
-    //     isStreamingValue: isStreaming.value,
-    //     lastDisplayedItemsLength: lastDisplayedItems.value?.length || 0
-    // });
+    console.log('📋 DataDisplay: displayedItems computed called:', {
+        propsType: props.type,
+        contentIsArray: Array.isArray(props.content),
+        contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
+        isStreamingValue: isStreaming.value,
+        lastDisplayedItemsLength: lastDisplayedItems.value?.length || 0
+    });
     
     if (props.type === MessageType.STREAM || props.type === MessageType.BATCH || props.type === MessageType.TABLE) {
         // Handle both direct array content and nested content structure
@@ -192,11 +192,11 @@ const displayedItems = computed(() => {
             items = props.content.content;
         }
         
-        // console.log('📋 DataDisplay: Table type processing:', {
-        //     itemsLength: items.length,
-        //     isStreaming: isStreaming.value,
-        //     lastDisplayedLength: lastDisplayedItems.value?.length || 0
-        // });
+        console.log('📋 DataDisplay: Table type processing:', {
+            itemsLength: items.length,
+            isStreaming: isStreaming.value,
+            lastDisplayedLength: lastDisplayedItems.value?.length || 0
+        });
         
         // Keep a reference to the last known items to prevent table disappearing
         if (items.length > 0) {
@@ -206,14 +206,14 @@ const displayedItems = computed(() => {
         // If items are empty but we were displaying items before and not streaming,
         // show the old items briefly to avoid flicker
         if (items.length === 0 && !isStreaming.value && lastDisplayedItems.value.length > 0) {
-            // console.log('📋 DataDisplay: Using fallback lastDisplayedItems');
+            console.log('📋 DataDisplay: Using fallback lastDisplayedItems');
             return lastDisplayedItems.value;
         }
         
-        // console.log('📋 DataDisplay: Returning', items.length, 'items');
+        console.log('📋 DataDisplay: Returning', items.length, 'items');
         return items;
     }
-    // console.log('📋 DataDisplay: Not a table type, returning empty array');
+    console.log('📋 DataDisplay: Not a table type, returning empty array');
     return [];
 });
 

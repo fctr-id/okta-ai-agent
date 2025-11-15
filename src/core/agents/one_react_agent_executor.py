@@ -150,7 +150,7 @@ class ReActAgentExecutor:
             """Called when agent starts a step"""
             self.state.current_step += 1
             event = {
-                "type": EventType.STEP_START,
+                "event_type": EventType.STEP_START,
                 "step": self.state.current_step,
                 "title": data.get("title", ""),
                 "text": data.get("text", ""),
@@ -161,7 +161,7 @@ class ReActAgentExecutor:
         async def on_step_end(data: Dict[str, Any]):
             """Called when agent completes a step"""
             event = {
-                "type": EventType.STEP_END,
+                "event_type": EventType.STEP_END,
                 "step": self.state.current_step,
                 "title": data.get("title", ""),
                 "text": data.get("text", ""),
@@ -172,7 +172,7 @@ class ReActAgentExecutor:
         async def on_tokens(data: Dict[str, Any]):
             """Called with token usage info"""
             event = {
-                "type": EventType.STEP_TOKENS,
+                "event_type": EventType.STEP_TOKENS,
                 "input_tokens": data.get("input_tokens", 0),
                 "output_tokens": data.get("output_tokens", 0),
                 "total_tokens": data.get("total_tokens", 0),
@@ -243,7 +243,7 @@ class ReActAgentExecutor:
         
         # Send validation start event
         yield {
-            "type": EventType.STEP_START,
+            "event_type": EventType.STEP_START,
             "step": "validation",
             "title": "Security Validation",
             "text": "Scanning generated code for security issues",
@@ -256,7 +256,7 @@ class ReActAgentExecutor:
         if not validation_result.is_valid:
             self.state.error = f"Security validation failed: {', '.join(validation_result.violations)}"
             yield {
-                "type": EventType.STEP_END,
+                "event_type": EventType.STEP_END,
                 "step": "validation",
                 "title": "Security Validation Failed",
                 "text": self.state.error,
@@ -268,7 +268,7 @@ class ReActAgentExecutor:
         self.state.validation_complete = True
         
         yield {
-            "type": EventType.STEP_END,
+            "event_type": EventType.STEP_END,
             "step": "validation",
             "title": "Security Validation Passed",
             "text": f"Code is safe to execute (risk level: {validation_result.risk_level})",
@@ -297,7 +297,7 @@ class ReActAgentExecutor:
         
         # Send execution start event
         yield {
-            "type": EventType.STEP_START,
+            "event_type": EventType.STEP_START,
             "step": "execution",
             "title": "Executing Code",
             "text": f"Running script: {Path(script_path).name}",
@@ -312,7 +312,7 @@ class ReActAgentExecutor:
             self.state.execution_complete = True
             
             yield {
-                "type": EventType.STEP_END,
+                "event_type": EventType.STEP_END,
                 "step": "execution",
                 "title": "Execution Complete",
                 "text": "Script executed successfully",
@@ -322,7 +322,7 @@ class ReActAgentExecutor:
         except Exception as e:
             self.state.error = f"Execution failed: {str(e)}"
             yield {
-                "type": EventType.STEP_END,
+                "event_type": EventType.STEP_END,
                 "step": "execution",
                 "title": "Execution Failed",
                 "text": self.state.error,
@@ -405,7 +405,7 @@ class ReActAgentExecutor:
                             
                             # Emit STEP-PROGRESS event
                             yield {
-                                "type": EventType.STEP_PROGRESS,
+                                "event_type": EventType.STEP_PROGRESS,
                                 "progress_type": progress_data.get("type", ""),
                                 "entity": progress_data.get("entity", ""),
                                 "current": progress_data.get("current", 0),
@@ -479,13 +479,17 @@ class ReActAgentExecutor:
     
     def _parse_script_output(self, stdout: str) -> Optional[Dict[str, Any]]:
         """
-        Parse JSON results from script stdout.
+        Parse JSON results from script stdout with Vuetify headers support.
         
         Expects script to print JSON between markers:
         ================================================================================
         QUERY RESULTS
         ================================================================================
-        [JSON array or object]
+        {
+          "data": [...],
+          "headers": [...],
+          "count": N
+        }
         ================================================================================
         """
         try:
@@ -506,12 +510,28 @@ class ReActAgentExecutor:
             
             if json_lines:
                 json_str = '\n'.join(json_lines)
-                results = json.loads(json_str)
+                parsed_output = json.loads(json_str)
                 
-                return {
-                    "data": results,
-                    "count": len(results) if isinstance(results, list) else 1
-                }
+                # Support both old format (array) and new format (object with data/headers)
+                if isinstance(parsed_output, list):
+                    # Old format: just an array - auto-generate headers
+                    return {
+                        "data": parsed_output,
+                        "count": len(parsed_output)
+                    }
+                elif isinstance(parsed_output, dict) and "data" in parsed_output:
+                    # New format: object with data, headers, count
+                    return {
+                        "data": parsed_output.get("data", []),
+                        "headers": parsed_output.get("headers", []),
+                        "count": parsed_output.get("count", len(parsed_output.get("data", [])))
+                    }
+                else:
+                    # Fallback: treat as single result
+                    return {
+                        "data": [parsed_output] if parsed_output else [],
+                        "count": 1 if parsed_output else 0
+                    }
         except Exception as e:
             logger.warning(f"[{self.correlation_id}] Failed to parse script output as JSON: {e}")
             # Return raw output if JSON parsing fails
@@ -523,22 +543,28 @@ class ReActAgentExecutor:
         return None
     
     def _create_complete_event(self) -> Dict[str, Any]:
-        """Create final completion event with results"""
+        """Create final completion event with results and headers"""
         results = self.state.final_results.get("script_output", {})
         
-        return {
-            "type": EventType.COMPLETE,
+        event = {
+            "event_type": EventType.COMPLETE,
             "success": True,
             "results": results.get("data", []),
             "count": results.get("count", 0),
             "execution_plan": self.state.final_results.get("execution_plan", ""),
             "timestamp": time.time()
         }
+        
+        # Include headers if present for Vuetify table
+        if "headers" in results:
+            event["headers"] = results["headers"]
+        
+        return event
     
     def _create_error_event(self, error: str) -> Dict[str, Any]:
         """Create error event"""
         return {
-            "type": EventType.ERROR,
+            "event_type": EventType.ERROR,
             "error": error,
             "timestamp": time.time()
         }
