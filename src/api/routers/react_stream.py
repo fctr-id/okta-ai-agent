@@ -187,6 +187,11 @@ async def stream_react_updates(
                 
                 # Rename event_type to type for frontend routing
                 event["type"] = event.pop("event_type", "message")
+                
+                # Log ERROR events for debugging
+                if event["type"] == "ERROR":
+                    logger.error(f"[{process_id}] Sending ERROR event to frontend: {event.get('error', 'Unknown error')}")
+                
                 yield f"data: {json.dumps(event)}\n\n"
                 
                 # Small delay to prevent overwhelming frontend
@@ -290,18 +295,32 @@ async def _create_react_dependencies(
     # Create Okta client (reads credentials from env)
     okta_client = OktaAPIClient()
     
-    # Load endpoints (lightweight)
-    endpoints = []  # Would load from API catalog
-    
-    # Load lightweight entities
-    lightweight_entities = {}  # Would load from SQLite
+    # Load API endpoints and lightweight operations
+    try:
+        # Load lightweight reference (minimal operations list in dot notation)
+        lightweight_file = Path("src/data/schemas/lightweight_onereact.json")
+        with open(lightweight_file, 'r', encoding='utf-8') as f:
+            lightweight_entities = json.load(f)
+        
+        # Load full endpoint details
+        full_endpoints_file = Path("src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json")
+        with open(full_endpoints_file, 'r', encoding='utf-8') as f:
+            full_api_data = json.load(f)
+            endpoints = full_api_data.get('endpoints', [])
+        
+        logger.info(f"[{correlation_id}] Loaded {len(lightweight_entities.get('operations', []))} operations from lightweight reference")
+        logger.info(f"[{correlation_id}] Loaded {len(endpoints)} full endpoint details")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Error loading endpoints: {e}")
+        lightweight_entities = {"operations": [], "sql_tables": []}
+        endpoints = []
     
     # Create SQLite connection using settings
     db_path = Path(settings.SQLITE_PATH)
     sqlite_conn = sqlite3.connect(str(db_path))
     
-    # Create operation mapping
-    operation_mapping = {}  # Would load from config
+    # Create operation mapping (not needed for ReAct agent)
+    operation_mapping = {}
     
     # Create dependencies
     deps = ReactAgentDependencies(

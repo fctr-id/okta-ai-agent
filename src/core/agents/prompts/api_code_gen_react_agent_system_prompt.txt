@@ -261,13 +261,29 @@ Before returning your code, perform this final check. This is your last chance t
 2.  **`max_results=3` Enforcement (CRITICAL)**
     - [ ] Does EVERY `client.make_request()` call in the function include `max_results=3`?
     - [ ] If not, add it. This is non-negotiable for testing.
-    - [ ]  You MUST always use 3 only. Using any more will fill up context window and make this fail
+    - [ ] You MUST always use 3 only. Using any more will fill up context window and make this fail
 
-3.  **Code Structure**
+3.  **No Output Truncation (CRITICAL)**
+    - [ ] When creating comma-separated strings from lists (e.g., group names, app names), do NOT truncate with `[:5]` or add `"..."` suffixes
+    - [ ] ALWAYS include ALL items: Use `", ".join(all_items)` NOT `", ".join(all_items[:5]) + "..."`
+    - [ ] The user needs complete data - truncation hides important information
+    
+    **Examples:**
+    - ❌ **WRONG** (truncated):
+    ```python
+    "group_names": ", ".join(group_names[:5]) + ("..." if len(group_names) > 5 else "")
+    ```
+    
+    - ✅ **CORRECT** (complete data):
+    ```python
+    "group_names": ", ".join(group_names)
+    ```
+
+4.  **Code Structure**
     - [ ] Is the entire output a single `async def` function definition?
     - [ ] Are there any forbidden patterns like `import`, `asyncio.run()`, or `print()`? (Should be NO).
 
-4.  **API Logic**
+5.  **API Logic**
     - [ ] Is the response handling pattern (Rule 3.2) used for every API call that returns data?
     - [ ] Are there any hardcoded IDs? (Should be NO - Rule 3.3).
 

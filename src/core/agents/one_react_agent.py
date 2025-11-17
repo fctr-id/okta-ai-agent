@@ -546,6 +546,7 @@ class ReactAgentDependencies:
     step_start_callback: Optional[callable] = None  # Called when a discovery step starts
     step_end_callback: Optional[callable] = None    # Called when a discovery step completes
     step_tokens_callback: Optional[callable] = None # Called to report token usage per step
+    tool_call_callback: Optional[callable] = None   # Called when a tool is invoked
     
     # Circuit breaker counters for tool execution limits
     sql_execution_count: int = 0
@@ -580,6 +581,17 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
     """Create function toolset with all 7 tools for the ReAct agent"""
     
     toolset = FunctionToolset()
+    
+    # Helper to notify frontend of tool calls
+    async def notify_tool_call(tool_name: str, tool_description: str):
+        """Send tool call notification via SSE callback"""
+        if hasattr(deps, 'tool_call_callback') and deps.tool_call_callback:
+            await deps.tool_call_callback({
+                "tool_name": tool_name,
+                "description": tool_description,
+                "timestamp": time.time()
+            })
+    
     # ========================================================================
     # Tool 1: Load SQLite Schema
     # ========================================================================
@@ -592,6 +604,9 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Complete schema description with tables, columns, indexes, and relationships
         """
+        # Notify frontend
+        await notify_tool_call("load_sql_schema", "Loading database schema")
+        
         # Circuit breaker check
         if deps.schema_load_count >= deps.MAX_SCHEMA_LOADS:
             logger.warning(f"[{deps.correlation_id}] Schema load circuit breaker triggered: {deps.schema_load_count}/{deps.MAX_SCHEMA_LOADS}")
@@ -633,6 +648,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Dictionary with operations list (in entity.operation format)
         """
+        await notify_tool_call("load_comprehensive_api_endpoints", "Loading API endpoints catalog")
         logger.info(f"[{deps.correlation_id}] Tool 2: Loading comprehensive API endpoints (lightweight)")
         
         # Handle both old format (entity-grouped dict) and new format (operations list)
@@ -707,6 +723,8 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Dictionary with full endpoint details for selected operations
         """
+        await notify_tool_call("filter_endpoints_by_operations", f"Getting details for {len(operation_names)} operations")
+        
         # Circuit breaker check
         if deps.endpoint_filter_count >= deps.MAX_ENDPOINT_FILTERS:
             logger.warning(f"[{deps.correlation_id}] Endpoint filter circuit breaker triggered: {deps.endpoint_filter_count}/{deps.MAX_ENDPOINT_FILTERS}")
@@ -793,6 +811,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Dictionary with code generation prompt and guidelines (schema already in system context)
         """
+        await notify_tool_call("get_sql_code_generation_prompt", "Getting SQL code generation guidance")
         logger.info(f"[{deps.correlation_id}] Tool 4: Getting SQL code generation prompt")
         
         # Load SQL generation prompt from file (ReAct agent specific)
@@ -824,7 +843,7 @@ Rules:
     
     async def get_api_code_generation_prompt(
         query_description: str,
-        endpoints: List[Dict[str, Any]],
+        endpoints: List[str],
         max_results: int = 3
     ) -> Dict[str, Any]:
         """
@@ -833,12 +852,13 @@ Rules:
         
         Args:
             query_description: Natural language description of what to fetch
-            endpoints: List of endpoint details to use
+            endpoints: List of operation names (e.g., ["group.list", "user.get"])
             max_results: Maximum number of records to return (default 3 for testing)
         
         Returns:
             Dictionary with code generation prompt and guidelines
         """
+        await notify_tool_call("get_api_code_generation_prompt", "Getting API code generation guidance")
         logger.info(f"[{deps.correlation_id}] Tool 5: Getting API code generation prompt")
         
         # Load API code generation prompt from file (ReAct agent specific)
@@ -861,7 +881,7 @@ Rules:
             "code_generation_prompt": api_prompt,
             "query_task": query_description,
             "max_results": max_results,
-            "available_endpoints": endpoints,
+            "target_operations": endpoints,  # Changed from available_endpoints - now just operation names
             "okta_client_available": "YES - Variable 'client' is pre-injected (see prompt for details)"
         }
     
@@ -902,6 +922,8 @@ Rules:
         Returns:
             Dictionary with execution results and metadata
         """
+        await notify_tool_call("execute_test_query", f"Executing {code_type} test query")
+        
         # Circuit breaker checks BEFORE execution
         if code_type == "sql":
             if deps.sql_execution_count >= deps.MAX_SQL_EXECUTIONS:
