@@ -101,3 +101,16 @@ sqlite_db/
 src/backend/certs/
 
 wiki.md
+
+# Generated data and scripts (keep templates only)
+src/core/data/generated_code_*.py
+src/core/data/*.csv
+src/core/data/sso_super_admins_*.csv
+src/core/data/saml_certificates_*.csv
+
+# Test scripts (keep core tests only)
+scripts/test_*.py
+
+# Experimental prompt variants (keep main prompts only)
+src/core/agents/prompts/*_new.txt
+src/core/agents/prompts/*_old.txt

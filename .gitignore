@@ -113,3 +113,22 @@ docs/Tako_ai_Architecture.md
 src/data/gemma_finetuning_examples.jsonl
 src/core/agents/prompts/one_react_agent_prompt_old.txt
 docs/slack_announcement.md
+
+# Generated data and scripts (keep templates only)
+src/core/data/generated_code_*.py
+src/core/data/*.csv
+src/core/data/sso_super_admins_*.csv
+src/core/data/saml_certificates_*.csv
+
+# Documentation that's not critical for version control
+docs/*_reference.md
+docs/*_implementation_*.md
+docs/postman_*.md
+docs/*_capabilities_*.md
+
+# Test scripts (keep core tests only)
+scripts/test_*.py
+
+# Experimental prompt variants (keep main prompts only)
+src/core/agents/prompts/*_new.txt
+src/core/agents/prompts/*_old.txt
