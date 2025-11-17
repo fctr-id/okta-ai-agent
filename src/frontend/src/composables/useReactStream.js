@@ -21,6 +21,16 @@ export function useReactStream() {
     // Discovery state
     const currentStep = ref('')
     const discoverySteps = ref([])
+    const isDiscoveryComplete = ref(false)
+    
+    // Execution state
+    const validationStep = ref(null)
+    const executionStarted = ref(false)
+    const isExecuting = ref(false)
+    const executionMessage = ref('')
+    const executionProgress = ref(0)
+    const subprocessProgress = ref([])
+    const rateLimitWarning = ref(0) // Countdown in seconds
     
     // Results
     const results = ref(null)
@@ -38,6 +48,14 @@ export function useReactStream() {
         isLoading.value = true
         error.value = null
         discoverySteps.value = []
+        isDiscoveryComplete.value = false
+        validationStep.value = null
+        executionStarted.value = false
+        isExecuting.value = false
+        executionMessage.value = ''
+        executionProgress.value = 0
+        subprocessProgress.value = []
+        rateLimitWarning.value = 0
         results.value = null
         tokenUsage.value = null
         
@@ -103,7 +121,11 @@ export function useReactStream() {
                     case 'STEP-END':
                         handleStepEnd(data)
                         break
+                    case 'TOOL-CALL':
+                        handleToolCall(data)
+                        break
                     case 'STEP-PROGRESS':
+                        console.log('[useReactStream] STEP-PROGRESS event:', data)
                         handleStepProgress(data)
                         break
                     case 'STEP-TOKENS':
@@ -113,6 +135,7 @@ export function useReactStream() {
                         handleComplete(data)
                         break
                     case 'ERROR':
+                        console.log('[useReactStream] ERROR event received:', data)
                         handleError(data)
                         break
                     default:
@@ -148,14 +171,67 @@ export function useReactStream() {
         
         currentStep.value = data.title
         
-        // Add step to list
-        discoverySteps.value.push({
-            step: data.step || discoverySteps.value.length + 1,
-            title: data.title,
-            text: data.text,
-            status: 'running',
-            timestamp: new Date(data.timestamp * 1000).toLocaleTimeString()
-        })
+        // Mark previous step as complete when a new step starts
+        if (discoverySteps.value.length > 0) {
+            const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
+            if (lastStep.status === 'in-progress') {
+                lastStep.status = 'complete'
+                console.log('[useReactStream] Auto-completed previous step:', lastStep.title)
+            }
+        }
+        
+        // Check if this is a synthesis/execution phase
+        if (data.step === 'synthesis' || data.title.includes('Synthesize') || data.title.includes('Prepare final')) {
+            isDiscoveryComplete.value = true
+        }
+        
+        // Track validation phase
+        if (data.step === 'validation' || data.title.includes('Validat')) {
+            validationStep.value = {
+                status: 'in-progress',
+                message: data.title,
+                details: data.text
+            }
+        }
+        
+        // Track execution phase
+        if (data.step === 'execution' || data.title.includes('Execut')) {
+            executionStarted.value = true
+            isExecuting.value = true
+            executionMessage.value = data.title
+        }
+        
+        // Add step to discovery list (only if not execution/validation)
+        // Check title content instead of step field which may not exist
+        const isValidationOrExecution = 
+            data.title?.toLowerCase().includes('validat') || 
+            data.title?.toLowerCase().includes('execut') ||
+            data.title?.toLowerCase().includes('prepare final') ||
+            data.title?.toLowerCase().includes('synthesize')
+        
+        if (!isValidationOrExecution) {
+            // Clean up the title - remove "STEP X:" prefix to show just the action
+            let cleanTitle = data.title
+            if (cleanTitle) {
+                // Remove "STEP 1:", "STEP 2:", etc. from the beginning
+                cleanTitle = cleanTitle.replace(/^STEP\s+\d+:\s*/i, '')
+                // Also handle variations like "Step 1 -", "STEP 1 -", etc.
+                cleanTitle = cleanTitle.replace(/^STEP\s+\d+\s*[-–—]\s*/i, '')
+            }
+            
+            discoverySteps.value.push({
+                id: `step-${discoverySteps.value.length + 1}`,
+                step: data.step || discoverySteps.value.length + 1,
+                title: cleanTitle || data.title, // Use cleaned title
+                reasoning: data.text || data.reasoning || null, // Reasoning is in data.text field
+                tool: data.tool || null, // Add tool info if available
+                text: data.text,
+                status: 'in-progress',
+                timestamp: new Date(data.timestamp * 1000).toLocaleTimeString(),
+                tools: [] // Initialize empty tools array for future tool tracking
+            })
+        }
+        
         console.log('[useReactStream] discoverySteps updated:', discoverySteps.value)
     }
     
@@ -166,31 +242,104 @@ export function useReactStream() {
         console.log('[useReactStream] handleStepEnd called')
         console.log('[useReactStream] STEP-END data:', data)
         
-        // Update last step status
+        // Check if this is a validation failure
+        const isFailure = data.title && (data.title.toLowerCase().includes('failed') || data.title.toLowerCase().includes('error'))
+        
+        // Update validation if complete or failed
+        if (validationStep.value && validationStep.value.status === 'in-progress') {
+            validationStep.value.status = isFailure ? 'failed' : 'complete'
+            if (isFailure) {
+                validationStep.value.message = data.text || 'Validation failed'
+            }
+        }
+        
+        // Update last discovery step status
         const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
-        if (lastStep) {
-            lastStep.status = 'completed'
+        if (lastStep && lastStep.status === 'in-progress') {
+            lastStep.status = isFailure ? 'failed' : 'complete'
             lastStep.text = data.text // Update with completion text
+            if (data.result) {
+                lastStep.result = data.result
+            }
         }
         
         currentStep.value = ''
     }
     
     /**
+     * Handle TOOL-CALL event
+     */
+    const handleToolCall = (data) => {
+        console.log('[useReactStream] handleToolCall called')
+        console.log('[useReactStream] TOOL-CALL data:', data)
+        
+        // Add tool call to the most recent step's tools array
+        const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
+        if (lastStep && lastStep.tools) {
+            lastStep.tools.push({
+                name: data.tool_name || 'unknown',
+                description: data.description || '',
+                timestamp: new Date((data.timestamp || Date.now()) * 1000).toLocaleTimeString()
+            })
+            console.log('[useReactStream] Added tool to last step:', lastStep.title, 'Tool:', data.tool_name)
+        } else {
+            console.warn('[useReactStream] No active step to attach tool call to')
+        }
+    }
+    
+    /**
      * Handle STEP-PROGRESS event (subprocess execution)
      */
     const handleStepProgress = (data) => {
-        // Update current step with progress
-        currentStep.value = `${data.entity}: ${data.current}/${data.total}`
+        console.log('[useReactStream] handleStepProgress called with data:', data)
         
-        // Update or add progress step
-        const progressStep = discoverySteps.value.find(s => s.title === 'Executing Code')
-        if (progressStep) {
-            progressStep.text = `Processing ${data.entity}: ${data.current}/${data.total}`
-            progressStep.progress = {
+        // Check if this is a rate limit event
+        if (data.progress_type === 'rate_limit' && data.wait_seconds) {
+            console.log('[useReactStream] Rate limit detected:', data.wait_seconds, 'seconds')
+            rateLimitWarning.value = data.wait_seconds
+            executionMessage.value = data.message || `Rate limit - waiting ${data.wait_seconds}s`
+            
+            // Start countdown
+            const countdown = setInterval(() => {
+                rateLimitWarning.value--
+                console.log('[useReactStream] Rate limit countdown:', rateLimitWarning.value)
+                if (rateLimitWarning.value <= 0) {
+                    clearInterval(countdown)
+                    rateLimitWarning.value = 0
+                    console.log('[useReactStream] Rate limit countdown complete')
+                }
+            }, 1000)
+            
+            return
+        }
+        
+        // Regular progress event
+        console.log('[useReactStream] Regular progress event - entity:', data.entity)
+        currentStep.value = `${data.entity}: ${data.current}/${data.total}`
+        executionMessage.value = `Processing ${data.entity}...`
+        
+        // Calculate progress percentage
+        if (data.total > 0) {
+            executionProgress.value = Math.round((data.current / data.total) * 100)
+        }
+        
+        // Track subprocess progress
+        const existing = subprocessProgress.value.find(p => p.label === data.entity)
+        if (existing) {
+            existing.current = data.current
+            existing.total = data.total
+            existing.percent = data.total > 0 ? Math.round((data.current / data.total) * 100) : null
+            existing.message = data.message || null
+            existing.success = data.status === 'completed_max_reached' || data.status === 'completed'
+        } else {
+            subprocessProgress.value.push({
+                label: data.entity,
                 current: data.current,
-                total: data.total
-            }
+                total: data.total,
+                percent: data.total > 0 ? Math.round((data.current / data.total) * 100) : null,
+                message: data.message || null,
+                success: false
+            })
         }
     }
     
@@ -202,9 +351,9 @@ export function useReactStream() {
         console.log('[useReactStream] STEP-TOKENS data:', data)
         
         tokenUsage.value = {
-            inputTokens: data.input_tokens,
-            outputTokens: data.output_tokens,
-            totalTokens: data.total_tokens,
+            input: data.input_tokens,
+            output: data.output_tokens,
+            total: data.total_tokens,
             requests: data.requests
         }
     }
@@ -220,11 +369,17 @@ export function useReactStream() {
         console.log('[useReactStream] data.results length:', data.results?.length)
         console.log('[useReactStream] data.headers:', data.headers)
         
+        // Mark discovery as complete
+        isDiscoveryComplete.value = true
+        
+        // Mark execution as complete
+        isExecuting.value = false
+        
         // Mark last step as completed
         if (discoverySteps.value.length > 0) {
             const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
-            if (lastStep.status === 'running') {
-                lastStep.status = 'completed'
+            if (lastStep.status === 'in-progress') {
+                lastStep.status = 'complete'
             }
         }
         
@@ -265,10 +420,25 @@ export function useReactStream() {
      * Handle ERROR event
      */
     const handleError = (data) => {
+        console.log('[useReactStream] handleError called with:', data)
         error.value = data.error
         isLoading.value = false
         isProcessing.value = false
         currentStep.value = ''
+        
+        // Mark validation step as failed if it exists
+        if (validationStep.value && validationStep.value.status === 'in-progress') {
+            validationStep.value.status = 'failed'
+            validationStep.value.message = data.error
+        }
+        
+        // Mark the last step as failed
+        if (discoverySteps.value.length > 0) {
+            const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
+            if (lastStep.status === 'in-progress') {
+                lastStep.status = 'failed'
+            }
+        }
         
         closeStream()
     }
@@ -316,7 +486,21 @@ export function useReactStream() {
         isProcessing,
         error,
         currentStep,
+        
+        // Discovery state
         discoverySteps,
+        isDiscoveryComplete,
+        
+        // Execution state
+        validationStep,
+        executionStarted,
+        isExecuting,
+        executionMessage,
+        executionProgress,
+        subprocessProgress,
+        rateLimitWarning,
+        
+        // Results
         results,
         tokenUsage,
         

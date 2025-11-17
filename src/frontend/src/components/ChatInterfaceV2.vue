@@ -117,14 +117,33 @@
                 </div>
             </transition>
 
-            <!-- ReAct Thinking Steps (only in ReAct mode) -->
+            <!-- ReAct Two-Panel Interface (only in ReAct mode) -->
             <transition name="fade-up">
-                <ReActThinkingSteps
-                    v-if="isReActMode && reactSteps.length > 0"
-                    :steps="reactSteps"
-                    :isRunning="reactLoading || reactProcessing"
-                    class="mb-4"
-                />
+                <div v-if="isReActMode && (reactLoading || reactSteps.length > 0 || reactExecutionStarted)" class="react-panels mb-4">
+                    <!-- Discovery Panel -->
+                    <DiscoveryPanel
+                        :steps="reactSteps"
+                        :isThinking="reactLoading && reactSteps.length === 0"
+                        :isComplete="reactDiscoveryComplete"
+                        :error="reactError"
+                    />
+                    
+                    <!-- Execution Panel (only show after discovery starts) -->
+                    <ExecutionPanel
+                        v-if="reactDiscoveryComplete || reactExecutionStarted"
+                        :validationStep="reactValidationStep"
+                        :executionStarted="reactExecutionStarted"
+                        :isExecuting="reactIsExecuting"
+                        :isComplete="!reactLoading && !reactProcessing && reactResults !== null"
+                        :executionError="reactError"
+                        :executionMessage="reactExecutionMessage"
+                        :progressValue="reactExecutionProgress"
+                        :subprocessProgress="reactSubprocessProgress"
+                        :resultCount="reactResults?.metadata?.count || 0"
+                        :tokenUsage="reactTokenUsage"
+                        :rateLimitWarning="reactRateLimitWarning"
+                    />
+                </div>
             </transition>
 
             <!-- Results Area with Smooth Transitions -->
@@ -173,7 +192,8 @@ import { useFetchStream } from '@/composables/useFetchStream'
 import { useSanitize } from '@/composables/useSanitize'
 import { useReactStream } from '@/composables/useReactStream'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
-import ReActThinkingSteps from '@/components/messages/ReActThinkingSteps.vue'
+import DiscoveryPanel from '@/components/messages/DiscoveryPanel.vue'
+import ExecutionPanel from '@/components/messages/ExecutionPanel.vue'
 import { MessageType } from '@/components/messages/messageTypes'
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
@@ -205,6 +225,14 @@ const {
     error: reactError,
     currentStep: reactCurrentStep,
     discoverySteps: reactSteps,
+    isDiscoveryComplete: reactDiscoveryComplete,
+    validationStep: reactValidationStep,
+    executionStarted: reactExecutionStarted,
+    isExecuting: reactIsExecuting,
+    executionMessage: reactExecutionMessage,
+    executionProgress: reactExecutionProgress,
+    subprocessProgress: reactSubprocessProgress,
+    rateLimitWarning: reactRateLimitWarning,
     results: reactResults,
     tokenUsage: reactTokenUsage,
     startProcess: startReActProcess,
@@ -391,6 +419,25 @@ const resetInterface = () => {
         type: MessageType.TEXT,
         content: '',
         metadata: {}
+    }
+    
+    // Reset ReAct state
+    if (isReActMode.value) {
+        // Cancel any ongoing ReAct process
+        cancelReAct()
+        
+        // Reset all ReAct-specific state
+        reactSteps.value = []
+        reactResults.value = null
+        reactValidationStep.value = null
+        reactExecutionStarted.value = false
+        reactIsExecuting.value = false
+        reactExecutionMessage.value = ''
+        reactExecutionProgress.value = 0
+        reactSubprocessProgress.value = []
+        reactTokenUsage.value = null
+        reactDiscoveryComplete.value = false
+        reactError.value = null
     }
 }
 

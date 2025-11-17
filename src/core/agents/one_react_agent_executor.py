@@ -149,22 +149,32 @@ class ReActAgentExecutor:
         async def on_step_start(data: Dict[str, Any]):
             """Called when agent starts a step"""
             self.state.current_step += 1
+            
+            # Extract title and reasoning from callback data
+            # title = action (e.g., "STEP 1: Load available API operations")
+            # text = reasoning (e.g., "User requested API-only approach...")
+            title = data.get("title", "")
+            reasoning = data.get("text", "")  # This is the reasoning from log_progress
+            
             event = {
                 "event_type": EventType.STEP_START,
                 "step": self.state.current_step,
-                "title": data.get("title", ""),
-                "text": data.get("text", ""),
+                "title": title,
+                "reasoning": reasoning,  # Pass reasoning separately for UI
                 "timestamp": data.get("timestamp", time.time())
             }
             await step_queue.put(event)
         
         async def on_step_end(data: Dict[str, Any]):
             """Called when agent completes a step"""
+            title = data.get("title", "")
+            result_text = data.get("text", "")  # Completion reasoning/result
+            
             event = {
                 "event_type": EventType.STEP_END,
                 "step": self.state.current_step,
-                "title": data.get("title", ""),
-                "text": data.get("text", ""),
+                "title": title,
+                "result": result_text,  # Result/completion message
                 "timestamp": data.get("timestamp", time.time())
             }
             await step_queue.put(event)
@@ -180,10 +190,21 @@ class ReActAgentExecutor:
             }
             await step_queue.put(event)
         
+        async def on_tool_call(data: Dict[str, Any]):
+            """Called when a tool is invoked"""
+            event = {
+                "event_type": "TOOL-CALL",
+                "tool_name": data.get("tool_name", ""),
+                "description": data.get("description", ""),
+                "timestamp": data.get("timestamp", time.time())
+            }
+            await step_queue.put(event)
+        
         # Attach callbacks to deps
         self.deps.step_start_callback = on_step_start
         self.deps.step_end_callback = on_step_end
         self.deps.step_tokens_callback = on_tokens
+        self.deps.tool_call_callback = on_tool_call
         
         # Run agent in background task
         async def run_agent():
@@ -203,12 +224,27 @@ class ReActAgentExecutor:
                     "results": execution_result.results
                 }
                 
+                # Log the final production script for debugging
+                if execution_result.complete_production_code:
+                    script_length = len(execution_result.complete_production_code)
+                    logger.info(f"[{self.correlation_id}] ✅ SYNTHESIS COMPLETE: Generated final production code ({script_length} chars)")
+                    logger.info(f"[{self.correlation_id}] " + "="*80)
+                    logger.info(f"[{self.correlation_id}] FINAL PRODUCTION SCRIPT:")
+                    logger.info(f"[{self.correlation_id}] " + "="*80)
+                    for i, line in enumerate(execution_result.complete_production_code.split('\n'), 1):
+                        logger.info(f"[{self.correlation_id}] {i:4d} | {line}")
+                    logger.info(f"[{self.correlation_id}] " + "="*80)
+                
                 if not execution_result.success:
                     self.state.error = execution_result.error or "Discovery failed"
+                    # Send error event to frontend
+                    await step_queue.put(self._create_error_event(self.state.error))
                 
             except Exception as e:
                 self.state.error = f"Discovery phase error: {str(e)}"
                 logger.error(f"[{self.correlation_id}] {self.state.error}", exc_info=True)
+                # Send error event to frontend
+                await step_queue.put(self._create_error_event(self.state.error))
             finally:
                 await step_queue.put(None)  # Signal completion
         
@@ -363,12 +399,10 @@ class ReActAgentExecutor:
     
     async def _run_subprocess_with_streaming(self, script_path: str) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Execute Python script in subprocess, streaming progress events.
+        Execute Python script in subprocess, streaming progress events in real-time.
         
-        Expects script to print __PROGRESS__ events to stderr:
-        __PROGRESS__ {"type": "entity_start", "entity": "users", "total": 100}
-        __PROGRESS__ {"type": "entity_progress", "current": 50, "total": 100}
-        __PROGRESS__ {"type": "entity_complete", "entity": "users", "count": 100}
+        Simple pattern: read stderr line → parse → immediately yield event.
+        Based on modern_execution_manager.py proven approach.
         """
         # Determine Python executable (use venv if available)
         python_exe = self._get_python_executable()
@@ -379,93 +413,136 @@ class ReActAgentExecutor:
         script_filename = script_path_obj.name
         
         # Create subprocess with cwd set to script directory
-        # Use just the filename since cwd is set to the script directory
         proc = await asyncio.create_subprocess_exec(
             python_exe,
             "-u",  # Unbuffered output
-            script_filename,  # Just the filename, not full path
+            script_filename,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(script_dir)  # Set working directory to script location
+            cwd=str(script_dir),
+            limit=1024*1024*5  # 5MB buffer
         )
         
-        # Read stderr for progress events
-        stderr_lines = []  # Collect all stderr for error reporting
-        async def read_stderr():
-            if proc.stderr:
-                async for line in proc.stderr:
-                    line_str = line.decode('utf-8').strip()
-                    stderr_lines.append(line_str)  # Store for error reporting
-                    
-                    # Check for progress event
-                    if line_str.startswith("__PROGRESS__"):
-                        try:
-                            json_str = line_str.replace("__PROGRESS__", "").strip()
-                            progress_data = json.loads(json_str)
-                            
-                            # Emit STEP-PROGRESS event
-                            yield {
-                                "event_type": EventType.STEP_PROGRESS,
-                                "progress_type": progress_data.get("type", ""),
-                                "entity": progress_data.get("entity", ""),
-                                "current": progress_data.get("current", 0),
-                                "total": progress_data.get("total", 0),
-                                "timestamp": time.time()
-                            }
-                        except json.JSONDecodeError:
-                            logger.warning(f"[{self.correlation_id}] Invalid progress JSON: {line_str}")
-                    else:
-                        # Log other stderr output
-                        logger.error(f"[{self.correlation_id}] Script stderr: {line_str}")
+        # Storage
+        stdout_lines = []
+        stderr_lines = []
         
-        # Read stdout for final results
-        async def read_stdout():
-            output = []
-            if proc.stdout:
-                async for line in proc.stdout:
-                    line_str = line.decode('utf-8')
-                    output.append(line_str)
-                    # Log stdout in real-time
-                    logger.debug(f"[{self.correlation_id}] Script output: {line_str.strip()}")
-            return ''.join(output)
+        # Deduplication tracking for rate limit events
+        last_rate_limit_time = 0
+        rate_limit_cooldown = 2.0  # Only send one rate limit event per 2 seconds
         
-        # Wait for both streams and process to complete
-        try:
-            stdout_task = asyncio.create_task(read_stdout())
+        # Simple callback that yields events immediately
+        async def handle_stderr_line(line_str: str):
+            """Parse stderr line and yield event if needed - called for each line in real-time"""
+            stderr_lines.append(line_str)
             
-            # Stream stderr events
-            async for event in read_stderr():
+            # Check for __PROGRESS__ event
+            if line_str.startswith("__PROGRESS__"):
+                try:
+                    json_str = line_str.replace("__PROGRESS__", "").strip()
+                    progress_data = json.loads(json_str)
+                    
+                    return {
+                        "event_type": EventType.STEP_PROGRESS,
+                        "progress_type": progress_data.get("type", ""),
+                        "entity": progress_data.get("entity", ""),
+                        "current": progress_data.get("current", 0),
+                        "total": progress_data.get("total", 0),
+                        "timestamp": time.time()
+                    }
+                except json.JSONDecodeError:
+                    logger.warning(f"[{self.correlation_id}] Invalid progress JSON: {line_str}")
+            
+            # Check for rate limit warnings (deduplicate to avoid spam from parallel threads)
+            elif "rate limit exceeded" in line_str.lower() and "waiting" in line_str.lower():
+                nonlocal last_rate_limit_time
+                current_time = time.time()
+                
+                # Only emit rate limit event if enough time has passed since last one
+                if current_time - last_rate_limit_time < rate_limit_cooldown:
+                    return None  # Skip duplicate
+                
+                try:
+                    import re
+                    match = re.search(r'waiting (\d+(?:\.\d+)?) seconds', line_str.lower())
+                    if match:
+                        wait_seconds = int(float(match.group(1)))
+                        last_rate_limit_time = current_time
+                        return {
+                            "event_type": EventType.STEP_PROGRESS,
+                            "progress_type": "rate_limit",
+                            "wait_seconds": wait_seconds,
+                            "message": f"Rate limit - waiting {wait_seconds}s",
+                            "timestamp": current_time
+                        }
+                except Exception as e:
+                    logger.warning(f"[{self.correlation_id}] Failed to parse rate limit: {e}")
+            
+            return None
+        
+        # Define async stream readers
+        async def read_stdout():
+            """Read stdout line by line"""
+            if proc.stdout:
+                while True:
+                    line = await proc.stdout.readline()
+                    if not line:
+                        break
+                    stdout_lines.append(line.decode('utf-8'))
+        
+        async def read_stderr_and_yield():
+            """Read stderr and yield events immediately - no queuing"""
+            if proc.stderr:
+                while True:
+                    line = await proc.stderr.readline()
+                    if not line:
+                        break
+                    line_str = line.decode('utf-8').strip()
+                    if not line_str:
+                        continue
+                    
+                    # Parse line and get event if any
+                    event = await handle_stderr_line(line_str)
+                    if event:
+                        logger.info(f"[{self.correlation_id}] Yielding event: {event.get('progress_type', 'unknown')}")
+                        yield event
+        
+        # Start stdout reading (stderr handled in generator below)
+        stdout_task = asyncio.create_task(read_stdout())
+        
+        try:
+            # Yield events from stderr as they arrive
+            async for event in read_stderr_and_yield():
                 yield event
             
-            # Wait for process completion
+            # Wait for stdout to complete
+            await stdout_task
+            
+            # Wait for process to complete
             await proc.wait()
             
-            # Get stdout
-            stdout = await stdout_task
-            
+            # Check for errors
             if proc.returncode != 0:
-                # Log stderr for debugging
                 if stderr_lines:
-                    logger.error(f"[{self.correlation_id}] Script stderr output:\n" + "\n".join(stderr_lines))
-                raise RuntimeError(f"Script exited with code {proc.returncode}. Check logs for stderr output.")
+                    logger.error(f"[{self.correlation_id}] Script failed. Last 20 stderr lines:\n" + "\n".join(stderr_lines[-20:]))
+                raise RuntimeError(f"Script exited with code {proc.returncode}")
             
             logger.info(f"[{self.correlation_id}] Script completed successfully")
             
-            # Parse stdout for JSON results
+            # Parse stdout
+            stdout = ''.join(stdout_lines)
             results_data = self._parse_script_output(stdout)
-            
-            # Store results in state
             if results_data:
                 self.state.final_results["script_output"] = results_data
             
         except Exception as e:
-            logger.error(f"[{self.correlation_id}] Subprocess execution failed: {e}", exc_info=True)
-            
-            # Try to kill process if still running
+            logger.error(f"[{self.correlation_id}] Subprocess failed: {e}", exc_info=True)
             if proc.returncode is None:
-                proc.kill()
-                await proc.wait()
-            
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
             raise
     
     def _get_python_executable(self) -> str:
