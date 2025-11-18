@@ -44,21 +44,31 @@ The following patterns are **STRICTLY FORBIDDEN** and will cause execution failu
 ### Section 3: The Golden Rules of API Interaction (Logic & Behavior)
 ---
 
-#### Rule 3.1: Testing Limits (NON-NEGOTIABLE)
-**EVERY `client.make_request()` call MUST include `max_results=3`**. This is a hard security and performance limit for testing.
+#### Rule 3.1: Testing Limits vs Production Code (NON-NEGOTIABLE)
+**FOR TESTING**: Every `client.make_request()` call MUST include `max_results=3` for initial test validation.
+**FOR PRODUCTION**: Remove `max_results` entirely to fetch ALL data. The client handles automatic pagination.
+
 ```python
-# ✅ CORRECT - max_results=3 is specified
+# ✅ TESTING CODE - max_results=3 for validation
 response = await client.make_request(
     endpoint="/api/v1/users",
-    max_results=3  # MANDATORY for testing
+    max_results=3  # MANDATORY for testing phase
 )
 
-# ❌ FORBIDDEN - Missing max_results
-response = await client.make_request(endpoint="/api/v1/users")
+# ✅ PRODUCTION CODE - no max_results to get ALL data
+response = await client.make_request(
+    endpoint="/api/v1/users"
+    # NO max_results parameter - client paginates automatically
+)
 
-# ❌ FORBIDDEN - Using params with 'limit'
-response = await client.make_request(endpoint="/api/v1/users", params={"limit": 3})
+# ❌ FORBIDDEN - Using client.concurrent_limit as max_results
+response = await client.make_request(endpoint="/api/v1/users", max_results=client.concurrent_limit)
+
+# ❌ FORBIDDEN - Using params with 'limit' 
+response = await client.make_request(endpoint="/api/v1/users", params={"limit": 200})
 ```
+
+**CRITICAL**: `client.concurrent_limit` controls parallel requests, NOT pagination limits. Never use it as `max_results`.
 
 #### Rule 3.2: Response Handling (CRITICAL)
 The API client **automatically normalizes** all Okta responses. The `data` field is always a list or dict, never nested.

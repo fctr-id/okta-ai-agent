@@ -192,6 +192,10 @@ async def stream_react_updates(
                 if event["type"] == "ERROR":
                     logger.error(f"[{process_id}] Sending ERROR event to frontend: {event.get('error', 'Unknown error')}")
                 
+                # Log SCRIPT-GENERATED events for debugging
+                if event["type"] == "SCRIPT-GENERATED":
+                    logger.info(f"[{process_id}] 📜 Sending SCRIPT-GENERATED event to frontend (script length: {event.get('script_length', 0)} chars)")
+                
                 yield f"data: {json.dumps(event)}\n\n"
                 
                 # Small delay to prevent overwhelming frontend

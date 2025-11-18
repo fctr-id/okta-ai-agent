@@ -142,6 +142,7 @@
                         :resultCount="reactResults?.metadata?.count || 0"
                         :tokenUsage="reactTokenUsage"
                         :rateLimitWarning="reactRateLimitWarning"
+                        :generatedScript="reactGeneratedScript"
                     />
                 </div>
             </transition>
@@ -233,6 +234,7 @@ const {
     executionProgress: reactExecutionProgress,
     subprocessProgress: reactSubprocessProgress,
     rateLimitWarning: reactRateLimitWarning,
+    generatedScript: reactGeneratedScript,
     results: reactResults,
     tokenUsage: reactTokenUsage,
     startProcess: startReActProcess,
