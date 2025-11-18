@@ -41,7 +41,10 @@ class EventType:
     STEP_END = "STEP-END"           # Discovery step completes
     STEP_PROGRESS = "STEP-PROGRESS" # Progress during subprocess execution
     STEP_TOKENS = "STEP-TOKENS"     # Token usage report
-    COMPLETE = "COMPLETE"           # Final completion
+    SCRIPT_GENERATED = "SCRIPT-GENERATED"  # Generated script code
+    RESULT_METADATA = "RESULT-METADATA"    # Result streaming metadata (total batches/records)
+    RESULT_BATCH = "RESULT-BATCH"          # Result batch chunk
+    COMPLETE = "COMPLETE"           # Final completion (no data, just signal)
     ERROR = "ERROR"                 # Error occurred
 
 
@@ -124,9 +127,10 @@ class ReActAgentExecutor:
             async for event in self._execute_subprocess_phase():
                 yield event
             
-            # Final completion
-            yield self._create_complete_event()
-            
+            # Stream results in chunks (for large datasets)
+            async for event in self._stream_results():
+                yield event
+
         except Exception as e:
             logger.error(f"[{self.correlation_id}] Executor failed: {e}", exc_info=True)
             yield self._create_error_event(str(e))
@@ -143,41 +147,45 @@ class ReActAgentExecutor:
         - step_end_callback: When agent completes a discovery step
         - step_tokens_callback: Final token usage
         """
-        step_queue = asyncio.Queue()
+        # Queue with size limit to prevent unbounded growth if frontend disconnects
+        step_queue = asyncio.Queue(maxsize=100)
         
         # Define callbacks to capture agent progress
         async def on_step_start(data: Dict[str, Any]):
             """Called when agent starts a step"""
             self.state.current_step += 1
             
-            # Extract title and reasoning from callback data
-            # title = action (e.g., "STEP 1: Load available API operations")
-            # text = reasoning (e.g., "User requested API-only approach...")
             title = data.get("title", "")
-            reasoning = data.get("text", "")  # This is the reasoning from log_progress
+            reasoning = data.get("text", "")
             
             event = {
                 "event_type": EventType.STEP_START,
                 "step": self.state.current_step,
                 "title": title,
-                "reasoning": reasoning,  # Pass reasoning separately for UI
+                "reasoning": reasoning,
                 "timestamp": data.get("timestamp", time.time())
             }
-            await step_queue.put(event)
+            try:
+                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.correlation_id}] Queue full, dropping step_start event")
         
         async def on_step_end(data: Dict[str, Any]):
             """Called when agent completes a step"""
             title = data.get("title", "")
-            result_text = data.get("text", "")  # Completion reasoning/result
+            result_text = data.get("text", "")
             
             event = {
                 "event_type": EventType.STEP_END,
                 "step": self.state.current_step,
                 "title": title,
-                "result": result_text,  # Result/completion message
+                "result": result_text,
                 "timestamp": data.get("timestamp", time.time())
             }
-            await step_queue.put(event)
+            try:
+                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.correlation_id}] Queue full, dropping step_end event")
         
         async def on_tokens(data: Dict[str, Any]):
             """Called with token usage info"""
@@ -188,7 +196,10 @@ class ReActAgentExecutor:
                 "total_tokens": data.get("total_tokens", 0),
                 "requests": data.get("requests", 0)
             }
-            await step_queue.put(event)
+            try:
+                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.correlation_id}] Queue full, dropping tokens event")
         
         async def on_tool_call(data: Dict[str, Any]):
             """Called when a tool is invoked"""
@@ -198,7 +209,10 @@ class ReActAgentExecutor:
                 "description": data.get("description", ""),
                 "timestamp": data.get("timestamp", time.time())
             }
-            await step_queue.put(event)
+            try:
+                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.correlation_id}] Queue full, dropping tool_call event")
         
         # Attach callbacks to deps
         self.deps.step_start_callback = on_step_start
@@ -224,16 +238,26 @@ class ReActAgentExecutor:
                     "results": execution_result.results
                 }
                 
-                # Log the final production script for debugging
+                # Log the final production script summary (not full content to avoid log spam)
                 if execution_result.complete_production_code:
                     script_length = len(execution_result.complete_production_code)
-                    logger.info(f"[{self.correlation_id}] ✅ SYNTHESIS COMPLETE: Generated final production code ({script_length} chars)")
-                    logger.info(f"[{self.correlation_id}] " + "="*80)
-                    logger.info(f"[{self.correlation_id}] FINAL PRODUCTION SCRIPT:")
-                    logger.info(f"[{self.correlation_id}] " + "="*80)
-                    for i, line in enumerate(execution_result.complete_production_code.split('\n'), 1):
-                        logger.info(f"[{self.correlation_id}] {i:4d} | {line}")
-                    logger.info(f"[{self.correlation_id}] " + "="*80)
+                    script_lines = execution_result.complete_production_code.split('\n')
+                    total_lines = len(script_lines)
+                    logger.info(f"[{self.correlation_id}] ✅ SYNTHESIS COMPLETE: Generated final production code ({script_length} chars, {total_lines} lines)")
+                    
+                    # Only log first 30 and last 20 lines to avoid log flooding
+                    if total_lines > 50:
+                        logger.debug(f"[{self.correlation_id}] First 30 lines:")
+                        for i, line in enumerate(script_lines[:30], 1):
+                            logger.debug(f"[{self.correlation_id}] {i:4d} | {line}")
+                        logger.debug(f"[{self.correlation_id}] ... ({total_lines - 50} lines omitted) ...")
+                        logger.debug(f"[{self.correlation_id}] Last 20 lines:")
+                        for i, line in enumerate(script_lines[-20:], total_lines - 19):
+                            logger.debug(f"[{self.correlation_id}] {i:4d} | {line}")
+                    else:
+                        # Small script - log all
+                        for i, line in enumerate(script_lines, 1):
+                            logger.debug(f"[{self.correlation_id}] {i:4d} | {line}")
                 
                 if not execution_result.success:
                     self.state.error = execution_result.error or "Discovery failed"
@@ -260,6 +284,23 @@ class ReActAgentExecutor:
         
         # Wait for agent to finish
         await agent_task
+        
+        # After discovery completes, send the generated script
+        if (self.state.discovery_complete and 
+            self.state.final_results and 
+            self.state.final_results.get("complete_production_code")):
+            
+            script_code = self.state.final_results["complete_production_code"]
+            script_length = len(script_code)
+            
+            logger.info(f"[{self.correlation_id}] 📜 Yielding SCRIPT-GENERATED event ({script_length} chars)")
+            
+            yield {
+                "event_type": EventType.SCRIPT_GENERATED,
+                "script_code": script_code,
+                "script_length": script_length,
+                "timestamp": time.time()
+            }
     
     async def _execute_validation_phase(self) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -392,9 +433,7 @@ class ReActAgentExecutor:
         with open(script_path, "w", encoding="utf-8") as f:
             f.write(modified_code)
         
-        logger.info(f"[{self.correlation_id}] ==========================================")
-        logger.info(f"[{self.correlation_id}] Script written to: {script_path.absolute()}")
-        logger.info(f"[{self.correlation_id}] ==========================================")
+        logger.debug(f"[{self.correlation_id}] Script written to: {script_path.absolute()}")
         return str(script_path)
     
     async def _run_subprocess_with_streaming(self, script_path: str) -> AsyncGenerator[Dict[str, Any], None]:
@@ -420,12 +459,13 @@ class ReActAgentExecutor:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(script_dir),
-            limit=1024*1024*5  # 5MB buffer
+            limit=1024*1024  # 1MB buffer
         )
         
-        # Storage
+        # Storage with size limits to prevent memory issues
         stdout_lines = []
         stderr_lines = []
+        MAX_STDOUT_LINES = 10000  # Cap at 10k lines (~1MB assuming 100 chars/line)
         
         # Deduplication tracking for rate limit events
         last_rate_limit_time = 0
@@ -468,6 +508,7 @@ class ReActAgentExecutor:
                     if match:
                         wait_seconds = int(float(match.group(1)))
                         last_rate_limit_time = current_time
+                        logger.debug(f"[{self.correlation_id}] Rate limit: {wait_seconds}s")
                         return {
                             "event_type": EventType.STEP_PROGRESS,
                             "progress_type": "rate_limit",
@@ -476,18 +517,24 @@ class ReActAgentExecutor:
                             "timestamp": current_time
                         }
                 except Exception as e:
-                    logger.warning(f"[{self.correlation_id}] Failed to parse rate limit: {e}")
+                    logger.debug(f"[{self.correlation_id}] Failed to parse rate limit: {e}")
             
             return None
         
         # Define async stream readers
         async def read_stdout():
-            """Read stdout line by line"""
+            """Read stdout line by line with size limit"""
             if proc.stdout:
                 while True:
                     line = await proc.stdout.readline()
                     if not line:
                         break
+                    
+                    # Prevent unbounded growth
+                    if len(stdout_lines) >= MAX_STDOUT_LINES:
+                        logger.warning(f"[{self.correlation_id}] stdout buffer limit reached, truncating old lines")
+                        stdout_lines[:] = stdout_lines[-5000:]  # Keep last 5k lines
+                    
                     stdout_lines.append(line.decode('utf-8'))
         
         async def read_stderr_and_yield():
@@ -544,6 +591,71 @@ class ReActAgentExecutor:
                 except Exception:
                     pass
             raise
+    
+    async def _stream_results(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream results in chunks for large datasets"""
+        results = self.state.final_results.get("script_output", {})
+        data = results.get("data", [])
+        headers = results.get("headers", [])
+        count = results.get("count", 0)
+        execution_plan = self.state.final_results.get("execution_plan", "")
+        
+        # Chunk size for streaming (500 records per batch)
+        CHUNK_SIZE = 500
+        
+        # Only chunk if dataset is large (> 750 records = 1.5x chunk size)
+        if len(data) > CHUNK_SIZE * 1.5:
+            # Large dataset - stream in chunks
+            total_chunks = (len(data) + CHUNK_SIZE - 1) // CHUNK_SIZE
+            logger.info(f"[{self.correlation_id}] Streaming {len(data)} results in {total_chunks} chunks")
+            
+            # Send metadata event first
+            yield {
+                "event_type": EventType.RESULT_METADATA,
+                "total_batches": total_chunks,
+                "total_records": len(data),
+                "headers": headers,
+                "execution_plan": execution_plan,
+                "timestamp": time.time()
+            }
+            
+            # Stream chunks
+            for i in range(0, len(data), CHUNK_SIZE):
+                chunk_data = data[i:i + CHUNK_SIZE]
+                chunk_number = i // CHUNK_SIZE + 1
+                is_final = i + CHUNK_SIZE >= len(data)
+                
+                yield {
+                    "event_type": EventType.RESULT_BATCH,
+                    "results": chunk_data,
+                    "batch_number": chunk_number,
+                    "total_batches": total_chunks,
+                    "is_final": is_final,
+                    "timestamp": time.time()
+                }
+                
+                # Small delay between chunks (10ms)
+                await asyncio.sleep(0.01)
+            
+            # Send final completion signal
+            yield {
+                "event_type": EventType.COMPLETE,
+                "success": True,
+                "count": count,
+                "timestamp": time.time()
+            }
+        else:
+            # Small dataset - send in single COMPLETE event (backward compatible)
+            logger.info(f"[{self.correlation_id}] Sending {len(data)} results in single COMPLETE event")
+            yield {
+                "event_type": EventType.COMPLETE,
+                "success": True,
+                "results": data,
+                "count": count,
+                "execution_plan": execution_plan,
+                "headers": headers,
+                "timestamp": time.time()
+            }
     
     def _get_python_executable(self) -> str:
         """Get Python executable path (prefer venv)"""
@@ -619,25 +731,6 @@ class ReActAgentExecutor:
         
         return None
     
-    def _create_complete_event(self) -> Dict[str, Any]:
-        """Create final completion event with results and headers"""
-        results = self.state.final_results.get("script_output", {})
-        
-        event = {
-            "event_type": EventType.COMPLETE,
-            "success": True,
-            "results": results.get("data", []),
-            "count": results.get("count", 0),
-            "execution_plan": self.state.final_results.get("execution_plan", ""),
-            "timestamp": time.time()
-        }
-        
-        # Include headers if present for Vuetify table
-        if "headers" in results:
-            event["headers"] = results["headers"]
-        
-        return event
-    
     def _create_error_event(self, error: str) -> Dict[str, Any]:
         """Create error event"""
         return {
@@ -647,12 +740,23 @@ class ReActAgentExecutor:
         }
     
     def _cleanup(self):
-        """Clean up temporary files - DISABLED for debugging"""
+        """Clean up temporary files"""
         if self.state.script_path and os.path.exists(self.state.script_path):
-            # Comment out cleanup to debug script errors
-            logger.info(f"[{self.correlation_id}] Script kept for debugging: {self.state.script_path}")
-            # try:
-            #     os.remove(self.state.script_path)
-            #     logger.info(f"[{self.correlation_id}] Cleaned up script: {self.state.script_path}")
-            # except Exception as e:
-            #     logger.warning(f"[{self.correlation_id}] Failed to cleanup script: {e}")
+            try:
+                # Check if we're in debug mode (via env var)
+                keep_scripts = os.getenv("KEEP_TEMP_SCRIPTS", "false").lower() == "true"
+                
+                if keep_scripts:
+                    logger.debug(f"[{self.correlation_id}] Script kept for debugging: {self.state.script_path}")
+                else:
+                    os.remove(self.state.script_path)
+                    logger.debug(f"[{self.correlation_id}] Cleaned up script: {self.state.script_path}")
+                    
+                    # Also cleanup the copied base_okta_api_client.py if it exists
+                    script_dir = Path(self.state.script_path).parent
+                    api_client_copy = script_dir / "base_okta_api_client.py"
+                    if api_client_copy.exists():
+                        os.remove(api_client_copy)
+                        
+            except Exception as e:
+                logger.warning(f"[{self.correlation_id}] Failed to cleanup script: {e}")

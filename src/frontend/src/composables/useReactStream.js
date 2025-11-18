@@ -5,7 +5,7 @@
  * Handles discovery steps, token usage, and final results.
  */
 
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 
 // Use relative URL to go through Vite proxy
 const API_BASE_URL = ''
@@ -31,6 +31,7 @@ export function useReactStream() {
     const executionProgress = ref(0)
     const subprocessProgress = ref([])
     const rateLimitWarning = ref(0) // Countdown in seconds
+    const generatedScript = ref(null) // Generated script code
     
     // Results
     const results = ref(null)
@@ -56,6 +57,7 @@ export function useReactStream() {
         executionProgress.value = 0
         subprocessProgress.value = []
         rateLimitWarning.value = 0
+        generatedScript.value = null
         results.value = null
         tokenUsage.value = null
         
@@ -102,7 +104,6 @@ export function useReactStream() {
         isProcessing.value = true
         
         const url = `${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`
-        console.log('[useReactStream] Connecting to SSE stream:', url)
         
         eventSource = new EventSource(url, {
             withCredentials: true
@@ -125,21 +126,25 @@ export function useReactStream() {
                         handleToolCall(data)
                         break
                     case 'STEP-PROGRESS':
-                        console.log('[useReactStream] STEP-PROGRESS event:', data)
                         handleStepProgress(data)
                         break
                     case 'STEP-TOKENS':
                         handleStepTokens(data)
                         break
+                    case 'SCRIPT-GENERATED':
+                        handleScriptGenerated(data)
+                        break
+                    case 'RESULT-METADATA':
+                        handleResultMetadata(data)
+                        break
+                    case 'RESULT-BATCH':
+                        handleResultBatch(data)
+                        break
                     case 'COMPLETE':
                         handleComplete(data)
                         break
                     case 'ERROR':
-                        console.log('[useReactStream] ERROR event received:', data)
                         handleError(data)
-                        break
-                    default:
-                        console.log('[useReactStream] Unknown message type:', data.type)
                         break
                 }
             } catch (err) {
@@ -231,17 +236,12 @@ export function useReactStream() {
                 tools: [] // Initialize empty tools array for future tool tracking
             })
         }
-        
-        console.log('[useReactStream] discoverySteps updated:', discoverySteps.value)
     }
     
     /**
      * Handle STEP-END event
      */
     const handleStepEnd = (data) => {
-        console.log('[useReactStream] handleStepEnd called')
-        console.log('[useReactStream] STEP-END data:', data)
-        
         // Check if this is a validation failure
         const isFailure = data.title && (data.title.toLowerCase().includes('failed') || data.title.toLowerCase().includes('error'))
         
@@ -270,9 +270,6 @@ export function useReactStream() {
      * Handle TOOL-CALL event
      */
     const handleToolCall = (data) => {
-        console.log('[useReactStream] handleToolCall called')
-        console.log('[useReactStream] TOOL-CALL data:', data)
-        
         // Add tool call to the most recent step's tools array
         const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
         if (lastStep && lastStep.tools) {
@@ -281,9 +278,6 @@ export function useReactStream() {
                 description: data.description || '',
                 timestamp: new Date((data.timestamp || Date.now()) * 1000).toLocaleTimeString()
             })
-            console.log('[useReactStream] Added tool to last step:', lastStep.title, 'Tool:', data.tool_name)
-        } else {
-            console.warn('[useReactStream] No active step to attach tool call to')
         }
     }
     
@@ -291,30 +285,29 @@ export function useReactStream() {
      * Handle STEP-PROGRESS event (subprocess execution)
      */
     const handleStepProgress = (data) => {
-        console.log('[useReactStream] handleStepProgress called with data:', data)
-        
         // Check if this is a rate limit event
         if (data.progress_type === 'rate_limit' && data.wait_seconds) {
-            console.log('[useReactStream] Rate limit detected:', data.wait_seconds, 'seconds')
             rateLimitWarning.value = data.wait_seconds
             executionMessage.value = data.message || `Rate limit - waiting ${data.wait_seconds}s`
             
-            // Start countdown
+            // Start countdown (client-side only, no backend load)
             const countdown = setInterval(() => {
                 rateLimitWarning.value--
-                console.log('[useReactStream] Rate limit countdown:', rateLimitWarning.value)
                 if (rateLimitWarning.value <= 0) {
                     clearInterval(countdown)
                     rateLimitWarning.value = 0
-                    console.log('[useReactStream] Rate limit countdown complete')
                 }
             }, 1000)
             
             return
         }
         
+        // Ignore rate_limit_wait spam events - we already have the countdown running
+        if (data.progress_type === 'rate_limit_wait') {
+            return
+        }
+        
         // Regular progress event
-        console.log('[useReactStream] Regular progress event - entity:', data.entity)
         currentStep.value = `${data.entity}: ${data.current}/${data.total}`
         executionMessage.value = `Processing ${data.entity}...`
         
@@ -347,9 +340,6 @@ export function useReactStream() {
      * Handle STEP-TOKENS event
      */
     const handleStepTokens = (data) => {
-        console.log('[useReactStream] handleStepTokens called')
-        console.log('[useReactStream] STEP-TOKENS data:', data)
-        
         tokenUsage.value = {
             input: data.input_tokens,
             output: data.output_tokens,
@@ -359,16 +349,92 @@ export function useReactStream() {
     }
     
     /**
+     * Handle SCRIPT-GENERATED event
+     */
+    const handleScriptGenerated = (data) => {
+        // Handle both direct and wrapped data structures
+        const scriptCode = data.script_code || data.content?.script_code
+        
+        if (scriptCode) {
+            generatedScript.value = scriptCode
+        } else {
+            console.warn('[useReactStream] No script_code found in SCRIPT-GENERATED event')
+        }
+    }
+    
+    /**
+     * Handle RESULT-METADATA event (chunked streaming)
+     */
+    const handleResultMetadata = (data) => {
+        // Initialize results with streaming structure
+        results.value = {
+            display_type: 'table',
+            content: [],
+            metadata: {
+                isStreaming: true,
+                streamingProgress: {
+                    current: 0,
+                    total: data.total_records,
+                    chunksReceived: 0,
+                    totalChunks: data.total_batches
+                },
+                execution_plan: data.execution_plan
+            }
+        }
+        
+        // Set headers if provided
+        if (data.headers) {
+            results.value.headers = data.headers
+        }
+    }
+    
+    /**
+     * Handle RESULT-BATCH event (chunked streaming)
+     */
+    const handleResultBatch = (data) => {
+        if (!results.value || !results.value.content) {
+            results.value = {
+                display_type: 'table',
+                content: [],
+                metadata: {
+                    isStreaming: true,
+                    streamingProgress: {
+                        current: 0,
+                        total: 0,
+                        chunksReceived: 0,
+                        totalChunks: data.total_batches
+                    }
+                }
+            }
+        }
+        
+        // Append batch data to content
+        if (data.results && Array.isArray(data.results)) {
+            results.value.content = [...results.value.content, ...data.results]
+            
+            // Update progress
+            if (results.value.metadata?.streamingProgress) {
+                results.value.metadata.streamingProgress = {
+                    ...results.value.metadata.streamingProgress,
+                    current: results.value.content.length,
+                    chunksReceived: data.batch_number
+                }
+            }
+        }
+        
+        // If final batch, mark streaming complete
+        if (data.is_final) {
+            if (results.value.metadata) {
+                results.value.metadata.isStreaming = false
+            }
+            isExecuting.value = false
+        }
+    }
+    
+    /**
      * Handle COMPLETE event
      */
     const handleComplete = (data) => {
-        console.log('[useReactStream] handleComplete called')
-        console.log('[useReactStream] COMPLETE data:', data)
-        console.log('[useReactStream] data.results:', data.results)
-        console.log('[useReactStream] data.results is array:', Array.isArray(data.results))
-        console.log('[useReactStream] data.results length:', data.results?.length)
-        console.log('[useReactStream] data.headers:', data.headers)
-        
         // Mark discovery as complete
         isDiscoveryComplete.value = true
         
@@ -383,11 +449,12 @@ export function useReactStream() {
             }
         }
         
-        // Store results with headers if provided
-        if (data.results) {
+        // Check if this is a chunked response (no results) or non-chunked (has results)
+        if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+            // Non-chunked response - small dataset, all data in COMPLETE event
             results.value = {
                 display_type: 'table',
-                content: data.results, // This is the array of results
+                content: data.results,
                 metadata: {
                     isStreaming: false,
                     execution_plan: data.execution_plan,
@@ -395,18 +462,16 @@ export function useReactStream() {
                 }
             }
             
-            // Include headers if provided by backend
-            if (data.headers && Array.isArray(data.headers) && data.headers.length > 0) {
-                results.value.metadata.headers = data.headers
-                console.log('[useReactStream] Headers received from backend:', data.headers.length, 'columns')
+            // Add headers if provided
+            if (data.headers) {
+                results.value.headers = data.headers
             }
-            
-            console.log('[useReactStream] Results stored:')
-            console.log('  - display_type:', results.value.display_type)
-            console.log('  - content:', results.value.content)
-            console.log('  - content is array:', Array.isArray(results.value.content))
-            console.log('  - content length:', results.value.content?.length)
-            console.log('  - metadata:', results.value.metadata)
+        } else {
+            // Chunked response - just a completion signal, data already loaded via RESULT-BATCH events
+            console.log('[useReactStream] Chunked response complete signal')
+            if (results.value && results.value.metadata) {
+                results.value.metadata.isStreaming = false
+            }
         }
         
         isLoading.value = false
@@ -499,6 +564,7 @@ export function useReactStream() {
         executionProgress,
         subprocessProgress,
         rateLimitWarning,
+        generatedScript,
         
         // Results
         results,

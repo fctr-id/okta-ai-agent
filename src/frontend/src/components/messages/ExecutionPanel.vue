@@ -13,6 +13,21 @@
 
       <transition name="expand">
         <div v-show="isExpanded" class="exec-body">
+          <!-- Generated Script (show before validation) -->
+          <div v-if="generatedScript" class="generated-script-section">
+            <button class="script-toggle" @click="isScriptExpanded = !isScriptExpanded">
+              <v-icon size="16" :class="{ rotated: isScriptExpanded }">mdi-chevron-right</v-icon>
+              <span class="script-label">Generated Script</span>
+              <span class="script-length">({{ scriptLength }} characters)</span>
+              <v-icon size="16" class="copy-icon" @click.stop="copyScript">mdi-content-copy</v-icon>
+            </button>
+            <transition name="expand">
+              <div v-show="isScriptExpanded" class="script-content">
+                <pre><code>{{ generatedScript }}</code></pre>
+              </div>
+            </transition>
+          </div>
+
           <div v-if="validationStep || executionStarted" class="unified-steps">
             <div class="steps-list">
               <!-- Validation Step -->
@@ -27,7 +42,7 @@
                 <div class="step-content">
                   <div class="step-header">
                     <div class="step-info-flow">
-                      <span class="step-type step-badge-validation">VALIDATION</span>
+                      <span class="step-type">Validation</span>
                     </div>
                   </div>
                   <div class="step-description">
@@ -51,7 +66,7 @@
                 <div class="step-content">
                   <div class="step-header">
                     <div class="step-info-flow">
-                      <span class="step-type step-badge-execution">EXECUTION</span>
+                      <span class="step-type">Execution</span>
                     </div>
                     <div class="step-metrics">
                       <!-- Rate limit warning -->
@@ -170,10 +185,29 @@ const props = defineProps({
   rateLimitWarning: {
     type: Number,
     default: 0
+  },
+  generatedScript: {
+    type: String,
+    default: null
   }
 })
 
 const isExpanded = ref(true)
+const isScriptExpanded = ref(false)
+
+const scriptLength = computed(() => {
+  return props.generatedScript ? props.generatedScript.length : 0
+})
+
+const copyScript = async () => {
+  if (!props.generatedScript) return
+  try {
+    await navigator.clipboard.writeText(props.generatedScript)
+    // Could add a toast notification here
+  } catch (err) {
+    console.error('Failed to copy script:', err)
+  }
+}
 
 // Filter out empty or non-progress items
 const hasActualSubprocessProgress = computed(() => {
@@ -191,12 +225,12 @@ const statusClass = computed(() => {
 })
 
 const statusText = computed(() => {
-  if (props.executionError) return 'ERROR'
-  if (props.isComplete) return 'DONE'
-  if (props.isExecuting) return 'RUNNING'
-  if (props.validationStep?.status === 'in-progress') return 'VALIDATING'
-  if (props.validationStep?.status === 'failed') return 'FAILED'
-  return 'READY'
+  if (props.executionError) return 'Error'
+  if (props.isComplete) return 'Complete'
+  if (props.isExecuting) return 'Running'
+  if (props.validationStep?.status === 'in-progress') return 'Validating'
+  if (props.validationStep?.status === 'failed') return 'Failed'
+  return 'Ready'
 })
 
 // Step counts for progress display
@@ -326,8 +360,10 @@ const getExecutionStatusClass = computed(() => {
 }
 
 .exec-body {
-  padding: 20px;
+  padding: 16px;
   background: white;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 /* Unified Steps (matching realtime ExecutionDetailsPanel) */
@@ -352,23 +388,30 @@ const getExecutionStatusClass = computed(() => {
 .unified-step {
   display: flex;
   gap: 12px;
-  padding: 14px;
-  border-radius: 8px;
+  padding: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
   background: rgba(76, 100, 226, 0.02);
+  border-radius: 6px;
   transition: all 0.2s ease;
+}
+
+.unified-step:last-child {
+  padding-bottom: 10px;
+  border-bottom: none;
 }
 
 .unified-step.step-active {
   background: rgba(76, 100, 226, 0.06);
-  box-shadow: 0 0 0 1px rgba(76, 100, 226, 0.2);
 }
 
 .unified-step.step-success {
-  background: rgba(76, 175, 80, 0.04);
+  background: rgba(76, 100, 226, 0.02);
 }
 
 .unified-step.step-failed {
-  background: rgba(198, 40, 40, 0.04);
+  background: rgba(198, 40, 40, 0.03);
+  border-color: rgba(198, 40, 40, 0.1);
 }
 
 /* Step Status Icon */
@@ -381,32 +424,26 @@ const getExecutionStatusClass = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+  width: 18px;
+  height: 18px;
   font-size: 12px;
   font-weight: bold;
+  opacity: 0.8;
 }
 
 .status-icon.status-active {
-  background: #4C64E2;
-  color: white;
-  animation: pulse 2s ease-in-out infinite;
+  color: #4C64E2;
+  opacity: 1;
 }
 
 .status-icon.status-success {
-  background: #388E3C;
-  color: white;
+  color: #388E3C;
+  opacity: 1;
 }
 
 .status-icon.status-failed {
-  background: #C62828;
-  color: white;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
+  color: #C62828;
+  opacity: 1;
 }
 
 /* Step Content */
@@ -431,25 +468,11 @@ const getExecutionStatusClass = computed(() => {
 }
 
 .step-type {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 800;
+  color: #4C64E2;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  white-space: nowrap;
-}
-
-.step-badge-validation {
-  background: rgba(76, 100, 226, 0.12);
-  color: #4C64E2;
-  border: 1px solid rgba(76, 100, 226, 0.25);
-}
-
-.step-badge-execution {
-  background: rgba(76, 100, 226, 0.08);
-  color: #4C64E2;
-  border: 1px solid rgba(76, 100, 226, 0.2);
 }
 
 .step-metrics {
@@ -494,6 +517,8 @@ const getExecutionStatusClass = computed(() => {
 .step-context {
   margin-bottom: 8px;
   font-weight: 500;
+  color: #555;
+  line-height: 1.6;
 }
 
 /* API Progress Container */
@@ -565,6 +590,78 @@ const getExecutionStatusClass = computed(() => {
   font-size: 12px;
   color: #C62828;
   font-weight: 500;
+}
+
+/* Generated Script Section */
+.generated-script-section {
+  margin: 12px 0;
+  border: 1px solid rgba(76, 100, 226, 0.15);
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(76, 100, 226, 0.02);
+}
+
+.script-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s;
+  color: #333;
+}
+
+.script-toggle:hover {
+  background: rgba(76, 100, 226, 0.05);
+}
+
+.script-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4C64E2;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.script-length {
+  font-size: 12px;
+  color: #666;
+  font-weight: 400;
+}
+
+.copy-icon {
+  margin-left: auto;
+  color: #4C64E2;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.copy-icon:hover {
+  opacity: 1;
+}
+
+.script-content {
+  padding: 12px;
+  background: #f8f9fa;
+  border-top: 1px solid rgba(76, 100, 226, 0.15);
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.script-content pre {
+  margin: 0;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.script-content code {
+  color: #333;
 }
 
 /* Token Summary (matching realtime style) */
