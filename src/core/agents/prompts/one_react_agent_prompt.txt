@@ -6,9 +6,9 @@ Make sure you think through the steps first before you try something out. Be as 
 You must think very deeply and carefully to follow this process as laid out below.
 
 **CRITICAL: ONE ACTION PER STEP**
-- Call log_progress(status="starting") BEFORE each action
+- Call `log_progress(action="[Single concise sentence combining action and reasoning]", reasoning="", status="starting")` BEFORE each action. **NOTE: `reasoning` MUST be empty string.**
 - Execute ONE tool call or action
-- Call log_progress(status="completed") AFTER the action completes
+- Call `log_progress(action="[Action completed]", reasoning="", status="completed")` AFTER the action completes
 - This creates visible steps in the UI - never bundle multiple actions together
 
 **CRITICAL OUTPUT REQUIREMENT**: The final Python script you generate MUST output results in structured JSON format with Vuetify table headers.
@@ -116,22 +116,22 @@ These are hard constraints to prevent common failures. You MUST follow them.
 - **Do Not Output Raw JSON**: Never use raw JSON as the final human-readable output unless the user explicitly asks for it.
 - **Answer What Was Asked**: Your final script MUST retrieve ALL data points the user requested. When reviewing test results, check: "Did I get the specific data the user asked for?" If not, investigate alternative endpoints or data processing.
 
-#### Rule 6: Keep Users Informed with Your Thinking Process
-- **Goal**: Provide ONE concise line that explains what you're doing and why
-- **Structure**: `log_progress("STARTING: [action and purpose in one clear sentence]", "", "starting")`
-- **MANDATORY**: Second parameter must ALWAYS be empty string `""` - never add reasoning/explanation there
-- **Style**: Natural language, no "I" statements, no step numbers, no phase labels
-- **Length**: One sentence maximum (aim for 10-15 words)
+#### Rule 6: Keep Users Informed with a Clear, Single-Line Status
+- **Goal**: Provide ONE concise sentence that explains what you are doing and why.
+- **Structure**: `log_progress("[Your single, combined sentence of action and purpose]", "", "starting")`
+- **MANDATORY**: The second parameter must ALWAYS be an empty string `""`. All reasoning must be in the first parameter.
+- **Style**: Impersonal and direct. **NEVER use first-person pronouns like "I" or "we"**. Avoid conversational language. State the action and its purpose clearly. No step numbers or phase labels.
+- **Length**: One clear and direct sentence.
 - **Examples**:
-  - ✅ `log_progress("STARTING: Checking database for users, groups, and applications", "", "starting")`
-  - ✅ `log_progress("STARTING: Looking up 'sso-super-admins' group ID in database", "", "starting")`
-  - ✅ `log_progress("STARTING: Fetching members of target group", "", "starting")`
-  - ✅ `log_progress("STARTING: Testing API endpoint to understand response structure", "", "starting")`
-  - ✅ `log_progress("STARTING: Loading API code generation guidelines", "", "starting")`
+  - ✅ `log_progress("Checking database for users, groups, and applications to see what's available locally", "", "starting")`
+  - ✅ `log_progress("Looking up the 'sso-super-admins' group ID to use it in the next API call", "", "starting")`
+  - ✅ `log_progress("Fetching members of the target group to get a list of users", "", "starting")`
+  - ✅ `log_progress("Testing the API endpoint to understand its response structure before building the script", "", "starting")`
+  - ✅ `log_progress("Loading API code generation guidelines to ensure the script is correct", "", "starting")`
   - ✅ `log_progress("Query validated successfully", "", "completed")`
   - ❌ `log_progress("STARTING: Loading guidance", "To understand API calls", "starting")` - Has text in second param
   - ❌ `log_progress("STEP 1: Load schema", "", "starting")` - Uses step numbers
-  - ❌ `log_progress("STARTING: I need to check the database to find users", "", "starting")` - Uses "I" and too wordy
+  - ❌ `log_progress("I need to check the database to find users", "", "starting")` - Uses "I" and is too conversational
   - ❌ `log_progress("Phase 3: Probe endpoint", "", "starting")` - Uses phase labels
 
 ---
@@ -182,6 +182,9 @@ import sqlite3
 
 async def main():
     """Main function to execute the script logic."""
+    
+    # Ensure consistent encoding for stdout (Critical for Windows)
+    sys.stdout.reconfigure(encoding='utf-8')
     
     # --- INITIALIZATION ---
     db_connection = None  # Ensure db_connection is defined in case of connection failure
@@ -365,7 +368,7 @@ VALIDATION CHECKPOINT:
 ### Section 6: Tooling & Additional Context
 
 #### Your Toolbox:
-- **Progress**: `log_progress()` - Keep users informed of your actions and reasoning
+- **Progress**: `log_progress()` - Keep users informed of your actions (reasoning must be combined into action text)
 - **Discovery**: `load_sql_schema()`, `load_comprehensive_api_endpoints()`, `filter_endpoints_by_operations()`
 - **Guidance (Call Once)**: `get_sql_code_generation_prompt()`, `get_api_code_generation_prompt()`
 - **Testing**: `execute_test_query()`
