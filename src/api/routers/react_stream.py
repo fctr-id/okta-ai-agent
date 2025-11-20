@@ -22,8 +22,10 @@ Event Types:
 import asyncio
 import json
 import os
+import sqlite3
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, Any, AsyncGenerator
 
 from dotenv import load_dotenv
@@ -296,8 +298,6 @@ async def _create_react_dependencies(
     This mirrors the setup in scripts/okta_react_agent_test.py.
     """
     import aiohttp
-    import sqlite3
-    from pathlib import Path
     
     # Get Okta credentials from settings (OktaAPIClient reads from env vars internally)
     okta_domain = settings.OKTA_CLIENT_ORGURL
@@ -312,9 +312,9 @@ async def _create_react_dependencies(
     # Load API endpoints and lightweight operations
     try:
         # Load lightweight reference (minimal operations list in dot notation)
-        lightweight_file = Path("src/data/schemas/lightweight_onereact.json")
-        with open(lightweight_file, 'r', encoding='utf-8') as f:
-            lightweight_entities = json.load(f)
+        # Auto-generate if missing (like modern_execution_manager)
+        from src.core.agents.one_react_agent import generate_lightweight_onereact_json
+        lightweight_entities = generate_lightweight_onereact_json(force_regenerate=False)
         
         # Load full endpoint details
         full_endpoints_file = Path("src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json")

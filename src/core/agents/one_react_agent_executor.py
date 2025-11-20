@@ -25,7 +25,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
-from src.core.agents.one_react_agent import execute_react_query, ReactAgentDependencies
+from src.core.agents.one_react_agent import (
+    execute_react_query, 
+    ReactAgentDependencies,
+    should_force_api_only_mode,
+    check_database_health
+)
 from src.utils.security_config import validate_generated_code
 
 logger = logging.getLogger(__name__)
@@ -82,10 +87,20 @@ class ReActAgentExecutor:
         correlation_id: str,
         user_query: str,
         deps: ReactAgentDependencies,
-        cancellation_check: Optional[callable] = None
+        cancellation_check: Optional[callable] = None,
+        force_api_only: bool = False
     ):
         self.correlation_id = correlation_id
-        self.user_query = user_query
+        
+        # Check database health and modify query if needed
+        should_force_api, modified_query = should_force_api_only_mode(user_query, force_api_only)
+        self.user_query = modified_query
+        self.api_only_mode = should_force_api
+        
+        # Log if query was modified
+        if modified_query != user_query:
+            logger.info(f"[{correlation_id}] Query modified for API-only mode")
+        
         self.deps = deps
         self.cancellation_check = cancellation_check
         

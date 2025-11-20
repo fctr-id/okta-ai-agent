@@ -107,15 +107,5 @@
     "user_authenticator.list_supported_factors",
     "user_authenticator.list_supported_security_questions",
     "user_authenticator.list_yubikey_tokens"
-  ],
-  "sql_tables": [
-    "applications",
-    "users",
-    "groups",
-    "group_memberships",
-    "application_users",
-    "application_groups",
-    "roles",
-    "user_roles"
   ]
 }

@@ -72,6 +72,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     # Startup code
     logger.info("Initializing Okta AI Agent API")
+    
+    # Generate lightweight reference for React agent if missing
+    try:
+        from src.core.agents.one_react_agent import generate_lightweight_onereact_json
+        lightweight_data = generate_lightweight_onereact_json(force_regenerate=False)
+        logger.info(f"Lightweight reference ready: {len(lightweight_data.get('operations', []))} operations")
+    except Exception as e:
+        logger.warning(f"Failed to generate lightweight reference: {e}")
+    
     logger.info("Initializing authentication database...")
     db = DatabaseOperations()
     

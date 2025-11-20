@@ -10,17 +10,22 @@ This agent follows the ReAct (Reasoning + Acting) pattern:
 """
 
 from pydantic_ai import Agent, RunContext, FunctionToolset
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Literal
 from dataclasses import dataclass
-import logging
 import json
 import os
 import time
 import asyncio
+import re
 from pathlib import Path
 
-from src.utils.logging import get_logger, set_correlation_id, get_default_log_dir
+from src.utils.logging import get_logger, get_default_log_dir
+
+# Security validators
+from src.utils.security_config import validate_generated_code
+from src.core.security.sql_security_validator import validate_user_sql
+from src.core.security.network_security import validate_request
 
 # Setup centralized logging
 logger = get_logger("okta_ai_agent", log_dir=get_default_log_dir())
@@ -102,22 +107,9 @@ def generate_lightweight_onereact_json(force_regenerate: bool = False) -> Dict[s
     # Sort for consistency
     operations.sort()
     
-    # SQL tables (from SQLite schema)
-    sql_tables = [
-        "applications",
-        "users",
-        "groups",
-        "group_memberships",
-        "application_users",
-        "application_groups",
-        "roles",
-        "user_roles"
-    ]
-    
-    # Create minimal structure
+    # Create minimal structure (API operations only - SQL schema is separate in shared_schema.py)
     lightweight_data = {
-        "operations": operations,
-        "sql_tables": sql_tables
+        "operations": operations
     }
     
     # Save to file
@@ -130,6 +122,113 @@ def generate_lightweight_onereact_json(force_regenerate: bool = False) -> Dict[s
         logger.error(f"Failed to save lightweight_onereact.json: {e}")
     
     return lightweight_data
+
+# ============================================================================
+# Database Health Check
+# ============================================================================
+
+def check_database_health() -> bool:
+    """
+    Check if the SQLite database exists and is populated with users.
+    
+    Returns:
+        bool: True if database exists and has users (>= 1), False otherwise
+    """
+    import sqlite3
+    
+    try:
+        # Try multiple possible database locations
+        possible_db_paths = [
+            os.path.join(os.getcwd(), 'sqlite_db', 'okta_sync.db'),
+            os.path.join(Path(__file__).parent.parent.parent.parent, 'sqlite_db', 'okta_sync.db'),
+            'sqlite_db/okta_sync.db'
+        ]
+        
+        db_path = None
+        for path in possible_db_paths:
+            if os.path.exists(path):
+                db_path = path
+                break
+        
+        if not db_path:
+            logger.warning("Database file not found in any expected location - API-only mode will be used")
+            return False
+        
+        # Check if database is accessible and has users
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            
+            # Check if users table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cursor.fetchone():
+                logger.warning("Users table not found in database - API-only mode will be used")
+                return False
+            
+            # Check if users table has at least 1 record
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+            
+            logger.info(f"Database health check: Found {user_count} users in database")
+            return user_count >= 1
+            
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e} - API-only mode will be used")
+        return False
+
+def should_force_api_only_mode(query: str, force_api_only: bool = False) -> tuple[bool, str]:
+    """
+    Determine if query should use API-only mode and modify query if needed.
+    
+    Args:
+        query: Original user query
+        force_api_only: Flag from frontend to force API-only mode
+        
+    Returns:
+        tuple: (should_use_api_only, modified_query)
+    """
+    # Check for explicit API-only requests in query
+    api_only_phrases = [
+        "do not use sql",
+        "don't use sql", 
+        "no sql",
+        "api only",
+        "apis only",
+        "api calls only",
+        "without using sql"
+    ]
+    
+    query_lower = query.lower()
+    explicit_api_only = any(phrase in query_lower for phrase in api_only_phrases)
+    
+    # Check database health
+    db_healthy = check_database_health()
+    
+    # Decision logic
+    should_force_api = force_api_only or explicit_api_only or not db_healthy
+    
+    # Modify query if forcing API-only mode
+    modified_query = query
+    if should_force_api and not explicit_api_only:
+        # Add API-only instruction to query
+        modified_query = f"{query}. IMPORTANT: Do NOT use SQL - ONLY use API calls to gather data."
+        
+    # Log decision
+    if should_force_api:
+        reasons = []
+        if force_api_only:
+            reasons.append("frontend flag")
+        if explicit_api_only:
+            reasons.append("explicit user request")
+        if not db_healthy:
+            reasons.append("database unavailable/empty")
+        
+        logger.info(f"[ReAct] API-only mode activated: {', '.join(reasons)}")
+        if modified_query != query:
+            logger.info(f"[ReAct] Modified query to enforce API-only mode")
+    else:
+        logger.info("[ReAct] SQL and API modes both available")
+        
+    return should_force_api, modified_query
 
 # ============================================================================
 # Schema Helper Function
@@ -596,13 +695,23 @@ Rules:
         # Log the generated code for debugging
         logger.debug(f"[{deps.correlation_id}] Generated code to execute:\n{code}")
         
-        import time
-        import re  # Import re at top level of function for safety
-        
         start_time = time.time()
         
         try:
             if code_type == "sql":
+                # SECURITY VALIDATION: Check SQL for injection attacks
+                is_valid, error_msg = validate_user_sql(code, deps.correlation_id)
+                if not is_valid:
+                    logger.warning(f"[{deps.correlation_id}] SQL security validation failed: {error_msg}")
+                    return {
+                        "success": False,
+                        "sample_results": None,
+                        "total_records": 0,
+                        "execution_time_ms": 0,
+                        "columns": [],
+                        "error": f"❌ SECURITY VALIDATION FAILED: {error_msg}"
+                    }
+                
                 # VALIDATION: Check for LIMIT 3 in SQL code
                 if "LIMIT 3" not in code.upper():
                     return {
@@ -614,7 +723,7 @@ Rules:
                         "error": "❌ VALIDATION FAILED: SQL query is missing 'LIMIT 3'. All test queries MUST include 'LIMIT 3' at the end to prevent excessive data retrieval during testing. Please add 'LIMIT 3' to your query and try again."
                     }
                 
-                # Execute SQL query against SQLite
+                # Execute SQL query against SQLite (now validated)
                 cursor = deps.sqlite_connection.cursor()
                 cursor.execute(code)
                 results = cursor.fetchall()
@@ -640,6 +749,40 @@ Rules:
                 }
             
             elif code_type == "python_sdk":
+                # SECURITY VALIDATION: Check Python code for dangerous patterns
+                validation_result = validate_generated_code(code)
+                if not validation_result.is_valid:
+                    logger.warning(f"[{deps.correlation_id}] Python code security validation failed: {validation_result.violations}")
+                    return {
+                        "success": False,
+                        "sample_results": None,
+                        "total_records": 0,
+                        "execution_time_ms": 0,
+                        "columns": [],
+                        "error": f"❌ SECURITY VALIDATION FAILED: {', '.join(validation_result.violations)}"
+                    }
+                
+                # SECURITY VALIDATION: Check network requests for unauthorized domains
+                # Extract endpoint from code to validate URL
+                endpoint_match = re.search(r'make_request\s*\(\s*["\']([^"\']+)["\']', code)
+                if endpoint_match:
+                    endpoint = endpoint_match.group(1)
+                    # Skip validation for special tools (they have their own security)
+                    if not endpoint.startswith("/special-tools/"):
+                        # Build full URL for validation
+                        full_url = f"{deps.okta_client.base_url}{endpoint}"
+                        network_validation = validate_request('GET', full_url)
+                        if not network_validation.is_allowed:
+                            logger.warning(f"[{deps.correlation_id}] Network security validation failed: {network_validation.blocked_reason}")
+                            return {
+                                "success": False,
+                                "sample_results": None,
+                                "total_records": 0,
+                                "execution_time_ms": 0,
+                                "columns": [],
+                                "error": f"❌ NETWORK SECURITY FAILED: {network_validation.blocked_reason}. Violations: {', '.join(network_validation.violations)}"
+                            }
+                
                 # VALIDATION: Check for max_results=3 or less in Python SDK code
                 # EXCEPTION: Special tools do not require max_results
                 if "/special-tools/" not in code:
@@ -662,7 +805,6 @@ Rules:
                 
                 # Execute Python SDK code
                 # We're already in an async context
-                import asyncio
                 
                 # Create namespace with okta_client available
                 namespace = {
@@ -886,8 +1028,6 @@ Rules:
         """
         logger.info(f"[{deps.correlation_id}] Tool 7: Generating production code (type: {code_type})")
         
-        import re
-        
         production_code = test_code
         optimizations_applied = []
         
@@ -995,10 +1135,9 @@ except FileNotFoundError:
     logger.warning(f"Prompt file not found: {PROMPT_FILE}. Using default prompt.")
     BASE_SYSTEM_PROMPT = "You are a ReAct agent for Okta query execution."
 
-# Create the ReAct agent using the same pattern as api_code_gen_agent
+# Create the ReAct agent
 react_agent = Agent(
-    model,  # Use model from model_pickerdaisy taylor
-    
+    model,  # Use model from model_picker
     instructions=BASE_SYSTEM_PROMPT,  # Static base instructions
     output_type=ExecutionResult,
     deps_type=ReactAgentDependencies,
