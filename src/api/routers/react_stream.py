@@ -165,11 +165,16 @@ async def stream_react_updates(
                 user_query=process["query"]
             )
             
+            # Create cancellation check
+            def check_cancelled():
+                return process.get("cancelled", False)
+            
             # Create executor
             executor = ReActAgentExecutor(
                 correlation_id=process_id,
                 user_query=process["query"],
-                deps=deps
+                deps=deps,
+                cancellation_check=check_cancelled
             )
             
             # Stream events
@@ -196,6 +201,11 @@ async def stream_react_updates(
                 if event["type"] == "SCRIPT-GENERATED":
                     logger.info(f"[{process_id}] 📜 Sending SCRIPT-GENERATED event to frontend (script length: {event.get('script_length', 0)} chars)")
                 
+                # Log COMPLETE events for debugging
+                if event["type"] == "COMPLETE":
+                    content_preview = str(event.get('content', ''))[:100] if event.get('content') else 'None'
+                    logger.info(f"[{process_id}] ✅ Sending COMPLETE event - display_type: {event.get('display_type')}, is_special_tool: {event.get('is_special_tool')}, content length: {len(str(event.get('content', '')))}, preview: {content_preview}...")
+                
                 yield f"data: {json.dumps(event)}\n\n"
                 
                 # Small delay to prevent overwhelming frontend
@@ -217,8 +227,8 @@ async def stream_react_updates(
             yield f"data: {json.dumps(error_data)}\n\n"
         
         finally:
-            # Cleanup after 5 minutes
-            asyncio.create_task(_cleanup_process(process_id, delay=300))
+            # Cleanup after 5 seconds for faster shutdown during development
+            asyncio.create_task(_cleanup_process(process_id, delay=5))
     
     return StreamingResponse(
         event_generator(),
@@ -311,6 +321,25 @@ async def _create_react_dependencies(
         with open(full_endpoints_file, 'r', encoding='utf-8') as f:
             full_api_data = json.load(f)
             endpoints = full_api_data.get('endpoints', [])
+        
+        # Inject special tools
+        try:
+            from src.core.tools.special_tools import get_special_tool_endpoints
+            special_endpoints = get_special_tool_endpoints()
+            if special_endpoints:
+                endpoints.extend(special_endpoints)
+                
+                # Also update lightweight entities if needed
+                # lightweight_entities is {"operations": [...], "sql_tables": [...]}
+                if "operations" in lightweight_entities:
+                    for ep in special_endpoints:
+                        op_name = f"{ep.get('entity')}.{ep.get('operation')}"
+                        if op_name not in lightweight_entities["operations"]:
+                            lightweight_entities["operations"].append(op_name)
+                
+                logger.info(f"[{correlation_id}] Injected {len(special_endpoints)} special tool endpoints")
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Failed to inject special tools: {e}")
         
         logger.info(f"[{correlation_id}] Loaded {len(lightweight_entities.get('operations', []))} operations from lightweight reference")
         logger.info(f"[{correlation_id}] Loaded {len(endpoints)} full endpoint details")

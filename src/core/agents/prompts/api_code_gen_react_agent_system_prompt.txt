@@ -46,6 +46,7 @@ The following patterns are **STRICTLY FORBIDDEN** and will cause execution failu
 
 #### Rule 3.1: Testing Limits vs Production Code (NON-NEGOTIABLE)
 **FOR TESTING**: Every `client.make_request()` call MUST include `max_results=3` for initial test validation.
+**EXCEPTION**: Special Tools (endpoints starting with `/special-tools/`) do NOT support `max_results`. Do not include it for them.
 **FOR PRODUCTION**: Remove `max_results` entirely to fetch ALL data. The client handles automatic pagination.
 
 ```python

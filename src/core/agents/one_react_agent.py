@@ -17,6 +17,7 @@ import logging
 import json
 import os
 import time
+import asyncio
 from pathlib import Path
 
 from src.utils.logging import get_logger, set_correlation_id, get_default_log_dir
@@ -137,396 +138,13 @@ def generate_lightweight_onereact_json(force_regenerate: bool = False) -> Dict[s
 def get_sqlite_schema_description() -> str:
     """
     Generate a comprehensive LLM-optimized description of the SQLite database schema.
-    Adapted from sql_generation_agent with enhanced details.
+    Uses the centralized shared schema definition.
     
     Returns:
         Formatted schema description string with complete table details
     """
-    # Get custom attributes dynamically
-    try:
-        from config.settings import settings
-        custom_attrs = settings.okta_user_custom_attributes_list
-    except (ImportError, AttributeError):
-        custom_attrs = []
-
-    # Build custom attributes schema section
-    custom_attrs_schema = ""
-    if custom_attrs:
-        custom_attrs_schema = "\n            - custom_attributes (JSON) Contains custom attributes."
-        custom_attrs_schema += "\n              Available attributes are: " + ", ".join(custom_attrs)
-    else:
-        custom_attrs_schema = "\n            - custom_attributes (JSON)  No custom attributes configured"
-
-    # Build the comprehensive schema
-    schema = """
-=========================================================================================================
-COMPLETE SQLITE DATABASE SCHEMA
-=========================================================================================================
-
-TABLE: users
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- okta_id (String, INDEX)
-- email (String, INDEX)
-- first_name (String)
-- last_name (String)
-- login (String, INDEX)
-- status (String, INDEX)  #STAGED, PROVISIONED, ACTIVE, PASSWORD_RESET, PASSWORD_EXPIRED, LOCKED_OUT, SUSPENDED, DEPROVISIONED
-- mobile_phone (String)
-- primary_phone (String)
-- employee_number (String, INDEX)
-- department (String, INDEX)
-- manager (String)
-- user_type (String)
-- country_code (String, INDEX)
-- title (String)
-- organization (String, INDEX)
-- password_changed_at (DateTime)
-- created_at (DateTime)      # From Okta 'created' field
-- last_updated_at (DateTime) # From Okta 'lastUpdated' field
-- updated_at (DateTime)      # Local record update time
-- status_changed_at (DateTime, INDEX)
-- last_synced_at (DateTime, INDEX)
-- is_deleted (Boolean, INDEX)""" + custom_attrs_schema + """
-
-INDEXES:
-- idx_user_tenant_email (tenant_id, email)
-- idx_user_tenant_login (tenant_id, login)
-- idx_tenant_deleted (tenant_id, is_deleted)
-- idx_user_employee_number (tenant_id, employee_number)
-- idx_user_department (tenant_id, department)
-- idx_user_country_code (tenant_id, country_code)
-- idx_user_organization (tenant_id, organization)
-- idx_user_manager (tenant_id, manager)
-- idx_user_name_search (tenant_id, first_name, last_name)
-- idx_user_status_filter (tenant_id, status, is_deleted)
-
-UNIQUE:
-- uix_tenant_okta_id (tenant_id, okta_id)
-
-RELATIONSHIPS:
-- direct_applications: many-to-many -> applications (via user_application_assignments)
-- groups: many-to-many -> groups (via user_group_memberships)
-- factors: one-to-many -> user_factors
-- devices: many-to-many -> devices (via user_devices)
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: groups
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- okta_id (String, INDEX)
-- name (String, INDEX)
-- description (String)
-- created_at (DateTime)      # From Okta 'created' field
-- last_updated_at (DateTime) # From Okta 'lastUpdated' field
-- updated_at (DateTime)      # Local record update time
-- last_synced_at (DateTime, INDEX)
-- is_deleted (Boolean, INDEX)
-
-INDEXES:
-- idx_group_tenant_name (tenant_id, name)
-- idx_tenant_deleted (tenant_id, is_deleted)
-
-UNIQUE:
-- uix_tenant_okta_id (tenant_id, okta_id)
-
-RELATIONSHIPS:
-- users: many-to-many -> users (via user_group_memberships)
-- applications: many-to-many -> applications (via group_application_assignments)
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: applications
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- okta_id (String, INDEX)
-- name (String, INDEX)
-- label (String)
-- status (String, INDEX)
-- sign_on_mode (String, INDEX)  #can be AUTO_LOGIN, BASIC_AUTH, BOOKMARK, BROWSER_PLUGIN, OPENID_CONNECT, SAML_2_0, WS_FEDERATION
-- metadata_url (String, NULL)
-- policy_id (String, ForeignKey -> policies.okta_id, NULL, INDEX)
-- sign_on_url (String, NULL)
-- audience (String, NULL)
-- destination (String, NULL)
-- signing_kid (String, NULL)
-- username_template (String, NULL) #types: BUILT_IN, CUSTOM, NONE
-- username_template_type (String, NULL)  #Use LIKE to search. Also known as nameid attribute. This can be source. or custom. and then any user profile attribute after the dot
-- implicit_assignment (Boolean)
-- admin_note (Text, NULL)
-- attribute_statements (JSON, NULL)  #Use LIKE to search. This is a an array of JSON objects . Must include '{' in the LIKE search
-- honor_force_authn (Boolean)
-- hide_ios (Boolean)
-- hide_web (Boolean)
-- created_at (DateTime)      # From Okta 'created' field
-- last_updated_at (DateTime) # From Okta 'lastUpdated' field
-- updated_at (DateTime)      # Local record update time
-- last_synced_at (DateTime, INDEX)
-- is_deleted (Boolean, INDEX)
-
-INDEXES:
-- idx_app_tenant_name (tenant_id, name)
-- idx_app_okta_id (okta_id)
-- idx_app_status (status)
-- idx_app_sign_on_mode (sign_on_mode)
-- idx_app_policy (policy_id)
-- idx_app_attrs (attribute_statements)
-- idx_app_label (label)
-
-UNIQUE:
-- uix_tenant_okta_id (tenant_id, okta_id)
-
-RELATIONSHIPS:
-- policy: many-to-one -> policies
-- direct_users: many-to-many -> users (via user_application_assignments)
-- assigned_groups: many-to-many -> groups (via group_application_assignments)
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: policies
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- okta_id (String, INDEX)
-- name (String, INDEX)
-- description (String, NULL)
-- status (String, INDEX)
-- type (String, INDEX)
-- created_at (DateTime)      # From Okta 'created' field
-- last_updated_at (DateTime) # From Okta 'lastUpdated' field
-- updated_at (DateTime)      # Local record update time
-- last_synced_at (DateTime, INDEX)
-- is_deleted (Boolean, INDEX)
-
-INDEXES:
-- idx_policy_tenant_name (tenant_id, name)
-- idx_policy_okta_id (okta_id)
-- idx_policy_type (type)
-
-UNIQUE:
-- uix_tenant_okta_id (tenant_id, okta_id)
-
-RELATIONSHIPS:
-- applications: one-to-many -> applications
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: devices
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- okta_id (String, INDEX)
-- status (String, INDEX)  # ACTIVE, INACTIVE, etc.
-- display_name (String, INDEX)  # Device display name
-- platform (String, INDEX)  # ANDROID, iOS, WINDOWS, etc.
-- manufacturer (String, INDEX)  # samsung, AZW, Apple, etc.
-- model (String)  # Device model
-- os_version (String)  # Operating system version
-- serial_number (String, INDEX)  # Device serial number
-- udid (String, INDEX)  # Unique device identifier
-- registered (Boolean)  # Device registration status
-- secure_hardware_present (Boolean)  # TPM/secure hardware availability
-- disk_encryption_type (String)  # USER, NONE, etc.
-- created_at (DateTime)      # From Okta 'created' field
-- last_updated_at (DateTime) # From Okta 'lastUpdated' field
-- updated_at (DateTime)      # Local record update time
-- last_synced_at (DateTime, INDEX)
-- is_deleted (Boolean, INDEX)
-
-INDEXES:
-- idx_device_tenant_name (tenant_id, display_name)
-- idx_device_platform (tenant_id, platform)
-- idx_device_manufacturer (tenant_id, manufacturer)
-- idx_device_serial (tenant_id, serial_number)
-- idx_device_udid (tenant_id, udid)
-
-UNIQUE:
-- uix_tenant_okta_id (tenant_id, okta_id)
-
-RELATIONSHIPS:
-- users: many-to-many -> users (via user_devices)
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: user_devices
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- user_okta_id (String, ForeignKey -> users.okta_id)
-- device_okta_id (String, ForeignKey -> devices.okta_id)
-- management_status (String)  # NOT_MANAGED, MANAGED, etc.
-- screen_lock_type (String)  # BIOMETRIC, PIN, PASSWORD, etc.
-- user_device_created_at (DateTime)  # When user was associated with device
-- created_at (DateTime)
-- last_updated_at (DateTime)
-- updated_at (DateTime)
-- last_synced_at (DateTime, INDEX)
-- is_deleted (Boolean, INDEX)
-
-INDEXES:
-- idx_user_device_user (tenant_id, user_okta_id)
-- idx_user_device_device (tenant_id, device_okta_id)
-- idx_user_device_mgmt_status (tenant_id, management_status)
-- idx_user_device_screen_lock (tenant_id, screen_lock_type)
-
-UNIQUE:
-- uix_user_device_tenant_user_device (tenant_id, user_okta_id, device_okta_id)
-
-RELATIONSHIPS:
-- user: many-to-one -> users
-- device: many-to-one -> devices
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: user_factors
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- okta_id (String, INDEX)
-- user_okta_id (String, ForeignKey -> users.okta_id)
-- factor_type (String, INDEX)  ## Values can be only sms, email, signed_nonce(fastpass), password, webauthn(FIDO2), security_question, token, push(okta verify), totp
-- provider (String, INDEX)
-- status (String, INDEX)
-- authenticator_name (String, INDEX)  # Human-readable authenticator name like "Google Authenticator", "Okta Verify"
-- email (String, NULL)
-- phone_number (String, NULL)
-- device_type (String, NULL)
-- device_name (String, NULL)
-- platform (String, NULL)
-- created_at (DateTime)
-- last_updated_at (DateTime) # From Okta 'lastUpdated' field
-- updated_at (DateTime)
-- last_synced_at (DateTime, INDEX)
-- is_deleted (Boolean, INDEX)
-
-INDEXES:
-- idx_factor_tenant_user (tenant_id, user_okta_id)
-- idx_factor_okta_id (okta_id)
-- idx_factor_type_status (factor_type, status)
-- idx_factor_provider_status (provider, status)
-- idx_factor_tenant_user_type (tenant_id, user_okta_id, factor_type)
-- idx_tenant_factor_type (tenant_id, factor_type)
-- idx_factor_auth_name (tenant_id, authenticator_name)
-
-UNIQUE:
-- uix_tenant_okta_id (tenant_id, okta_id)
-
-RELATIONSHIPS:
-- user: many-to-one -> users
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: user_application_assignments
-FIELDS:
-- user_okta_id (String, ForeignKey -> users.okta_id)
-- application_okta_id (String, ForeignKey -> applications.okta_id)
-- tenant_id (String)
-- assignment_id (String)
-- app_instance_id (String)
-- credentials_setup (Boolean)
-- hidden (Boolean)
-- created_at (DateTime)
-- updated_at (DateTime)
-
-PRIMARY KEY: (user_okta_id, application_okta_id)
-
-INDEXES:
-- idx_user_app_tenant (tenant_id)
-- idx_uaa_application (tenant_id, application_okta_id)
-
-UNIQUE:
-- uix_user_app_assignment (tenant_id, user_okta_id, application_okta_id)
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: group_application_assignments
-FIELDS:
-- group_okta_id (String, ForeignKey -> groups.okta_id)
-- application_okta_id (String, ForeignKey -> applications.okta_id)
-- tenant_id (String)
-- assignment_id (String)
-- created_at (DateTime)
-- updated_at (DateTime)
-
-PRIMARY KEY: (group_okta_id, application_okta_id)
-
-INDEXES:
-- idx_group_app_tenant (tenant_id)
-- idx_gaa_application (tenant_id, application_okta_id)
-
-UNIQUE:
-- uix_group_app_assignment (tenant_id, group_okta_id, application_okta_id)
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: user_group_memberships
-FIELDS:
-- user_okta_id (String, ForeignKey -> users.okta_id)
-- group_okta_id (String, ForeignKey -> groups.okta_id)
-- tenant_id (String)
-- created_at (DateTime)
-- updated_at (DateTime)
-
-PRIMARY KEY: (user_okta_id, group_okta_id)
-
-INDEXES:
-- idx_user_group_tenant (tenant_id)
-- idx_user_by_group (tenant_id, group_okta_id)
-
-UNIQUE:
-- uix_user_group_membership (tenant_id, user_okta_id, group_okta_id)
-
----------------------------------------------------------------------------------------------------------
-
-TABLE: sync_history
-FIELDS:
-- id (Integer, PrimaryKey)
-- tenant_id (String, INDEX)
-- entity_type (String, INDEX)
-- sync_start_time (DateTime)
-- sync_end_time (DateTime)
-- status (ENUM: STARTED/SUCCESS/FAILED)
-- records_processed (Integer)
-- last_successful_sync (DateTime)
-- error_message (String)
-- created_at (DateTime)
-- updated_at (DateTime)
-
-INDEXES:
-- idx_sync_tenant_entity (tenant_id, entity_type)
-
-=========================================================================================================
-IMPORTANT QUERY GUIDELINES
-=========================================================================================================
-
-1. DEFAULT FILTERS:
-   - Always filter by status = 'ACTIVE' unless user specifies otherwise
-   - Filter by is_deleted = 0 or NULL for active records
-   - Use tenant_id when available for multi-tenant environments
-
-2. RELATIONSHIPS:
-   - Join tables using okta_id fields (e.g., users.okta_id = user_factors.user_okta_id)
-   - For user applications: Check BOTH direct assignments AND group-based assignments (UNION pattern)
-
-3. PERFORMANCE:
-   - Use indexed fields in WHERE clauses for better performance
-   - Leverage composite indexes when filtering by multiple fields
-   - Use LIMIT for test queries (LIMIT 3 for testing)
-
-4. COMMON PATTERNS:
-   - User's groups: JOIN user_group_memberships ON users.okta_id = user_group_memberships.user_okta_id
-   - User's apps: UNION of user_application_assignments (direct) + group_application_assignments (via groups)
-   - User's MFA: JOIN user_factors ON users.okta_id = user_factors.user_okta_id
-
-=========================================================================================================
-"""
-    return schema
-
-# ============================================================================
+    from src.data.schemas.shared_schema import get_okta_database_schema
+    return get_okta_database_schema()# ============================================================================
 # Dependencies (Dataclass for PydanticAI)
 # ============================================================================
 
@@ -548,6 +166,9 @@ class ReactAgentDependencies:
     step_tokens_callback: Optional[callable] = None # Called to report token usage per step
     tool_call_callback: Optional[callable] = None   # Called when a tool is invoked
     
+    # NEW: Cancellation check callback
+    cancellation_check: Optional[callable] = None   # Called to check if execution should stop
+    
     # Circuit breaker counters for tool execution limits
     sql_execution_count: int = 0
     api_execution_count: int = 0
@@ -568,6 +189,10 @@ class ExecutionResult(BaseModel):
     """Final execution result from ReAct agent"""
     success: bool
     results: Optional[Any] = None
+    display_type: Literal["table", "markdown", "json"] = Field(
+        default="markdown", 
+        description="Format to display results: 'table' for list of records, 'markdown' for text/summary"
+    )
     execution_plan: str
     steps_taken: List[str]
     error: Optional[str] = None
@@ -593,6 +218,16 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
             })
     
     # ========================================================================
+    # Helper: Check Cancellation
+    # ========================================================================
+    
+    def check_cancellation():
+        """Check if execution should be cancelled"""
+        if deps.cancellation_check and deps.cancellation_check():
+            logger.warning(f"[{deps.correlation_id}] 🛑 Execution cancelled by user during tool execution")
+            raise asyncio.CancelledError("Execution cancelled by user")
+
+    # ========================================================================
     # Tool 1: Load SQLite Schema
     # ========================================================================
     
@@ -604,6 +239,8 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Complete schema description with tables, columns, indexes, and relationships
         """
+        check_cancellation()
+        
         # Notify frontend
         await notify_tool_call("load_sql_schema", "Loading database schema")
         
@@ -648,6 +285,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Dictionary with operations list (in entity.operation format)
         """
+        check_cancellation()
         await notify_tool_call("load_comprehensive_api_endpoints", "Loading API endpoints catalog")
         logger.info(f"[{deps.correlation_id}] Tool 2: Loading comprehensive API endpoints (lightweight)")
         
@@ -712,18 +350,17 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         operation_names: List[str]
     ) -> Dict[str, Any]:
         """
-        Get FULL detailed endpoint information for specific operations.
+        Get full details for specific operations (e.g., ["application.list", "user.get"]).
+        Call this AFTER Tool 2 to get the exact URL, method, and parameters for the operations you need.
         
         Args:
-            operation_names: List of operation identifiers in one of these formats:
-                - Dot notation: "entity.operation" (e.g., "application_credential.list_keys")
-                - Plain operation: "operation" (e.g., "list_keys")
-                - Old compound format: "entity_operation" (e.g., "application_credential_list_keys")
+            operation_names: List of operation strings (e.g., ["application.list"])
         
         Returns:
-            Dictionary with full endpoint details for selected operations
+            Detailed endpoint definitions for the requested operations
         """
-        await notify_tool_call("filter_endpoints_by_operations", f"Getting details for {len(operation_names)} operations")
+        check_cancellation()
+        await notify_tool_call("filter_endpoints_by_operations", f"Filtering endpoints: {operation_names}")
         
         # Circuit breaker check
         if deps.endpoint_filter_count >= deps.MAX_ENDPOINT_FILTERS:
@@ -811,6 +448,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         Returns:
             Dictionary with code generation prompt and guidelines (schema already in system context)
         """
+        check_cancellation()
         await notify_tool_call("get_sql_code_generation_prompt", "Getting SQL code generation guidance")
         logger.info(f"[{deps.correlation_id}] Tool 4: Getting SQL code generation prompt")
         
@@ -858,6 +496,7 @@ Rules:
         Returns:
             Dictionary with code generation prompt and guidelines
         """
+        check_cancellation()
         await notify_tool_call("get_api_code_generation_prompt", "Getting API code generation guidance")
         logger.info(f"[{deps.correlation_id}] Tool 5: Getting API code generation prompt")
         
@@ -922,6 +561,7 @@ Rules:
         Returns:
             Dictionary with execution results and metadata
         """
+        check_cancellation()
         await notify_tool_call("execute_test_query", f"Executing {code_type} test query")
         
         # Circuit breaker checks BEFORE execution
@@ -957,6 +597,7 @@ Rules:
         logger.debug(f"[{deps.correlation_id}] Generated code to execute:\n{code}")
         
         import time
+        import re  # Import re at top level of function for safety
         
         start_time = time.time()
         
@@ -1000,18 +641,24 @@ Rules:
             
             elif code_type == "python_sdk":
                 # VALIDATION: Check for max_results=3 or less in Python SDK code
-                # Accept max_results=1, max_results=2, or max_results=3
-                import re
-                max_results_pattern = r'max_results\s*=\s*([123])\b'
-                if not re.search(max_results_pattern, code):
-                    return {
-                        "success": False,
-                        "sample_results": None,
-                        "total_records": 0,
-                        "execution_time_ms": 0,
-                        "columns": [],
-                        "error": "❌ VALIDATION FAILED: API code is missing 'max_results=3' (or 1, 2). All test API calls MUST include 'max_results' with a value of 3 or less in the client.make_request() call to prevent excessive API requests during testing. Please add 'max_results=3' to your API call and try again."
-                    }
+                # EXCEPTION: Special tools do not require max_results
+                if "/special-tools/" not in code:
+                    # Accept max_results=1, max_results=2, or max_results=3
+                    max_results_pattern = r'max_results\s*=\s*([123])\b'
+                    if not re.search(max_results_pattern, code):
+                        return {
+                            "success": False,
+                            "sample_results": None,
+                            "total_records": 0,
+                            "execution_time_ms": 0,
+                            "columns": [],
+                            "error": "❌ VALIDATION FAILED: API code is missing 'max_results=3' (or 1, 2). All test API calls MUST include 'max_results' with a value of 3 or less in the client.make_request() call to prevent excessive API requests during testing. Please add 'max_results=3' to your API call and try again."
+                        }
+                else:
+                    # Special Tools detected - Execute immediately to get the real analysis
+                    # We do NOT skip execution for special tools because they now contain embedded LLM analysis
+                    # that we want to present to the user immediately.
+                    logger.info(f"[{deps.correlation_id}] Special Tool detected - Executing immediately for real-time analysis")
                 
                 # Execute Python SDK code
                 # We're already in an async context
@@ -1024,9 +671,69 @@ Rules:
                     'asyncio': asyncio
                 }
                 
+                # Special Tool Handling: Intercept /special-tools/ calls
+                if "/special-tools/" in code:
+                    logger.info(f"[{deps.correlation_id}] Special Tool detected in code - Using SpecialToolInterceptor")
+                    
+                    # Define interceptor class
+                    class SpecialToolInterceptor:
+                        def __init__(self, real_client):
+                            self.real_client = real_client
+                            
+                        def __getattr__(self, name):
+                            return getattr(self.real_client, name)
+                            
+                        async def make_request(self, endpoint, **kwargs):
+                            if endpoint.startswith("/special-tools/"):
+                                logger.info(f"[{deps.correlation_id}] Intercepting Special Tool request: {endpoint}")
+                                try:
+                                    tool_path = endpoint.replace("/special-tools/", "")
+                                    tool_name = None
+                                    if tool_path == "access-analysis":
+                                        tool_name = "access_analysis"
+                                    elif tool_path == "login-risk" or tool_path == "login-risk-analysis":
+                                        tool_name = "login_risk_analysis"
+                                    
+                                    if not tool_name:
+                                        return {"status": "error", "error": f"Unknown special tool: {tool_path}"}
+                                    
+                                    from src.core.tools.special_tools import execute_special_tool
+                                    
+                                    # Prepare tool arguments
+                                    tool_kwargs = {}
+                                    
+                                    # Extract params if present (client.make_request passes params=...)
+                                    if 'params' in kwargs:
+                                        tool_kwargs.update(kwargs['params'])
+                                    
+                                    # Add any other kwargs that aren't 'method' or 'params'
+                                    for k, v in kwargs.items():
+                                        if k not in ['method', 'params', 'endpoint']:
+                                            tool_kwargs[k] = v
+                                            
+                                    # Pass client to tool
+                                    tool_kwargs['client'] = self.real_client
+                                    
+                                    # Execute tool
+                                    tool_result = await execute_special_tool(tool_name, **tool_kwargs)
+                                    
+                                    return {
+                                        "status": "success", 
+                                        "data": tool_result,
+                                        "source": "special_tool"
+                                    }
+                                except Exception as e:
+                                    logger.error(f"Special tool execution failed: {e}")
+                                    return {"status": "error", "error": str(e)}
+                            else:
+                                return await self.real_client.make_request(endpoint, **kwargs)
+                    
+                    # Replace client in namespace with interceptor
+                    namespace['client'] = SpecialToolInterceptor(deps.okta_client)
+                    namespace['okta_client'] = namespace['client']
+                
                 # Wrap code in async function to handle await statements
                 # API/SDK code - extract function name and call it
-                import re
                 func_match = re.search(r'async\s+def\s+(\w+)\s*\(', code)
                 if not func_match:
                     return ExecutionResult(
@@ -1038,8 +745,19 @@ Rules:
                 
                 func_name = func_match.group(1)
                 
-                # Wrap: define the function inside a wrapper, call it, and return results
-                wrapped_code = f"""async def __exec_wrapper__():
+                # Check if the code already assigns results (to avoid double execution)
+                has_results_assignment = 'results = await' in code or 'results=await' in code
+                
+                if has_results_assignment:
+                    # Code already calls the function and assigns to 'results'
+                    # Just wrap it and return results
+                    wrapped_code = f"""async def __exec_wrapper__():
+{chr(10).join('    ' + line for line in code.split(chr(10)))}
+    return results
+"""
+                else:
+                    # Code only defines the function, so call it
+                    wrapped_code = f"""async def __exec_wrapper__():
 {chr(10).join('    ' + line for line in code.split(chr(10)))}
     return await {func_name}()
 """
@@ -1112,6 +830,7 @@ Rules:
         Returns:
             Acknowledgment that progress was logged
         """
+        check_cancellation()
         logger.info(f"[{deps.correlation_id}] 🎯 {status.upper()}: {action}")
         logger.info(f"[{deps.correlation_id}] 💭 Reasoning: {reasoning}")
         
@@ -1309,6 +1028,7 @@ DYNAMIC CONTEXT FOR THIS REQUEST:
 
 2. When you need to generate Python SDK code:
    - FIRST: Call get_api_code_generation_prompt(query_description, endpoints, max_results=3)
+     (NOTE: Do NOT use max_results for Special Tools starting with /special-tools/)
    - SECOND: READ the returned data carefully
    - THIRD: WRITE your Python code based on that guidance
    - FOURTH: Call execute_test_query(your_code, "python_sdk")

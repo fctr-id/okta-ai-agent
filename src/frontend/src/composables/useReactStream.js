@@ -186,12 +186,12 @@ export function useReactStream() {
         }
         
         // Check if this is a synthesis/execution phase
-        if (data.step === 'synthesis' || data.title.includes('Synthesize') || data.title.includes('Prepare final')) {
+        if (data.step === 'synthesis' || (typeof data.step === 'number' && (data.title.includes('Synthesize') || data.title.includes('Prepare final')))) {
             isDiscoveryComplete.value = true
         }
         
-        // Track validation phase
-        if (data.step === 'validation' || data.title.includes('Validat')) {
+        // Track validation phase - STRICT CHECK
+        if (data.step === 'validation') {
             validationStep.value = {
                 status: 'in-progress',
                 message: data.title,
@@ -199,22 +199,18 @@ export function useReactStream() {
             }
         }
         
-        // Track execution phase
-        if (data.step === 'execution' || data.title.includes('Execut')) {
+        // Track execution phase - STRICT CHECK
+        if (data.step === 'execution') {
             executionStarted.value = true
             isExecuting.value = true
             executionMessage.value = data.title
         }
         
-        // Add step to discovery list (only if not execution/validation)
-        // Check title content instead of step field which may not exist
-        const isValidationOrExecution = 
-            data.title?.toLowerCase().includes('validat') || 
-            data.title?.toLowerCase().includes('execut') ||
-            data.title?.toLowerCase().includes('prepare final') ||
-            data.title?.toLowerCase().includes('synthesize')
+        // Add step to discovery list (Everything except validation and final execution)
+        // We explicitly want to include "Executing test query" (which has numeric step)
+        const isFinalPhase = data.step === 'validation' || data.step === 'execution';
         
-        if (!isValidationOrExecution) {
+        if (!isFinalPhase) {
             // Clean up the title - remove "STEP X:" prefix to show just the action
             let cleanTitle = data.title
             if (cleanTitle) {
@@ -257,9 +253,11 @@ export function useReactStream() {
         const lastStep = discoverySteps.value[discoverySteps.value.length - 1]
         if (lastStep && lastStep.status === 'in-progress') {
             lastStep.status = isFailure ? 'failed' : 'complete'
-            lastStep.text = data.text // Update with completion text
+            // Append completion text to the step text or reasoning
             if (data.result) {
-                lastStep.result = data.result
+                lastStep.text = (lastStep.text ? lastStep.text + '\n\n' : '') + '✅ ' + data.result
+            } else if (data.text) {
+                lastStep.text = (lastStep.text ? lastStep.text + '\n\n' : '') + '✅ ' + data.text
             }
         }
         
@@ -368,7 +366,7 @@ export function useReactStream() {
     const handleResultMetadata = (data) => {
         // Initialize results with streaming structure
         results.value = {
-            display_type: 'table',
+            display_type: data.display_type || 'table',
             content: [],
             metadata: {
                 isStreaming: true,
@@ -435,6 +433,12 @@ export function useReactStream() {
      * Handle COMPLETE event
      */
     const handleComplete = (data) => {
+        console.log('[useReactStream] handleComplete called with:', data)
+        console.log('[useReactStream] - display_type:', data.display_type)
+        console.log('[useReactStream] - content type:', typeof data.content)
+        console.log('[useReactStream] - content length:', data.content?.length || 'N/A')
+        console.log('[useReactStream] - is_special_tool:', data.is_special_tool)
+        
         // Mark discovery as complete
         isDiscoveryComplete.value = true
         
@@ -449,11 +453,24 @@ export function useReactStream() {
             }
         }
         
+        // Handle Markdown/Text content
+        if (data.display_type === 'markdown') {
+            console.log('[useReactStream] Setting markdown results with content:', data.content?.substring(0, 100))
+            results.value = {
+                display_type: 'markdown',
+                content: data.content,
+                metadata: {
+                    isStreaming: false,
+                    execution_plan: data.execution_plan
+                }
+            }
+            console.log('[useReactStream] Results set to:', results.value)
+        }
         // Check if this is a chunked response (no results) or non-chunked (has results)
-        if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+        else if (data.results && Array.isArray(data.results) && data.results.length > 0) {
             // Non-chunked response - small dataset, all data in COMPLETE event
             results.value = {
-                display_type: 'table',
+                display_type: data.display_type || 'table',
                 content: data.results,
                 metadata: {
                     isStreaming: false,
@@ -486,7 +503,9 @@ export function useReactStream() {
      */
     const handleError = (data) => {
         console.log('[useReactStream] handleError called with:', data)
+        console.log('[useReactStream] Setting error.value to:', data.error)
         error.value = data.error
+        console.log('[useReactStream] error.value is now:', error.value)
         isLoading.value = false
         isProcessing.value = false
         currentStep.value = ''

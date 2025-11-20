@@ -132,7 +132,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useReactStream } from '@/composables/useReactStream'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
 import ReActThinkingSteps from '@/components/messages/ReActThinkingSteps.vue'
@@ -158,6 +158,11 @@ const {
     connectToStream,
     cancelProcess: cancelReAct
 } = useReactStream()
+
+// Watch error for debugging
+watch(error, (newVal, oldVal) => {
+    console.log('🚀 [ReactChat] error changed from:', oldVal, 'to:', newVal)
+})
 
 // Sample suggestions
 const suggestions = [

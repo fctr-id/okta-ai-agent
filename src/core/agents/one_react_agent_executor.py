@@ -81,11 +81,18 @@ class ReActAgentExecutor:
         self,
         correlation_id: str,
         user_query: str,
-        deps: ReactAgentDependencies
+        deps: ReactAgentDependencies,
+        cancellation_check: Optional[callable] = None
     ):
         self.correlation_id = correlation_id
         self.user_query = user_query
         self.deps = deps
+        self.cancellation_check = cancellation_check
+        
+        # Pass cancellation check to dependencies if provided
+        if cancellation_check:
+            self.deps.cancellation_check = cancellation_check
+            
         self.state = ExecutionState(
             correlation_id=correlation_id,
             user_query=user_query
@@ -113,6 +120,35 @@ class ReActAgentExecutor:
                 yield self._create_error_event(self.state.error)
                 return
             
+            # Check for direct answer (Special Tool) - Skip validation/execution if no script
+            if (self.state.discovery_complete and 
+                self.state.final_results and 
+                not self.state.final_results.get("complete_production_code") and
+                self.state.final_results.get("results")):
+                
+                logger.info(f"[{self.correlation_id}] ⚡ Direct answer detected (no script generated)")
+                
+                # The results should be the markdown summary from the special tool
+                special_tool_output = self.state.final_results["results"]
+                
+                # Extract llm_summary if results is a dict (special tool output)
+                if isinstance(special_tool_output, dict) and "llm_summary" in special_tool_output:
+                    content = special_tool_output["llm_summary"]
+                    logger.info(f"[{self.correlation_id}] Extracted llm_summary from special tool output")
+                else:
+                    content = special_tool_output
+                    logger.debug(f"[{self.correlation_id}] Using raw results (type: {type(special_tool_output)})")
+                
+                # Yield COMPLETE event with markdown content
+                yield {
+                    "event_type": EventType.COMPLETE,
+                    "display_type": "markdown",
+                    "content": content,
+                    "timestamp": time.time(),
+                    "is_special_tool": True
+                }
+                return
+            
             # Phase 2: Security Validation
             logger.info(f"[{self.correlation_id}] Phase 2: Validating generated code")
             async for event in self._execute_validation_phase():
@@ -131,6 +167,14 @@ class ReActAgentExecutor:
             async for event in self._stream_results():
                 yield event
 
+        except asyncio.CancelledError:
+            logger.warning(f"[{self.correlation_id}] Execution cancelled")
+            yield {
+                "event_type": EventType.ERROR,
+                "error": "Process cancelled by user",
+                "timestamp": time.time()
+            }
+            return
         except Exception as e:
             logger.error(f"[{self.correlation_id}] Executor failed: {e}", exc_info=True)
             yield self._create_error_event(str(e))
@@ -263,8 +307,16 @@ class ReActAgentExecutor:
                     self.state.error = execution_result.error or "Discovery failed"
                     # Send error event to frontend
                     await step_queue.put(self._create_error_event(self.state.error))
-                
+            
+            except asyncio.CancelledError:
+                logger.warning(f"[{self.correlation_id}] Agent execution cancelled inside run_agent")
+                raise
             except Exception as e:
+                # Check if it's a wrapped cancellation error
+                if "Execution cancelled by user" in str(e):
+                    logger.warning(f"[{self.correlation_id}] Agent execution cancelled (caught via exception message)")
+                    raise asyncio.CancelledError("Execution cancelled by user")
+                
                 self.state.error = f"Discovery phase error: {str(e)}"
                 logger.error(f"[{self.correlation_id}] {self.state.error}", exc_info=True)
                 # Send error event to frontend
@@ -277,13 +329,37 @@ class ReActAgentExecutor:
         
         # Stream events as they arrive
         while True:
-            event = await step_queue.get()
-            if event is None:  # Completion signal
-                break
-            yield event
+            # Check for cancellation
+            if self.cancellation_check and self.cancellation_check():
+                logger.warning(f"[{self.correlation_id}] Cancellation detected in discovery phase")
+                agent_task.cancel()
+                try:
+                    await agent_task
+                except asyncio.CancelledError:
+                    logger.info(f"[{self.correlation_id}] Agent task cancelled successfully")
+                except Exception as e:
+                    logger.error(f"[{self.correlation_id}] Error cancelling agent task: {e}")
+                
+                # Ensure we stop the generator
+                raise asyncio.CancelledError("Process cancelled by user")
+
+            try:
+                # Use timeout to allow periodic cancellation checks
+                event = await asyncio.wait_for(step_queue.get(), timeout=0.5)
+                if event is None:  # Completion signal
+                    break
+                yield event
+            except asyncio.TimeoutError:
+                continue
         
         # Wait for agent to finish
-        await agent_task
+        try:
+            await agent_task
+        except asyncio.CancelledError:
+            logger.info(f"[{self.correlation_id}] Agent task cancelled (awaited)")
+            raise
+        except Exception as e:
+            logger.error(f"[{self.correlation_id}] Agent task failed: {e}")
         
         # After discovery completes, send the generated script
         if (self.state.discovery_complete and 
@@ -541,7 +617,17 @@ class ReActAgentExecutor:
             """Read stderr and yield events immediately - no queuing"""
             if proc.stderr:
                 while True:
-                    line = await proc.stderr.readline()
+                    # Check for cancellation periodically
+                    if self.cancellation_check and self.cancellation_check():
+                        logger.warning(f"[{self.correlation_id}] Cancellation detected in stderr reader")
+                        raise asyncio.CancelledError("Process cancelled by user")
+
+                    try:
+                        # Use timeout to allow periodic cancellation checks
+                        line = await asyncio.wait_for(proc.stderr.readline(), timeout=0.5)
+                    except asyncio.TimeoutError:
+                        continue
+
                     if not line:
                         break
                     line_str = line.decode('utf-8').strip()
@@ -570,8 +656,14 @@ class ReActAgentExecutor:
             
             # Check for errors
             if proc.returncode != 0:
+                error_msg = f"Script exited with code {proc.returncode}"
                 if stderr_lines:
-                    logger.error(f"[{self.correlation_id}] Script failed. Last 20 stderr lines:\n" + "\n".join(stderr_lines[-20:]))
+                    last_errors = "\n".join(stderr_lines[-20:])
+                    logger.error(f"[{self.correlation_id}] Script failed. Last 20 stderr lines:\n{last_errors}")
+                    error_msg = f"Script execution failed: {last_errors}"
+                
+                # Yield error event to frontend so it stops waiting
+                yield self._create_error_event(error_msg)
                 raise RuntimeError(f"Script exited with code {proc.returncode}")
             
             logger.info(f"[{self.correlation_id}] Script completed successfully")
@@ -582,19 +674,46 @@ class ReActAgentExecutor:
             if results_data:
                 self.state.final_results["script_output"] = results_data
             
+        except asyncio.CancelledError:
+            logger.warning(f"[{self.correlation_id}] Subprocess execution cancelled")
+            raise
         except Exception as e:
             logger.error(f"[{self.correlation_id}] Subprocess failed: {e}", exc_info=True)
+            raise
+        finally:
+            # Ensure process is terminated
             if proc.returncode is None:
                 try:
-                    proc.kill()
-                    await proc.wait()
-                except Exception:
-                    pass
-            raise
+                    proc.terminate()
+                    # Give it a moment to terminate gracefully
+                    try:
+                        await asyncio.wait_for(proc.wait(), timeout=2.0)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[{self.correlation_id}] Process did not terminate, killing...")
+                        proc.kill()
+                        await proc.wait()
+                except Exception as e:
+                    logger.error(f"[{self.correlation_id}] Error cleaning up process: {e}")
     
     async def _stream_results(self) -> AsyncGenerator[Dict[str, Any], None]:
         """Stream results in chunks for large datasets"""
         results = self.state.final_results.get("script_output", {})
+        display_type = results.get("display_type", "table")
+        
+        # Handle Markdown/Text content
+        if display_type == "markdown":
+            content = results.get("content", "")
+            yield {
+                "event_type": EventType.COMPLETE,
+                "success": True,
+                "display_type": "markdown",
+                "content": content,
+                "execution_plan": self.state.final_results.get("execution_plan", ""),
+                "timestamp": time.time()
+            }
+            return
+
+        # Handle Table/Data content
         data = results.get("data", [])
         headers = results.get("headers", [])
         count = results.get("count", 0)
@@ -612,6 +731,7 @@ class ReActAgentExecutor:
             # Send metadata event first
             yield {
                 "event_type": EventType.RESULT_METADATA,
+                "display_type": "table",
                 "total_batches": total_chunks,
                 "total_records": len(data),
                 "headers": headers,
@@ -650,6 +770,7 @@ class ReActAgentExecutor:
             yield {
                 "event_type": EventType.COMPLETE,
                 "success": True,
+                "display_type": "table",
                 "results": data,
                 "count": count,
                 "execution_plan": execution_plan,
@@ -705,19 +826,39 @@ class ReActAgentExecutor:
                 if isinstance(parsed_output, list):
                     # Old format: just an array - auto-generate headers
                     return {
+                        "display_type": "table",
                         "data": parsed_output,
                         "count": len(parsed_output)
                     }
-                elif isinstance(parsed_output, dict) and "data" in parsed_output:
-                    # New format: object with data, headers, count
-                    return {
-                        "data": parsed_output.get("data", []),
-                        "headers": parsed_output.get("headers", []),
-                        "count": parsed_output.get("count", len(parsed_output.get("data", [])))
-                    }
+                elif isinstance(parsed_output, dict):
+                    # Check for explicit display_type
+                    display_type = parsed_output.get("display_type", "table")
+                    
+                    if display_type == "markdown":
+                        return {
+                            "display_type": "markdown",
+                            "content": parsed_output.get("content", ""),
+                            "count": 1
+                        }
+                    elif "data" in parsed_output:
+                        # New format: object with data, headers, count
+                        return {
+                            "display_type": "table",
+                            "data": parsed_output.get("data", []),
+                            "headers": parsed_output.get("headers", []),
+                            "count": parsed_output.get("count", len(parsed_output.get("data", [])))
+                        }
+                    else:
+                        # Fallback: treat as single result
+                        return {
+                            "display_type": "table",
+                            "data": [parsed_output] if parsed_output else [],
+                            "count": 1 if parsed_output else 0
+                        }
                 else:
                     # Fallback: treat as single result
                     return {
+                        "display_type": "table",
                         "data": [parsed_output] if parsed_output else [],
                         "count": 1 if parsed_output else 0
                     }

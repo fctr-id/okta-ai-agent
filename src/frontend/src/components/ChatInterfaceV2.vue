@@ -128,9 +128,9 @@
                         :error="reactError"
                     />
                     
-                    <!-- Execution Panel (only show after discovery starts) -->
+                    <!-- Execution Panel (only show after discovery starts AND we have a script or execution started) -->
                     <ExecutionPanel
-                        v-if="reactDiscoveryComplete || reactExecutionStarted"
+                        v-if="(reactDiscoveryComplete && reactGeneratedScript) || reactExecutionStarted"
                         :validationStep="reactValidationStep"
                         :executionStarted="reactExecutionStarted"
                         :isExecuting="reactIsExecuting"
@@ -219,7 +219,7 @@ const streamController = ref(null)
 const { postStream, isStreaming, progress } = useFetchStream()
 
 // ReAct mode detection and state
-const isReActMode = ref(false) // Detect from query param or localStorage
+const isReActMode = ref(true) // Default to ReAct mode
 const {
     isLoading: reactLoading,
     isProcessing: reactProcessing,
@@ -621,7 +621,7 @@ onMounted(() => {
             savedMode 
         })
         
-        isReActMode.value = modeParam === 'react' || savedMode === 'react'
+        isReActMode.value = modeParam !== 'realtime' && (modeParam === 'react' || savedMode !== 'realtime')
         
         console.log('[ChatInterfaceV2] isReActMode set to:', isReActMode.value)
         
