@@ -6,9 +6,6 @@
         <span class="title">Script validation and execution</span>
         <div class="spacer"></div>
         <span class="status-badge" :class="statusClass">{{ statusText }}</span>
-        <span v-if="completedStepsCount > 0 && totalStepsCount > 0" class="progress-info">
-          {{ completedStepsCount }}/{{ totalStepsCount }}
-        </span>
       </button>
 
       <transition name="expand">
@@ -194,6 +191,13 @@ const props = defineProps({
 
 const isExpanded = ref(true)
 const isScriptExpanded = ref(false)
+
+// Collapse panel when execution completes successfully
+watch(() => props.isComplete, (newVal) => {
+  if (newVal) {
+    isExpanded.value = false
+  }
+})
 
 const scriptLength = computed(() => {
   return props.generatedScript ? props.generatedScript.length : 0

@@ -48,6 +48,37 @@ Tako generates Python code on the fly, runs it through a security sandbox (AST a
 
 ---
 
+## Case Study: The Self-Healing Engineer
+
+**The Request:** *"Find all users in the group 'sso-super-admins' and fetch their assigned apps, groups, and roles."*
+
+Most AI agents would hallucinate a made-up API endpoint like `/api/v1/super-admins` and fail. **Tako behaves differently.**
+
+### Phase 1: The Architect (Discovery)
+Tako doesn't guess. It starts by loading the actual API capabilities of your tenant.
+> *Log: "Loaded 28 entities with 107 operations... Filtering for 'group.list', 'group.list_members'..."*
+
+It maps the problem: "I need to find a group, get its ID, list its members, and then for each member, fetch their apps and roles."
+
+### Phase 2: The Scientist (Probing)
+Before running a massive query, Tako runs small, safe experiments (`LIMIT 3`).
+*   **Experiment 1:** Find the group. *Success.*
+*   **Experiment 2:** List members. *Error: Missing Argument.*
+
+**Here is the magic:**
+Instead of crashing, Tako reads the Python traceback: `TypeError: missing 1 required positional argument: 'group_id'`.
+> *Log: "Reasoning: Retrying the API call... embedding the groupId directly into the test function."*
+
+It **fixes its own code**, re-runs the test, and verifies the data structure matches what it needs.
+
+### Phase 3: The Engineer (Synthesis)
+Only after validating every step does Tako write the final production script.
+> *Log: "SYNTHESIS COMPLETE: Generated final production code (8352 chars)"*
+
+The result? A robust, error-free script that handles pagination, rate limits, and data joining—generated in seconds, verified by logic.
+
+---
+
 ## Use Cases
 
 ### 🔍 Root Cause Analysis

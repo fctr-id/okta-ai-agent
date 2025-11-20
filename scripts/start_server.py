@@ -45,8 +45,20 @@ def run_command(command):
     stdout_thread.start()
     stderr_thread.start()
     
-    # Wait for the process to complete
-    return_code = process.wait()
+    try:
+        # Wait for the process to complete
+        return_code = process.wait()
+    except KeyboardInterrupt:
+        print("\nStopping server...")
+        # Send Ctrl+C to the child process group
+        import signal
+        process.send_signal(signal.CTRL_C_EVENT)
+        try:
+            return_code = process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            print("Server did not stop gracefully, forcing kill...")
+            process.kill()
+            return_code = 1
     
     # Give the threads a moment to finish printing any remaining output
     stdout_thread.join(1)

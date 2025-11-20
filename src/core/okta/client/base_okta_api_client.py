@@ -55,12 +55,8 @@ except ImportError:
             import_success = False
             OktaOAuth2Manager = None
 
-# Import centralized logging - DISABLED to prevent stdout contamination in subprocess execution
 # Using self-contained logging instead to ensure logs go to stderr
 import logging
-
-# Debug: Print import result (will be logged later)
-oauth2_import_status = f"OAuth2Manager import: {'✅ ' + import_success if import_success else '❌ Failed'}"
 
 
 class OktaAPIClient:

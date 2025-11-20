@@ -121,3 +121,21 @@ def execute_special_tool(tool_name: str, **kwargs):
         raise ValueError(f"Special tool '{tool_name}' not found")
     
     return tool["function"](**kwargs)
+
+
+def get_special_tool_endpoints() -> List[Dict[str, Any]]:
+    """
+    Get all special tool endpoints for API catalog integration.
+    
+    Returns:
+        List of endpoint definitions from all special tools
+    """
+    tools = discover_special_tools()
+    endpoints = []
+    
+    for tool in tools.values():
+        lightweight_ref = tool["metadata"].get("lightweight_reference", {})
+        tool_endpoints = lightweight_ref.get("endpoints", [])
+        endpoints.extend(tool_endpoints)
+        
+    return endpoints

@@ -13,26 +13,21 @@ import ChatInterfaceV2 from '@/components/ChatInterfaceV2.vue'
 import RealtimeChatInterface from '@/components/views/RealtimeChatInterface.vue'
 import { isRealtimeMode } from '@/state/chatMode.js'
 
-// Detect ReAct mode from URL parameter
-const urlParams = new URLSearchParams(window.location.search)
-const isReActMode = urlParams.get('mode') === 'react'
-
-// ChatInterfaceV2 handles ReAct mode internally based on ?mode=react URL parameter
-// ReAct mode takes precedence over realtime mode
+// ChatInterfaceV2 handles ReAct mode internally
+// We default to ChatInterfaceV2 unless mode=realtime is explicitly requested
 const currentChatComponent = computed(() => {
-  // If ?mode=react is set, always use ChatInterfaceV2 (it will activate ReAct mode internally)
-  if (isReActMode) {
-    console.log('🚀 [ChatContainer] Loading ChatInterfaceV2 with ReAct mode')
-    return ChatInterfaceV2
-  }
-  // Otherwise, check isRealtimeMode for Tako Modern vs Tako Legacy
-  else if (isRealtimeMode.value) {
-    console.log('🤖 [ChatContainer] Loading RealtimeChatInterface (Tako Modern Execution)')
+  const urlParams = new URLSearchParams(window.location.search)
+  const modeParam = urlParams.get('mode')
+  
+  // Only load RealtimeChatInterface if explicitly requested
+  if (modeParam === 'realtime') {
+    console.log('🤖 [ChatContainer] Loading RealtimeChatInterface (Explicit Realtime Mode)')
     return RealtimeChatInterface
-  } else {
-    console.log('📊 [ChatContainer] Loading ChatInterfaceV2 (Tako Legacy mode)')
-    return ChatInterfaceV2
   }
+  
+  // Default to ChatInterfaceV2 (which defaults to ReAct mode)
+  console.log('🚀 [ChatContainer] Loading ChatInterfaceV2 (Default)')
+  return ChatInterfaceV2
 })
 </script>
 
