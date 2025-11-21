@@ -109,6 +109,15 @@ export function useReactStream() {
             withCredentials: true
         })
         
+        // Handle explicit close event from server
+        eventSource.addEventListener('close', () => {
+            console.log('[useReactStream] Server requested connection close')
+            if (eventSource) {
+                eventSource.close()
+                eventSource = null
+            }
+        })
+        
         // Handle all messages with unified JSON format {type: "...", ...data}
         eventSource.onmessage = (event) => {
             try {

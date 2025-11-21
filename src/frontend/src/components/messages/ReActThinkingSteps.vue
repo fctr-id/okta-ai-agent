@@ -89,10 +89,28 @@ const getStepIcon = (step) => {
     max-width: 100%;
     border-radius: 12px;
     overflow: hidden;
+    transition: all 0.3s ease;
+    border: 1.5px solid rgba(76, 100, 226, 0.2);
+    background: rgba(255, 255, 255, 0.75) !important;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.react-thinking-steps:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.14) !important;
+    background: rgba(255, 255, 255, 0.82) !important;
+    border-color: rgba(76, 100, 226, 0.3);
 }
 
 .step-content {
     padding: 8px 0;
+    animation: slide-in-right 0.4s ease-out;
+}
+
+@keyframes slide-in-right {
+    from { opacity: 0; transform: translateX(-10px); }
+    to { opacity: 1; transform: translateX(0); }
 }
 
 .step-text {

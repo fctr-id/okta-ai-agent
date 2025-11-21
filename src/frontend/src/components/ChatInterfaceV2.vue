@@ -117,6 +117,28 @@
                 </div>
             </transition>
 
+            <!-- Error Alert -->
+            <transition name="fade-up">
+                <div v-if="reactError" class="error-alert-container">
+                    <v-alert
+                        type="error"
+                        variant="tonal"
+                        prominent
+                        closable
+                        @click:close="reactError = null"
+                        class="error-alert"
+                    >
+                        <template v-slot:prepend>
+                            <v-icon size="large">mdi-alert-circle</v-icon>
+                        </template>
+                        <div class="error-content">
+                            <div class="error-title">An Error Occurred</div>
+                            <div class="error-message">{{ reactError }}</div>
+                        </div>
+                    </v-alert>
+                </div>
+            </transition>
+
             <!-- ReAct Two-Panel Interface (only in ReAct mode) -->
             <transition name="fade-up">
                 <div v-if="isReActMode && (reactLoading || reactSteps.length > 0 || reactExecutionStarted)" class="react-panels mb-4">
@@ -1353,5 +1375,38 @@ onMounted(() => {
     .inline-loading-indicator span {
         font-size: 13px;
     }
+}
+
+/* Error Alert Styling */
+.error-alert-container {
+    max-width: var(--max-width);
+    width: calc(100% - 40px);
+    margin: 20px auto;
+    position: relative;
+    z-index: 35;
+}
+
+.error-alert {
+    border-radius: 12px !important;
+    box-shadow: 0 4px 16px rgba(244, 67, 54, 0.2) !important;
+}
+
+.error-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.error-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #d32f2f;
+}
+
+.error-message {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #5f2120;
+    word-break: break-word;
 }
 </style>

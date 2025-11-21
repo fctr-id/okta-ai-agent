@@ -1,6 +1,6 @@
 <template>
     <AppLayout contentClass="chat-content">
-        <main class="content-area mt-10" :class="{ 'has-results': hasResults }">
+        <main class="content-area" :class="{ 'has-results': hasResults }">
             <!-- Search Container -->
             <div :class="['search-container', hasResults ? 'moved' : '']">
                 <!-- Title -->
@@ -282,6 +282,11 @@ onMounted(() => {
     font-weight: 600;
     color: #1a1a1a;
     margin-bottom: 0.5rem;
+    animation: slide-up 0.8s ease-out;
+    background: linear-gradient(90deg, #1a1a1a, #4C64E2);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .title-underline {
@@ -290,6 +295,17 @@ onMounted(() => {
     margin: 0 auto;
     background: linear-gradient(90deg, #4C64E2, #00B8D4);
     border-radius: 2px;
+    animation: expand-width 1s ease-out 0.5s backwards;
+}
+
+@keyframes slide-up {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes expand-width {
+    from { width: 0; opacity: 0; }
+    to { width: 100px; opacity: 1; }
 }
 
 .search-wrapper {
@@ -301,6 +317,11 @@ onMounted(() => {
     gap: 0.5rem;
     align-items: center;
     margin-bottom: 1.5rem;
+    transition: transform 0.3s ease;
+}
+
+.integrated-search-bar:focus-within {
+    transform: scale(1.01);
 }
 
 .action-btn {
@@ -314,16 +335,17 @@ onMounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .action-btn:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    transform: scale(1.1) rotate(5deg);
+    box-shadow: 0 6px 16px rgba(76, 100, 226, 0.2);
 }
 
 .search-input {
     flex: 1;
+    transition: all 0.3s ease;
 }
 
 .suggestions-wrapper {
@@ -331,12 +353,33 @@ onMounted(() => {
     flex-wrap: wrap;
     gap: 0.5rem;
     justify-content: center;
+    perspective: 1000px;
 }
 
 .suggestion-btn {
     text-transform: none;
     font-size: 0.875rem;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+    opacity: 0;
+    animation: fade-in-up 0.5s ease-out forwards;
 }
+
+.suggestion-btn:hover {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15);
+    background-color: #f0f4fb !important;
+}
+
+@keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Stagger animation for suggestions */
+.suggestion-btn:nth-child(1) { animation-delay: 0.1s; }
+.suggestion-btn:nth-child(2) { animation-delay: 0.2s; }
+.suggestion-btn:nth-child(3) { animation-delay: 0.3s; }
+.suggestion-btn:nth-child(4) { animation-delay: 0.4s; }
 
 .results-area {
     margin-top: 2rem;
@@ -348,9 +391,13 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
     padding: 1rem;
-    background: #f5f5f5;
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1.5px solid rgba(76, 100, 226, 0.2);
     border-radius: 8px;
     margin-bottom: 1.5rem;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
 .question-text {

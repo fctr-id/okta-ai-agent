@@ -104,7 +104,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown code - Modern Execution Manager handles cleanup automatically
+    # Shutdown code
     logger.info("Shutting down Okta AI Agent API")
 
 # Create FastAPI app with lifespan manager

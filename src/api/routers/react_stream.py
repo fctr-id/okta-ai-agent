@@ -229,8 +229,17 @@ async def stream_react_updates(
             yield f"data: {json.dumps(error_data)}\n\n"
         
         finally:
-            # Cleanup after 5 seconds for faster shutdown during development
-            asyncio.create_task(_cleanup_process(process_id, delay=5))
+            # Cleanup immediately when stream ends - no need to delay
+            if process_id in active_processes:
+                logger.info(f"[{process_id}] Cleaning up process tracking")
+                del active_processes[process_id]
+            
+            # Send explicit close event to tell browser to disconnect
+            # This prevents uvicorn from waiting for browser to close the connection
+            try:
+                yield "event: close\ndata: Stream ended\n\n"
+            except:
+                pass  # Generator may already be closed
     
     return StreamingResponse(
         event_generator(),
@@ -368,11 +377,3 @@ async def _create_react_dependencies(
     
     return deps
 
-
-async def _cleanup_process(process_id: str, delay: int = 300):
-    """Clean up process tracking entry after delay"""
-    await asyncio.sleep(delay)
-    
-    if process_id in active_processes:
-        logger.info(f"[{process_id}] Cleaning up process tracking")
-        del active_processes[process_id]

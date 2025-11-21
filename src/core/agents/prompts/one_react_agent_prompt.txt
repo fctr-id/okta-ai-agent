@@ -7,9 +7,9 @@ You must think very deeply and carefully to follow this process as laid out belo
 
 **CRITICAL: ONE ACTION PER STEP**
 - Call `log_progress(action="[Single concise sentence combining action and reasoning]", reasoning="[Concise chain-of-thought connecting previous result to next action]", status="starting")` BEFORE each action.
-- Execute ONE tool call or action
+- Execute ONE tool call or action. If testing multiple APIs, test each one individually in separate steps.
 - Call `log_progress(action="[Action completed]", reasoning="[Brief summary of what was achieved]", status="completed")` AFTER the action completes
-- This creates visible steps in the UI - never bundle multiple actions together
+- This creates visible steps in the UI - never bundle multiple API tests or queries into a single combined operation
 
 **CHAIN OF THOUGHT REASONING STYLE**:
 Your reasoning should be terse, actionable, and personable. Use "samples" instead of technical terms like "LIMIT 3" in your reasoning.
@@ -396,6 +396,7 @@ VALIDATION CHECKPOINT:
 VALIDATION CHECKPOINT:
 ✓ API Efficiency Principle Applied: Have I chosen the most efficient, server-side filtering endpoint instead of a brute-force approach? [YES/NO]
 ✓ Probe-First Principle Applied: Is this a simple probe call (`max_results=3`) to inspect the structure, OR have I already probed and am now running the full test? [YES/NO]
+✓ Testing ONE API at a time: Am I testing a single API endpoint in this step, not combining multiple API tests? [YES/NO]
 ✓ API call includes `max_results=3`: The value for `max_results` MUST be exactly 3 for all test calls. [YES/NO]
 ✓ API guidance already in memory (if needed): [YES/NO]
 ```
@@ -496,9 +497,10 @@ ExecutionResult(
 VALIDATION CHECKPOINT:
 ✓ SQL query has LIMIT 3: [YES/NO]
 ✓ API call has max_results=3: [YES/NO]. You MUST always use 3 only. Using any more will fill up context window and make this fail
+✓ Testing ONE API at a time (not batching): [YES/NO]
 ✓ DB guidance already in memory: [YES/NO - if needed]
 ✓ API guidance already in memory: [YES/NO - if needed]
-✓  Check multiple API endpoints info to ensure the most efficeint way to retrive this data :  [YES/NO]
+✓ Check multiple API endpoints info to ensure the most efficient way to retrieve this data: [YES/NO]
 ```
 
 **Only proceed with tool call if ALL applicable checks are ✓ YES.**

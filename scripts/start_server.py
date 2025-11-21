@@ -24,7 +24,7 @@ def run_command(command):
     
     process = subprocess.Popen(
         command,
-        shell=True,
+        shell=True,  # Allow shell for cross-platform string commands
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -50,15 +50,26 @@ def run_command(command):
         return_code = process.wait()
     except KeyboardInterrupt:
         print("\nStopping server...")
-        # Send Ctrl+C to the child process group
         import signal
-        process.send_signal(signal.CTRL_C_EVENT)
+        
+        # Try graceful shutdown first
+        if os.name == 'nt':
+            process.send_signal(signal.CTRL_C_EVENT)
+        else:
+            process.send_signal(signal.SIGINT)
+            
         try:
+            # Give uvicorn time to close streaming connections and cleanup
             return_code = process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            print("Server did not stop gracefully, forcing kill...")
-            process.kill()
-            return_code = 1
+            print("Server did not stop gracefully, forcing termination...")
+            process.terminate()
+            try:
+                return_code = process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                print("Server still running, forcing kill...")
+                process.kill()
+                return_code = 1
     
     # Give the threads a moment to finish printing any remaining output
     stdout_thread.join(1)
@@ -177,7 +188,7 @@ if __name__ == "__main__":
     if args.no_https:
         print("WARNING: Running without HTTPS. This is not recommended for production use.")
         reload_flag = " --reload" if args.reload else ""
-        command = f"venv\\Scripts\\python -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level}{reload_flag}"
+        command = f"{sys.executable} -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level}{reload_flag}"
         run_command(command)
     else:
         # Generate certificates if needed
@@ -187,7 +198,7 @@ if __name__ == "__main__":
         # Run with HTTPS
         reload_flag = " --reload" if args.reload else ""
         command = (
-            f"venv\\Scripts\\python -m uvicorn src.api.main:app --host {args.host} "
+            f"{sys.executable} -m uvicorn src.api.main:app --host {args.host} "
             f"--port {args.port} --log-level {args.log_level} "
             f"--ssl-keyfile {key_path} --ssl-certfile {cert_path}{reload_flag}"
         )

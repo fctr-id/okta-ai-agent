@@ -756,6 +756,7 @@ const downloadCSV = () => {
     background: #f9faff;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(76, 100, 226, 0.05);
+    animation: fade-in-up 0.5s ease-out;
 }
 
 .json-content pre {
@@ -944,6 +945,12 @@ const downloadCSV = () => {
   border-radius: 8px;
   border: 1px solid #edf2f7;
   box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  animation: fade-in-up 0.5s ease-out;
+}
+
+@keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Headings with modern styling */

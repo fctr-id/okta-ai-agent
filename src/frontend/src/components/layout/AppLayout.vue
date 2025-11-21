@@ -78,7 +78,8 @@ const handleLogout = async () => {
 <style>
 .app-page {
     min-height: 100vh;
-    background: linear-gradient(180deg, #e5eaf5 0%, #f0f4fb 100%);
+    /* Cooler blue with subtle depth - tighter range */
+    background: linear-gradient(135deg, #c0d2e6 0%, #d0dcea 50%, #dfe6ef 100%);
     position: relative;
     overflow-y: auto;
     overflow-x: hidden;
@@ -92,13 +93,17 @@ const handleLogout = async () => {
     top: 0;
     left: 0;
     right: 0;
-    height: 200px;
-    background: linear-gradient(to bottom,
-            rgba(76, 100, 226, 0.05) 0%,
-            rgba(76, 100, 226, 0.02) 75%,
-            transparent 100%);
+    height: 300px;
+
     z-index: 1;
+    animation: pulse-bg 8s ease-in-out infinite alternate;
 }
+
+@keyframes pulse-bg {
+    0% { opacity: 0.5; transform: scale(1); }
+    100% { opacity: 0.8; transform: scale(1.05); }
+}
+
 
 
 /* Header */
@@ -116,14 +121,23 @@ const handleLogout = async () => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: white;
-    backdrop-filter: blur(15px);
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
     border-radius: var(--border-radius);
     padding: 16px 24px;
-    box-shadow: var(--shadow-light);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.12);
     position: relative;
-    border: none;
+    border: 1.5px solid rgba(76, 100, 226, 0.15);
     z-index: 2;
+    transition: all 0.3s ease;
+}
+
+.header-content:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.14);
+    transform: translateY(-2px);
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(76, 100, 226, 0.25);
 }
 
 .header-actions {
