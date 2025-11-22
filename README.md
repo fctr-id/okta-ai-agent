@@ -5,57 +5,51 @@
   
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
   
-  <h1>Tako: AI Agent for Okta (v1.3-beta)</h1>
+  <h1>Tako: AI Agent for Okta (v1.5.0-beta)</h1>
   
-  <p>🚨 MAJOR RELEASE: v1.3-beta "Takotastic" introduces OAuth 2.0 support and comprehensive access analysis capabilities. Update now for enhanced security and powerful access control features!</strong> <a href="VERSION.md">📋 Changelog →</a></p>
+  <p>🚀 <strong>NEW RELEASE:</strong> v1.5.0-beta introduces an Autonomous Reasoning Engine for Okta administrators, IAM managers, and IT teams. </p>
+  <p><a href="VERSION.md">📋 Changelog →</a></p>
 </div>
 
 
 ## What is Tako?
 
-Tako is the **world's first conversational AI agent system** for Okta administration. Ask questions in natural language and get instant answers - **no scripting required**. Powered by multiple specialized agents and intelligent data source selection, Tako automatically determines whether to use local database or real-time APIs for each query.
+The world's first autonomous AI agent for Okta administration that thinks like a senior engineer, based on ReAct (reason and act) AI pattern.
 
-Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako represents a revolutionary approach to identity management automation, combining multiple specialized agents into one intelligent system that understands both your data relationships and real-time API requirements.
+### **Think → Generate Code → Sample Results → Repeat → Final Results**
+
+Tako follows a deterministic workflow that validates every step, **catches its own mistakes**, and generates production-ready Python across **all 107+ Okta APIs**. Ask questions in plain English, get reproducible results with full transparency. **No scripting required.**
 
 **Key Features:**
 - 🗣️ **Natural language queries** - Ask questions in plain English, get instant results
-- 🤖 **Multiple AI agents** - Specialized agents work together for consistent, deterministic results  
-- 📊 **Real-time progress** - See exactly what each step is doing with live updates
-- 🔄 **Dual data sources** - Local SQLite sync + real-time API calls (107+ endpoints)
-- 🔒 **Security-first** - All data stays on your infrastructure, read-only by default
+- 🤖 **Autonomous ReAct agent** - Single intelligent agent with specialized tools for consistent, deterministic results  
+- 💰 **Cost-effective models** - Runs on small, efficient LLMs. Faster and cheaper. (Gemini 2.0 Flash, Claude 3.5 Haiku, GPT-4o-mini)
+- 📊 **Live progress tracking** - Real-time percentage updates, error counts, and cancellation support
+- 📚 **Context-engineered grounding** - Okta API documentation optimized for LLM comprehension
+- 🔄 **Flexible data access** - Query local SQLite database OR call Okta APIs directly (database sync is optional)
+- 🔒 **Security-first** - Multiple validation layers, sandboxed execution, read-only by default
 - 🐳 **Easy deployment** - Docker support for AMD64 and ARM64 platforms
-- 🧩 **Full Coverage** - Automatic code generation across **107+ Okta GET endpoints** ([full list](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints))
 
 <div align="center">
-  <img src="docs/media/tako-v1.gif" alt="Tako Multi-Agent Demo" width="800px" height="auto">
-  <p><em>Demo: Multiple agents coordinating with real-time progress updates and CSV download</em></p>
+  <img src="docs/media/tako-ai.jpeg" alt="Tako ReAct Agent Architecture" width="800px" height="auto">
+  <p><em>Tako's autonomous ReAct workflow: Think → Generate Code → Validate → Execute → Deliver Results</em></p>
 </div>
-
 
 <div align="center">
-<h3>📖 Featured Articles & Demo Video</h3>
-
-
-<div style="margin: 20px 0;">
-  <a href="https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/" style="margin-right: 20px;">
-    📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short
-  </a>
-  <br><br>
-  <a href="https://www.youtube.com/watch?v=PC8arYq5kZk">
-    🎥 Installation and Demo Video
-  </a>
-</div>
+  <img src="docs/media/tako-v1.gif" alt="Tako ReAct Agent Demo" width="800px" height="auto">
+  <p><em>Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download</em></p>
 </div>
 
 ## 📋 Table of Contents
 
 - [What is Tako?](#what-is-tako)
-- [What Makes Tako Revolutionary?](#-what-makes-tako-revolutionary)
+- [What Makes Tako Different?](#-what-makes-tako-different)
 - [Quick Start (Docker)](#-quick-start-docker)
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
   - [Configure Rate Limits](#-configure-rate-limits-critical)
   - [Launch Application](#launch-application)
+- [Featured Articles & Videos](#-featured-articles--videos)
 - [AI Provider Support](#ai-provider-support)
   - [Supported Providers](#supported-providers)
   - [Tested Model Combinations](#tested-model-combinations)
@@ -69,27 +63,38 @@ Built for Okta administrators, IAM managers, IT GRC teams, and auditors - Tako r
   - [Get Help](#get-help)
   - [Roadmap](#roadmap)
 
-## 🆕 What Makes Tako Revolutionary?
+## 🆕 What Makes Tako Different?
 
-### **Multi-Agent Architecture**
-Tako uses multiple specialized agents that work together to execute the necessary steps for planning, writing deterministic Python code for SQL or Okta API queries, and formatting results with real-time execution management and progress streaming.
+### **Self-Healing Code**
+Tako auto-corrects syntax errors, validates API parameters against Okta's spec, and retries intelligently when issues occur. Built-in circuit breakers prevent runaway loops, while automatic error tracking reports exactly what failed and why - eliminating trial-and-error cycles.
 
-### **Intelligent Data Selection**
-You can choose how Tako accesses your Okta data:
-- **Database Mode** - Fast queries against local SQLite with users, groups, apps, devices, factors
-- **API Mode** - Real-time calls to Okta APIs for latest data (no database sync required)
-- **Hybrid Mode** - Automatically chooses the best data source for each query
+### **Cost-Effective Intelligence**
+Run on lightweight, low-cost models (Gemini 2.0 Flash, Claude 3.5 Haiku, GPT-4o-mini) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's deterministic workflow.
 
-### **No-Code Experience**
-- Natural language queries - no scripts, no complex syntax
-- Real-time progress visibility - see what each agent is doing
-- Deterministic results through advanced context engineering
+### **Flexible Data Access**
+- **API Mode** - Real-time Okta API calls (no database sync required)
+- **Database Mode** - Optional: Sync to local SQLite for faster queries
+- **Hybrid Mode** - Automatically selects optimal source when database is synced
 
-### **Enterprise-Grade Performance**
-- Polars DataFrames for lightning-fast data processing
-- 99% token reduction through intelligent context filtering
-- Multi-layered security with comprehensive validation
-- Optimized operations with smart filtering and parallel processing
+### **Context-Engineered API Documentation**
+Tako uses context-engineered Okta API documentation optimized for LLM comprehension, enabling accurate API calls and parameter validation without hallucination.
+
+### Enterprise Performance & Security
+- Intelligent rate limit management with dynamic batching (respects Okta's API quotas automatically)
+- Optimized data processing for fast query execution
+- 99% token reduction through intelligent filtering
+- **Multiple security checks**: Schema validation, parameter verification, syntax checking, sandboxed execution
+
+### 🆚 Tako vs. Okta MCP Server
+While the Okta MCP Server is excellent for developers working inside IDEs (Cursor, Claude Desktop), Tako is designed as a **centralized team platform**.
+
+| Feature | Okta MCP Server | Tako AI Agent |
+|---------|-----------------|---------------|
+| **Target Audience** | Developers & Architects | IT Teams, Help Desk, Security Analysts |
+| **Interface** | IDE / Command Line | Web UI & Natural Language |
+| **Setup** | Per-user configuration | Single Docker container for the team |
+| **Context** | Limited by IDE context window | Full documentation + Database context |
+| **Scale** | Ad-hoc queries | Enterprise-scale data processing |
 
 ## 🚀 Quick Start (Docker)
 
@@ -203,51 +208,44 @@ https://localhost:8001
 
 > ⚠️ **CRITICAL**: The application will not function unless your `.env` file is properly configured with all required authentication, AI provider, and rate limit variables. Double-check all settings before launching.
 
+## 📖 Featured Articles & Videos
+
+- [📚 Tako AI v1.5: Your New Okta Sidekick That Thinks, Codes, and Generates Results](docs/blog_post_v1.5.md)
+- [📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short](https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/)
+- [🎥 Installation and Demo Video](https://www.youtube.com/watch?v=PC8arYq5kZk)
+
 ## AI Provider Support
 
-Tako works with multiple AI providers for maximum flexibility:
+### Supported Providers
 
-### **Supported Providers**
-- **OpenAI** (GPT-4, o4-mini) - Reliable performance
-- **Google Vertex AI** (Gemini 1.5 Pro, 2.5 Pro) - Advanced reasoning
-- **Anthropic** (Claude 3.7 Sonnet) - Superior analysis
-- **Azure OpenAI** (GPT-4) - Enterprise deployment
-- **AWS Bedrock** (Claude, Nova, Llama models) - AWS integration
-- **Ollama** (Local, Self-hosted) - Air-gapped deployment
-- **OpenAI Compatible** (Fireworks, Together AI, OpenRouter, etc.)
+OpenAI, Google Vertex AI, Anthropic, Azure OpenAI, AWS Bedrock, Ollama (local), and OpenAI-compatible APIs.
 
-### **Dual Model Architecture**
-Tako can use separate models for reasoning and code generation, allowing cost optimization while maintaining enterprise-ready capabilities.
+**Dual Model Architecture:** Use separate models for reasoning and code generation to optimize costs.
 
 ### Tested Model Combinations
-These model classes have been validated for stability and cost/performance trade‑offs (you can still use others):
 
-### **Reasoning Models** (Planning & Analysis)
-- **GPT-o4-mini** -  (preferred)
-- **OpenAI GPT-OSS 120B** 
-- **Claude Sonnet 4** 
-- **Gemini 2.5 Pro** 
-- **O3** - Advanced reasoning capabilities (very expensive)
-- **GPT-5-mini** - Works but is very slow (least expensive but needs more testing)
+These model classes have been validated for stability and cost/performance trade-offs (you can still use others):
 
+**Reasoning Models (Planning & Analysis)**
+- **GPT-o4-mini** - (preferred)
+- OpenAI GPT-OSS 120B
+- Claude Sonnet 4
+- Gemini 2.5 Pro
+- O3 - Advanced reasoning capabilities (very expensive)
+- GPT-5-mini - Works but is very slow (least expensive but needs more testing)
 
-### **Coding Models** (API Code Generation)
-- **GPT-4.1** -  (preferred)
-- **Claude Sonnet 4**
-- **Gemini 2.5 Pro** 
-- **OpenAI GPT-OSS 120B**
+**Coding Models (API Code Generation)**
+- **GPT-4.1** - (preferred)
+- Claude Sonnet 4
+- Gemini 2.5 Pro
+- OpenAI GPT-OSS 120B
 
-**Notes**
-- Dual-model strategy: lighter reasoning + stronger coding model can reduce cost.
-- Provider variability: slight output format differences are normal.
-- You can override any pairing via environment variables.
+**Notes:**
+- **Dual-model strategy**: lighter reasoning + stronger coding model can reduce cost
+- **Provider variability**: slight output format differences are normal
+- You can override any pairing via environment variables
 
 ## 🛡️ Security & Privacy
-
-### Architecture Overview
-
-<img src="docs/media/unified-architecture.png" alt="Tako Multi-Agent Architecture" width="800px" height="auto">
-<p><em>Tako's multi-agent architecture with intelligent data source selection</em></p>
 
 ### Security Features
 
@@ -307,14 +305,10 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 - 📋 [Version History](VERSION.md)
 
 ### Current Status
-- **Beta Release** - Keep out of production environments
-- **Version Requirement** - Please use version 1.3-beta or above for best stability and latest security features
-- **Identity Engine** - Tested on Okta Identity Engine only
-- **Single Tenant** - One Okta org at a time
-- **Stateless Queries** - Each query processed independently
-- **Sync Duration** - Large tenants may see longer initial sync times (if using Database Mode)
-- **Model Variability** - Wording differs slightly across AI providers
-- **Complex Queries** - Break very large, multi-part questions into smaller ones for best determinism
+- **Beta Release** - Not for production use
+- **Minimum Version** - Use v1.3-beta or above
+- **Requirements** - Okta Identity Engine, single tenant
+- **Note** - Large tenants may see longer initial sync times in Database Mode
 
 ### Get Help
 
@@ -343,8 +337,8 @@ Thanks to early community testers providing feedback on rate limits, hybrid mode
 ### Roadmap
 
 **✅ Completed:**
-- Multi-agent foundation with enterprise security
-- Intelligent data source selection and Polars optimization  
+- ReAct agent foundation with enterprise security
+- Intelligent data source selection and query optimization  
 - Modern LLM integration with advanced web interface
 
 **🚧 In Progress:**

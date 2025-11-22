@@ -63,6 +63,11 @@ docs/
 mcp.txt
 *.md
 !README.md
+!VERSION.md
+!LICENSE
+
+# Archive folder (not needed in production)
+_archive/
 
 # Backend static files (API static handled separately)
 src/backend/app/static/
@@ -70,6 +75,17 @@ src/backend/app/static/
 # Script development files
 scripts/*.json
 scripts/okta_sdk_client_code_tests.py
+scripts/fetch_data.py
+scripts/Fetch_okta_users_only.py
+scripts/okta_code_tester.py
+scripts/okta_hybrid_agent_test.py
+scripts/okta_react_agent_test.py
+scripts/Okta_Realtime_Agent.py
+scripts/okta_sdk_client_code_tests.py
+scripts/agent.py
+scripts/fix_imports.ps1
+scripts/reset_admin_password.py
+scripts/stop_server.*
 
 # Specific development files
 src/data/entity_analysis.txt
@@ -83,6 +99,8 @@ src/data/schemas/*copy*.json
 
 # Only ignore node_modules - we need the rest for the build
 src/frontend/node_modules/
+src/frontend/dist/
+src/frontend/.vite/
 
 # Docker related
 .dockerignore

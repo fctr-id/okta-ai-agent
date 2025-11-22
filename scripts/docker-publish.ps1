@@ -62,6 +62,7 @@ if ($latestTag) {
 if ($latestTag) {
     docker buildx build --pull --rm `
         --platform linux/amd64,linux/arm64 `
+        --build-arg APP_VERSION=$Version `
         --file "../Dockerfile" `
         --tag "$Registry/$ImageName`:$Version" `
         --tag "$Registry/$ImageName`:latest" `
@@ -70,6 +71,7 @@ if ($latestTag) {
 } else {
     docker buildx build --pull --rm `
         --platform linux/amd64,linux/arm64 `
+        --build-arg APP_VERSION=$Version `
         --file "../Dockerfile" `
         --tag "$Registry/$ImageName`:$Version" `
         --push `

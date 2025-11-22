@@ -43,6 +43,7 @@
                 <a href="https://fctr.io" target="_blank" class="branded-link">
                     Fctr Identity
                 </a>
+                <span class="version-tag">{{ appVersion }}</span>
                 <span class="disclaimer">• Responses may require verification</span>
             </div>
         </footer>
@@ -52,6 +53,7 @@
 <script setup>
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
+import { computed } from 'vue'
 import SyncStatusButton from '@/components/sync/SyncStatusButton.vue'
 import { isRealtimeMode } from '@/state/chatMode.js';
 
@@ -69,6 +71,11 @@ const props = defineProps({
 const auth = useAuth()
 const router = useRouter()
 
+const appVersion = computed(() => {
+    const version = import.meta.env.VITE_APP_VERSION
+    return version ? `v${version}` : 'v1.3-beta'
+})
+
 const handleLogout = async () => {
     await auth.logout()
     router.push('/login')
@@ -78,8 +85,8 @@ const handleLogout = async () => {
 <style>
 .app-page {
     min-height: 100vh;
-    /* Cooler blue with subtle depth - tighter range */
-    background: linear-gradient(135deg, #c0d2e6 0%, #d0dcea 50%, #dfe6ef 100%);
+    /* Calm Slate - Stable, professional, excellent contrast for white cards, non-distracting */
+   background: linear-gradient(135deg, rgb(195, 205, 235), rgb(210, 220, 240), rgb(220, 238, 245));
     position: relative;
     overflow-y: auto;
     overflow-x: hidden;
@@ -87,22 +94,6 @@ const handleLogout = async () => {
     flex-direction: column;
 }
 
-.app-page::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 300px;
-
-    z-index: 1;
-    animation: pulse-bg 8s ease-in-out infinite alternate;
-}
-
-@keyframes pulse-bg {
-    0% { opacity: 0.5; transform: scale(1); }
-    100% { opacity: 0.8; transform: scale(1.05); }
-}
 
 
 
@@ -121,7 +112,7 @@ const handleLogout = async () => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: rgba(255, 255, 255, 0.85);
+    background: rgba(255, 255, 255);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-radius: var(--border-radius);
@@ -254,6 +245,12 @@ const handleLogout = async () => {
     gap: 5px;
     max-width: var(--max-width);
     margin: 0 auto;
+}
+
+.version-tag {
+    color: var(--text-muted);
+    font-size: 12px;
+    opacity: 0.8;
 }
 
 .branded-link {

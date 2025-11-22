@@ -247,12 +247,26 @@ async def main():
     db_connection = None  # Ensure db_connection is defined in case of connection failure
     try:
         # 2. Initialize SQLite database connection
-        #    Working directory is src/core/data/testing, navigate to project root
-        project_root = Path.cwd().parent.parent.parent.parent
-        db_path = project_root / "sqlite_db" / "okta_sync.db"
+        #    Robust path detection for Docker and Local environments
+        possible_paths = [
+            Path("/app/sqlite_db/okta_sync.db"),  # Docker container absolute path
+            Path.cwd() / "sqlite_db" / "okta_sync.db", # Current working directory
+            Path(__file__).resolve().parent.parent.parent.parent / "sqlite_db" / "okta_sync.db", # Relative to src/core/data/testing
+        ]
+        
+        db_path = None
+        for path in possible_paths:
+            if path.exists():
+                db_path = path
+                break
+        
+        if not db_path:
+            # Fallback
+            db_path = Path("sqlite_db/okta_sync.db")
+            
         db_connection = sqlite3.connect(str(db_path))
         cursor = db_connection.cursor()
-        print("Successfully connected to SQLite database.")
+        print(f"Successfully connected to SQLite database at {db_path}")
     except Exception as e:
         print(f"Error: Could not connect to SQLite database: {e}")
         sys.exit(1)
