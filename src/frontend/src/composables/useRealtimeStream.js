@@ -276,6 +276,12 @@ export function useRealtimeStream() {
         // console.log("🎯 execution.results exists:", !!execution.results);
         try {
             const data = JSON.parse(event.data);
+            
+            // Check for special tool execution to hide execution details
+            if (data.is_special_tool) {
+                expansionPanelData.visible = false;
+            }
+
             const content = data.content;
             // console.log("🎯 Final result content:", content);
             

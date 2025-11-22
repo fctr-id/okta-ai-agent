@@ -64,8 +64,8 @@ class AgentMetrics:
             "status": status,
             # These fields will be populated in future when we integrate with PydanticAI usage tracking
             "token_usage": extra_data.get("token_usage", {
-                "request_tokens": None,
-                "response_tokens": None,
+                "input_tokens": None,
+                "output_tokens": None,
                 "total_tokens": None,
             })
         }

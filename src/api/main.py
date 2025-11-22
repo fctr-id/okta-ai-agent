@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
-from .routers import auth, sync, realtime_hybrid
+from .routers import auth, sync, react_stream
 from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import AuthUser
@@ -72,6 +72,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 async def lifespan(app: FastAPI):
     # Startup code
     logger.info("Initializing Okta AI Agent API")
+    
+    # Generate lightweight reference for React agent if missing
+    try:
+        from src.core.agents.one_react_agent import generate_lightweight_onereact_json
+        lightweight_data = generate_lightweight_onereact_json(force_regenerate=False)
+        logger.info(f"Lightweight reference ready: {len(lightweight_data.get('operations', []))} operations")
+    except Exception as e:
+        logger.warning(f"Failed to generate lightweight reference: {e}")
+    
     logger.info("Initializing authentication database...")
     db = DatabaseOperations()
     
@@ -95,7 +104,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown code - Modern Execution Manager handles cleanup automatically
+    # Shutdown code
     logger.info("Shutting down Okta AI Agent API")
 
 # Create FastAPI app with lifespan manager
@@ -126,7 +135,7 @@ app.add_middleware(
 # Register router for API endpoints
 app.include_router(auth.router) 
 app.include_router(sync.router, prefix="/api")
-app.include_router(realtime_hybrid.router, prefix="/api/realtime")
+app.include_router(react_stream.router, prefix="/api")  # ReAct agent streaming
 
 # Mount static files
 app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")

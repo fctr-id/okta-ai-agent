@@ -1,0 +1,379 @@
+"""
+ReAct Agent Streaming Router - SSE Integration
+
+This module provides SSE streaming for the One-ReAct agent execution.
+
+Key Features:
+- One-ReAct agent integration via ReActAgentExecutor
+- SSE (Server-Sent Events) streaming for real-time discovery steps
+- Security validation before code execution
+- Subprocess execution with progress streaming
+- Cancellation support
+
+Event Types:
+- STEP-START: Discovery step begins
+- STEP-END: Discovery step completes
+- STEP-PROGRESS: Subprocess progress updates
+- STEP-TOKENS: Token usage reporting
+- COMPLETE: Final completion
+- ERROR: Error occurred
+"""
+
+import asyncio
+import json
+import os
+import sqlite3
+import time
+import uuid
+from pathlib import Path
+from typing import Dict, Any, AsyncGenerator
+
+from dotenv import load_dotenv
+from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
+
+from src.config.settings import Settings
+from src.core.security.dependencies import get_current_user
+from src.core.okta.sync.models import AuthUser
+from src.core.agents.one_react_agent_executor import ReActAgentExecutor, EventType
+from src.core.agents.one_react_agent import ReactAgentDependencies
+from src.core.okta.client.base_okta_api_client import OktaAPIClient
+from src.utils.logging import get_logger, set_correlation_id
+
+# Load environment variables
+load_dotenv()
+
+# Load settings
+settings = Settings()
+
+logger = get_logger("okta_ai_agent")
+
+# --- Router Setup ---
+router = APIRouter(prefix="/react", tags=["react-agent"])
+
+# --- Process Tracking ---
+active_processes: Dict[str, Any] = {}
+
+
+# ============================================================================
+# Request/Response Models
+# ============================================================================
+
+class QueryRequest(BaseModel):
+    """Request body for ReAct query"""
+    query: str
+
+
+class QueryResponse(BaseModel):
+    """Response with process ID for SSE connection"""
+    process_id: str
+    message: str
+
+
+class CancelRequest(BaseModel):
+    """Request to cancel execution"""
+    process_id: str
+
+
+# ============================================================================
+# Routes
+# ============================================================================
+
+@router.post("/start-react-process", response_model=QueryResponse)
+async def start_react_process(
+    request: QueryRequest,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Start ReAct agent discovery process.
+    
+    Returns process_id for connecting to SSE stream.
+    Frontend should immediately call /stream-react-updates with this process_id.
+    """
+    correlation_id = str(uuid.uuid4())
+    set_correlation_id(correlation_id)
+    
+    try:
+        username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
+        logger.info(f"[{correlation_id}] Starting ReAct process for user: {username}")
+        logger.info(f"[{correlation_id}] Query: {request.query}")
+        
+        # Create process tracking entry
+        active_processes[correlation_id] = {
+            "status": "initializing",
+            "query": request.query,
+            "user_id": current_user.id,
+            "created_at": time.time(),
+            "cancelled": False
+        }
+        
+        return QueryResponse(
+            process_id=correlation_id,
+            message="ReAct process started. Connect to /stream-react-updates to receive events."
+        )
+        
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to start process: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start ReAct process: {str(e)}"
+        )
+
+
+@router.get("/stream-react-updates")
+async def stream_react_updates(
+    process_id: str,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Stream ReAct agent execution events via SSE.
+    """
+    # Validate process_id is a valid UUID to prevent path traversal
+    import uuid
+    try:
+        uuid.UUID(process_id, version=4)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid process ID format. Must be a valid UUID."
+        )
+
+    if process_id not in active_processes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Process ID not found"
+        )
+    
+    process = active_processes[process_id]
+    
+    # Verify user owns this process
+    if process["user_id"] != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this process"
+        )
+    
+    async def event_generator() -> AsyncGenerator[str, None]:
+        """Generate SSE events from ReAct execution"""
+        try:
+            # Update status
+            process["status"] = "executing"
+            
+            # Create dependencies for agent
+            deps = await _create_react_dependencies(
+                correlation_id=process_id,
+                user_query=process["query"]
+            )
+            
+            # Create cancellation check
+            def check_cancelled():
+                return process.get("cancelled", False)
+            
+            # Create executor
+            executor = ReActAgentExecutor(
+                correlation_id=process_id,
+                user_query=process["query"],
+                deps=deps,
+                cancellation_check=check_cancelled
+            )
+            
+            # Stream events
+            async for event in executor.execute_with_streaming():
+                # Check for cancellation
+                if process.get("cancelled", False):
+                    logger.info(f"[{process_id}] Process cancelled by user")
+                    error_data = {
+                        "type": "ERROR",
+                        "error": "Process cancelled by user",
+                        "timestamp": time.time()
+                    }
+                    yield f"data: {json.dumps(error_data)}\n\n"
+                    break
+                
+                # Rename event_type to type for frontend routing
+                event["type"] = event.pop("event_type", "message")
+                
+                # Log ERROR events for debugging
+                if event["type"] == "ERROR":
+                    logger.error(f"[{process_id}] Sending ERROR event to frontend: {event.get('error', 'Unknown error')}")
+                
+                # Log SCRIPT-GENERATED events for debugging
+                if event["type"] == "SCRIPT-GENERATED":
+                    logger.info(f"[{process_id}] 📜 Sending SCRIPT-GENERATED event to frontend (script length: {event.get('script_length', 0)} chars)")
+                
+                # Log COMPLETE events for debugging
+                if event["type"] == "COMPLETE":
+                    content_preview = str(event.get('content', ''))[:100] if event.get('content') else 'None'
+                    logger.info(f"[{process_id}] ✅ Sending COMPLETE event - display_type: {event.get('display_type')}, is_special_tool: {event.get('is_special_tool')}, content length: {len(str(event.get('content', '')))}, preview: {content_preview}...")
+                
+                yield f"data: {json.dumps(event)}\n\n"
+                
+                # Small delay to prevent overwhelming frontend
+                await asyncio.sleep(0.01)
+            
+            # Mark as complete
+            process["status"] = "complete"
+            logger.info(f"[{process_id}] ReAct process completed")
+            
+        except Exception as e:
+            logger.error(f"[{process_id}] Stream error: {e}", exc_info=True)
+            process["status"] = "error"
+            
+            error_data = {
+                "type": "ERROR",
+                "error": "An internal error has occurred. Please try again later.",
+                "timestamp": time.time()
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+        
+        finally:
+            # Cleanup immediately when stream ends - no need to delay
+            if process_id in active_processes:
+                logger.info(f"[{process_id}] Cleaning up process tracking")
+                del active_processes[process_id]
+            
+            # Send explicit close event to tell browser to disconnect
+            # This prevents uvicorn from waiting for browser to close the connection
+            try:
+                yield "event: close\ndata: Stream ended\n\n"
+            except:
+                pass  # Generator may already be closed
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@router.post("/cancel")
+async def cancel_react_process(
+    request: CancelRequest,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Cancel a running ReAct process.
+    
+    Sets the cancelled flag, which the executor checks between steps.
+    """
+    process_id = request.process_id
+    
+    if process_id not in active_processes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Process ID not found"
+        )
+    
+    process = active_processes[process_id]
+    
+    # Verify user owns this process
+    if process["user_id"] != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to cancel this process"
+        )
+    
+    # Set cancelled flag
+    process["cancelled"] = True
+    process["status"] = "cancelled"
+    
+    logger.info(f"[{process_id}] Process cancellation requested")
+    
+    return JSONResponse(
+        content={
+            "success": True,
+            "message": "Process cancellation requested"
+        }
+    )
+
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+async def _create_react_dependencies(
+    correlation_id: str,
+    user_query: str
+) -> ReactAgentDependencies:
+    """
+    Create ReactAgentDependencies with all required resources.
+    
+    This mirrors the setup in scripts/okta_react_agent_test.py.
+    """
+    import aiohttp
+    
+    # Get Okta credentials from settings (OktaAPIClient reads from env vars internally)
+    okta_domain = settings.OKTA_CLIENT_ORGURL
+    okta_token = settings.OKTA_API_TOKEN
+    
+    if not okta_domain or not okta_token:
+        raise ValueError("OKTA_CLIENT_ORGURL and OKTA_API_TOKEN must be set in environment")
+    
+    # Create Okta client (reads credentials from env)
+    okta_client = OktaAPIClient()
+    
+    # Load API endpoints and lightweight operations
+    try:
+        # Load lightweight reference (minimal operations list in dot notation)
+        # Auto-generate if missing (like modern_execution_manager)
+        from src.core.agents.one_react_agent import generate_lightweight_onereact_json
+        lightweight_entities = generate_lightweight_onereact_json(force_regenerate=False)
+        
+        # Load full endpoint details
+        full_endpoints_file = Path("src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json")
+        with open(full_endpoints_file, 'r', encoding='utf-8') as f:
+            full_api_data = json.load(f)
+            endpoints = full_api_data.get('endpoints', [])
+        
+        # Inject special tools
+        try:
+            from src.core.tools.special_tools import get_special_tool_endpoints
+            special_endpoints = get_special_tool_endpoints()
+            if special_endpoints:
+                endpoints.extend(special_endpoints)
+                
+                # Also update lightweight entities if needed
+                # lightweight_entities is {"operations": [...], "sql_tables": [...]}
+                if "operations" in lightweight_entities:
+                    for ep in special_endpoints:
+                        op_name = f"{ep.get('entity')}.{ep.get('operation')}"
+                        if op_name not in lightweight_entities["operations"]:
+                            lightweight_entities["operations"].append(op_name)
+                
+                logger.info(f"[{correlation_id}] Injected {len(special_endpoints)} special tool endpoints")
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Failed to inject special tools: {e}")
+        
+        logger.info(f"[{correlation_id}] Loaded {len(lightweight_entities.get('operations', []))} operations from lightweight reference")
+        logger.info(f"[{correlation_id}] Loaded {len(endpoints)} full endpoint details")
+    except Exception as e:
+        logger.warning(f"[{correlation_id}] Error loading endpoints: {e}")
+        lightweight_entities = {"operations": [], "sql_tables": []}
+        endpoints = []
+    
+    # Create SQLite connection using settings
+    db_path = Path(settings.SQLITE_PATH)
+    sqlite_conn = sqlite3.connect(str(db_path))
+    
+    # Create operation mapping (not needed for ReAct agent)
+    operation_mapping = {}
+    
+    # Create dependencies
+    deps = ReactAgentDependencies(
+        correlation_id=correlation_id,
+        endpoints=endpoints,
+        lightweight_entities=lightweight_entities,
+        okta_client=okta_client,
+        sqlite_connection=sqlite_conn,
+        operation_mapping=operation_mapping,
+        user_query=user_query
+    )
+    
+    return deps
+

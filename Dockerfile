@@ -1,6 +1,9 @@
 # Stage 1: Build the frontend
 FROM --platform=$BUILDPLATFORM node:24-slim AS frontend-builder
 
+# Accept version as build argument
+ARG APP_VERSION=dev
+
 WORKDIR /app/frontend
 
 # Copy frontend source code
@@ -9,9 +12,9 @@ COPY src/frontend/ ./
 # Create the target directory for the build output
 RUN mkdir -p ../api/static
 
-# Install dependencies and build the frontend
+# Install dependencies and build the frontend with version
 RUN npm ci && \
-    npm run build
+    VITE_APP_VERSION=$APP_VERSION npm run build
 
 # Stage 2: Python application with built frontend  
 FROM python:3.13-slim
@@ -25,9 +28,12 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python requirements and install dependencies
+# Install UV for faster package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy Python requirements and install dependencies with UV (10-100x faster)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy main entry point
 COPY main.py /app/

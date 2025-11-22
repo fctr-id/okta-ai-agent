@@ -5,7 +5,9 @@
             <div :class="['search-container', hasResults ? 'moved' : '']">
                 <!-- Title with animated gradient underline -->
                 <div :class="['title-wrapper', hasResults ? 'hidden' : '']">
-                    <h1 class="main-title">I'm Tako. How can I help you?</h1>
+                    <h1 class="main-title">
+                        I'm Tako. How can I help you?
+                    </h1>
                     <div class="title-underline"></div>
                 </div>
 
@@ -14,7 +16,7 @@
                     <div class="integrated-search-bar">
                         <!-- Reset button (only when results are showing and not loading) -->
                         <transition name="fade" mode="out-in">
-                            <div v-if="hasResults && !isLoading" class="reset-btn-container" key="reset-btn">
+                            <div v-if="hasResults && !isLoading && !reactLoading" class="reset-btn-container" key="reset-btn">
                                 <v-tooltip text="Start over" location="top">
                                     <template v-slot:activator="{ props }">
                                         <button v-bind="props" class="action-btn reset-btn" @click="resetInterface"
@@ -28,7 +30,7 @@
 
                         <!-- Stop button with progress (when loading) -->
                         <transition name="fade">
-                            <div v-if="isLoading" class="stop-btn-container">
+                            <div v-if="isLoading || reactLoading" class="stop-btn-container">
                                 <v-tooltip text="Stop processing" location="top">
                                     <template v-slot:activator="{ props }">
                                         <button v-bind="props" @click="stopProcessing" class="action-btn stop-btn "
@@ -97,12 +99,76 @@
                 </div>
             </transition>
 
+            <!-- Error Alert -->
+            <transition name="fade-up">
+                <div v-if="reactError" class="error-alert-container">
+                    <v-alert
+                        type="error"
+                        variant="outlined"
+                        prominent
+                        closable
+                        @click:close="reactError = null"
+                        class="error-alert"
+                        color="error"
+                    >
+                        <template v-slot:prepend>
+                            <v-icon size="large">mdi-alert-circle</v-icon>
+                        </template>
+                        <div class="error-content">
+                            <div class="error-title">Error</div>
+                            <div class="error-message">Please try again. If it persists, contact the admin.</div>
+                        </div>
+                    </v-alert>
+                </div>
+            </transition>
+
+            <!-- ReAct Two-Panel Interface (only in ReAct mode) -->
+            <transition name="fade-up">
+                <div v-if="isReActMode && (reactLoading || reactSteps.length > 0 || reactExecutionStarted)" class="react-panels mb-4">
+                    <!-- Discovery Panel -->
+                    <DiscoveryPanel
+                        :steps="reactSteps"
+                        :isThinking="reactLoading && reactSteps.length === 0"
+                        :isComplete="reactDiscoveryComplete"
+                        :error="reactError"
+                        :executionStarted="reactExecutionStarted"
+                    />
+                    
+                    <!-- Execution Panel (only show after discovery starts AND we have a script or execution started) -->
+                    <ExecutionPanel
+                        v-if="(reactDiscoveryComplete && reactGeneratedScript) || reactExecutionStarted"
+                        :validationStep="reactValidationStep"
+                        :executionStarted="reactExecutionStarted"
+                        :isExecuting="reactIsExecuting"
+                        :isComplete="!reactLoading && !reactProcessing && reactResults !== null"
+                        :executionError="reactError"
+                        :executionMessage="reactExecutionMessage"
+                        :progressValue="reactExecutionProgress"
+                        :subprocessProgress="reactSubprocessProgress"
+                        :resultCount="reactResults?.metadata?.count || 0"
+                        :tokenUsage="reactTokenUsage"
+                        :rateLimitWarning="reactRateLimitWarning"
+                        :generatedScript="reactGeneratedScript"
+                    />
+                </div>
+            </transition>
+
             <!-- Results Area with Smooth Transitions -->
             <transition name="fade-up">
-                <div v-if="hasResults && !isLoading"
-                    :class="['results-container', getContentClass(currentResponse.type)]" class="mt-8">
-                    <DataDisplay :type="currentResponse.type" :content="currentResponse.content"
-                        :metadata="currentResponse.metadata" />
+                <div v-if="hasResults && ((isReActMode && !reactLoading) || (!isReActMode && !isLoading))"
+                    :class="['results-container', getContentClass(isReActMode ? MessageType.TABLE : currentResponse.type)]" class="mt-8">
+                    <DataDisplay 
+                        v-if="isReActMode && reactResults"
+                        :type="reactResults.display_type"
+                        :content="reactResults.content"
+                        :metadata="reactResults.metadata"
+                    />
+                    <DataDisplay 
+                        v-else-if="!isReActMode"
+                        :type="currentResponse.type" 
+                        :content="currentResponse.content"
+                        :metadata="currentResponse.metadata"
+                    />
                 </div>
             </transition>
         </main>
@@ -124,10 +190,17 @@
  * Main component for the search and query interface that handles
  * user input, displays results, and manages the overall UI state.
  */
+
+console.log('🚀 ChatInterfaceV2 INITIALIZING')
+console.log('📍 Current URL:', window.location.href)
+
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import { useSanitize } from '@/composables/useSanitize'
+import { useReactStream } from '@/composables/useReactStream'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
+import DiscoveryPanel from '@/components/messages/DiscoveryPanel.vue'
+import ExecutionPanel from '@/components/messages/ExecutionPanel.vue'
 import { MessageType } from '@/components/messages/messageTypes'
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
@@ -151,6 +224,35 @@ const router = useRouter()
 const streamController = ref(null)
 const { postStream, isStreaming, progress } = useFetchStream()
 
+// ReAct mode detection and state
+const isReActMode = ref(true) // Default to ReAct mode
+const {
+    isLoading: reactLoading,
+    isProcessing: reactProcessing,
+    error: reactError,
+    currentStep: reactCurrentStep,
+    discoverySteps: reactSteps,
+    isDiscoveryComplete: reactDiscoveryComplete,
+    validationStep: reactValidationStep,
+    executionStarted: reactExecutionStarted,
+    isExecuting: reactIsExecuting,
+    executionMessage: reactExecutionMessage,
+    executionProgress: reactExecutionProgress,
+    subprocessProgress: reactSubprocessProgress,
+    rateLimitWarning: reactRateLimitWarning,
+    generatedScript: reactGeneratedScript,
+    results: reactResults,
+    tokenUsage: reactTokenUsage,
+    startProcess: startReActProcess,
+    connectToStream: connectReActStream,
+    cancelProcess: cancelReAct
+} = useReactStream()
+
+// Watch mode changes and log
+watch(isReActMode, (newMode) => {
+    console.log('🔥 MODE CHANGED:', newMode ? 'REACT MODE 🚀' : 'TAKO MODE 🤖')
+})
+
 // Initialize sanitization utilities
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
 
@@ -172,6 +274,14 @@ const currentResponse = ref({
  * Stops the current query processing and aborts the stream
  */
 const stopProcessing = () => {
+    if (isReActMode.value) {
+        // Cancel ReAct process
+        cancelReAct()
+        isLoading.value = false
+        return
+    }
+    
+    // Tako flow
     if (streamController.value) {
         streamController.value.abort();
         streamController.value = null;
@@ -318,6 +428,25 @@ const resetInterface = () => {
         content: '',
         metadata: {}
     }
+    
+    // Reset ReAct state
+    if (isReActMode.value) {
+        // Cancel any ongoing ReAct process
+        cancelReAct()
+        
+        // Reset all ReAct-specific state
+        reactSteps.value = []
+        reactResults.value = null
+        reactValidationStep.value = null
+        reactExecutionStarted.value = false
+        reactIsExecuting.value = false
+        reactExecutionMessage.value = ''
+        reactExecutionProgress.value = 0
+        reactSubprocessProgress.value = []
+        reactTokenUsage.value = null
+        reactDiscoveryComplete.value = false
+        reactError.value = null
+    }
 }
 
 /**
@@ -356,7 +485,22 @@ const sendQuery = async () => {
     updateMessageHistory(sanitizedQuery)
 
     try {
+        // Check if ReAct mode is enabled
+        console.log('[ChatInterfaceV2] isReActMode:', isReActMode.value)
+        
+        if (isReActMode.value) {
+            // Use ReAct flow
+            console.log('[ChatInterfaceV2] Using ReAct flow for query:', sanitizedQuery)
+            const pid = await startReActProcess(sanitizedQuery)
+            if (pid) {
+                await connectReActStream(pid)
+            }
+            isLoading.value = false
+            return
+        }
 
+        // Tako flow (existing)
+        console.log('[ChatInterfaceV2] Using Tako flow for query:', sanitizedQuery)
         // First check authentication only (lightweight call) 
         const authCheckResponse = await fetch('/api/query?auth_check=true', {
             method: 'POST',
@@ -470,6 +614,26 @@ onMounted(() => {
         if (savedHistory) {
             // Sanitize history from localStorage before using
             messageHistory.value = JSON.parse(savedHistory).map(item => sanitizeQuery(item))
+        }
+        
+        // Detect ReAct mode from query param or localStorage
+        const urlParams = new URLSearchParams(window.location.search)
+        const modeParam = urlParams.get('mode')
+        const savedMode = localStorage.getItem('agentMode')
+        
+        console.log('[ChatInterfaceV2] Mode detection:', { 
+            url: window.location.href,
+            modeParam, 
+            savedMode 
+        })
+        
+        isReActMode.value = modeParam !== 'realtime' && (modeParam === 'react' || savedMode !== 'realtime')
+        
+        console.log('[ChatInterfaceV2] isReActMode set to:', isReActMode.value)
+        
+        // Save mode preference
+        if (modeParam) {
+            localStorage.setItem('agentMode', modeParam)
         }
     } catch (error) {
         console.error('Failed to load message history:', error)
@@ -1195,5 +1359,42 @@ onMounted(() => {
     .inline-loading-indicator span {
         font-size: 13px;
     }
+}
+
+/* Error Alert Styling */
+.error-alert-container {
+    max-width: var(--max-width);
+    width: calc(100% - 40px);
+    margin: 20px auto;
+    position: relative;
+    z-index: 35;
+}
+
+.error-alert {
+    border-radius: 12px !important;
+    box-shadow: 0 4px 16px rgba(244, 67, 54, 0.2) !important;
+}
+
+.error-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.error-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #c62828;
+}
+
+.error-message {
+    font-size: 14px;
+    line-height: 1.5;
+    color: #424242;
+    word-break: break-word;
+}
+
+.error-alert {
+    background-color: rgba(255, 255, 255, 0.98) !important;
 }
 </style>

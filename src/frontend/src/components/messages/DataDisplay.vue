@@ -172,13 +172,13 @@ const isTextData = computed(() => {
 });
 
 const displayedItems = computed(() => {
-    // console.log('📋 DataDisplay: displayedItems computed called:', {
-    //     propsType: props.type,
-    //     contentIsArray: Array.isArray(props.content),
-    //     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
-    //     isStreamingValue: isStreaming.value,
-    //     lastDisplayedItemsLength: lastDisplayedItems.value?.length || 0
-    // });
+    console.log('📋 DataDisplay: displayedItems computed called:', {
+        propsType: props.type,
+        contentIsArray: Array.isArray(props.content),
+        contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
+        isStreamingValue: isStreaming.value,
+        lastDisplayedItemsLength: lastDisplayedItems.value?.length || 0
+    });
     
     if (props.type === MessageType.STREAM || props.type === MessageType.BATCH || props.type === MessageType.TABLE) {
         // Handle both direct array content and nested content structure
@@ -192,11 +192,11 @@ const displayedItems = computed(() => {
             items = props.content.content;
         }
         
-        // console.log('📋 DataDisplay: Table type processing:', {
-        //     itemsLength: items.length,
-        //     isStreaming: isStreaming.value,
-        //     lastDisplayedLength: lastDisplayedItems.value?.length || 0
-        // });
+        console.log('📋 DataDisplay: Table type processing:', {
+            itemsLength: items.length,
+            isStreaming: isStreaming.value,
+            lastDisplayedLength: lastDisplayedItems.value?.length || 0
+        });
         
         // Keep a reference to the last known items to prevent table disappearing
         if (items.length > 0) {
@@ -206,14 +206,14 @@ const displayedItems = computed(() => {
         // If items are empty but we were displaying items before and not streaming,
         // show the old items briefly to avoid flicker
         if (items.length === 0 && !isStreaming.value && lastDisplayedItems.value.length > 0) {
-            // console.log('📋 DataDisplay: Using fallback lastDisplayedItems');
+            console.log('📋 DataDisplay: Using fallback lastDisplayedItems');
             return lastDisplayedItems.value;
         }
         
-        // console.log('📋 DataDisplay: Returning', items.length, 'items');
+        console.log('📋 DataDisplay: Returning', items.length, 'items');
         return items;
     }
-    // console.log('📋 DataDisplay: Not a table type, returning empty array');
+    console.log('📋 DataDisplay: Not a table type, returning empty array');
     return [];
 });
 
@@ -756,6 +756,7 @@ const downloadCSV = () => {
     background: #f9faff;
     border-radius: 8px;
     box-shadow: 0 2px 8px rgba(76, 100, 226, 0.05);
+    animation: fade-in-up 0.5s ease-out;
 }
 
 .json-content pre {
@@ -944,6 +945,12 @@ const downloadCSV = () => {
   border-radius: 8px;
   border: 1px solid #edf2f7;
   box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  animation: fade-in-up 0.5s ease-out;
+}
+
+@keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Headings with modern styling */

@@ -78,6 +78,9 @@ ALLOWED_MODULES: Set[str] = {
     'cryptography.x509',  # X.509 certificate handling
     'ssl',  # SSL/TLS certificate processing for SAML metadata
     
+    # Database
+    'sqlite3',  # For ReAct SQL mode database access
+    
     # HTTP and networking
     'aiohttp',
     
@@ -120,6 +123,10 @@ ALLOWED_PYTHON_METHODS = {
     
     # JSON methods
     'loads', 'dumps', 'load', 'dump', 'JSONDecodeError',
+    
+    # Database methods (sqlite3) - READ ONLY
+    'connect', 'cursor', 'execute', 'fetchall', 'fetchone', 'fetchmany',
+    'close', 'row_factory', 'Row',  # Removed: commit, rollback (no write operations)
     
     # Data structure operations
     'items', 'keys', 'values', 'get', 'append', 'extend', 'insert',
@@ -270,14 +277,16 @@ class EnhancedSecurityValidator:
         # Allow special tool endpoints to bypass standard API pattern validation
         url_pattern = endpoint_data.get('url_pattern', '') or endpoint_data.get('path', '')
         
-        # Exempt special tool endpoints from standard API pattern validation
+        # Exempt special tool endpoints and OAuth endpoints from standard API pattern validation
         # Special tools use /special-tools/ path prefix instead of /api/v1/
+        # OAuth endpoints use /oauth2/v1/ path prefix
         if url_pattern.startswith('/special-tools/'):
             # Special tools have their own validation rules
             pass
+        elif url_pattern.startswith('/oauth2/v1/'):
+            # OAuth2 endpoints are valid (role assignments, client management, etc.)
+            pass
         elif not url_pattern.startswith('/api/v1/'):
-            violations.append(f"Invalid API endpoint pattern: {url_pattern}")
-            risk_level = 'MEDIUM'
             violations.append(f"Invalid API endpoint pattern: {url_pattern}")
             risk_level = 'MEDIUM'
         

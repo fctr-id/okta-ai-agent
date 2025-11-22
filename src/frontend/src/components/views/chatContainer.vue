@@ -1,7 +1,5 @@
 <template>
   <div class="chat-container">
-
-    
     <!-- Dynamically render chat interface based on mode -->
     <transition name="fade" mode="out-in">
       <component :is="currentChatComponent" />
@@ -10,14 +8,26 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import ChatInterfaceV2 from '@/components/ChatInterfaceV2.vue'
 import RealtimeChatInterface from '@/components/views/RealtimeChatInterface.vue'
 import { isRealtimeMode } from '@/state/chatMode.js'
 
-// Dynamically select component based on mode
+// ChatInterfaceV2 handles ReAct mode internally
+// We default to ChatInterfaceV2 unless mode=realtime is explicitly requested
 const currentChatComponent = computed(() => {
-  return isRealtimeMode.value ? RealtimeChatInterface : ChatInterfaceV2
+  const urlParams = new URLSearchParams(window.location.search)
+  const modeParam = urlParams.get('mode')
+  
+  // Only load RealtimeChatInterface if explicitly requested
+  if (modeParam === 'realtime') {
+    console.log('🤖 [ChatContainer] Loading RealtimeChatInterface (Explicit Realtime Mode)')
+    return RealtimeChatInterface
+  }
+  
+  // Default to ChatInterfaceV2 (which defaults to ReAct mode)
+  console.log('🚀 [ChatContainer] Loading ChatInterfaceV2 (Default)')
+  return ChatInterfaceV2
 })
 </script>
 

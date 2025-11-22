@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Optional, Dict
 from pydantic import BaseModel
 from pydantic_ai.models.gemini import GeminiModel
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from openai import AsyncAzureOpenAI
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -193,11 +193,11 @@ class ModelConfig:
             coding_model_name = os.getenv('OPENAI_COMPATIBLE_CODING_MODEL', reasoning_model_name)
             
             return {
-                ModelType.REASONING: OpenAIModel(
+                ModelType.REASONING: OpenAIChatModel(
                     model_name=reasoning_model_name,
                     provider=openai_compat_provider
                 ),
-                ModelType.CODING: OpenAIModel(
+                ModelType.CODING: OpenAIChatModel(
                     model_name=coding_model_name,
                     provider=openai_compat_provider
                 )
@@ -211,12 +211,12 @@ class ModelConfig:
             )
             
             return {
-                ModelType.REASONING: OpenAIModel(
-                    model_name=os.getenv('OPENAI_REASONING_MODEL', 'gpt-4'),
+                ModelType.REASONING: OpenAIResponsesModel(
+                    model_name=os.getenv('OPENAI_REASONING_MODEL', 'gpt-4o'),
                     provider=openai_provider
                 ),
-                ModelType.CODING: OpenAIModel(
-                    model_name=os.getenv('OPENAI_CODING_MODEL', 'gpt-4-turbo'),
+                ModelType.CODING: OpenAIResponsesModel(
+                    model_name=os.getenv('OPENAI_CODING_MODEL', 'gpt-4o'),
                     provider=openai_provider
                 )
             }
@@ -233,12 +233,12 @@ class ModelConfig:
             azure_provider = OpenAIProvider(openai_client=azure_client)
             
             return {
-                ModelType.REASONING: OpenAIModel(
-                    model_name=os.getenv('AZURE_OPENAI_REASONING_MODEL', 'gpt-4'),
+                ModelType.REASONING: OpenAIResponsesModel(
+                    model_name=os.getenv('AZURE_OPENAI_REASONING_MODEL', 'gpt-4o'),
                     provider=azure_provider
                 ),
-                ModelType.CODING: OpenAIModel(
-                    model_name=os.getenv('AZURE_OPENAI_CODING_MODEL', 'gpt-4'),
+                ModelType.CODING: OpenAIResponsesModel(
+                    model_name=os.getenv('AZURE_OPENAI_CODING_MODEL', 'gpt-4o'),
                     provider=azure_provider
                 )
             }

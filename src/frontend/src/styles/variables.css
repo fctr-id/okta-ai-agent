@@ -1,22 +1,27 @@
 :root {
-    /* Brand colors */
-    --primary: #4C64E2;
-    --primary-light: #F0F3FF;
-    --primary-dark: #3b4fd9;
-    
-    /* Text colors */
-    --text-primary: #333333;
-    --text-secondary: #666666;
-    --text-muted: #5d6b8a;
-    
-    /* Backgrounds */
-    --bg-gradient: linear-gradient(135deg, #1942c9 0%, #fafbff 100%);
+    /* Background */
+    --bg-gradient: linear-gradient(180deg, #e0e7ff 0%, #d1d8f0 100%);
+
+    /* Typography - Neutral Gray */
+    --text-primary: #111827;   /* Gray 900 */
+    --text-secondary: #374151; /* Gray 700 */
+    --text-muted: #6B7280;     /* Gray 500 */
+
+    /* Brand Actions */
+    --primary: #4F46E5;        /* Indigo 600 - Pops against background */
+    --primary-hover: #4338CA;  /* Indigo 700 */
+    --primary-light: #EEF2FF;  /* Indigo 50 */
+    --primary-dark: #3730A3;   /* Indigo 800 */
+
+    /* UI Components */
+    --card-bg: #FFFFFF;
+    --border-color: #E5E7EB;   /* Gray 200 */
     
     /* Layout */
     --border-radius: 16px;
     --max-width: 1280px;
     
     /* Shadows */
-    --shadow-light: 0 2px 20px rgba(76, 100, 226, 0.08), 0 1px 8px rgba(76, 100, 226, 0.05);
-    --shadow-medium: 0 6px 30px rgba(76, 100, 226, 0.08);
+    --shadow-light: 0 2px 20px rgba(79, 70, 229, 0.08), 0 1px 8px rgba(79, 70, 229, 0.05);
+    --shadow-medium: 0 6px 30px rgba(79, 70, 229, 0.08);
   }
