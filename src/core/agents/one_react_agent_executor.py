@@ -684,14 +684,14 @@ class ReActAgentExecutor:
             
             # Check for errors
             if proc.returncode != 0:
-                error_msg = f"Script exited with code {proc.returncode}"
                 if stderr_lines:
                     last_errors = "\n".join(stderr_lines[-20:])
                     logger.error(f"[{self.correlation_id}] Script failed. Last 20 stderr lines:\n{last_errors}")
-                    error_msg = f"Script execution failed: {last_errors}"
+                else:
+                    logger.error(f"[{self.correlation_id}] Script exited with code {proc.returncode}")
                 
-                # Yield error event to frontend so it stops waiting
-                yield self._create_error_event(error_msg)
+                # Yield generic error event to frontend (detailed errors logged internally)
+                yield self._create_error_event("Script execution failed. Please try again and contact admins if it persists.")
                 raise RuntimeError(f"Script exited with code {proc.returncode}")
             
             logger.info(f"[{self.correlation_id}] Script completed successfully")
@@ -817,7 +817,7 @@ class ReActAgentExecutor:
     
     def _parse_script_output(self, stdout: str) -> Optional[Dict[str, Any]]:
         """
-        Parse JSON results from script stdout with Vuetify headers support.
+        Parse JSON results from script stdout with table headers support.
         
         Expects script to print JSON between markers:
         ================================================================================
@@ -929,11 +929,11 @@ class ReActAgentExecutor:
                         logger.debug(f"[{self.correlation_id}] Cleaned up script: {self.state.script_path}")
                         
                         # Also cleanup the copied base_okta_api_client.py if it exists
-                        script_dir = Path(self.state.script_path).parent
-                        api_client_copy = script_dir / "base_okta_api_client.py"
-                        normalized_api_client = os.path.normpath(str(api_client_copy))
+                        # Construct path directly from validated temp_dir (not from user-controlled script_path)
+                        api_client_path = temp_dir / "base_okta_api_client.py"
+                        normalized_api_client = os.path.normpath(str(api_client_path))
                         
-                        if os.path.exists(normalized_api_client) and normalized_api_client.startswith(normalized_temp + os.sep):
+                        if os.path.exists(normalized_api_client):
                             os.remove(normalized_api_client)
                             logger.debug(f"[{self.correlation_id}] Cleaned up base_okta_api_client.py")
                     else:

@@ -204,7 +204,7 @@ These are hard constraints to prevent common failures. You MUST follow them.
 
 ### Section 4: The Final Output
 
-Your goal is to populate `complete_production_code` with a complete, executable Python script that outputs JSON with Vuetify table headers.
+Your goal is to populate `complete_production_code` with a complete, executable Python script that outputs JSON with proper table headers.
 
 ---
 
@@ -214,9 +214,18 @@ Your final production script MUST follow this exact structure.
 **PERFORMANCE REQUIREMENTS:**
 - **Use `client.concurrent_limit`** for batch size (never hardcode batch sizes)
 - **Use `asyncio.gather()`** for concurrent API calls when fetching data for multiple entities
-- **Use progress tracking** (`start_entity_progress`, `update_entity_progress`, `complete_entity_progress`) for operations with known totals
+- **Use progress tracking** (`start_entity_progress(label, total)`, `update_entity_progress`, `complete_entity_progress`) for operations with known totals
 - **Use `entity_label` parameter** in `make_request()` for automatic error tracking
 - **Remove `max_results=3`** from all API calls in production code
+
+**⚠️ CRITICAL: Progress tracking method signature:**
+```python
+# CORRECT - Only two parameters: label and total
+client.start_entity_progress(label="operation_name", total=count)
+
+# WRONG - Do NOT use estimated_total, it does not exist!
+# client.start_entity_progress(label="...", total=0, estimated_total=100)  # ❌ INVALID!
+```
 
 ```python
 #!/usr/bin/env python3
@@ -352,10 +361,10 @@ async def main():
         raise
     
     # --- FINAL OUTPUT ---
-    # 9. Print results as JSON with Vuetify table headers (REQUIRED FORMAT)
+    # 9. Print results as JSON with table headers (REQUIRED FORMAT)
     #    Output MUST include both 'data' and 'headers' for table display
     
-    # Generate Vuetify-compatible headers from the first result
+    # Generate table-compatible headers from the first result
     headers = []
     if all_results and isinstance(all_results, list) and len(all_results) > 0:
         first_item = all_results[0]
