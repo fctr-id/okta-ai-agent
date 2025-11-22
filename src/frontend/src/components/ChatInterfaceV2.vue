@@ -7,24 +7,6 @@
                 <div :class="['title-wrapper', hasResults ? 'hidden' : '']">
                     <h1 class="main-title">
                         I'm Tako. How can I help you?
-                        <v-chip 
-                            v-if="isReActMode" 
-                            color="success" 
-                            size="small" 
-                            class="ml-2"
-                            variant="elevated"
-                        >
-                            🚀 REACT MODE
-                        </v-chip>
-                        <v-chip 
-                            v-else 
-                            color="primary" 
-                            size="small" 
-                            class="ml-2"
-                            variant="elevated"
-                        >
-                            TAKO MODE
-                        </v-chip>
                     </h1>
                     <div class="title-underline"></div>
                 </div>
@@ -122,18 +104,19 @@
                 <div v-if="reactError" class="error-alert-container">
                     <v-alert
                         type="error"
-                        variant="tonal"
+                        variant="outlined"
                         prominent
                         closable
                         @click:close="reactError = null"
                         class="error-alert"
+                        color="error"
                     >
                         <template v-slot:prepend>
                             <v-icon size="large">mdi-alert-circle</v-icon>
                         </template>
                         <div class="error-content">
-                            <div class="error-title">An Error Occurred</div>
-                            <div class="error-message">{{ reactError }}</div>
+                            <div class="error-title">Error</div>
+                            <div class="error-message">Please try again. If it persists, contact the admin.</div>
                         </div>
                     </v-alert>
                 </div>
@@ -148,6 +131,7 @@
                         :isThinking="reactLoading && reactSteps.length === 0"
                         :isComplete="reactDiscoveryComplete"
                         :error="reactError"
+                        :executionStarted="reactExecutionStarted"
                     />
                     
                     <!-- Execution Panel (only show after discovery starts AND we have a script or execution started) -->
@@ -1400,13 +1384,17 @@ onMounted(() => {
 .error-title {
     font-size: 16px;
     font-weight: 600;
-    color: #d32f2f;
+    color: #c62828;
 }
 
 .error-message {
     font-size: 14px;
     line-height: 1.5;
-    color: #5f2120;
+    color: #424242;
     word-break: break-word;
+}
+
+.error-alert {
+    background-color: rgba(255, 255, 255, 0.98) !important;
 }
 </style>

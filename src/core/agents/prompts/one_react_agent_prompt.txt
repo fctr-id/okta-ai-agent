@@ -248,10 +248,12 @@ async def main():
     try:
         # 2. Initialize SQLite database connection
         #    Robust path detection for Docker and Local environments
+        script_dir = Path(__file__).parent
+        
+        # Try multiple possible paths (Docker first, then local)
         possible_paths = [
-            Path("/app/sqlite_db/okta_sync.db"),  # Docker container absolute path
-            Path.cwd() / "sqlite_db" / "okta_sync.db", # Current working directory
-            Path(__file__).resolve().parent.parent.parent.parent / "sqlite_db" / "okta_sync.db", # Relative to src/core/data/testing
+            Path("/app/sqlite_db/okta_sync.db"),  # Docker container
+            script_dir.parent / "sqlite_db" / "okta_sync.db",  # Local: ../sqlite_db/okta_sync.db
         ]
         
         db_path = None
@@ -261,8 +263,10 @@ async def main():
                 break
         
         if not db_path:
-            # Fallback
-            db_path = Path("sqlite_db/okta_sync.db")
+            print(f"Error: Database not found. Checked paths:", file=sys.stderr)
+            for p in possible_paths:
+                print(f"  - {p} (exists: {p.exists()})", file=sys.stderr)
+            sys.exit(1)
             
         db_connection = sqlite3.connect(str(db_path))
         cursor = db_connection.cursor()

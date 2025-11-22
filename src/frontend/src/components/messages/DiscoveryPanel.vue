@@ -5,7 +5,6 @@
         <v-icon size="18" :class="{ rotated: isExpanded }">mdi-chevron-right</v-icon>
         <span class="title">Agent reasoning </span>
         <div class="spacer"></div>
-        <div v-if="statusClass === 'run' && !error" class="loading-spinner-header"></div>
         <span class="status-badge" :class="statusClass" :title="error || ''">{{ statusText }}</span>
       </button>
 
@@ -26,7 +25,11 @@
             >
               <div class="step-line">
                 <v-icon class="step-icon" size="13" :color="step.status === 'failed' ? '#C62828' : '#4C64E2'">mdi-assistant</v-icon>
-                <span class="stream-text">{{ step.reasoning || step.text || step.title }}</span>
+                <span class="stream-text">
+                  {{ step.reasoning || step.text || step.title }}
+                  <!-- Show spinner inline only on the last/active step (when discovery not complete and execution hasn't started) -->
+                  <span v-if="index === steps.length - 1 && !isComplete && !error && !executionStarted" class="step-spinner"></span>
+                </span>
               </div>
               
               <!-- Tool lines with tree structure -->
@@ -64,6 +67,10 @@ const props = defineProps({
   error: {
     type: String,
     default: null
+  },
+  executionStarted: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -81,16 +88,16 @@ watch([() => props.isThinking, () => props.isComplete], ([thinking, complete]) =
 const statusText = computed(() => {
   if (props.error) return 'Error'
   if (props.isComplete) return 'Complete'
-  // Stay in Planning state while thinking or has steps (until complete)
-  if (props.isThinking || props.steps.length > 0) return 'Planning'
+  // Show "Working" while agent works through ReAct loop
+  if (props.isThinking || props.steps.length > 0) return 'Working'
   return 'Ready'
 })
 
 const statusClass = computed(() => {
   if (props.error) return 'error'
   if (props.isComplete) return 'ok'
-  // Stay in run state while thinking or has steps (until complete)
-  if (props.isThinking || props.steps.length > 0) return 'run'
+  // Only show run state while actively working (not complete)
+  if ((props.isThinking || props.steps.length > 0) && !props.isComplete) return 'run'
   return 'idle'
 })
 
@@ -245,6 +252,24 @@ const completedCount = computed(() => {
   margin-bottom: 6px;
 }
 
+.step-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  margin-left: 8px;
+  border: 2.5px solid rgba(76, 100, 226, 0.25);
+  border-top-color: #4C64E2;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .step-icon {
   flex-shrink: 0;
   margin-top: 2px;
@@ -281,6 +306,29 @@ const completedCount = computed(() => {
 .stream-item.failed .stream-text {
   color: #C62828;
   font-weight: 600;
+}
+
+.dots-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.dots-header span {
+  width: 6px;
+  height: 6px;
+  background: #4C64E2;
+  border-radius: 50%;
+  animation: bounce 1.2s ease-in-out infinite;
+}
+
+.dots-header span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.dots-header span:nth-child(3) {
+  animation-delay: 0.3s;
 }
 
 .loading-spinner-header {

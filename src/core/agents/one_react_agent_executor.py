@@ -500,7 +500,9 @@ class ReActAgentExecutor:
     def _write_temp_script(self, code: str) -> str:
         """Write code to temporary Python file and copy dependencies"""
         import shutil
-        temp_dir = Path("src/core/data/testing")
+        # Use generated_scripts directory at project root (same level as sqlite_db)
+        project_root = Path(__file__).parent.parent.parent.parent
+        temp_dir = project_root / "generated_scripts"
         temp_dir.mkdir(parents=True, exist_ok=True)
         
         script_path = temp_dir / f"react_execution_{self.correlation_id}.py"

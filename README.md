@@ -14,7 +14,7 @@
 
 ## What is Tako?
 
-The world's first autonomous AI agent for Okta administration that thinks like a senior engineer, based on ReAct (reason and act) AI pattern.
+The world's first **Autonomous AI Engineer** for Okta. Built on the **ReAct (Reason and Act)** pattern, Tako doesn't just answer questions—it **thinks, writes code, and self-heals** errors in real-time to deliver deterministic, production-ready results.
 
 ### **Think → Generate Code → Sample Results → Repeat → Final Results**
 

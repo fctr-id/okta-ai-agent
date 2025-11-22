@@ -699,10 +699,14 @@ Rules:
         
         try:
             if code_type == "sql":
+                # LLM generates pure SQL query (no Python wrapper)
+                sql_query = code.strip()
+                
                 # SECURITY VALIDATION: Check SQL for injection attacks
-                is_valid, error_msg = validate_user_sql(code, deps.correlation_id)
+                logger.info(f"[{deps.correlation_id}] Running SQL security validation on query: {sql_query[:100]}...")
+                is_valid, error_msg = validate_user_sql(sql_query, deps.correlation_id)
                 if not is_valid:
-                    logger.warning(f"[{deps.correlation_id}] SQL security validation failed: {error_msg}")
+                    logger.error(f"[{deps.correlation_id}] SQL security validation failed: {error_msg}")
                     return {
                         "success": False,
                         "sample_results": None,
@@ -712,8 +716,10 @@ Rules:
                         "error": f"❌ SECURITY VALIDATION FAILED: {error_msg}"
                     }
                 
-                # VALIDATION: Check for LIMIT 3 in SQL code
-                if "LIMIT 3" not in code.upper():
+                logger.info(f"[{deps.correlation_id}] ✅ SQL security validation passed")
+                
+                # VALIDATION: Check for LIMIT 3 in SQL query
+                if "LIMIT 3" not in sql_query.upper():
                     return {
                         "success": False,
                         "sample_results": None,
@@ -725,7 +731,7 @@ Rules:
                 
                 # Execute SQL query against SQLite (now validated)
                 cursor = deps.sqlite_connection.cursor()
-                cursor.execute(code)
+                cursor.execute(sql_query)
                 results = cursor.fetchall()
                 
                 # Get column names from cursor description

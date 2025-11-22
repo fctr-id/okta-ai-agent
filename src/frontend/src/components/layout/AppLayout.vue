@@ -86,7 +86,7 @@ const handleLogout = async () => {
 .app-page {
     min-height: 100vh;
     /* Calm Slate - Stable, professional, excellent contrast for white cards, non-distracting */
-   background: linear-gradient(135deg, rgb(195, 205, 235), rgb(210, 220, 240), rgb(220, 238, 245));
+   background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
     position: relative;
     overflow-y: auto;
     overflow-x: hidden;
