@@ -31,13 +31,12 @@ Tako follows a deterministic workflow that validates every step, **catches its o
 - 🐳 **Easy deployment** - Docker support for AMD64 and ARM64 platforms
 
 <div align="center">
-  <img src="[docs/media/tako-ai.jpeg](https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad)" alt="Tako ReAct Agent Architecture" width="800px" height="auto">
+  <img src="docs/media/tako-ai.jpeg" alt="Tako ReAct Agent Architecture" width="800px" height="auto">
   <p><em>Tako's autonomous ReAct workflow: Think → Generate Code → Validate → Execute → Deliver Results</em></p>
 </div>
 
 <div align="center">
-  <img src="docs/media/tako-v1.gif" alt="Tako ReAct Agent Demo" width="800px" height="auto">
-  
+  <video src="[https://github.com/user-attachments/assets/d0c3580a-7cbc-4ab1-ad04-42d4e35166bc](https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad)" width="352" height="720"></video>
   <p><em>Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download</em></p>
 </div>
 
