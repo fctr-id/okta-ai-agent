@@ -933,8 +933,8 @@ class ReActAgentExecutor:
                         api_client_copy = script_dir / "base_okta_api_client.py"
                         normalized_api_client = os.path.normpath(str(api_client_copy))
                         
-                        if api_client_copy.exists() and normalized_api_client.startswith(normalized_temp + os.sep):
-                            os.remove(api_client_copy)
+                        if os.path.exists(normalized_api_client) and normalized_api_client.startswith(normalized_temp + os.sep):
+                            os.remove(normalized_api_client)
                             logger.debug(f"[{self.correlation_id}] Cleaned up base_okta_api_client.py")
                     else:
                         logger.warning(f"[{self.correlation_id}] Skipped cleanup of unsafe path: {self.state.script_path}")
