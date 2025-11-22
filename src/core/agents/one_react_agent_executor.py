@@ -534,11 +534,12 @@ class ReActAgentExecutor:
             "from base_okta_api_client import OktaAPIClient"
         )
         
-        with open(script_path, "w", encoding="utf-8") as f:
+        # Use the validated normalized path for file write
+        with open(normalized_script, "w", encoding="utf-8") as f:
             f.write(modified_code)
         
-        logger.debug(f"[{self.correlation_id}] Script written to: {script_path.absolute()}")
-        return str(script_path)
+        logger.debug(f"[{self.correlation_id}] Script written to: {normalized_script}")
+        return normalized_script
     
     async def _run_subprocess_with_streaming(self, script_path: str) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -910,34 +911,40 @@ class ReActAgentExecutor:
     
     def _cleanup(self):
         """Clean up temporary files"""
-        if self.state.script_path and os.path.exists(self.state.script_path):
+        if self.state.script_path:
             try:
+                # Normalize and validate path before any file operations
+                project_root = Path(__file__).parent.parent.parent.parent
+                temp_dir = project_root / "generated_scripts"
+                normalized_script = os.path.normpath(self.state.script_path)
+                normalized_temp = os.path.normpath(str(temp_dir))
+                
+                # Security check: ensure path is within generated_scripts
+                if not normalized_script.startswith(normalized_temp + os.sep):
+                    logger.warning(f"[{self.correlation_id}] Skipped cleanup of unsafe path: {self.state.script_path}")
+                    return
+                
+                # Only proceed with file operations using the validated path
+                if not os.path.exists(normalized_script):
+                    return
+                
                 # Check if we're in debug mode (via env var)
                 keep_scripts = os.getenv("KEEP_TEMP_SCRIPTS", "false").lower() == "true"
                 
                 if keep_scripts:
-                    logger.debug(f"[{self.correlation_id}] Script kept for debugging: {self.state.script_path}")
+                    logger.debug(f"[{self.correlation_id}] Script kept for debugging: {normalized_script}")
                 else:
-                    # Security check before deletion using normpath
-                    project_root = Path(__file__).parent.parent.parent.parent
-                    temp_dir = project_root / "generated_scripts"
-                    normalized_script = os.path.normpath(self.state.script_path)
-                    normalized_temp = os.path.normpath(str(temp_dir))
+                    os.remove(normalized_script)
+                    logger.debug(f"[{self.correlation_id}] Cleaned up script: {normalized_script}")
                     
-                    if normalized_script.startswith(normalized_temp + os.sep):
-                        os.remove(self.state.script_path)
-                        logger.debug(f"[{self.correlation_id}] Cleaned up script: {self.state.script_path}")
-                        
-                        # Also cleanup the copied base_okta_api_client.py if it exists
-                        # Construct path directly from validated temp_dir (not from user-controlled script_path)
-                        api_client_path = temp_dir / "base_okta_api_client.py"
-                        normalized_api_client = os.path.normpath(str(api_client_path))
-                        
-                        if os.path.exists(normalized_api_client):
-                            os.remove(normalized_api_client)
-                            logger.debug(f"[{self.correlation_id}] Cleaned up base_okta_api_client.py")
-                    else:
-                        logger.warning(f"[{self.correlation_id}] Skipped cleanup of unsafe path: {self.state.script_path}")
+                    # Also cleanup the copied base_okta_api_client.py if it exists
+                    # Construct path directly from validated temp_dir (not from user-controlled script_path)
+                    api_client_path = temp_dir / "base_okta_api_client.py"
+                    normalized_api_client = os.path.normpath(str(api_client_path))
+                    
+                    if os.path.exists(normalized_api_client):
+                        os.remove(normalized_api_client)
+                        logger.debug(f"[{self.correlation_id}] Cleaned up base_okta_api_client.py")
                         
             except Exception as e:
                 logger.warning(f"[{self.correlation_id}] Failed to cleanup script: {e}")
