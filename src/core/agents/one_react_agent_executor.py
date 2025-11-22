@@ -512,9 +512,11 @@ class ReActAgentExecutor:
         
         script_path = temp_dir / f"react_execution_{self.correlation_id}.py"
         
-        # Security check: Ensure path is within generated_scripts
-        if not os.path.abspath(script_path).startswith(os.path.abspath(temp_dir)):
-             raise ValueError("Invalid script path - potential path traversal")
+        # Security check: Ensure path is within generated_scripts using normpath
+        normalized_script = os.path.normpath(str(script_path))
+        normalized_temp = os.path.normpath(str(temp_dir))
+        if not normalized_script.startswith(normalized_temp + os.sep):
+            raise ValueError("Invalid script path - potential path traversal")
         
         # Copy base_okta_api_client.py to the same directory so imports work
         api_client_source = Path(__file__).parent.parent / "okta" / "client" / "base_okta_api_client.py"
@@ -916,20 +918,26 @@ class ReActAgentExecutor:
                 if keep_scripts:
                     logger.debug(f"[{self.correlation_id}] Script kept for debugging: {self.state.script_path}")
                 else:
-                    # Security check before deletion
+                    # Security check before deletion using normpath
                     project_root = Path(__file__).parent.parent.parent.parent
                     temp_dir = project_root / "generated_scripts"
-                    if os.path.abspath(self.state.script_path).startswith(os.path.abspath(temp_dir)):
+                    normalized_script = os.path.normpath(self.state.script_path)
+                    normalized_temp = os.path.normpath(str(temp_dir))
+                    
+                    if normalized_script.startswith(normalized_temp + os.sep):
                         os.remove(self.state.script_path)
                         logger.debug(f"[{self.correlation_id}] Cleaned up script: {self.state.script_path}")
+                        
+                        # Also cleanup the copied base_okta_api_client.py if it exists
+                        script_dir = Path(self.state.script_path).parent
+                        api_client_copy = script_dir / "base_okta_api_client.py"
+                        normalized_api_client = os.path.normpath(str(api_client_copy))
+                        
+                        if api_client_copy.exists() and normalized_api_client.startswith(normalized_temp + os.sep):
+                            os.remove(api_client_copy)
+                            logger.debug(f"[{self.correlation_id}] Cleaned up base_okta_api_client.py")
                     else:
                         logger.warning(f"[{self.correlation_id}] Skipped cleanup of unsafe path: {self.state.script_path}")
-                    
-                    # Also cleanup the copied base_okta_api_client.py if it exists
-                    script_dir = Path(self.state.script_path).parent
-                    api_client_copy = script_dir / "base_okta_api_client.py"
-                    if api_client_copy.exists():
-                        os.remove(api_client_copy)
                         
             except Exception as e:
                 logger.warning(f"[{self.correlation_id}] Failed to cleanup script: {e}")
