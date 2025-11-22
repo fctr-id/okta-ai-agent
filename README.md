@@ -11,7 +11,6 @@
   <p><a href="VERSION.md">📋 Changelog →</a></p>
 </div>
 
-
 ## What is Tako?
 
 The world's first **Autonomous AI Engineer** for Okta. Built on the **ReAct (Reason and Act)** pattern, Tako doesn't just answer questions—it **thinks, writes code, and self-heals** errors in real-time to deliver deterministic, production-ready results.
@@ -30,15 +29,16 @@ Tako follows a deterministic workflow that validates every step, **catches its o
 - 🔒 **Security-first** - Multiple validation layers, sandboxed execution, read-only by default
 - 🐳 **Easy deployment** - Docker support for AMD64 and ARM64 platforms
 
-<div align="center">
-  <img src="docs/media/tako-ai.jpeg" alt="Tako ReAct Agent Architecture" width="800px" height="auto">
-  <p><em>Tako's autonomous ReAct workflow: Think → Generate Code → Validate → Execute → Deliver Results</em></p>
-</div>
+### Architecture Overview
 
-<div align="center">
-  <video src="https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad" width="800px" ></video>
-  <p><em>Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download</em></p>
-</div>
+<img src="docs/media/tako-ai.jpeg" alt="Tako ReAct Agent Architecture" width="1024px" height="auto">
+
+
+### See Tako in Action (play video below)
+
+<video src="https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad" width="1024px" ></video>
+
+*Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download*
 
 ## 📋 Table of Contents
 
