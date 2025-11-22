@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
+import re
 
 from src.core.agents.one_react_agent import (
     execute_react_query, 
@@ -90,6 +91,10 @@ class ReActAgentExecutor:
         cancellation_check: Optional[callable] = None,
         force_api_only: bool = False
     ):
+        # Validate the correlation_id to prevent path injection
+        if not re.fullmatch(r"[A-Za-z0-9_\-]+", correlation_id):
+            logger.error(f"Invalid correlation_id format: {correlation_id!r}")
+            raise ValueError("Invalid correlation_id format.")
         self.correlation_id = correlation_id
         
         # Check database health and modify query if needed
@@ -192,7 +197,7 @@ class ReActAgentExecutor:
             return
         except Exception as e:
             logger.error(f"[{self.correlation_id}] Executor failed: {e}", exc_info=True)
-            yield self._create_error_event(str(e))
+            yield self._create_error_event("An internal error has occurred during execution. Please contact support if the problem persists.")
         finally:
             # Cleanup temporary script
             self._cleanup()
@@ -506,6 +511,10 @@ class ReActAgentExecutor:
         temp_dir.mkdir(parents=True, exist_ok=True)
         
         script_path = temp_dir / f"react_execution_{self.correlation_id}.py"
+        
+        # Security check: Ensure path is within generated_scripts
+        if not os.path.abspath(script_path).startswith(os.path.abspath(temp_dir)):
+             raise ValueError("Invalid script path - potential path traversal")
         
         # Copy base_okta_api_client.py to the same directory so imports work
         api_client_source = Path(__file__).parent.parent / "okta" / "client" / "base_okta_api_client.py"
@@ -907,8 +916,14 @@ class ReActAgentExecutor:
                 if keep_scripts:
                     logger.debug(f"[{self.correlation_id}] Script kept for debugging: {self.state.script_path}")
                 else:
-                    os.remove(self.state.script_path)
-                    logger.debug(f"[{self.correlation_id}] Cleaned up script: {self.state.script_path}")
+                    # Security check before deletion
+                    project_root = Path(__file__).parent.parent.parent.parent
+                    temp_dir = project_root / "generated_scripts"
+                    if os.path.abspath(self.state.script_path).startswith(os.path.abspath(temp_dir)):
+                        os.remove(self.state.script_path)
+                        logger.debug(f"[{self.correlation_id}] Cleaned up script: {self.state.script_path}")
+                    else:
+                        logger.warning(f"[{self.correlation_id}] Skipped cleanup of unsafe path: {self.state.script_path}")
                     
                     # Also cleanup the copied base_okta_api_client.py if it exists
                     script_dir = Path(self.state.script_path).parent

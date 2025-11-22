@@ -129,17 +129,17 @@ async def stream_react_updates(
 ):
     """
     Stream ReAct agent execution events via SSE.
-    
-    Events:
-    - STEP-START: Discovery step begins (title, text)
-    - STEP-END: Discovery step completes (title, text)
-    - STEP-PROGRESS: Subprocess progress (entity, current, total)
-    - STEP-TOKENS: Token usage (input, output, total)
-    - COMPLETE: Final completion (results)
-    - ERROR: Error occurred (error message)
     """
-    set_correlation_id(process_id)
-    
+    # Validate process_id is a valid UUID to prevent path traversal
+    import uuid
+    try:
+        uuid.UUID(process_id, version=4)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid process ID format. Must be a valid UUID."
+        )
+
     if process_id not in active_processes:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -223,7 +223,7 @@ async def stream_react_updates(
             
             error_data = {
                 "type": "ERROR",
-                "error": str(e),
+                "error": "An internal error has occurred. Please try again later.",
                 "timestamp": time.time()
             }
             yield f"data: {json.dumps(error_data)}\n\n"
