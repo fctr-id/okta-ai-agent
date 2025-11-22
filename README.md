@@ -36,7 +36,7 @@ Tako follows a deterministic workflow that validates every step, **catches its o
 </div>
 
 <div align="center">
-  <video src="https://github.com/user-attachments/assets/d0c3580a-7cbc-4ab1-ad04-42d4e35166bc" width="352" height="720"></video>
+  <video src="https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad" width="800px" ></video>
   <p><em>Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download</em></p>
 </div>
 
