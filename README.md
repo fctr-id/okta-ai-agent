@@ -17,7 +17,7 @@ The world's first **Autonomous AI Engineer** for Okta. Built on the **ReAct (Rea
 
 ### **Think → Generate Code → Sample Results → Repeat → Final Results**
 
-Tako follows a deterministic workflow that validates every step, **catches its own mistakes**, and generates production-ready Python across **all 107+ Okta APIs**. Ask questions in plain English, get reproducible results with full transparency. **No scripting required.**
+Tako follows a deterministic workflow that validates every step, **catches its own mistakes**, and generates production-ready Python across **all 107+ Okta GET APIs**. Ask questions in plain English, get reproducible results with full transparency. **No scripting required.**
 
 **Key Features:**
 - 🗣️ **Natural language queries** - Ask questions in plain English, get instant results
@@ -69,7 +69,7 @@ Tako follows a deterministic workflow that validates every step, **catches its o
 Tako auto-corrects syntax errors, validates API parameters against Okta's spec, and retries intelligently when issues occur. Built-in circuit breakers prevent runaway loops, while automatic error tracking reports exactly what failed and why - eliminating trial-and-error cycles.
 
 ### **Cost-Effective Intelligence**
-Run on lightweight, low-cost models (Gemini 2.0 Flash, Claude 3.5 Haiku, GPT-4o-mini) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's deterministic workflow.
+Run on lightweight, low-cost models (Gemini 2.5 Flash, Claude 4.5 Haiku, GPT-4.1) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's deterministic workflow.
 
 ### **Flexible Data Access**
 - **API Mode** - Real-time Okta API calls (no database sync required)
