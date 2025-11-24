@@ -226,7 +226,15 @@ OpenAI, Google Vertex AI, Anthropic, Azure OpenAI, AWS Bedrock, Ollama (local), 
 
 These model classes have been validated for stability and cost/performance trade-offs (you can still use others):
 
-**Reasoning Models (Planning & Analysis)**
+**Coding Models **
+- Claude Hailu 4.5
+- **Gemini Flash 2.5**
+- GPT-4.1
+- Claude Sonnet 4
+- Gemini 2.5 Pro
+- OpenAI GPT-OSS 120B
+
+**Reasoning Models (Sumarization for certain tools)**
 - **GPT-o4-mini** - (preferred)
 - OpenAI GPT-OSS 120B
 - Claude Sonnet 4
@@ -234,14 +242,10 @@ These model classes have been validated for stability and cost/performance trade
 - O3 - Advanced reasoning capabilities (very expensive)
 - GPT-5-mini - Works but is very slow (least expensive but needs more testing)
 
-**Coding Models (API Code Generation)**
-- **GPT-4.1** - (preferred)
-- Claude Sonnet 4
-- Gemini 2.5 Pro
-- OpenAI GPT-OSS 120B
+
 
 **Notes:**
-- **Dual-model strategy**: lighter reasoning + stronger coding model can reduce cost
+- **React pattern models**: Start with smaller lighter models and move up if those don't work for you
 - **Provider variability**: slight output format differences are normal
 - You can override any pairing via environment variables
 
