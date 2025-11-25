@@ -1,4 +1,5 @@
 import { ref, readonly } from "vue";
+import { useRouter } from "vue-router";
 
 // Create reactive state (only initialized once)
 const user = ref(null);
@@ -15,9 +16,23 @@ const isAdmin = () => user.value?.role === "admin";
 
 // Export auth composable
 export function useAuth() {
+    const router = useRouter();
+
     // Handle API responses and errors consistently
     // Also update the handleResponse function to handle these complex errors better:
     const handleResponse = async (response) => {
+        // Handle session timeout (401)
+        if (response.status === 401) {
+            isAuthenticated.value = false;
+            user.value = null;
+            if (router) {
+                router.push('/login');
+            } else {
+                window.location.href = '/login';
+            }
+            throw new Error("Session expired");
+        }
+
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
 

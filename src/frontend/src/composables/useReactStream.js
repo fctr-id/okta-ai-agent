@@ -6,11 +6,13 @@
  */
 
 import { ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 
 // Use relative URL to go through Vite proxy
 const API_BASE_URL = ''
 
 export function useReactStream() {
+    const router = useRouter()
     
     // State
     const isLoading = ref(false)
@@ -72,6 +74,17 @@ export function useReactStream() {
                 credentials: 'include',
                 body: JSON.stringify({ query })
             })
+            
+            // Handle session timeout (401)
+            if (response.status === 401) {
+                console.log('[useReactStream] Session expired (401), redirecting to login')
+                if (router) {
+                    router.push('/login')
+                } else {
+                    window.location.href = '/login'
+                }
+                return null
+            }
             
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`)
@@ -543,7 +556,7 @@ export function useReactStream() {
         if (!currentProcessId.value) return
         
         try {
-            await fetch(`${API_BASE_URL}/api/react/cancel`, {
+            const response = await fetch(`${API_BASE_URL}/api/react/cancel`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -553,6 +566,16 @@ export function useReactStream() {
                     process_id: currentProcessId.value
                 })
             })
+            
+            // Handle session timeout (401)
+            if (response.status === 401) {
+                if (router) {
+                    router.push('/login')
+                } else {
+                    window.location.href = '/login'
+                }
+                return
+            }
             
             closeStream()
             isLoading.value = false

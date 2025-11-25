@@ -16,7 +16,19 @@
               <v-icon size="16" :class="{ rotated: isScriptExpanded }">mdi-chevron-right</v-icon>
               <span class="script-label">Generated Script</span>
               <span class="script-length">({{ scriptLength }} characters)</span>
-              <v-icon size="16" class="copy-icon" @click.stop="copyScript">mdi-content-copy</v-icon>
+              <div class="copy-container">
+                <transition name="fade">
+                  <span v-if="showCopied" class="copied-label">Copied!</span>
+                </transition>
+                <v-icon 
+                  size="16" 
+                  class="copy-icon" 
+                  :color="showCopied ? 'success' : ''"
+                  @click.stop="copyScript"
+                >
+                  {{ showCopied ? 'mdi-check' : 'mdi-content-copy' }}
+                </v-icon>
+              </div>
             </button>
             <transition name="expand">
               <div v-show="isScriptExpanded" class="script-content">
@@ -191,6 +203,7 @@ const props = defineProps({
 
 const isExpanded = ref(true)
 const isScriptExpanded = ref(false)
+const showCopied = ref(false)
 
 // Collapse panel when execution completes successfully
 watch(() => props.isComplete, (newVal) => {
@@ -207,7 +220,10 @@ const copyScript = async () => {
   if (!props.generatedScript) return
   try {
     await navigator.clipboard.writeText(props.generatedScript)
-    // Could add a toast notification here
+    showCopied.value = true
+    setTimeout(() => {
+      showCopied.value = false
+    }, 2000)
   } catch (err) {
     console.error('Failed to copy script:', err)
   }
@@ -636,8 +652,20 @@ const getExecutionStatusClass = computed(() => {
   font-weight: 400;
 }
 
-.copy-icon {
+.copy-container {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.copied-label {
+  font-size: 11px;
+  color: #4CAF50;
+  font-weight: 600;
+}
+
+.copy-icon {
   color: #4C64E2;
   opacity: 0.6;
   transition: opacity 0.2s;
@@ -645,6 +673,17 @@ const getExecutionStatusClass = computed(() => {
 
 .copy-icon:hover {
   opacity: 1;
+}
+
+/* Fade transition */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 
 .script-content {
