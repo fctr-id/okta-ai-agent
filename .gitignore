@@ -135,3 +135,10 @@ scripts/test_*.py
 # Experimental prompt variants (keep main prompts only)
 src/core/agents/prompts/*_new.txt
 src/core/agents/prompts/*_old.txt
+docs/Tako_vs_MCP_Code_Mode_Analysis.md
+.gitignore
+docs/MCP_Server_MVP.md
+.gitignore
+docs/MCP_Server_Implementation.md
+docs/MCP_Migration_Strategy.md
+docs/Tako_Architecture_Deep_Analysis.md
