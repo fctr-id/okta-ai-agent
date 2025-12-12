@@ -560,6 +560,12 @@ class SyncOrchestrator:
                     logger.info("Step 5: Syncing Policies")
                     await self.sync_model_streaming(Policy, okta.list_policies)
                     
+                    # Check if there were authentication errors
+                    if okta.auth_errors:
+                        error_msg = "Okta authentication failed: " + "; ".join(okta.auth_errors[:3])  # Limit to first 3 errors
+                        logger.error(f"Sync completed with auth errors: {error_msg}")
+                        raise Exception(error_msg)
+                    
                     logger.info(f"Sync completed for tenant {self.tenant_id}")
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")

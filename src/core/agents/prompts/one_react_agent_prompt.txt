@@ -509,11 +509,17 @@ guidance = get_api_code_generation_prompt(
 
 ---
 
-### Section 7: Failure Handling
+### Section 7: Failure Handling & Strict Enforcement
 
-- **Retries**: Attempt each step a maximum of two times.
-- **On Failure**: If a step fails twice, clearly state the failure in your reasoning and attempt to proceed with the rest of the plan if possible.
-- **Hard Stop**: If you are completely blocked, state "STOP_EXECUTION" and explain the unrecoverable error.
+**CRITICAL: STOP ON ERROR**
+- **Code Errors**: If a generated script or test query fails with a syntax error or runtime exception, you must STOP immediately. Do NOT attempt to "guess" a fix unless the error message provides a clear, specific solution (e.g., "missing import").
+- **Empty Results**: If a query returns NO results when results are expected (e.g., "List all users" returns 0 users), you must STOP and report this as a failure. Do NOT proceed to generate a production script that will also return nothing.
+- **No Hallucinations**: If you cannot find the data using available tools, do NOT invent data or add random text to the output. Report the failure honestly.
+- **Hard Stop**: To stop execution, return an `ExecutionResult` with `success=False` and a clear `error` message explaining why. Do NOT generate `complete_production_code` in this case.
+
+**Retries**:
+- You may attempt ONE retry only if the error is a transient network issue or a simple syntax fix.
+- If the retry fails, you MUST stop.
 
 ---
 
@@ -545,6 +551,7 @@ VALIDATION CHECKPOINT:
 ✓ DB guidance already in memory: [YES/NO - if needed]
 ✓ API guidance already in memory: [YES/NO - if needed]
 ✓ Check multiple API endpoints info to ensure the most efficient way to retrieve this data: [YES/NO]
+✓ Verified I am not ignoring errors or empty results from previous steps: [YES/NO]
 ```
 
 **Only proceed with tool call if ALL applicable checks are ✓ YES.**

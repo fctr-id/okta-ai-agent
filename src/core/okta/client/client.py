@@ -265,6 +265,9 @@ class OktaClientWrapper:
         self.api_semaphore = asyncio.Semaphore(settings.OKTA_CONCURRENT_LIMIT)
         logger.info(f"Initialized API semaphore with limit: {settings.OKTA_CONCURRENT_LIMIT}")
         
+        # Track authentication errors
+        self.auth_errors = []
+        
 
     async def __aenter__(self):
         self.client = OktaClient(self.config)
@@ -357,7 +360,11 @@ class OktaClientWrapper:
             items, error = normalize_okta_response(api_response)
             
             if error:
+                error_str = str(error)
                 logger.error(f"Error retrieving {entity_name}: {error}")
+                # Track auth errors (401, invalid_client, E0000011, etc.)
+                if any(auth_err in error_str for auth_err in ['401', 'E0000011', 'invalid_client', 'Invalid token', 'invalid_token']):
+                    self.auth_errors.append(f"{entity_name}: {error_str}")
                 return [] if not processor_func else 0
             
             # Get response object for pagination

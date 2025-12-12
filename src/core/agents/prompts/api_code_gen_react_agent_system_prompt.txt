@@ -73,6 +73,10 @@ response = await client.make_request(endpoint="/api/v1/users", params={"limit": 
 
 #### Rule 3.2: Response Handling (CRITICAL)
 The API client **automatically normalizes** all Okta responses. The `data` field is always a list or dict, never nested.
+
+**CRITICAL: DO NOT SWALLOW ERRORS**
+If `response["status"] != "success"`, you MUST return the error object, NOT an empty list.
+
 ```python
 # Response structure after normalization:
 # {"status": "success", "data": [...]}  ← data is already unwrapped
@@ -84,7 +88,9 @@ if response["status"] == "success":
         return data
     # Single object responses (e.g., GET /users/{id})
     return [data] if data else []
-return []
+
+# Return the error response directly so the agent sees the failure
+return response
 ```
 
 #### Rule 3.3: Dynamic Lookups (NO HARDCODING)
@@ -214,7 +220,10 @@ async def descriptive_function_name():
     )
     
     # Check for success and non-empty results before proceeding.
-    if search_response["status"] != "success" or not search_response.get("data"):
+    if search_response["status"] != "success":
+        return search_response
+        
+    if not search_response.get("data"):
         return []
     
     search_data = search_response.get("data", [])
@@ -240,7 +249,7 @@ async def descriptive_function_name():
             return data
         return [data] if data else []
     
-    return []
+    return response
 ```
 
 ---

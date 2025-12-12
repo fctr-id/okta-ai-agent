@@ -116,6 +116,16 @@ export function useSync() {
             syncStatus.value = data.status;
             syncProgress.value = data.progress || 0;
 
+            // Set error from API response if present
+            if (data.error_details) {
+                syncError.value = data.error_details;
+            } else if (data.status === "failed") {
+                syncError.value = data.message || "Sync failed";
+            } else if (data.status !== "failed") {
+                // Clear error for non-failed states (unless we have error_details)
+                syncError.value = null;
+            }
+
             // Check if entity counts have changed
             if (data.entity_counts) {
                 const hasChanged =

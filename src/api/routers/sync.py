@@ -51,6 +51,7 @@ class SyncResponse(BaseModel):
     entity_counts: Optional[Dict[str, int]] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    error_details: Optional[str] = None
 
 # Get tenant ID from the application settings
 def get_tenant_id():
@@ -341,7 +342,8 @@ async def get_sync_status(
                 "policies": active_sync.policies_count or 0,
                 "devices": active_sync.devices_count or 0
             },
-            start_time=active_sync.start_time
+            start_time=active_sync.start_time,
+            error_details=active_sync.error_details
         )
     
     # If no active sync, get last completed sync
@@ -351,7 +353,7 @@ async def get_sync_status(
     if last_sync:
         return SyncResponse(
             status=last_sync.status.value,
-            message="Latest sync information",
+            message="Latest sync information" if not last_sync.error_details else last_sync.error_details,
             sync_id=last_sync.id,
             progress=100 if last_sync.status == SyncStatus.COMPLETED else None,
             entity_counts={
@@ -362,7 +364,8 @@ async def get_sync_status(
                 "devices": last_sync.devices_count or 0
             },
             start_time=last_sync.start_time,
-            end_time=last_sync.end_time
+            end_time=last_sync.end_time,
+            error_details=last_sync.error_details
         )
     
     return SyncResponse(

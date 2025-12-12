@@ -481,9 +481,23 @@ class OktaAPIClient:
                 self.increment_entity_errors(entity_label, 1)
                 self.logger.debug(f"Auto-tracked error for entity batch '{entity_label}': {result.get('error', 'Unknown error')}")
             
+            # CRITICAL: Raise exceptions for fatal auth/permission errors so the LLM sees them
+            # instead of swallowing them in the generated code.
+            if result.get("status") == "error":
+                error_code = result.get("error_code")
+                http_status = result.get("http_status")
+                
+                # 401 (Invalid Token) or 403 (Forbidden) or 400 (Bad Request/Invalid Client)
+                if error_code in ["E0000011", "E0000006"] or http_status == 400:
+                    raise Exception(f"{result.get('error')} (Code: {error_code})")
+            
             return result
                 
         except Exception as e:
+            # If we just raised it above, re-raise it
+            if "Code: E0000011" in str(e) or "Code: E0000006" in str(e) or "HTTP 400" in str(e):
+                raise
+
             self.logger.error(f"API request failed for {endpoint}: {str(e)}")
             sys.stderr.flush()  # Flush error logs immediately
             error_result = {
