@@ -111,7 +111,7 @@
                         </svg>
                     </div>
                     <div class="error-content">
-                        <span class="error-text">Something went wrong. Please try again.</span>
+                        <span class="error-text">{{ reactError }}</span>
                     </div>
                     <button class="error-dismiss" @click="reactError = null" title="Dismiss">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -1241,7 +1241,7 @@ onMounted(() => {
 .error-block {
     max-width: 900px;
     width: calc(100% - 40px);
-    margin: 20px auto;
+    margin: 60px auto 20px;
     padding: 12px 16px;
     display: flex;
     align-items: center;
@@ -1256,16 +1256,23 @@ onMounted(() => {
 .error-icon {
     flex-shrink: 0;
     color: #f87171;
+    display: flex;
+    align-items: center;
+    line-height: 0;
+    margin-top: -2px;
 }
 
 .error-content {
     flex: 1;
+    display: flex;
+    align-items: center;
 }
 
 .error-text {
     font-size: 13px;
     color: #b91c1c;
     font-weight: 450;
+    line-height: 1.5;
 }
 
 .error-dismiss {

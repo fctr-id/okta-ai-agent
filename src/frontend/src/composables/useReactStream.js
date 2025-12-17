@@ -524,10 +524,17 @@ export function useReactStream() {
      * Handle ERROR event
      */
     const handleError = (data) => {
-        console.log('[useReactStream] handleError called with:', data)
-        console.log('[useReactStream] Setting error.value to:', data.error)
-        error.value = data.error
-        console.log('[useReactStream] error.value is now:', error.value)
+        console.log('[useReactStream] ========== ERROR EVENT ==========')
+        console.log('[useReactStream] Full data object:', JSON.stringify(data, null, 2))
+        console.log('[useReactStream] data.error value:', data.error)
+        console.log('[useReactStream] data.error type:', typeof data.error)
+        
+        // Set error from the event data
+        error.value = data.error || 'An unexpected error occurred. Please try again.'
+        
+        console.log('[useReactStream] error.value set to:', error.value)
+        console.log('[useReactStream] =====================================')
+        
         isLoading.value = false
         isProcessing.value = false
         currentStep.value = ''
