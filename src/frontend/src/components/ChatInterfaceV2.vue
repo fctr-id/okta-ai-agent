@@ -3,73 +3,69 @@
         <main class="content-area mt-10" :class="{ 'has-results': hasResults }">
             <!-- Search Container with Animated Position -->
             <div :class="['search-container', hasResults ? 'moved' : '']">
-                <!-- Title with animated gradient underline -->
+                <!-- Big title -->
                 <div :class="['title-wrapper', hasResults ? 'hidden' : '']">
-                    <h1 class="main-title">
-                        I'm Tako. How can I help you?
+                    <h1 class="main-title gradient-title">
+                        Hey there! I'm Tako
                     </h1>
-                    <div class="title-underline"></div>
+                    <p class="main-subtitle">Ask your AI agent anything about your Okta tenant</p>
                 </div>
 
-                <!-- Modern integrated search -->
+                <!-- Modern integrated search - Plain CSS Card -->
                 <div class="search-wrapper">
-                    <div class="integrated-search-bar">
-                        <!-- Reset button (only when results are showing and not loading) -->
-                        <transition name="fade" mode="out-in">
-                            <div v-if="hasResults && !isLoading && !reactLoading" class="reset-btn-container" key="reset-btn">
-                                <v-tooltip text="Start over" location="top">
-                                    <template v-slot:activator="{ props }">
-                                        <button v-bind="props" class="action-btn reset-btn" @click="resetInterface"
-                                            aria-label="Reset search">
-                                            <v-icon>mdi-refresh</v-icon>
-                                        </button>
-                                    </template>
-                                </v-tooltip>
-                            </div>
-                        </transition>
-
-                        <!-- Stop button with progress (when loading) -->
-                        <transition name="fade">
-                            <div v-if="isLoading || reactLoading" class="stop-btn-container">
-                                <v-tooltip text="Stop processing" location="top">
-                                    <template v-slot:activator="{ props }">
-                                        <button v-bind="props" @click="stopProcessing" class="action-btn stop-btn "
-                                            aria-label="Stop processing">
-                                            <!-- Progress circle - thinner spinner only -->
-                                            <div class="circular-progress-container">
-                                                <div v-if="!isStreaming" class="indeterminate-progress"></div>
-                                                <svg v-else class="determinate-progress" viewBox="0 0 36 36">
-                                                    <circle class="progress-background" cx="18" cy="18" r="16"
-                                                        fill="none" />
-                                                    <circle class="progress-value" cx="18" cy="18" r="16" fill="none"
-                                                        :stroke-dasharray="`${progress * 0.98}, 100`" />
-                                                </svg>
-                                            </div>
-                                            <!-- Larger stop icon -->
-                                            <v-icon size="large" color="#4C64E2">mdi-stop</v-icon>
-                                        </button>
-                                    </template>
-                                </v-tooltip>
-                            </div>
-                        </transition>
-
-                        <!-- Search input with dynamic placeholder -->
-                        <v-text-field v-model="userInput" @keydown="handleKeyDown" autofocus refs="searchInput"
-                            @update:model-value="handleUserInputChange" :focused="isFocused" @focus="isFocused = true"
-                            @blur="isFocused = false" placeholder="Ask anything about your Okta tenant..."
-                            variant="plain" color="#4C64E2" bg-color="transparent" hide-details class="search-input"
-                            :clearable="true" />
-
-                        <!-- Send button -->
-                        <v-tooltip text="Send query" location="top">
-                            <template v-slot:activator="{ props }">
-                                <button v-bind="props" class="action-btn send-btn"
-                                    :disabled="!userInput || !(userInput?.trim?.())" @click="sendQuery"
-                                    aria-label="Send query">
-                                    <v-icon>mdi-send</v-icon>
+                    <div class="query-card" :class="{ 'is-focused': isFocused }">
+                        
+                        <!-- Input row with icons -->
+                        <div class="query-input-row">
+                            <!-- Left icons (reset/stop) -->
+                            <div class="query-icons-left">
+                                <!-- Reset button when has results -->
+                                <button 
+                                    v-if="hasResults && !isLoading && !reactLoading" 
+                                    class="icon-btn" 
+                                    @click="resetInterface"
+                                    title="Start over"
+                                >
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M1 4v6h6M23 20v-6h-6"/>
+                                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                                    </svg>
                                 </button>
-                            </template>
-                        </v-tooltip>
+                                <!-- Stop button when loading -->
+                                <button 
+                                    v-if="isLoading || reactLoading" 
+                                    class="icon-btn stop-icon" 
+                                    @click="stopProcessing"
+                                    title="Stop processing"
+                                >
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                        <rect x="6" y="6" width="12" height="12" rx="2"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- Native textarea -->
+                            <textarea 
+                                ref="searchTextarea"
+                                v-model="userInput"
+                                @keydown="handleKeyDown"
+                                @focus="isFocused = true"
+                                @blur="isFocused = false"
+                                @input="autoResizeTextarea"
+                                placeholder="List all users in ACTIVE status"
+                                class="query-textarea"
+                                rows="1"
+                            ></textarea>
+                            
+                            <!-- Submit button -->
+                            <button 
+                                class="send-button"
+                                :disabled="!userInput || !(userInput?.trim?.())"
+                                @click="sendQuery"
+                            >
+                                SUBMIT
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -77,10 +73,15 @@
                 <transition name="fade-up">
                     <div v-if="!hasResults" class="suggestions-wrapper">
                         <div class="suggestions-grid">
-                            <v-btn v-for="(suggestion, i) in suggestions" :key="i" class="suggestion-btn"
-                                variant="outlined" @click="selectSuggestion(suggestion)" size="small">
-                                {{ suggestion }}
-                            </v-btn>
+                            <button 
+                                v-for="(suggestion, i) in suggestions" 
+                                :key="i" 
+                                class="suggestion-btn"
+                                @click="selectSuggestion(suggestion.query)"
+                            >
+                                <v-icon class="suggestion-icon" size="18">{{ suggestion.icon }}</v-icon>
+                                <span class="suggestion-text">{{ suggestion.query }}</span>
+                            </button>
                         </div>
                     </div>
                 </transition>
@@ -99,26 +100,25 @@
                 </div>
             </transition>
 
-            <!-- Error Alert -->
+            <!-- Error Alert - 2026 Minimal Style -->
             <transition name="fade-up">
-                <div v-if="reactError" class="error-alert-container">
-                    <v-alert
-                        type="error"
-                        variant="outlined"
-                        prominent
-                        closable
-                        @click:close="reactError = null"
-                        class="error-alert"
-                        color="error"
-                    >
-                        <template v-slot:prepend>
-                            <v-icon size="large">mdi-alert-circle</v-icon>
-                        </template>
-                        <div class="error-content">
-                            <div class="error-title">Error</div>
-                            <div class="error-message">Please try again. If it persists, contact the admin.</div>
-                        </div>
-                    </v-alert>
+                <div v-if="reactError" class="error-block">
+                    <div class="error-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="12" y1="8" x2="12" y2="12"/>
+                            <circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+                        </svg>
+                    </div>
+                    <div class="error-content">
+                        <span class="error-text">Something went wrong. Please try again.</span>
+                    </div>
+                    <button class="error-dismiss" @click="reactError = null" title="Dismiss">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
                 </div>
             </transition>
 
@@ -172,14 +172,6 @@
                 </div>
             </transition>
         </main>
-
-        <!-- Loading overlay -->
-        <transition name="fade">
-            <div v-if="isLoading" class="inline-loading-indicator">
-                <div class="loading-pulse"></div>
-                <span>{{ isStreaming ? `Processing data (${progress}%)...` : 'Processing your query...' }}</span>
-            </div>
-        </transition>
     </AppLayout>
 </template>
 
@@ -190,9 +182,6 @@
  * Main component for the search and query interface that handles
  * user input, displays results, and manages the overall UI state.
  */
-
-console.log('🚀 ChatInterfaceV2 INITIALIZING')
-console.log('📍 Current URL:', window.location.href)
 
 import { ref, watch, nextTick, onMounted } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
@@ -212,13 +201,24 @@ import AppLayout from '@/components/layout/AppLayout.vue'
  * Core UI state
  */
 const userInput = ref('') // Current text in the input field
+const searchTextarea = ref(null) // Ref for native textarea
 const isLoading = ref(false) // Loading state for API calls
-const isClearable = ref(true) // Whether the text input can be cleared
 const lastQuestion = ref('') // Stores the last question that was asked
 const isFocused = ref(false) // Tracks if the search input is focused
 const hasResults = ref(false) // Whether there are results to display
 const auth = useAuth()
 const router = useRouter()
+
+/**
+ * Auto-resize textarea to fit content
+ */
+const autoResizeTextarea = () => {
+    const textarea = searchTextarea.value
+    if (textarea) {
+        textarea.style.height = 'auto'
+        textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+    }
+}
 
 // Add new refs to store stream controller and track streaming progress
 const streamController = ref(null)
@@ -247,11 +247,6 @@ const {
     connectToStream: connectReActStream,
     cancelProcess: cancelReAct
 } = useReactStream()
-
-// Watch mode changes and log
-watch(isReActMode, (newMode) => {
-    console.log('🔥 MODE CHANGED:', newMode ? 'REACT MODE 🚀' : 'TAKO MODE 🤖')
-})
 
 // Initialize sanitization utilities
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
@@ -354,17 +349,15 @@ const handleAuthError = async (status) => {
 // ---------- PREDEFINED CONTENT ----------
 
 /**
- * Query suggestions for users
+ * Query suggestions - curated valid questions (rearranged for varied lengths)
  */
 const suggestions = ref([
-    'List all  users along with their creation dates',
-    'Show users with PUSH factor registered',
-    'Find users withs SMS  registered with phone number ending with 2364',
-    'How many users were created last month?',
-    'List all users assigned to the \'monday\' app',
-    'Find all users reporting to \'noah.williams\' and get me their emails only ',
-    'List all users along with their registered factors',
-    'show me all users who are in locked status'
+    { query: 'List all users along with their creation dates', icon: 'mdi-calendar-outline' },
+    { query: 'How many users were created last month?', icon: 'mdi-chart-line' },
+    { query: 'Show me all users in locked status', icon: 'mdi-lock-outline' },
+    { query: 'Find all users in Engineering group', icon: 'mdi-account-group-outline' },
+    { query: 'Show users with PUSH factor registered', icon: 'mdi-shield-check-outline' },
+    { query: 'Find groups with more than 50 members', icon: 'mdi-account-multiple-outline' }
 ])
 
 // ---------- API INTERACTION ----------
@@ -398,23 +391,6 @@ const handleKeyDown = (e) => {
                 sanitizeQuery(messageHistory.value[historyIndex.value])
         }
     }
-}
-
-/**
- * Clears the input field
- */
-const clearInput = () => {
-    userInput.value = ''
-}
-
-/**
- * Fills input with predefined query and submits
- * @param {string} query - The query to use
- */
-const useQuery = (query) => {
-    // Sanitize even predefined queries
-    userInput.value = sanitizeQuery(query)
-    sendQuery()
 }
 
 /**
@@ -485,12 +461,8 @@ const sendQuery = async () => {
     updateMessageHistory(sanitizedQuery)
 
     try {
-        // Check if ReAct mode is enabled
-        console.log('[ChatInterfaceV2] isReActMode:', isReActMode.value)
-        
         if (isReActMode.value) {
             // Use ReAct flow
-            console.log('[ChatInterfaceV2] Using ReAct flow for query:', sanitizedQuery)
             const pid = await startReActProcess(sanitizedQuery)
             if (pid) {
                 await connectReActStream(pid)
@@ -500,7 +472,6 @@ const sendQuery = async () => {
         }
 
         // Tako flow (existing)
-        console.log('[ChatInterfaceV2] Using Tako flow for query:', sanitizedQuery)
         // First check authentication only (lightweight call) 
         const authCheckResponse = await fetch('/api/query?auth_check=true', {
             method: 'POST',
@@ -621,15 +592,7 @@ onMounted(() => {
         const modeParam = urlParams.get('mode')
         const savedMode = localStorage.getItem('agentMode')
         
-        console.log('[ChatInterfaceV2] Mode detection:', { 
-            url: window.location.href,
-            modeParam, 
-            savedMode 
-        })
-        
         isReActMode.value = modeParam !== 'realtime' && (modeParam === 'react' || savedMode !== 'realtime')
-        
-        console.log('[ChatInterfaceV2] isReActMode set to:', isReActMode.value)
         
         // Save mode preference
         if (modeParam) {
@@ -682,6 +645,13 @@ onMounted(() => {
     if (window.innerHeight <= 800) {
         document.querySelector('.chat-content')?.classList.add('small-screen')
     }
+
+    // Auto-focus the textarea on load
+    nextTick(() => {
+        if (searchTextarea.value) {
+            searchTextarea.value.focus()
+        }
+    })
 })
 </script>
 
@@ -694,23 +664,108 @@ onMounted(() => {
 .search-container {
     position: fixed;
     left: 50%;
-    top: 45%;
+    top: 50%;
     transform: translate(-50%, -50%);
     width: 100%;
     max-width: 900px;
     margin: 0 auto;
     padding-bottom: 40px;
-    transition: all 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform 0.3s ease-out;
     z-index: 50;
-    will-change: transform, top;
-    backface-visibility: hidden; /* Prevent rendering artifacts */
-    -webkit-transform-style: preserve-3d;  /* Prevent rendering artifacts on webkit */
-    transform-style: preserve-3d; /* Prevent rendering artifacts */
+    will-change: transform;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
 }
 
 .search-container.moved {
-    top: calc(100vh - 200px);
-    transform: translate(-50%, 0);
+    top: auto;
+    bottom: 24px;
+    transform: translateX(-50%);
+}
+
+/* Hide placeholder when in mini mode */
+.search-container.moved .query-textarea::placeholder {
+    opacity: 0;
+}
+
+/* Compact style when moved - Clean white bar */
+.search-container.moved .query-card {
+    padding: 12px 16px;
+    border-radius: 16px;
+    background: #ffffff;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+
+.search-container.moved .query-card::before {
+    border-radius: 16px;
+}
+
+.search-container.moved .query-label {
+    display: none;
+}
+
+.search-container.moved .query-input-row {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+}
+
+.search-container.moved .query-icons-left {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.search-container.moved .query-textarea {
+    min-height: 32px;
+    max-height: 120px;
+    font-size: 15px;
+    flex: 1;
+    background: transparent;
+    border-radius: 0;
+    padding: 6px 0;
+}
+
+.search-container.moved .send-button {
+    margin-top: 0;
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    flex-shrink: 0;
+    background: var(--primary);
+    color: white;
+}
+
+.search-container.moved .icon-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: #f3f4f6;
+}
+
+.search-container.moved .icon-btn:hover {
+    background: #e5e7eb;
+}
+
+.search-container.moved .icon-btn.stop-icon {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    animation: pulse-stop 1.5s ease-in-out infinite;
+}
+
+.search-container.moved .icon-btn.stop-icon:hover {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+@keyframes pulse-stop {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.search-container.moved .send-button {
+    padding: 10px 20px;
+    border-radius: 10px;
+    font-size: 13px;
 }
 
 /* Title with animated underline */
@@ -728,28 +783,28 @@ onMounted(() => {
 }
 
 .main-title {
-    font-size: 32px;
-    font-weight: 500;
-    margin-bottom: 8px;
-    background: linear-gradient(135deg,
-            #ff9966,
-            #ff5e62,
-            #845ec2,
-            #2c73d2,
-            #0081cf);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
+    font-family: var(--font-family-display);
+    font-size: 55px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: #1a1a1a;
     position: relative;
 }
 
-.title-underline {
-    height: 4px;
-    width: 100px;
-    margin: 0 auto;
-    background: linear-gradient(90deg, var(--primary), #6373E5);
-    border-radius: 2px;
-    display: none;
+.main-title.gradient-title {
+    background: linear-gradient(135deg, #4C64E2 0%, #8B5CF6 50%, #d442f5 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+}
+
+.main-subtitle {
+    font-family: var(--font-family-display);
+    font-size: 18px;
+    font-weight: 500;
+    color: #8B5CF6;
+    margin: -18px 0 0 0;
+    letter-spacing: -0.01em;
 }
 
 /* Main content area */
@@ -766,87 +821,144 @@ onMounted(() => {
     padding-bottom: 60px;
 }
 
-/* Modern integrated search */
+/* Modern integrated search - Plain CSS Card */
 .search-wrapper {
     width: 100%;
-    max-width: 850px;
+    max-width: 900px;
     margin: 0 auto;
 }
 
-.integrated-search-bar {
-    display: flex;
-    align-items: center;
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.06);
-    padding: 6px 8px;
-    transition: all 0.3s ease;
+.query-card {
     position: relative;
-    overflow: hidden;
-    border: 1px solid var(--primary);
+    background: white;
+    border-radius: 24px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    padding: 20px 24px;
+    transition: padding 0.3s ease, border-radius 0.3s ease, box-shadow 0.2s ease;
+    border: none;
 }
 
-.integrated-search-bar:has(.v-field--focused) {
-    box-shadow: 0 8px 28px rgba(76, 100, 226, 0.15);
-    transform: translateY(-2px);
-    border: 1.5px solid var(--primary);
-}
-
-/* Add a subtle side accent when focused */
-.integrated-search-bar:has(.v-field--focused)::before {
+/* Gradient border using mask technique - same as suggestion pills */
+.query-card::before {
     content: '';
     position: absolute;
-    left: 0;
-    top: 10px;
-    bottom: 10px;
-    width: 3px;
-    border-radius: 4px;
+    inset: 0;
+    border-radius: 24px;
+    padding: 1.5px;
+    background: linear-gradient(90deg,
+            var(--primary),
+            #5e72e4,
+            #8e54e9,
+            #d442f5);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.4;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
 }
 
-.integrated-search-bar:focus-within {
-    box-shadow: 0 8px 30px rgba(76, 100, 226, 0.15);
-    transform: translateY(-2px);
+.query-card:hover::before {
+    opacity: 0.7;
 }
 
-.search-input {
-    flex: 1;
+.query-card.is-focused::before {
+    opacity: 1;
 }
 
-.search-input :deep(.v-field) {
-    box-shadow: none !important;
+.query-card.is-focused {
+    box-shadow: 0 4px 16px rgba(76, 100, 226, 0.15);
+}
+
+.query-label {
+    display: none;
+}
+
+.query-input-row {
+    display: flex;
+    flex-direction: column;
+}
+
+.query-icons-left {
+    display: none;
+}
+
+.query-textarea {
+    width: 100%;
     border: none;
-    min-height: 44px !important;
+    outline: none;
+    resize: none;
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: #1a1a1a;
+    background: transparent;
+    min-height: 72px;
+    max-height: 180px;
+    overflow-y: auto;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    transition: min-height 0.25s ease, font-size 0.25s ease, padding 0.25s ease;
 }
 
-.search-input :deep(.v-field__input) {
-    padding: 0 0 0 16px !important;
-    font-size: 15px;
-    min-height: 42px !important;
-    display: flex !important;
-    align-items: center !important;
+.query-textarea::placeholder {
+    color: #9ca3af;
+    line-height: 1.5;
 }
 
-.search-input :deep(.v-field__input input) {
-    margin-top: 0 !important;
-    padding: 0 !important;
-}
-
-.search-input :deep(.v-field__clearable) {
-    align-self: center !important;
-    padding: 0 !important;
-}
-
-.search-input :deep(.v-field__clearable .v-icon) {
+.icon-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    transform: translateY(-2px);
-    padding: 0;
-    margin-right: 4px;
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: #fafafa;
+    border-radius: 10px;
+    cursor: pointer;
+    color: #9ca3af;
+    transition: all 0.15s ease;
 }
 
-.search-input :deep(.v-field__clearable:hover .v-icon) {
-    color: #666;
+.icon-btn:hover {
+    background: #f3f4f6;
+    color: #6b7280;
+}
+
+.icon-btn.stop-icon {
+    color: #4C64E2;
+    background: rgba(76, 100, 226, 0.08);
+}
+
+.icon-btn.stop-icon:hover {
+    background: rgba(76, 100, 226, 0.12);
+}
+
+.send-button {
+    margin-top: 20px;
+    align-self: flex-end;
+    padding: 12px 28px;
+    border: none;
+    border-radius: 12px;
+    background: #4C64E2;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.send-button:hover:not(:disabled) {
+    background: #3d52c7;
+}
+
+.send-button:disabled {
+    background: #e5e7eb;
+    color: #9ca3af;
+    cursor: not-allowed;
 }
 
 :deep(.v-tooltip .v-overlay__content) {
@@ -860,200 +972,81 @@ onMounted(() => {
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
-/* Action buttons */
-.action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 42px;
-    height: 42px;
-    border: none;
-    background: transparent;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    color: #999;
-}
-
-.reset-btn {
-    width: 38px !important; /* Match stop button width */
-    height: 38px !important; /* Match stop button height */
-    margin-right: 0; /* Remove extra margin */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.reset-btn:hover {
-    color: #666;
-    background: #f5f5f5;
-}
-
-.send-btn {
-    color: white;
-    background: var(--primary);
-    margin-left: 4px;
-}
-
-.send-btn:hover:not(:disabled) {
-    background: var(--primary-dark);
-    transform: translateY(-1px);
-}
-
-.send-btn:disabled {
-    background: #e0e0e0;
-    color: #999;
-    cursor: not-allowed;
-}
-
-/* Stop button styling */
-.stop-btn {
-    position: relative;
-    width: 38px !important;
-    height: 38px !important;
-    background-color: white;
-    color: #4C64E2;
-    border: none;
-    border-radius: 50%;
-    z-index: 2;
-    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.15);
-    cursor: pointer;
-    margin-right: 4px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-
-
-
-/* Container styles for the button containers */
-.reset-btn-container,
-.stop-btn-container {
-    position: relative;
-    z-index: 2;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 48px;
-    height: 48px;
-    flex-shrink: 0;
-}
-
-/* Progress indicators */
-.circular-progress-container {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 40px;
-    height: 40px;
-    pointer-events: none;
-
-}
-
-.indeterminate-progress {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    border: 1px solid rgba(76, 100, 226, 0.2);
-    border-top: 1px solid #4C64E2;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    0% {
-        transform: rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(360deg);
-    }
-}
-
-.determinate-progress {
-    width: 100%;
-    height: 100%;
-    transform: rotate(-90deg);
-}
-
-.progress-background {
-    stroke: rgba(76, 100, 226, 0.2);
-    stroke-width: 1.5px;
-    /* Thinner stroke: 2px → 1.5px */
-}
-
-.progress-value {
-    stroke: #4C64E2;
-    stroke-linecap: round;
-    stroke-width: 1.5px;
-    /* Thinner stroke: 2px → 1.5px */
-    transition: stroke-dasharray 0.3s ease;
-}
-
-/* Update the suggestions CSS */
+/* Suggestion cards with outline icons and expanding rectangular background */
 .suggestions-wrapper {
-    margin-top: 1.5rem;
+    margin-top: 2rem;
     padding: 0 1rem;
     opacity: 1;
     transition: opacity 0.4s ease;
 }
 
 .suggestions-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    justify-content: center;
-    max-width: 850px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    max-width: 840px;
     margin: 0 auto;
 }
 
 .suggestion-btn {
     position: relative;
-    background: #fff !important;
-    border: none !important;
-    border-radius: var(--border-radius) !important;
-    transition: all 0.2s ease;
-    color: var(--text-primary) !important;
-    font-weight: 400 !important;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
-    padding: 0 12px !important;
-    height: 32px !important;
-    min-width: 0 !important;
-    overflow: hidden !important;
-    font-size: 13px !important;
-    letter-spacing: 0.2px !important;
-    text-transform: none !important;
-}
-
-/* Updated gradient border inspired by the title gradient */
-.suggestion-btn::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: var(--border-radius);
-    padding: 1.5px;
-    background: linear-gradient(90deg,
-            var(--primary),
-            #5e72e4,
-            #8e54e9,
-            #d442f5);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    opacity: 0.85;
-    pointer-events: none;
+    width: 100%;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: left;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+    transition: box-shadow 0.35s ease-in-out, background 0.2s ease;
 }
 
 .suggestion-btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(142, 84, 233, 0.2);
-    color: #8e54e9 !important;
-    background: #f8f9ff !important;
+    background: #ffffff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.suggestion-text {
+    font-size: 12.5px;
+    font-weight: 400;
+    color: #64748b;
+    line-height: 1.4;
+}
+
+.suggestion-icon {
+    background: linear-gradient(135deg, #4C64E2 0%, #8B5CF6 50%, #d442f5 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    flex-shrink: 0;
+}
+
+/* Rectangular expanding background effect - starts at card edge */
+.suggestion-btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    background: rgba(99, 102, 241, 0.08);
+    border-radius: 10px;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: width 0.55s ease-in-out, height 0.55s ease-in-out, opacity 0.5s ease-in-out, border-radius 0.55s ease-in-out;
+    z-index: -1;
+    pointer-events: none;
+}
+
+.suggestion-btn:hover::before {
+    width: calc(100% + 20px);
+    height: calc(100% + 20px);
+    border-radius: 4px;
+    opacity: 1;
 }
 
 /* Centered question header with blue background */
@@ -1150,93 +1143,6 @@ onMounted(() => {
     box-shadow: none;
 }
 
-/* Enhanced loading indicator */
-.inline-loading-indicator {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: white;
-    border-radius: 18px;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15),
-        0 6px 12px rgba(76, 100, 226, 0.08);
-    padding: 18px 24px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    z-index: 2000; /* Increased z-index to ensure it's above everything */
-    min-width: 240px;
-    border: 1px solid rgba(76, 100, 226, 0.1);
-    will-change: opacity, transform; /* Optimize for animation */
-    backface-visibility: hidden; /* Prevent rendering artifacts */
-}
-
-.loading-pulse {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: var(--primary);
-    position: relative;
-    animation: pulse 1.5s ease infinite;
-}
-
-.loading-pulse::before,
-.loading-pulse::after {
-    content: '';
-    position: absolute;
-    width: 4px;
-    height: 4px;
-    background: white;
-    border-radius: 50%;
-}
-
-.loading-pulse::before {
-    animation: orbit1 2s linear infinite;
-}
-
-.loading-pulse::after {
-    animation: orbit2 2.5s linear infinite;
-}
-
-.inline-loading-indicator span {
-    font-size: 15px;
-    font-weight: 400;
-}
-
-@keyframes pulse {
-
-    0%,
-    100% {
-        transform: scale(0.9);
-        background-color: var(--primary);
-    }
-
-    50% {
-        transform: scale(1.1);
-        background-color: #7D4CE2;
-    }
-}
-
-@keyframes orbit1 {
-    0% {
-        transform: rotate(0deg) translateX(15px);
-    }
-
-    100% {
-        transform: rotate(360deg) translateX(15px);
-    }
-}
-
-@keyframes orbit2 {
-    0% {
-        transform: rotate(0deg) translateX(10px) rotate(0deg);
-    }
-
-    100% {
-        transform: rotate(-360deg) translateX(10px) rotate(360deg);
-    }
-}
-
 /* Button container to consistently hold space */
 .button-container {
     width: 48px;
@@ -1260,19 +1166,6 @@ onMounted(() => {
 .fade-enter-from,
 .fade-leave-to {
     opacity: 0;
-}
-
-/* Transitions for the main fade - Fix specificity for loading indicator */
-.inline-loading-indicator.fade-enter-active,
-.inline-loading-indicator.fade-leave-active {
-    transition: opacity 0.4s ease-out, transform 0.3s ease-out;
-    transform-origin: center center;
-}
-
-.inline-loading-indicator.fade-enter-from,
-.inline-loading-indicator.fade-leave-to {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.95);
 }
 
 .fade-up-enter-active,
@@ -1309,7 +1202,11 @@ onMounted(() => {
     }
 
     .search-container.moved {
-        top: calc(100vh - 140px);
+        bottom: 16px;
+    }
+
+    .search-container.moved .send-button {
+        padding: 8px 16px;
     }
 
     .main-title {
@@ -1319,82 +1216,71 @@ onMounted(() => {
     .results-area {
         margin-top: 80px;
     }
-
-    .inline-loading-indicator {
-        padding: 16px 20px;
-        min-width: 220px;
-        gap: 14px;
-    }
-
-    .loading-pulse {
-        width: 18px;
-        height: 18px;
-    }
-
-    .inline-loading-indicator span {
-        font-size: 14px;
-    }
 }
 
 @media (max-width: 480px) {
     .search-container.moved {
-        top: calc(100vh - 120px);
+        bottom: 12px;
+    }
+
+    .search-container.moved .query-card {
+        padding: 10px 12px;
+    }
+
+    .search-container.moved .send-button {
+        padding: 8px 12px;
+        font-size: 12px;
     }
 
     .main-title {
         font-size: 24px;
     }
-
-    .inline-loading-indicator {
-        padding: 12px 16px;
-        min-width: 200px;
-        border-radius: 14px;
-    }
-
-    .loading-pulse {
-        width: 16px;
-        height: 16px;
-    }
-
-    .inline-loading-indicator span {
-        font-size: 13px;
-    }
 }
 
-/* Error Alert Styling */
-.error-alert-container {
-    max-width: var(--max-width);
+/* Error Block - Warm Solid Style */
+.error-block {
+    max-width: 900px;
     width: calc(100% - 40px);
     margin: 20px auto;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
     position: relative;
     z-index: 35;
 }
 
-.error-alert {
-    border-radius: 12px !important;
-    box-shadow: 0 4px 16px rgba(244, 67, 54, 0.2) !important;
+.error-icon {
+    flex-shrink: 0;
+    color: #f87171;
 }
 
 .error-content {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+    flex: 1;
 }
 
-.error-title {
-    font-size: 16px;
-    font-weight: 600;
-    color: #c62828;
+.error-text {
+    font-size: 13px;
+    color: #b91c1c;
+    font-weight: 450;
 }
 
-.error-message {
-    font-size: 14px;
-    line-height: 1.5;
-    color: #424242;
-    word-break: break-word;
+.error-dismiss {
+    flex-shrink: 0;
+    padding: 5px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: #f87171;
+    transition: all 0.15s;
+    border-radius: 6px;
 }
 
-.error-alert {
-    background-color: rgba(255, 255, 255, 0.98) !important;
+.error-dismiss:hover {
+    background: rgba(248, 113, 113, 0.1);
+    color: #dc2626;
 }
 </style>

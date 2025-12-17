@@ -1,11 +1,13 @@
 <template>
-  <AppLayout :showLogout="false" contentClass="auth-content">
-    <div class="app-card setup-card">
-      <div class="setup-icon">
-        <v-icon size="32" color="#4C64E2">mdi-shield-account</v-icon>
+  <AppLayout :showHeader="true" :showLogout="false" contentClass="auth-content">
+    <div class="auth-box animate-entry">
+      <div class="auth-logo">
+        <img src="@/assets/fctr-logo-full.svg" alt="fctr" />
       </div>
-      <h1 class="auth-title">Initial Setup</h1>
-      <div class="auth-subtitle">Create your admin account to get started</div>
+      <h1 class="auth-title">
+        <span class="title-main">Initial Setup for Tako AI</span>
+      </h1>
+      <p class="auth-subtitle">Create your admin account to get started</p>
 
       <form @submit.prevent="handleSetup" class="auth-form">
         <div v-if="auth.error.value" class="error-alert">
@@ -19,19 +21,19 @@
         <div class="form-field">
           <label for="username">Admin Username</label>
           <div class="input-wrapper">
-            <v-icon class="field-icon">mdi-account</v-icon>
             <input type="text" id="username" v-model="username" placeholder="Choose an admin username"
               autocomplete="username" required :disabled="auth.loading.value" @input="sanitizeUsernameInput" />
           </div>
-          <small v-if="usernameModified" class="input-modified-hint">
-            Username was adjusted to remove invalid characters
-          </small>
+          <transition name="fade">
+            <small v-if="usernameModified" class="input-modified-hint">
+              Username was adjusted to remove invalid characters
+            </small>
+          </transition>
         </div>
 
         <div class="form-field">
           <label for="password">Password</label>
           <div class="input-wrapper">
-            <v-icon class="field-icon">mdi-lock</v-icon>
             <input :type="showPassword ? 'text' : 'password'" id="password" v-model="password"
               placeholder="Create a secure password" autocomplete="new-password" required :disabled="auth.loading.value"
               @input="sanitizePasswordInput" />
@@ -76,17 +78,20 @@
         <div class="form-field">
           <label for="confirmPassword">Confirm Password</label>
           <div class="input-wrapper">
-            <v-icon class="field-icon">mdi-lock-check</v-icon>
             <input :type="showPassword ? 'text' : 'password'" id="confirmPassword" v-model="confirmPassword"
               placeholder="Confirm your password" autocomplete="new-password" required :disabled="auth.loading.value"
               @input="sanitizeConfirmPasswordInput" />
           </div>
         </div>
 
-        <button type="submit" class="auth-button glow-effect" :class="{ 'loading': auth.loading.value }"
+        <button type="submit" class="auth-button"
           :disabled="auth.loading.value || !formIsValid">
           <span v-if="!auth.loading.value">Complete Setup</span>
-          <div v-else class="button-loader"></div>
+          <div v-else class="three-dots-loader">
+            <div class="dot"></div>
+            <div class="dot"></div>
+            <div class="dot"></div>
+          </div>
         </button>
       </form>
     </div>
@@ -218,405 +223,258 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 });
 </script>
 
-<style>
-
-html, body {
-  height: 100%;
-  overflow: auto;
-}
-
-/* Make the AppLayout's content area scrollable */
-.auth-content {
-  min-height: 100vh;
-  padding: 40px 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  overflow-y: auto; /* Enable vertical scrolling */
-}
-
-/* Enhanced setup card with animations */
-.setup-card {
+<style scoped>
+/* 2026 Glassmorphism Auth Box */
+.auth-box {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(24px) saturate(120%);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  border-radius: 24px;
+  padding: 3rem 2.5rem;
   width: 100%;
   max-width: 480px;
-  background: white;
-  border-radius: 16px;
-  padding: 2rem;
-  box-shadow:
-    0 10px 30px rgba(0, 0, 0, 0.05),
-    0 5px 15px rgba(76, 100, 226, 0.04),
-    0 2px 5px rgba(0, 0, 0, 0.02);
-  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-  position: relative;
-  overflow: visible;
-  border: 1px solid rgba(76, 100, 226, 0.08);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.8);
   animation: card-appear 0.5s ease-out forwards;
   margin: auto;
+}
+
+.auth-logo {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.auth-logo img {
+  height: 28px;
 }
 
 @keyframes card-appear {
   0% {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(12px);
   }
-
   100% {
     opacity: 1;
     transform: translateY(0);
   }
 }
 
-/* Enhanced setup icon with gradient */
-.setup-icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, var(--primary-light), rgba(94, 114, 228, 0.1));
+.animate-entry {
+  animation: card-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.auth-title {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin: 0 auto 24px;
-  animation: fadeIn 0.5s ease-out forwards;
-  box-shadow: 0 4px 10px rgba(76, 100, 226, 0.1);
-}
-
-/* Gradient title */
-.auth-title {
-  font-size: 28px;
+  gap: 8px;
+  margin-bottom: 0.25rem;
+  font-size: 20px;
   font-weight: 600;
-  margin-bottom: 8px;
-  background: linear-gradient(90deg, var(--primary), #5e72e4);
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  text-align: center;
 }
 
-/* Gradient subtitle */
+.title-main {
+  color: #1a1a1a;
+}
+
 .auth-subtitle {
-  font-size: 16px;
-  color: #666;
-  margin-bottom: 32px;
-  background: linear-gradient(90deg, var(--text-muted) 0%, var(--primary) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  font-size: 14px;
+  color: #888;
   text-align: center;
-  display: inline-block;
+  margin-bottom: 2rem;
 }
 
 .auth-form {
   text-align: left;
 }
 
-/* Enhanced form fields with animations */
 .form-field {
-  margin-bottom: 24px;
-  animation: fadeIn 0.5s ease-out;
-  animation-fill-mode: both;
-}
-
-.form-field:nth-child(2) {
-  animation-delay: 0.1s;
-}
-
-.form-field:nth-child(3) {
-  animation-delay: 0.2s;
-}
-
-.form-field:nth-child(4) {
-  animation-delay: 0.3s;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  margin-bottom: 22px;
 }
 
 .form-field label {
   display: block;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
-  color: #444;
+  color: #666;
   margin-bottom: 8px;
-  transition: color 0.2s;
+  letter-spacing: 0.01em;
 }
 
 .form-field:focus-within label {
-  color: var(--primary);
+  color: #4C64E2;
 }
 
-/* Enhanced input styling */
+/* Glassmorphism inputs */
 .input-wrapper {
   position: relative;
-  border: 1px solid #ddd;
-  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
   overflow: hidden;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
 }
 
 .input-wrapper:hover {
-  border-color: #bbc4f3;
+  background: rgba(255, 255, 255, 0.8);
+  border-color: rgba(0, 0, 0, 0.12);
 }
 
 .input-wrapper:focus-within {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(76, 100, 226, 0.15);
-}
-
-/* Side accent bar on focus */
-.input-wrapper::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 3px;
-  height: 0;
-  background: linear-gradient(180deg, var(--primary), #5e72e4);
-  transition: height 0.25s cubic-bezier(0.25, 1, 0.5, 1);
-  border-top-left-radius: 10px;
-  border-bottom-left-radius: 10px;
-}
-
-.input-wrapper:focus-within::before {
-  height: 100%;
-}
-
-.field-icon {
-  color: #999;
-  margin: 0 12px;
-  font-size: 20px;
-  transition: color 0.3s ease;
-}
-
-.input-wrapper:focus-within .field-icon {
-  color: var(--primary);
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(76, 100, 226, 0.4);
+  box-shadow: 0 0 0 3px rgba(76, 100, 226, 0.08);
 }
 
 .input-wrapper input {
   width: 100%;
-  padding: 14px 16px 14px 0;
+  padding: 14px 16px;
   border: none;
   outline: none;
   font-size: 15px;
   background: transparent;
+  color: #1a1a1a;
 }
 
-/* Enhanced password toggle */
+.input-wrapper input::placeholder {
+  color: #999;
+}
+
 .password-toggle {
   background: transparent;
   border: none;
   color: #999;
-  padding: 0 16px;
+  padding: 0 12px;
   cursor: pointer;
   outline: none;
   transition: color 0.2s ease;
 }
 
 .password-toggle:hover {
-  color: var(--primary);
+  color: #4C64E2;
 }
 
-/* Enhanced password requirements */
+/* Password requirements - minimal 2026 */
 .password-requirements {
-  margin-top: 12px;
+  margin-top: 10px;
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  font-size: 12px;
-  color: #6b7280;
-  opacity: 0;
-  animation: fadeIn 0.5s ease-out forwards;
-  animation-delay: 0.4s;
+  gap: 4px 8px;
+  font-size: 11px;
+  color: #999;
 }
 
 .requirement {
   display: flex;
   align-items: center;
-  gap: 6px;
-  transition: all 0.3s ease;
+  gap: 4px;
+  transition: color 0.2s ease;
 }
 
 .requirement.met {
   color: #10b981;
 }
 
-/* Enhanced alert messages */
+/* Error/Warning alerts - glassmorphism */
 .error-alert {
-  background: linear-gradient(135deg, rgba(244, 67, 54, 0.02), rgba(244, 67, 54, 0.08));
-  color: #dc2626;
-  padding: 12px 16px;
+  background: rgba(254, 202, 202, 0.5);
+  color: #991b1b;
+  padding: 10px 14px;
   border-radius: 10px;
-  margin-bottom: 24px;
-  font-size: 14px;
-  border-left: 3px solid #dc2626;
-  position: relative;
-  overflow: hidden;
-}
-
-.error-alert::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(220, 38, 38, 0.1), transparent);
-  animation: shimmer 2s infinite;
+  margin-bottom: 16px;
+  font-size: 13px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  text-align: center;
 }
 
 .warning-alert {
-  background: linear-gradient(135deg, rgba(234, 179, 8, 0.02), rgba(234, 179, 8, 0.08));
-  color: #b45309;
-  padding: 12px 16px;
+  background: rgba(254, 243, 199, 0.5);
+  color: #92400e;
+  padding: 10px 14px;
   border-radius: 10px;
-  margin-bottom: 24px;
-  font-size: 14px;
-  border-left: 3px solid #eab308;
-  position: relative;
-  overflow: hidden;
-}
-
-.warning-alert::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(234, 179, 8, 0.1), transparent);
-  animation: shimmer 2s infinite;
+  margin-bottom: 16px;
+  font-size: 13px;
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  text-align: center;
 }
 
 .input-modified-hint {
   color: #b45309;
-  font-size: 12px;
+  font-size: 11px;
   margin-top: 4px;
   display: block;
 }
 
-/* Enhanced button with gradient and glow */
+/* Modern submit button */
 .auth-button {
   width: 100%;
   padding: 14px;
-  background: linear-gradient(135deg, var(--primary), #5e72e4);
+  background: #4C64E2;
   color: white;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 15px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  position: relative;
-  overflow: hidden;
-  animation: fadeIn 0.5s ease-out;
-  animation-delay: 0.3s;
-  animation-fill-mode: both;
-  box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15);
-  margin-top: 8px;
+  margin-top: 12px;
+  box-shadow: 0 4px 12px rgba(76, 100, 226, 0.2);
 }
 
 .auth-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(76, 100, 226, 0.25);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(76, 100, 226, 0.3);
 }
 
 .auth-button:active:not(:disabled) {
   transform: translateY(0);
-  box-shadow: 0 4px 12px rgba(76, 100, 226, 0.15);
-}
-
-.glow-effect:not(:disabled)::after {
-  content: '';
-  position: absolute;
-  top: -50%;
-  left: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.2) 0%, transparent 70%);
-  opacity: 0;
-  transition: opacity 0.5s ease;
-}
-
-.glow-effect:not(:disabled):hover::after {
-  opacity: 1;
 }
 
 .auth-button:disabled {
-  background: #cfd7f9;
+  background: #a5b4fc;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
-.auth-button.loading {
-  background: #cfd7f9;
-  cursor: wait;
-}
-
-/* Enhanced loading animation */
-.button-loader {
+/* 3-dot loader */
+.three-dots-loader {
   display: flex;
   gap: 6px;
   align-items: center;
   justify-content: center;
+  height: 18px;
 }
 
-.button-loader::before,
-.button-loader::after,
-.button-loader {
-  width: 8px;
-  height: 8px;
+.three-dots-loader .dot {
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background-color: white;
-  opacity: 0.8;
-  content: '';
+  background: white;
+  animation: bounce 1.4s ease-in-out infinite;
 }
 
-.button-loader {
-  animation: pulse 1.2s ease-in-out 0s infinite;
+.three-dots-loader .dot:nth-child(2) {
+  animation-delay: 0.2s;
 }
 
-.button-loader::before {
-  animation: pulse 1.2s ease-in-out 0.4s infinite;
+.three-dots-loader .dot:nth-child(3) {
+  animation-delay: 0.4s;
 }
 
-.button-loader::after {
-  animation: pulse 1.2s ease-in-out 0.8s infinite;
-}
-
-@keyframes pulse {
-
-  0%,
-  100% {
+@keyframes bounce {
+  0%, 80%, 100% {
     transform: scale(0.8);
     opacity: 0.6;
   }
-
-  50% {
-    transform: scale(1.2);
+  40% {
+    transform: scale(1.1);
     opacity: 1;
-  }
-}
-
-@keyframes shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-
-  100% {
-    transform: translateX(100%);
   }
 }
 
@@ -631,33 +489,15 @@ html, body {
   opacity: 0;
 }
 
-/* Responsive adjustments */
+/* Responsive */
 @media (max-width: 480px) {
-  .setup-card {
-    padding: 30px 20px;
-  }
-
-  .auth-title {
-    font-size: 24px;
+  .auth-box {
+    padding: 2rem 1.5rem;
+    border-radius: 20px;
   }
 
   .password-requirements {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-height: 800px) {
-  .auth-content {
-    padding: 20px 16px;
-    justify-content: flex-start; /* Align to top on small screens */
-  }
-  
-  .setup-icon {
-    margin-bottom: 16px; /* Reduce vertical spacing */
-  }
-  
-  .auth-subtitle {
-    margin-bottom: 24px; /* Reduce spacing */
   }
 }
 </style>

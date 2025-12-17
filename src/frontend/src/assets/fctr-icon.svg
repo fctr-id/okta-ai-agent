@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="32" height="32" preserveAspectRatio="xMidYMid meet">
+  <defs>
+    <linearGradient id="iconGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(5, 5) scale(0.875)">
+    <!-- Vertical stem -->
+    <path fill="url(#iconGrad)" d="M 10 10 C 10 4 14 0 20 0 L 32 0 L 32 80 L 20 80 C 14 80 10 76 10 70 L 10 10 Z"/>
+    <!-- Top arm -->
+    <path fill="url(#iconGrad)" d="M 36 0 L 70 0 C 76 0 80 4 80 10 L 80 22 C 80 28 76 32 70 32 L 36 32 L 36 0 Z"/>
+    <!-- Bottom arm -->
+    <path fill="url(#iconGrad)" d="M 36 36 L 58 36 C 64 36 68 40 68 46 L 68 58 C 68 64 64 68 58 68 L 36 68 L 36 36 Z"/>
+  </g>
+</svg>

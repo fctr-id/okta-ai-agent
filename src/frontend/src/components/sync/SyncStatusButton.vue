@@ -123,11 +123,11 @@
                         <span class="last-sync-time">{{ formattedLastSyncTime() }}</span>
                     </div>
 
-                    <!-- Enhanced error message with icon and better visibility -->
+                    <!-- Error message with user-friendly text -->
                     <transition name="fade">
                         <div v-if="syncError" class="error-message">
                             <v-icon size="small" class="me-1">mdi-alert-circle</v-icon>
-                            <span>{{ syncError }}</span>
+                            <span>{{ friendlyErrorMessage }}</span>
                         </div>
                     </transition>
                 </div>
@@ -142,48 +142,52 @@
 }
 
 .sync-button {
-    background: linear-gradient(135deg, var(--primary), #5e72e4) !important;
-    color: white !important;
-    box-shadow: 0 3px 8px rgba(76, 100, 226, 0.2) !important;
-    border: none !important;
+    background: rgba(76, 100, 226, 0.08) !important;
+    color: #4C64E2 !important;
+    box-shadow: none !important;
+    border: 1px solid rgba(76, 100, 226, 0.15) !important;
+    border-radius: 20px !important;
+    font-weight: 500 !important;
+    font-size: 13px !important;
 }
 
 .sync-button:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 4px 10px rgba(76, 100, 226, 0.12) !important;
+    background: rgba(76, 100, 226, 0.12) !important;
+    transform: none !important;
+    box-shadow: none !important;
 }
 
 .sync-button .status-indicator {
-    border: 2px solid white !important;
+    border: none !important;
 }
 
-/* Enhanced status indicator with better animations */
+/* Minimal status indicator - 2026 style */
 .status-indicator {
-    width: 10px;
-    height: 10px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    transition: background-color 0.2s ease;
 }
 
 .green {
-    background: linear-gradient(135deg, #4CAF50, #43A047);
-    box-shadow: 0 0 10px rgba(76, 175, 80, 0.4);
+    background: #22c55e;
 }
 
 .orange {
-    background: linear-gradient(135deg, #FF9800, #F57C00);
-    box-shadow: 0 0 10px rgba(255, 152, 0, 0.4);
-    animation: pulse 2s infinite cubic-bezier(0.45, 0, 0.55, 1);
+    background: #f59e0b;
+    animation: pulse-subtle 2s infinite ease-in-out;
 }
 
 .red {
-    background: linear-gradient(135deg, #F44336, #E53935);
-    box-shadow: 0 0 10px rgba(244, 67, 54, 0.4);
+    background: #ef4444;
 }
 
 .grey {
-    background: linear-gradient(135deg, #9E9E9E, #757575);
-    box-shadow: 0 0 5px rgba(158, 158, 158, 0.3);
+    background: #9ca3af;
+}
+
+.blue {
+    background: #4C64E2;
 }
 
 @keyframes pulse {
@@ -200,90 +204,79 @@
     }
 }
 
-/* Modern dropdown with refined aesthetics */
+/* Minimal dropdown - 2026 style */
 .modern-dropdown {
     background: white;
-    border-radius: 16px;
+    border-radius: 12px;
     overflow: hidden;
-    box-shadow:
-        0 10px 30px rgba(0, 0, 0, 0.08),
-        0 5px 15px rgba(76, 100, 226, 0.06),
-        0 2px 5px rgba(0, 0, 0, 0.03);
-    width: 320px;
-    transform: translateY(0);
-    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border: 1px solid #e5e7eb;
+    width: 300px;
 }
 
 .modern-content {
-    border-radius: 16px;
+    border-radius: 12px;
     background: white;
     overflow: hidden;
 }
 
-/* Gradient header like in chat interface */
+/* Clean header - 2026 style */
 .modern-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 18px;
-    background: linear-gradient(135deg, rgba(76, 100, 226, 0.02), rgba(76, 100, 226, 0.08));
-    border-bottom: 1px solid rgba(76, 100, 226, 0.08);
+    padding: 16px;
+    border-bottom: 1px solid #f4f4f5;
 }
 
 .modern-header h3 {
-    font-size: 15px;
-    font-weight: 500;
-    color: var(--primary);
+    font-size: 14px;
+    font-weight: 600;
+    color: #18181b;
     margin: 0;
-    letter-spacing: 0.2px;
-    background: linear-gradient(90deg, var(--primary), #5e72e4);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
+    letter-spacing: -0.01em;
 }
 
-/* Enhanced action buttons to match chat interface */
+/* Minimal action buttons - 2026 style */
 .action-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
     border: none;
     cursor: pointer;
-    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+    transition: background-color 0.15s ease;
 }
 
 .action-btn.primary {
-    background: linear-gradient(135deg, var(--primary), #5e72e4);
+    background: #4C64E2;
     color: white;
 }
 
 .action-btn.primary:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 10px rgba(76, 100, 226, 0.25);
+    background: #3b50c4;
 }
 
 .action-btn.primary:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
 }
 
 .action-btn.error {
-    background: linear-gradient(135deg, #FF5252, #F44336);
+    background: #ef4444;
     color: white;
 }
 
 .action-btn.error:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 10px rgba(244, 67, 54, 0.25);
+    background: #dc2626;
 }
 
-/* Enhanced progress section with animation */
+/* Minimal progress section */
 .progress-section {
-    padding: 18px;
-    background: linear-gradient(135deg, rgba(76, 100, 226, 0.04), rgba(76, 100, 226, 0.08));
+    padding: 14px 16px;
+    background: #fafafa;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -302,35 +295,26 @@
 }
 
 .sync-status-text span {
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    color: #555;
+    color: #52525b;
 }
 
 .pulse-dot {
-    width: 14px;
-    height: 14px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #FF9800, #F57C00);
-    box-shadow: 0 0 15px rgba(255, 152, 0, 0.5);
-    animation: pulse-animation 1.5s infinite cubic-bezier(0.45, 0, 0.55, 1);
-    margin-right: 12px;
+    background: #f59e0b;
+    margin-right: 10px;
+    animation: pulse-subtle 1.5s infinite ease-in-out;
 }
 
-@keyframes pulse-animation {
-    0% {
-        transform: scale(0.85);
-        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7);
+@keyframes pulse-subtle {
+    0%, 100% {
+        opacity: 1;
     }
-    
     50% {
-        transform: scale(1.2);
-        box-shadow: 0 0 20px 10px rgba(255, 152, 0, 0.1);
-    }
-    
-    100% {
-        transform: scale(0.85);
-        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
+        opacity: 0.5;
     }
 }
 
@@ -396,66 +380,73 @@
     }
 }
 
-/* Improved entity grid with cards */
+/* Minimal entity grid - 2026 style */
 .entity-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 18px;
+    gap: 8px;
+    padding: 12px 16px;
 }
 
 .entity-card {
     display: flex;
     align-items: center;
-    padding: 12px;
-    border-radius: 12px;
-    background: #f8f9ff;
-    transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1);
-    border: 1px solid rgba(76, 100, 226, 0.08);
-    min-width: 120px;
-    /* Ensure minimum width */
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: #fafafa;
+    transition: background-color 0.15s ease;
+    border: none;
+    min-width: 110px;
 }
 
 .entity-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(76, 100, 226, 0.1);
+    background: #f0f0f5;
 }
 
-/* Apply soft gradient backgrounds to each card */
+/* Subtle purple/pink tints for entity cards */
 .entity-1 {
-    background: linear-gradient(135deg, rgba(76, 100, 226, 0.03), rgba(76, 100, 226, 0.08));
+    background: rgba(99, 102, 241, 0.04);
+}
+.entity-1:hover {
+    background: rgba(99, 102, 241, 0.08);
 }
 
 .entity-2 {
-    background: linear-gradient(135deg, rgba(125, 76, 226, 0.03), rgba(125, 76, 226, 0.08));
+    background: rgba(139, 92, 246, 0.04);
+}
+.entity-2:hover {
+    background: rgba(139, 92, 246, 0.08);
 }
 
 .entity-3 {
-    background: linear-gradient(135deg, rgba(76, 175, 226, 0.03), rgba(76, 175, 226, 0.08));
+    background: rgba(168, 85, 247, 0.04);
+}
+.entity-3:hover {
+    background: rgba(168, 85, 247, 0.08);
 }
 
 .entity-4 {
-    background: linear-gradient(135deg, rgba(94, 114, 228, 0.03), rgba(94, 114, 228, 0.08));
+    background: rgba(192, 132, 252, 0.04);
+}
+.entity-4:hover {
+    background: rgba(192, 132, 252, 0.08);
 }
 
 .entity-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
     margin-right: 10px;
     background: white;
-    box-shadow: 0 3px 8px rgba(76, 100, 226, 0.1);
+    border: 1px solid #e5e7eb;
 }
 
 .entity-icon :deep(.v-icon) {
-    background: linear-gradient(135deg, var(--primary), #5e72e4);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
-    font-size: 20px;
+    color: #71717a;
+    font-size: 18px;
 }
 
 .entity-details {
@@ -468,70 +459,64 @@
 
 .entity-count {
     font-weight: 600;
-    font-size: 16px;
-    color: #333;
+    font-size: 15px;
+    color: #18181b;
     line-height: 1;
-    margin-bottom: 4px;
+    margin-bottom: 3px;
     white-space: nowrap;
-    /* Keep on one line */
 }
 
 .entity-label {
-    font-size: 12px;
-    color: #666;
-    letter-spacing: 0.2px;
+    font-size: 11px;
+    color: #71717a;
+    font-weight: 500;
 }
 
 .entity-count-large {
-    font-size: 14px;
-    /* Slightly smaller font for large numbers */
-    letter-spacing: -0.3px;
-    /* Tighter letter spacing */
+    font-size: 13px;
+    letter-spacing: -0.02em;
 }
 
-/* Enhanced last sync footer */
+/* Minimal last sync footer */
 .last-sync {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 14px 18px;
-    border-top: 1px solid rgba(76, 100, 226, 0.08);
-    background: linear-gradient(135deg, rgba(248, 249, 255, 0.5), rgba(248, 249, 255, 0.9));
+    padding: 12px 16px;
+    border-top: 1px solid #f4f4f5;
+    background: white;
 }
 
 .last-sync-label {
     font-size: 12px;
-    color: #666;
+    color: #71717a;
     display: flex;
     align-items: center;
 }
 
 .last-sync-label :deep(.v-icon) {
-    color: var(--primary);
-    opacity: 0.7;
+    color: #a1a1aa;
 }
 
 .last-sync-time {
     font-size: 12px;
     font-weight: 500;
-    color: #333;
-    letter-spacing: 0.2px;
+    color: #3f3f46;
 }
 
-/* Enhanced error message */
+/* Minimal error message */
 .error-message {
     display: flex;
     align-items: center;
-    padding: 14px 18px;
-    background: linear-gradient(135deg, rgba(244, 67, 54, 0.03), rgba(244, 67, 54, 0.08));
-    border-top: 1px solid rgba(244, 67, 54, 0.1);
-    color: #F44336;
+    padding: 12px 16px;
+    background: #fef2f2;
+    border-top: 1px solid #fecaca;
+    color: #dc2626;
     font-size: 12px;
-    letter-spacing: 0.2px;
 }
 
 .error-message :deep(.v-icon) {
-    color: #F44336;
+    color: #dc2626;
 }
 
 /* Matching transitions from ChatInterface */
@@ -593,6 +578,29 @@ const statusText = computed(() => {
     if (syncStatus.value === 'canceled') return 'Canceled';
     if (syncStatus.value === 'idle') return 'Ready'; // Or "Not synced"
     return 'Not synced';
+});
+
+// Format error message to be user-friendly
+const friendlyErrorMessage = computed(() => {
+    if (!syncError.value) return null;
+    const error = syncError.value.toLowerCase();
+    if (error.includes('401') || error.includes('invalid token')) {
+        return 'Invalid API token. Please check your Okta credentials.';
+    }
+    if (error.includes('403') || error.includes('forbidden')) {
+        return 'Access denied. Check API permissions.';
+    }
+    if (error.includes('timeout')) {
+        return 'Sync timed out. Please try again.';
+    }
+    if (error.includes('network') || error.includes('fetch')) {
+        return 'Network error. Check your connection.';
+    }
+    // For other errors, truncate if too long
+    if (syncError.value.length > 60) {
+        return 'Sync failed. Check Okta configuration.';
+    }
+    return syncError.value;
 });
 
 // Methods

@@ -689,31 +689,32 @@ const downloadCSV = () => {
 .download-btn {
     color: #4C64E2;
     text-transform: none;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    padding: 0 16px !important;
-    height: 36px;
-    border: 1px solid #eef1ff !important;
+    padding: 0 14px !important;
+    height: 34px;
+    border: 1px solid rgba(76, 100, 226, 0.15) !important;
+    background: rgba(255, 255, 255, 0.6) !important;
+    border-radius: 8px !important;
     transition: all 0.2s ease;
-    margin-right: 10px;
 }
 
 .download-btn:hover {
-    background: #f0f4ff !important;
+    background: rgba(76, 100, 226, 0.08) !important;
     transform: translateY(-1px);
-    box-shadow: 0 2px 5px rgba(76, 100, 226, 0.1);
+    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.12);
 }
 
 .sync-info {
     display: flex;
     align-items: center;
-    gap: 8px;
-    color: #444;
-    font-size: 0.813rem;
+    gap: 6px;
+    color: #666;
+    font-size: 12px;
     white-space: nowrap;
-    padding: 4px 8px;
-    background: rgba(76, 100, 226, 0.04);
-    border-radius: 4px;
+    padding: 6px 10px;
+    background: rgba(76, 100, 226, 0.06);
+    border-radius: 6px;
 }
 
 .sync-icon {
@@ -850,40 +851,45 @@ const downloadCSV = () => {
     border: 1px solid #eef1ff;
 }
 
-/* Minimalist Table Styles */
+/* 2026 Glassmorphism Data Table */
 :deep(.v-data-table) {
-    background: transparent;
-    box-shadow: none;
+    background: transparent !important;
+    box-shadow: none !important;
 }
 
 :deep(.v-data-table__wrapper) {
     overflow-x: auto;
-    border: 1px solid #eef1ff;
-    border-radius: 12px;
-    /* Increased from 8px for more modern look */
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
 }
 
-/* More aggressive table header styling */
+/* 2026 Minimal Table Header */
 :deep(.v-data-table) th,
 :deep(.v-data-table-header th),
 :deep(.v-data-table-header__cell),
 :deep(.v-data-table) .v-data-table-header th {
-    transition: all 0.2s ease !important;
+    transition: all 0.15s ease !important;
     font-weight: 500 !important;
-    color: #374151 !important;
-    font-size: 13px !important;
-    letter-spacing: 0.3px !important;
+    color: #555 !important;
+    font-size: 11px !important;
+    letter-spacing: 0.03em !important;
     text-transform: uppercase !important;
     position: relative !important;
-    background-color: #FAFBFF !important;
+    background: rgba(248, 250, 252, 0.8) !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+    padding: 14px 16px !important;
 }
 
-/* Stronger hover selectors */
+/* Subtle hover */
 :deep(.v-data-table) th:hover,
 :deep(.v-data-table-header th:hover),
 :deep(.v-data-table-header__cell:hover),
 :deep(.v-data-table) .v-data-table-header th:hover {
-    background-color: #f0f3ff !important;
+    background: rgba(76, 100, 226, 0.06) !important;
     color: #4C64E2 !important;
     cursor: pointer !important;
 }
@@ -899,7 +905,7 @@ const downloadCSV = () => {
     right: 0 !important;
     height: 2px !important;
     background: #4C64E2 !important;
-    opacity: 0.7 !important;
+    opacity: 0.6 !important;
 }
 
 /* Alternative approach using direct style attributes */
@@ -908,29 +914,34 @@ const downloadCSV = () => {
 }
 
 :deep([role="columnheader"]:hover) {
-    background-color: #f0f3ff !important;
+    background-color: rgba(76, 100, 226, 0.08) !important;
     color: #4C64E2 !important;
 }
 
-
-
 /* Clean row styles */
+:deep(.v-data-table-row) {
+    background: transparent !important;
+    transition: background 0.15s ease !important;
+}
+
 :deep(.v-data-table-row:hover) {
-    background-color: #f9faff !important;
+    background: rgba(76, 100, 226, 0.04) !important;
 }
 
 :deep(.v-data-table .v-data-table-row td) {
     padding: 12px 16px !important;
-    font-size: 0.875rem;
-    color: #374151;
-    border-bottom: 1px solid rgba(245, 247, 255, 0.5);
-    /* More subtle */
+    font-size: 13px !important;
+    color: #374151 !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
+    background: transparent !important;
 }
 
 /* Simplified Pagination */
 :deep(.v-data-table-footer) {
-    padding: 6px 8px;
-    border-top: 1px solid #eef1ff;
+    padding: 10px 16px !important;
+    background: rgba(248, 250, 252, 0.6) !important;
+    border-top: 1px solid rgba(0, 0, 0, 0.04) !important;
+    border-radius: 0 0 16px 16px !important;
 }
 
 /* Compact markdown styling with consistent background */

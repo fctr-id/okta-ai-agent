@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 90" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="fctrTitle">
+  <title id="fctrTitle">fctr - Identity Security Platform</title>
+  
+  <defs>
+    <!-- 90° horizontal gradient -->
+    <linearGradient id="blockGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#818cf8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ===================== -->
+  <!-- ICON: WIDER ARMS F -->
+  <!-- ===================== -->
+  <g id="icon" transform="translate(5, 5) scale(1)">
+    <!-- Vertical stem -->
+    <path fill="url(#blockGrad)" d="M 10 10 C 10 4 14 0 20 0 L 32 0 L 32 80 L 20 80 C 14 80 10 76 10 70 L 10 10 Z"/>
+    <!-- Top arm -->
+    <path fill="url(#blockGrad)" d="M 36 0 L 70 0 C 76 0 80 4 80 10 L 80 22 C 80 28 76 32 70 32 L 36 32 L 36 0 Z"/>
+    <!-- Bottom arm -->
+    <path fill="url(#blockGrad)" d="M 36 40 L 60 40 C 66 40 70 44 70 50 L 70 54 C 70 60 66 64 60 64 L 36 64 L 36 40 Z"/>
+  </g>
+
+  <!-- ===================== -->
+  <!-- WORDMARK: FCTR with MORE SPACING from icon -->
+  <!-- Moved from x=78 to x=110 (32px more gap) -->
+  <!-- ===================== -->
+  <g id="wordmark" fill="#374151">
+    <!-- F - clean geometric -->
+    <path d="M110 17 L150 17 L150 29 L125 29 L125 37 L145 37 L145 49 L125 49 L125 69 L110 69 Z"/>
+    
+    <!-- C - MORE OPEN aperture (wider opening) -->
+    <path d="M158 43 
+             C158 29 169 17 185 17 
+             C195 17 203 21 209 28 
+             L199 38 
+             C196 34 191 31 185 31 
+             C177 31 172 37 172 43 
+             C172 49 177 55 185 55 
+             C191 55 196 52 199 48 
+             L209 58 
+             C203 65 195 69 185 69 
+             C169 69 158 57 158 43 Z"/>
+    
+    <!-- T - clean geometric -->
+    <path d="M218 17 L268 17 L268 29 L250 29 L250 69 L236 69 L236 29 L218 29 Z"/>
+    
+    <!-- R - clean geometric with bowl -->
+    <path d="M278 17 L308 17 C320 17 328 25 328 35 C328 43 323 49 315 51 L330 69 L312 69 L300 53 L293 53 L293 69 L278 69 L278 17 Z M293 29 L293 43 L306 43 C311 43 314 40 314 36 C314 32 311 29 306 29 Z"/>
+  </g>
+</svg>

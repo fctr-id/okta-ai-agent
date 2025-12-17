@@ -10,10 +10,15 @@
 // );
 :root {
     --font-family-body: 'Inter', sans-serif;
+    --font-family-display: 'Manrope', sans-serif;
+    --font-size-base: 15px;
+    --font-weight-base: 500;
   }
   
   html {
     font-family: var(--font-family-body);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-base);
   }
   
   .v-application {

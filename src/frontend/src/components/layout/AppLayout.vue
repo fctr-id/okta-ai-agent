@@ -1,52 +1,54 @@
 <template>
     <div class="app-page">
         <!-- Header -->
-        <header class="floating-header">
+        <header v-if="showHeader" class="floating-header">
             <div class="header-content">
-                <div class="brand">
-                    <img src="@/assets/fctr-logo.png" alt="Okta Logo" height="24" />
+                <!-- Brand section only shows when logged in -->
+                <div v-if="showLogout" class="brand">
+                    <img src="@/assets/fctr-icon.svg" alt="fctr" height="28" />
                     <div class="brand-divider"></div>
                     <div class="title-with-badge">
                         <div class="tako-title-container">
                             <span class="tako-name">Tako AI</span>
-                            <!--<span class="tako-subtitle">AI Agent for Okta</span>-->
                         </div>
                         <div class="beta-badge">BETA</div>
                     </div>
                 </div>
+                <!-- Empty spacer when not logged in -->
+                <div v-else></div>
 
                 <div class="header-actions">
                     <!-- Add SyncStatusButton here -->
                     <div class="header-spacer"></div>
                     <SyncStatusButton v-if="showLogout" />
-                    <v-tooltip text="Logout" location="bottom">
-                        <template v-slot:activator="{ props }">
-                            <button v-if="showLogout" v-bind="props" class="logout-btn" aria-label="Logout"
-                                @click="handleLogout">
-                                <v-icon>mdi-logout</v-icon>
-                            </button>
-                        </template>
-                    </v-tooltip>
+                    <button v-if="showLogout" class="logout-btn" aria-label="Logout"
+                        @click="handleLogout">
+                        <v-icon size="16">mdi-logout</v-icon>
+                        <span>Log out</span>
+                    </button>
                 </div>
             </div>
         </header>
 
-        <!-- Main Content -->
-        <main class="main-content" :class="contentClass">
-            <slot></slot>
-        </main>
+        <!-- Content Surface (rounded top corners, gradient background) -->
+        <div class="content-surface">
+            <!-- Main Content -->
+            <main class="main-content" :class="contentClass">
+                <slot></slot>
+            </main>
 
-        <!-- Footer -->
-        <footer class="page-footer">
+            <!-- Footer -->
+            <footer class="page-footer">
             <div class="footer-content">
                 <span>Powered by </span>
                 <a href="https://fctr.io" target="_blank" class="branded-link">
-                    Fctr Identity
+                    fctr
                 </a>
                 <span class="version-tag">{{ appVersion }}</span>
                 <span class="disclaimer">• Responses may require verification</span>
             </div>
         </footer>
+        </div>
     </div>
 </template>
 
@@ -55,9 +57,12 @@ import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
 import { computed } from 'vue'
 import SyncStatusButton from '@/components/sync/SyncStatusButton.vue'
-import { isRealtimeMode } from '@/state/chatMode.js';
 
 const props = defineProps({
+    showHeader: {
+        type: Boolean,
+        default: true
+    },
     showLogout: {
         type: Boolean,
         default: true
@@ -85,13 +90,27 @@ const handleLogout = async () => {
 <style>
 .app-page {
     min-height: 100vh;
-    /* Calm Slate - Stable, professional, excellent contrast for white cards, non-distracting */
-   background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
+    background: #FFFFFF;
     position: relative;
     overflow-y: auto;
     overflow-x: hidden;
     display: flex;
     flex-direction: column;
+}
+
+/* Content surface below header with rounded top corners and gradient */
+.content-surface {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin: 0 16px 16px 16px;
+    border-top-left-radius: 24px;
+    border-top-right-radius: 24px;
+    border-bottom-left-radius: 24px;
+    border-bottom-right-radius: 24px;
+    /* Calm Slate - soft blue gradient */
+    background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
+    overflow: hidden;
 }
 
 
@@ -100,35 +119,35 @@ const handleLogout = async () => {
 /* Header */
 .floating-header {
     position: relative;
-    /* Changed from fixed */
-    margin: 20px auto;
-    /* Instead of positioning with top/left/transform */
+    margin: 0;
     z-index: 100;
-    width: calc(100% - 40px);
-    max-width: var(--max-width);
+    width: 100%;
+    max-width: 100%;
+    min-height: 56px;
+
+    /* Frosted glass effect */
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px) saturate(180%);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.2s ease;
 }
 
 .header-content {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: rgba(255, 255, 255);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-radius: var(--border-radius);
-    padding: 16px 24px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.12);
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 12px 24px;
+    box-shadow: none;
     position: relative;
-    border: 1.5px solid rgba(76, 100, 226, 0.15);
     z-index: 2;
-    transition: all 0.3s ease;
 }
 
-.header-content:hover {
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.14);
-    transform: translateY(-2px);
-    background: rgba(255, 255, 255, 0.92);
-    border-color: rgba(76, 100, 226, 0.25);
+.floating-header:hover {
+    background: #ffffff;
 }
 
 .header-actions {
@@ -145,6 +164,14 @@ const handleLogout = async () => {
     color: var(--text-primary);
 }
 
+.tako-name {
+    font-family: var(--font-family-display);
+    font-weight: 700;
+    font-size: 19px;
+    letter-spacing: -0.01em;
+    color: #1e293b;
+}
+
 .title-with-badge {
     display: flex;
     align-items: center;
@@ -152,35 +179,45 @@ const handleLogout = async () => {
 }
 
 .brand-divider {
-    height: 20px;
+    height: 16px;
     width: 1px;
-    background: #e0e0e0;
+    background: rgba(76, 100, 226, 0.18);
 }
 
 .beta-badge {
-    background: var(--primary-light);
-    color: var(--primary);
+    background: rgba(76, 100, 226, 0.1);
+    color: #4C64E2;
     font-size: 10px;
     font-weight: 600;
     padding: 4px 8px;
     border-radius: 6px;
     letter-spacing: 0.5px;
-    margin-top: -5px;
+    line-height: 1;
 }
 
 .logout-btn {
-    background: transparent;
-    border: none;
-    color: #777;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(248, 250, 252, 0.9);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(100, 116, 139, 0.15);
+    color: #64748b;
     cursor: pointer;
-    padding: 8px;
-    border-radius: 8px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-family: var(--font-family-body);
+    font-size: 13px;
+    font-weight: 500;
     transition: all 0.2s ease;
 }
 
 .logout-btn:hover {
-    background: #f5f5f5;
-    color: #333;
+    background: #ffffff;
+    border-color: rgba(100, 116, 139, 0.25);
+    color: #475569;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 
 /* Main content area */
@@ -200,42 +237,28 @@ const handleLogout = async () => {
 .auth-content {
     display: flex;
     flex-direction: column;
-    /* Add this */
     justify-content: center;
     align-items: center;
     flex-grow: 1;
-    /* Add this to make it expand */
     padding: 20px 0;
 }
 
 
-/* Full-width footer fixed to bottom */
+/* Footer inside the content surface */
 .page-footer {
     position: relative;
     margin-top: auto;
-    /* Add this to push to the bottom */
     padding: 14px 0;
     text-align: center;
     font-size: 13px;
     color: var(--text-muted);
-    background: white;
-    box-shadow: 0 -1px 0 rgba(76, 100, 226, 0.08);
+    background: transparent;
     z-index: 50;
 }
 
-/* Add subtle gradient top border */
+/* Hide the old pseudo border */
 .page-footer::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(90deg,
-            rgba(76, 100, 226, 0.01),
-            rgba(76, 100, 226, 0.1) 40%,
-            rgba(76, 100, 226, 0.1) 60%,
-            rgba(76, 100, 226, 0.01));
+    display: none;
 }
 
 .footer-content {
@@ -327,12 +350,11 @@ const handleLogout = async () => {
 /* Responsive adjustments */
 @media (max-width: 768px) {
     .floating-header {
-        width: calc(100% - 20px);
-        top: 10px;
+        width: 100%;
     }
 
     .header-content {
-        padding: 12px 16px;
+        padding: 10px 16px;
     }
 }
 
@@ -349,42 +371,10 @@ const handleLogout = async () => {
   gap: 8px;
 }
 
-.tako-title-container {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.tako-name {
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--primary, #4C64E2);
-  letter-spacing: -0.5px;
-}
-
-.tako-subtitle {
-  font-size: 16px;
-  font-weight: 400;
-  color: #666;
-  opacity: 0.7;
-}
-
-
-
 /* For mobile responsiveness */
 @media (max-width: 600px) {
-  .tako-title-container {
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-  }
-  
   .tako-name {
-    font-size: 24px;
-  }
-  
-  .tako-subtitle {
-    font-size: 14px;
+    font-size: 18px;
   }
 }
 </style>

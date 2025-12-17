@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-labelledby="fctrTitle">
+  <title id="fctrTitle">fctr - Identity Security Platform</title>
+  
+  <!-- ===================== -->
+  <!-- WORDMARK ONLY: FCTR -->
+  <!-- ===================== -->
+  <g id="wordmark" fill="#374151" transform="translate(10, 0)">
+    <!-- F - clean geometric -->
+    <path d="M10 14 L50 14 L50 26 L25 26 L25 34 L45 34 L45 46 L25 46 L25 66 L10 66 Z"/>
+    
+    <!-- C - OPEN aperture -->
+    <path d="M58 40 C58 26 69 14 85 14 C95 14 103 18 109 25 L99 35 C96 31 91 28 85 28 C77 28 72 34 72 40 C72 46 77 52 85 52 C91 52 96 49 99 45 L109 55 C103 62 95 66 85 66 C69 66 58 54 58 40 Z"/>
+    
+    <!-- T - clean geometric -->
+    <path d="M113 14 L163 14 L163 26 L145 26 L145 66 L131 66 L131 26 L113 26 Z"/>
+    
+    <!-- R - clean geometric with bowl -->
+    <path d="M170 14 L200 14 C212 14 220 22 220 32 C220 40 215 46 207 48 L222 66 L204 66 L192 50 L185 50 L185 66 L170 66 L170 14 Z M185 26 L185 40 L198 40 C203 40 206 37 206 33 C206 29 203 26 198 26 Z"/>
+  </g>
+</svg>

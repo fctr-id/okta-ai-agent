@@ -1,55 +1,99 @@
 <template>
-  <div class="exec-wrapper">
-    <div class="exec-card">
-      <button class="exec-header" @click="isExpanded = !isExpanded">
-        <v-icon size="18" :class="{ rotated: isExpanded }">mdi-chevron-right</v-icon>
-        <span class="title">Agent reasoning </span>
-        <div class="spacer"></div>
-        <span class="status-badge" :class="statusClass" :title="error || ''">{{ statusText }}</span>
-      </button>
+  <div class="thinking-glass">
+    <!-- Minimal Header -->
+    <button class="glass-header" @click="isExpanded = !isExpanded">
+      <svg 
+        class="chevron" 
+        :class="{ expanded: isExpanded }" 
+        width="14" height="14" 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        stroke="currentColor" 
+        stroke-width="2.5"
+      >
+        <path d="M9 18l6-6-6-6"/>
+      </svg>
+      <span class="header-text">Thinking</span>
+      
+      <div class="header-spacer"></div>
+      
+      <!-- Status badges - right aligned -->
+      <span v-if="isThinking && steps.length === 0" class="status-badge processing">
+        <span class="badge-dots"><span></span><span></span><span></span></span>
+        PROCESSING
+      </span>
+      <span v-else-if="!isComplete && !error && steps.length > 0" class="status-badge processing">
+        <span class="badge-pulse"></span>
+        PROCESSING
+      </span>
+      <span v-if="isComplete && !error" class="status-badge completed">COMPLETED</span>
+      <span v-if="error" class="status-badge error">ERROR</span>
+    </button>
 
-      <transition name="expand">
-        <div v-show="isExpanded" class="exec-body">
-          <!-- Thinking loader -->
-          <div v-if="isThinking && steps.length === 0" class="thinking-state">
-            <div class="dots"><span></span><span></span><span></span></div>
-          </div>
+    <!-- Content -->
+    <transition name="slide">
+      <div v-show="isExpanded" class="glass-content">
+        <!-- Loading shimmer -->
+        <div v-if="isThinking && steps.length === 0" class="loading-shimmer">
+          <div class="shimmer-bar"></div>
+          <div class="shimmer-bar short"></div>
+        </div>
 
-          <!-- Continuous thinking stream -->
-          <div v-if="steps.length > 0" class="thinking-stream">
-            <div
-              v-for="(step, index) in steps"
-              :key="step.id || index"
-              class="stream-item"
-              :class="step.status"
-            >
-              <div class="step-line">
-                <v-icon class="step-icon" size="13" :color="step.status === 'failed' ? '#C62828' : '#4C64E2'">mdi-assistant</v-icon>
-                <span class="stream-text">
-                  {{ step.reasoning || step.text || step.title }}
-                  <!-- Show spinner inline only on the last/active step (when discovery not complete and execution hasn't started) -->
-                  <span v-if="index === steps.length - 1 && !isComplete && !error && !executionStarted" class="step-spinner"></span>
-                </span>
-              </div>
-              
-              <!-- Tool lines with tree structure -->
-              <div v-if="step.tools && step.tools.length > 0" class="tool-lines">
-                <div v-for="(tool, i) in step.tools" :key="i" class="tool-line">
-                  <span class="tool-branch">└─</span>
-                  <v-icon class="tool-icon" size="11" color="#666">mdi-tools</v-icon>
-                  <span class="tool-name">{{ tool.name.replace(/_/g, ' ') }}</span>
+        <!-- Steps -->
+        <div v-else-if="steps.length > 0" class="steps-list">
+          <div 
+            v-for="(step, index) in steps" 
+            :key="step.id || index" 
+            class="step-item"
+            :class="{ 
+              current: index === steps.length - 1 && !isComplete && !error,
+              error: step.status === 'failed'
+            }"
+          >
+            <p class="step-text">
+              {{ step.reasoning || step.text || step.title }}
+              <span 
+                v-if="index === steps.length - 1 && !isComplete && !error && !executionStarted" 
+                class="typing-cursor"
+              ></span>
+            </p>
+            
+            <!-- Tool calls - modern 2026 animated chips -->
+            <div v-if="step.tools && step.tools.length > 0" class="tool-chips">
+              <template v-for="(tool, i) in step.tools" :key="i">
+                <!-- Chevron separator between sequential tools -->
+                <span v-if="i > 0" class="tool-separator">›</span>
+                <div 
+                  class="tool-chip"
+                  :class="{ 
+                    active: !isComplete && index === steps.length - 1 && i === step.tools.length - 1,
+                    done: isComplete || index < steps.length - 1 || i < step.tools.length - 1
+                  }"
+                >
+                  <!-- Spinning sun when active, checkmark when done -->
+                  <svg v-if="!isComplete && index === steps.length - 1 && i === step.tools.length - 1" class="tool-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+                  </svg>
+                  <svg v-else class="tool-icon done" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="20 6 9 17 4 12"/>
+                  </svg>
+                  <span class="tool-label">{{ formatToolName(tool.name) }}</span>
                 </div>
-              </div>
+              </template>
             </div>
           </div>
         </div>
-      </transition>
-    </div>
+
+        <!-- Error -->
+        <div v-if="error" class="error-msg">{{ error }}</div>
+      </div>
+    </transition>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, watch } from 'vue'
 
 const props = defineProps({
   steps: {
@@ -76,7 +120,6 @@ const props = defineProps({
 
 const isExpanded = ref(true)
 
-// Auto-expand when processing, collapse when complete
 watch([() => props.isThinking, () => props.isComplete], ([thinking, complete]) => {
   if (thinking || (props.steps.length > 0 && !complete)) {
     isExpanded.value = true
@@ -85,319 +128,311 @@ watch([() => props.isThinking, () => props.isComplete], ([thinking, complete]) =
   }
 })
 
-const statusText = computed(() => {
-  if (props.error) return 'Error'
-  if (props.isComplete) return 'Complete'
-  // Show "Working" while agent works through ReAct loop
-  if (props.isThinking || props.steps.length > 0) return 'Working'
-  return 'Ready'
-})
-
-const statusClass = computed(() => {
-  if (props.error) return 'error'
-  if (props.isComplete) return 'ok'
-  // Only show run state while actively working (not complete)
-  if ((props.isThinking || props.steps.length > 0) && !props.isComplete) return 'run'
-  return 'idle'
-})
-
-const completedCount = computed(() => {
-  return props.steps.filter(s => s.status === 'complete').length
-})
+const formatToolName = (name) => {
+  return name.replace(/_/g, ' ').replace(/^okta /, '')
+}
 </script>
 
 <style scoped>
-.exec-wrapper {
-  margin: 3rem 0;
-}
-
-.exec-card {
-  background: white;
-  border-radius: 12px;
-  border: 1px solid rgba(76, 100, 226, 0.15);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+/* Frosted glass container */
+.thinking-glass {
+  margin: 1.5rem auto;
+  max-width: 900px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
   overflow: hidden;
-  transition: all 0.3s ease;
 }
 
-.exec-card:hover {
-  box-shadow: 0 6px 24px rgba(76, 100, 226, 0.12);
-  border-color: rgba(76, 100, 226, 0.25);
-}
-
-.exec-header {
+/* Header - more white */
+.glass-header {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 10px;
   width: 100%;
   padding: 14px 20px;
-  background: rgba(76, 100, 226, 0.03);
+  background: rgba(255, 255, 255, 0.85);
   border: none;
   cursor: pointer;
   transition: background 0.2s ease;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
 }
 
-.exec-header:hover {
-  background: rgba(76, 100, 226, 0.06);
+.glass-header:hover {
+  background: rgba(255, 255, 255, 0.95);
 }
 
-.exec-header .v-icon {
-  color: #4C64E2;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+.chevron {
+  color: #666;
+  transition: transform 0.25s ease;
+  flex-shrink: 0;
 }
 
-.exec-header .v-icon.rotated {
+.chevron.expanded {
   transform: rotate(90deg);
 }
 
-.title {
-  font-size: 15px;
+.header-text {
+  font-size: 13px;
   font-weight: 600;
-  color: #1a1a1a;
+  color: #333;
   letter-spacing: -0.01em;
 }
 
-.status-badge {
-  padding: 0.25rem 0.75rem;
-  border-radius: 12px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
-
-.status-badge.idle { background: #e0e0e0; color: #666; }
-.status-badge.run { background: #E3F2FD; color: #1976D2; }
-.status-badge.ok { background: #E8F5E9; color: #388E3C; }
-.status-badge.error { background: #FFEBEE; color: #C62828; }
-
-.spacer {
+.header-spacer {
   flex: 1;
 }
 
-.exec-body {
-  padding: 20px;
-  background: white;
-}
-
-.thinking-state {
+/* Status badges - right aligned with backgrounds */
+.status-badge {
   display: flex;
-  justify-content: center;
   align-items: center;
-  padding: 40px 0;
-}
-
-.dots {
-  display: flex;
-  gap: 8px;
-}
-
-.dots span {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #4C64E2;
-  animation: bounce 1.2s ease-in-out infinite;
-}
-
-.dots span:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.dots span:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes bounce {
-  0%, 80%, 100% {
-    transform: translateY(0);
-  }
-  40% {
-    transform: translateY(-12px);
-  }
-}
-
-/* Continuous Thinking Stream */
-.thinking-stream {
-  font-size: 14px;
-  line-height: 1.6;
-  color: #333;
-  background: white;
-  border-radius: 8px;
-  padding: 16px;
-  border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.stream-item {
-  margin-bottom: 14px;
-  padding: 10px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-  background: rgba(76, 100, 226, 0.02);
+  gap: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 4px 10px;
   border-radius: 6px;
+}
+
+.status-badge.processing {
+  background: rgba(76, 100, 226, 0.12);
+  color: #4C64E2;
+}
+
+.status-badge.completed {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+}
+
+.status-badge.error {
+  background: rgba(239, 68, 68, 0.12);
+  color: #dc2626;
+}
+
+.badge-dots {
+  display: flex;
+  gap: 2px;
+}
+
+.badge-dots span {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 50%;
+  animation: fade-pulse 1.4s ease-in-out infinite;
+}
+
+.badge-dots span:nth-child(2) { animation-delay: 0.2s; }
+.badge-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes fade-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.badge-pulse {
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+  border-radius: 50%;
+  animation: soft-pulse 2s ease-in-out infinite;
+}
+
+@keyframes soft-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Content */
+.glass-content {
+  padding: 16px 20px;
+}
+
+/* Shimmer loading */
+.loading-shimmer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shimmer-bar {
+  height: 12px;
+  background: linear-gradient(90deg, 
+    rgba(0,0,0,0.04) 0%, 
+    rgba(0,0,0,0.08) 50%, 
+    rgba(0,0,0,0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
+  width: 80%;
+}
+
+.shimmer-bar.short {
+  width: 50%;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Steps list */
+.steps-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step-item {
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 12px;
   transition: all 0.2s ease;
 }
 
-.stream-item:last-child {
-  margin-bottom: 0;
-  padding-bottom: 10px;
-  border-bottom: none;
+.step-item.current {
+  background: rgba(255, 255, 255, 0.95);
 }
 
-.step-line {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin-bottom: 6px;
+.step-item.error {
+  background: rgba(229, 57, 53, 0.08);
 }
 
-.step-spinner {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  margin-left: 8px;
-  border: 2.5px solid rgba(76, 100, 226, 0.25);
-  border-top-color: #4C64E2;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
-  vertical-align: middle;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.step-icon {
-  flex-shrink: 0;
-  margin-top: 2px;
-  opacity: 0.8;
-}
-
-.stream-item.in-progress .step-icon {
-  opacity: 1;
-}
-
-.stream-text {
-  color: #555;
-  font-weight: 500;
+.step-text {
+  margin: 0;
+  font-size: 13px;
   line-height: 1.6;
-  flex: 1;
-  letter-spacing: -0.005em;
+  color: #444;
+  font-weight: 450;
 }
 
-.stream-item.in-progress .stream-text {
-  color: #4C64E2;
-  font-weight: 600;
-  background: linear-gradient(90deg, rgba(76, 100, 226, 0.08) 0%, rgba(76, 100, 226, 0.03) 100%);
-  padding: 4px 10px;
-  margin: -4px -10px;
-  border-radius: 4px;
-  box-shadow: 0 1px 3px rgba(76, 100, 226, 0.1);
+.step-item.current .step-text {
+  color: #222;
 }
 
-.stream-item.failed {
-  background: rgba(198, 40, 40, 0.03);
-  border-color: rgba(198, 40, 40, 0.1);
+.step-item.error .step-text {
+  color: #c62828;
 }
 
-.stream-item.failed .stream-text {
-  color: #C62828;
-  font-weight: 600;
-}
-
-.dots-header {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin-right: 8px;
-}
-
-.dots-header span {
-  width: 6px;
-  height: 6px;
+/* Typing cursor */
+.typing-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 14px;
   background: #4C64E2;
-  border-radius: 50%;
-  animation: bounce 1.2s ease-in-out infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blink 1s step-end infinite;
 }
 
-.dots-header span:nth-child(2) {
-  animation-delay: 0.15s;
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
-.dots-header span:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-.loading-spinner-header {
-  width: 16px;
-  height: 16px;
-  margin-right: 8px;
-  border: 2px solid rgba(76, 100, 226, 0.2);
-  border-top-color: #4C64E2;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  flex-shrink: 0;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Tool tree structure */
-.tool-lines {
-  margin-top: 6px;
-  padding-left: 20px;
-  border-left: 2px solid rgba(76, 100, 226, 0.1);
-}
-
-.tool-line {
+/* Tool chips - 2026 modern style */
+.tool-chips {
   display: flex;
-  align-items: center;
-  font-size: 12px;
-  color: #666;
-  line-height: 1.7;
-  padding: 1px 0;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
 }
 
-.tool-branch {
-  color: rgba(76, 100, 226, 0.3);
-  margin-right: 8px;
-  font-family: monospace;
+.tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  background: rgba(76, 100, 226, 0.08);
+  border-radius: 100px;
+  font-size: 11px;
+  color: #5a6acf;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.tool-chip:hover {
+  background: rgba(76, 100, 226, 0.14);
+}
+
+.tool-chip.active {
+  background: rgba(76, 100, 226, 0.12);
+  box-shadow: 0 0 0 1px rgba(76, 100, 226, 0.2);
+}
+
+.tool-chip.active .tool-icon {
+  animation: spin-slow 3s linear infinite;
+}
+
+/* Done state - subtle purple */
+.tool-chip.done {
+  background: rgba(142, 84, 233, 0.08);
+  color: #9b7ed4;
+}
+
+.tool-chip.done:hover {
+  background: rgba(142, 84, 233, 0.12);
+}
+
+.tool-icon.done {
+  color: #a98eda;
+}
+
+/* Chevron separator between sequential tools */
+.tool-separator {
+  color: #c4b5d8;
   font-size: 14px;
+  font-weight: 300;
+  margin: 0 2px;
+  opacity: 0.7;
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .tool-icon {
-  margin-right: 6px;
   flex-shrink: 0;
+  opacity: 0.8;
 }
 
-.tool-name {
-  color: #4C64E2;
-  font-style: italic;
-  font-weight: 500;
+.tool-label {
+  white-space: nowrap;
 }
 
-/* Transitions */
-.expand-enter-active,
-.expand-leave-active {
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+/* Error message */
+.error-msg {
+  padding: 12px 16px;
+  background: rgba(229, 57, 53, 0.1);
+  color: #c62828;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+/* Slide transition */
+.slide-enter-active,
+.slide-leave-active {
+  transition: all 0.3s ease;
   overflow: hidden;
 }
 
-.expand-enter-from,
-.expand-leave-to {
+.slide-enter-from,
+.slide-leave-to {
   opacity: 0;
   max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
-.expand-enter-to,
-.expand-leave-from {
+.slide-enter-to,
+.slide-leave-from {
   opacity: 1;
-  max-height: 2000px;
+  max-height: 1000px;
 }
 </style>
