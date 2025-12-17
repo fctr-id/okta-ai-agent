@@ -324,7 +324,17 @@ class ReActAgentExecutor:
                             logger.debug(f"[{self.correlation_id}] {i:4d} | {line}")
                 
                 if not execution_result.success:
-                    self.state.error = execution_result.error or "Discovery failed"
+                    # Check for safety violation error code
+                    raw_error = execution_result.error or "Discovery failed"
+                    
+                    if raw_error == "NOT-OKTA-RELATED":
+                        # Convert to user-friendly message
+                        user_friendly_error = "I can only assist with Okta-related queries. Please ask a question about your Okta tenant."
+                        self.state.error = user_friendly_error
+                        logger.warning(f"[{self.correlation_id}] Safety violation detected: Query rejected as non-Okta-related")
+                    else:
+                        self.state.error = raw_error
+                    
                     # Send error event to frontend
                     await step_queue.put(self._create_error_event(self.state.error))
             
