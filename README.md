@@ -69,7 +69,7 @@ Tako follows a deterministic workflow that validates every step, **catches its o
 Tako auto-corrects syntax errors, validates API parameters against Okta's spec, and retries intelligently when issues occur. Built-in circuit breakers prevent runaway loops, while automatic error tracking reports exactly what failed and why - eliminating trial-and-error cycles.
 
 ### **Cost-Effective Intelligence**
-Run on lightweight, low-cost models (Gemini 2.5 Flash, Claude 4.5 Haiku, GPT-4.1) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's deterministic workflow.
+Run on lightweight, low-cost models (Gemini 3 Flash, Claude 4.5 Haiku, GPT-4.1) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's deterministic workflow.
 
 ### **Flexible Data Access**
 - **API Mode** - Real-time Okta API calls (no database sync required)
@@ -228,6 +228,7 @@ These model classes have been validated for stability and cost/performance trade
 
 **Coding Models **
 - Claude Hailu 4.5
+- **Gemini Flash 3**
 - **Gemini Flash 2.5**
 - GPT-4.1
 - Claude Sonnet 4
@@ -238,6 +239,7 @@ These model classes have been validated for stability and cost/performance trade
 - **GPT-o4-mini** - (preferred)
 - OpenAI GPT-OSS 120B
 - Claude Sonnet 4
+- Gemini 3 Pro
 - Gemini 2.5 Pro
 - O3 - Advanced reasoning capabilities (very expensive)
 - GPT-5-mini - Works but is very slow (least expensive but needs more testing)
