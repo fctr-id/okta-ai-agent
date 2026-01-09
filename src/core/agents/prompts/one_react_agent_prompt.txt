@@ -160,11 +160,9 @@ These are hard constraints to prevent common failures. You MUST follow them.
 - **ALWAYS** start by calling `load_sql_schema()` to check what data is available locally (`users`, `groups`, `applications`, etc.).
 - **NEVER** call an API for data that might exist in the SQLite database. Use APIs for gaps only (e.g., roles, MFA factors, policies, logs).
 
-#### Rule 2: Strict Testing Limits are Mandatory (See Validation Checklist Below)
-- **SQL Test Queries**: MUST end with a `LIMIT 3` clause.
-- **API Test Calls**: MUST include `max_results=3` in the `make_request()` call.
+#### Rule 2: Test with Small Samples
 - **Loop Iteration Tests**: MUST slice to the first 3 items (e.g., `for user in users[:3]:`).
-- **EXCEPTION**: **Special Tools** (starting with `special_tool_`) do **NOT** support `max_results`. Do not pass this parameter to them.
+- **Note**: SQL queries and API calls are automatically limited to 3 results during testing by system enforcement.
 
 #### Rule 3: SQLite Results Must Be Handled Correctly
 - **CRITICAL**: Use `cursor.fetchall()` to fetch data after `cursor.execute(query)`.
@@ -437,23 +435,17 @@ if __name__ == "__main__":
 #### Before calling `execute_test_query()` (SQL):
 ```
 VALIDATION CHECKPOINT:
-✓ SQL query ends with LIMIT 3: [YES/NO]
 ✓ DB guidance already in memory (if needed): [YES/NO]
 ```
-**Examples:** ✅ `SELECT ... LIMIT 3` | ❌ `SELECT ...` (no limit)
 
 #### Before calling API test tools:
 ```
 VALIDATION CHECKPOINT:
 ✓ API Efficiency Principle Applied: Have I chosen the most efficient, server-side filtering endpoint instead of a brute-force approach? [YES/NO]
-✓ Probe-First Principle Applied: Is this a simple probe call (`max_results=3`) to inspect the structure, OR have I already probed and am now running the full test? [YES/NO]
+✓ Probe-First Principle Applied: Is this a simple probe call to inspect the structure, OR have I already probed and am now running the full test? [YES/NO]
 ✓ Testing ONE API at a time: Am I testing a single API endpoint in this step, not combining multiple API tests? [YES/NO]
-✓ API call includes `max_results=3`: The value for `max_results` MUST be exactly 3 for all test calls. [YES/NO]
 ✓ API guidance already in memory (if needed): [YES/NO]
 ```
-**Examples:**
-✅ `client.make_request(..., max_results=3)`
-❌ `client.make_request(...)` (no max_results) | ❌ `client.make_request(..., max_results=1)` (wrong value)
 
 #### Before calling guidance tools:
 ```
@@ -552,8 +544,6 @@ ExecutionResult(
 VALIDATION CHECKPOINT:
 ✓ Request is in English and Okta-scoped (if NO, return error="NOT-OKTA-RELATED"): [YES/NO]
 ✓ Request is free of emotional/time pressure (if NO, return error="NOT-OKTA-RELATED"): [YES/NO]
-✓ SQL query has LIMIT 3: [YES/NO]
-✓ API call has max_results=3: [YES/NO]. You MUST always use 3 only. Using any more will fill up context window and make this fail
 ✓ Testing ONE API at a time (not batching): [YES/NO]
 ✓ DB guidance already in memory: [YES/NO - if needed]
 ✓ API guidance already in memory: [YES/NO - if needed]

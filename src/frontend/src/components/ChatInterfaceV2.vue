@@ -1,6 +1,6 @@
 <template>
     <AppLayout contentClass="chat-content">
-        <main class="content-area mt-10" :class="{ 'has-results': hasResults }">
+        <main class="content-area" :class="{ 'has-results': hasResults }">
             <!-- Search Container with Animated Position -->
             <div :class="['search-container', hasResults ? 'moved' : '']">
                 <!-- Big title -->
@@ -79,7 +79,7 @@
                                 class="suggestion-btn"
                                 @click="selectSuggestion(suggestion.query)"
                             >
-                                <v-icon class="suggestion-icon" size="18">{{ suggestion.icon }}</v-icon>
+                                <v-icon class="suggestion-icon" size="16">{{ suggestion.icon }}</v-icon>
                                 <span class="suggestion-text">{{ suggestion.query }}</span>
                             </button>
                         </div>
@@ -352,12 +352,15 @@ const handleAuthError = async (status) => {
  * Query suggestions - curated valid questions (rearranged for varied lengths)
  */
 const suggestions = ref([
+    { query: 'Show me all okta admins in the tenant and list their roles', icon: 'mdi-shield-account-outline' },
     { query: 'List all users along with their creation dates', icon: 'mdi-calendar-outline' },
-    { query: 'How many users were created last month?', icon: 'mdi-chart-line' },
     { query: 'Show me all users in locked status', icon: 'mdi-lock-outline' },
-    { query: 'Find all users in Engineering group', icon: 'mdi-account-group-outline' },
     { query: 'Show users with PUSH factor registered', icon: 'mdi-shield-check-outline' },
-    { query: 'Find groups with more than 50 members', icon: 'mdi-account-multiple-outline' }
+    { query: 'Find the SAML certificate expiry date for all the active SAML applications', icon: 'mdi-certificate-outline' },
+    { query: 'Show applications assigned to user dan@fctr.io', icon: 'mdi-apps' },
+    { query: 'Find all users in Engineering group', icon: 'mdi-account-group-outline' },
+    { query: 'Find groups with more than 50 members', icon: 'mdi-account-multiple-outline' },
+    { query: 'Can john.smith@company.com access Salesforce?', icon: 'mdi-help-circle-outline' }
 ])
 
 // ---------- API INTERACTION ----------
@@ -664,7 +667,7 @@ onMounted(() => {
 .search-container {
     position: fixed;
     left: 50%;
-    top: 50%;
+    top: 46%; /* Moved down from center */
     transform: translate(-50%, -50%);
     width: 100%;
     max-width: 900px;
@@ -831,44 +834,23 @@ onMounted(() => {
 .query-card {
     position: relative;
     background: white;
-    border-radius: 24px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-    padding: 20px 24px;
-    transition: padding 0.3s ease, border-radius 0.3s ease, box-shadow 0.2s ease;
-    border: none;
+    border-radius: 20px; /* Rounded card */
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+    padding: 20px 24px; /* Even padding for card */
+    transition: all 0.25s ease;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: column;
 }
 
-/* Gradient border using mask technique - same as suggestion pills */
-.query-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 24px;
-    padding: 1.5px;
-    background: linear-gradient(90deg,
-            var(--primary),
-            #5e72e4,
-            #8e54e9,
-            #d442f5);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    opacity: 0.4;
-    pointer-events: none;
-    transition: opacity 0.2s ease;
-}
-
-.query-card:hover::before {
-    opacity: 0.7;
-}
-
-.query-card.is-focused::before {
-    opacity: 1;
+.query-card:hover {
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    transform: translateY(-1px);
 }
 
 .query-card.is-focused {
-    box-shadow: 0 4px 16px rgba(76, 100, 226, 0.15);
+    box-shadow: 0 8px 30px rgba(76, 100, 226, 0.2);
+    border-color: rgba(76, 100, 226, 0.3);
 }
 
 .query-label {
@@ -877,7 +859,9 @@ onMounted(() => {
 
 .query-input-row {
     display: flex;
-    flex-direction: column;
+    flex-direction: column; /* Vertical layout */
+    width: 100%;
+    gap: 12px;
 }
 
 .query-icons-left {
@@ -892,20 +876,17 @@ onMounted(() => {
     font-family: inherit;
     font-size: 16px;
     font-weight: 400;
-    line-height: 1.5;
-    color: #1a1a1a;
+    line-height: 1.6;
+    color: #1f2937;
     background: transparent;
-    min-height: 72px;
-    max-height: 180px;
+    min-height: 52px; /* 2 lines approximately */
+    max-height: 150px;
     overflow-y: auto;
-    padding-top: 12px;
-    padding-bottom: 12px;
-    transition: min-height 0.25s ease, font-size 0.25s ease, padding 0.25s ease;
+    padding: 0;
 }
 
 .query-textarea::placeholder {
     color: #9ca3af;
-    line-height: 1.5;
 }
 
 .icon-btn {
@@ -937,22 +918,23 @@ onMounted(() => {
 }
 
 .send-button {
-    margin-top: 20px;
-    align-self: flex-end;
-    padding: 12px 28px;
+    align-self: flex-end; /* Align to right */
+    padding: 10px 28px;
     border: none;
-    border-radius: 12px;
+    border-radius: 100px; /* Pill button */
     background: #4C64E2;
     color: white;
     font-size: 14px;
     font-weight: 600;
-    letter-spacing: 0.5px;
+    white-space: nowrap;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
 }
 
 .send-button:hover:not(:disabled) {
     background: #3d52c7;
+    transform: scale(1.02);
 }
 
 .send-button:disabled {
@@ -972,81 +954,128 @@ onMounted(() => {
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
-/* Suggestion cards with outline icons and expanding rectangular background */
+/* Modern 2026 Suggestion Cards - Clean minimal style */
 .suggestions-wrapper {
-    margin-top: 2rem;
+    margin-top: 2.5rem;
     padding: 0 1rem;
+    width: calc(100vw - 2rem);
+    max-width: 1200px;
+    position: relative;
+    left: 50%;
+    transform: translateX(-50%);
     opacity: 1;
     transition: opacity 0.4s ease;
 }
 
 .suggestions-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-    max-width: 840px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    justify-content: center;
+    width: 100%;
+    max-width: 1200px;
     margin: 0 auto;
 }
 
 .suggestion-btn {
     position: relative;
-    width: 100%;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.6);
-    border: 1px solid rgba(148, 163, 184, 0.1);
-    border-radius: 8px;
+    padding: 9px 12px;
+    width: auto;
+    max-width: 100%;
+    display: inline-flex;
+    margin: 0;
+    /* Brighter subtle dirty white */
+    background: rgba(250, 250, 248, 0.75);
+    /* Gradient border matching hero title */
+    border: 1.5px solid transparent;
+    background-clip: padding-box;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.4),
+        0 2px 8px rgba(0, 0, 0, 0.02);
+    border-radius: 999px;
     cursor: pointer;
     text-align: left;
-    display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 10px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
-    transition: box-shadow 0.35s ease-in-out, background 0.2s ease;
+    gap: 8px;
+    transition: all 0.2s ease;
 }
 
-.suggestion-btn:hover {
-    background: #ffffff;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-}
-
-.suggestion-text {
-    font-size: 12.5px;
-    font-weight: 400;
-    color: #64748b;
-    line-height: 1.4;
-}
-
-.suggestion-icon {
-    background: linear-gradient(135deg, #4C64E2 0%, #8B5CF6 50%, #d442f5 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
-    flex-shrink: 0;
-}
-
-/* Rectangular expanding background effect - starts at card edge */
 .suggestion-btn::before {
     content: '';
     position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 100%;
-    height: 100%;
-    background: rgba(99, 102, 241, 0.08);
-    border-radius: 10px;
-    transform: translate(-50%, -50%);
-    opacity: 0;
-    transition: width 0.55s ease-in-out, height 0.55s ease-in-out, opacity 0.5s ease-in-out, border-radius 0.55s ease-in-out;
-    z-index: -1;
-    pointer-events: none;
+    inset: -1.5px;
+    border-radius: 999px;
+    padding: 1.5px;
+    background: linear-gradient(135deg, #4C64E2, #8B5CF6, #d442f5);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: 0.15;
+    transition: opacity 0.2s ease;
+}
+
+.suggestion-btn:hover {
+    background: rgba(252, 252, 250, 0.88);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.5),
+        0 4px 12px rgba(76, 100, 226, 0.08),
+        0 2px 6px rgba(0, 0, 0, 0.03);
+    transform: translateY(-1px);
 }
 
 .suggestion-btn:hover::before {
-    width: calc(100% + 20px);
-    height: calc(100% + 20px);
-    border-radius: 4px;
-    opacity: 1;
+    opacity: 0.35;
+}
+
+.suggestion-btn:focus-visible {
+    outline: 2px solid rgba(79, 70, 229, 0.35);
+    outline-offset: 2px;
+}
+
+.suggestion-text {
+    font-size: 13px;
+    font-weight: 450;
+    color: #374151;
+    line-height: 1.4;
+    flex: 1;
+}
+
+.suggestion-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.suggestion-icon {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    border-radius: 12px;
+    background: transparent;
+    color: #8B5CF6;
+}
+
+.suggestion-icon :deep(.v-icon) {
+    color: #8B5CF6;
+}
+
+/* Remove glow effect */
+.suggestion-btn::after {
+    display: none;
+}
+
+.suggestion-btn:hover .suggestion-icon {
+    background: transparent;
+    color: #a78bfa;
+}
+
+.suggestion-btn:hover .suggestion-icon :deep(.v-icon) {
+    color: #a78bfa;
 }
 
 /* Centered question header with blue background */

@@ -44,22 +44,19 @@ The following patterns are **STRICTLY FORBIDDEN** and will cause execution failu
 ### Section 3: The Golden Rules of API Interaction (Logic & Behavior)
 ---
 
-#### Rule 3.1: Testing Limits vs Production Code (NON-NEGOTIABLE)
-**FOR TESTING**: Every `client.make_request()` call MUST include `max_results=3` for initial test validation.
-**EXCEPTION**: Special Tools (endpoints starting with `/special-tools/`) do NOT support `max_results`. Do not include it for them.
+#### Rule 3.1: Testing vs Production Code
+**FOR TESTING**: API calls are automatically limited to 3 results by system enforcement.
 **FOR PRODUCTION**: Remove `max_results` entirely to fetch ALL data. The client handles automatic pagination.
 
 ```python
-# ✅ TESTING CODE - max_results=3 for validation
-response = await client.make_request(
-    endpoint="/api/v1/users",
-    max_results=3  # MANDATORY for testing phase
-)
-
-# ✅ PRODUCTION CODE - no max_results to get ALL data
+# ✅ TESTING CODE - write normally, limits enforced by system
 response = await client.make_request(
     endpoint="/api/v1/users"
-    # NO max_results parameter - client paginates automatically
+)
+
+# ✅ PRODUCTION CODE - same as testing, no max_results
+response = await client.make_request(
+    endpoint="/api/v1/users"
 )
 
 # ❌ FORBIDDEN - Using client.concurrent_limit as max_results
@@ -69,7 +66,7 @@ response = await client.make_request(endpoint="/api/v1/users", max_results=clien
 response = await client.make_request(endpoint="/api/v1/users", params={"limit": 200})
 ```
 
-**CRITICAL**: `client.concurrent_limit` controls parallel requests, NOT pagination limits. Never use it as `max_results`.
+**CRITICAL**: `client.concurrent_limit` controls parallel requests, NOT pagination limits.
 
 #### Rule 3.2: Response Handling (CRITICAL)
 The API client **automatically normalizes** all Okta responses. The `data` field is always a list or dict, never nested.
@@ -146,8 +143,7 @@ await client.make_request(
     endpoint="/api/v1/users",      # Exact endpoint path (str)
     method="GET",                   # HTTP method: GET, POST, PUT, DELETE
     params=None,                    # Query parameters (dict)
-    body=None,                      # Request body for POST/PUT (dict)
-    max_results=3                   # Total limit for testing (int, default: 3)
+    body=None                       # Request body for POST/PUT (dict)
 )
 ```
 
@@ -166,11 +162,9 @@ await client.make_request(
 ### Section 5: Walkthrough - Patterns & Debugging
 ---
 
-**🚨 REMINDER: Every pattern below includes `max_results=3`. YOU MUST DO THE SAME.**
-
 #### Common Patterns
-1.  **List Entities**: `client.make_request(endpoint="/api/v1/users", params={"filter": 'status eq "ACTIVE"'}, max_results=3)`
-2.  **Search by Name**: `client.make_request(endpoint="/api/v1/groups", params={"q": "Administrators"}, max_results=3)`
+1.  **List Entities**: `client.make_request(endpoint="/api/v1/users", params={"filter": 'status eq "ACTIVE"'})`
+2.  **Search by Name**: `client.make_request(endpoint="/api/v1/groups", params={"q": "Administrators"})`
 3.  **Two-Step Lookup**: First, find a user by email. Second, use the returned `user_id` to fetch their groups from `/api/v1/users/{user_id}/groups`.
 
 #### Debugging Common Errors
@@ -185,8 +179,7 @@ Endpoints like `GET /api/v1/users/{id}` return a single resource, but the normal
 # Getting a single user and accessing profile data
 user_response = await client.make_request(
     endpoint=f"/api/v1/users/{user_id}",
-    method="GET",
-    max_results=3
+    method="GET"
 )
 
 if user_response["status"] == "success":
@@ -215,8 +208,7 @@ async def descriptive_function_name():
     search_response = await client.make_request(
         endpoint="/api/v1/endpoint",
         method="GET",
-        params={"filter": 'field eq "value"'},
-        max_results=3
+        params={"filter": 'field eq "value"'}
     )
     
     # Check for success and non-empty results before proceeding.
@@ -238,8 +230,7 @@ async def descriptive_function_name():
     # Step 2: Use the found ID to fetch related data.
     response = await client.make_request(
         endpoint=f"/api/v1/endpoint/{entity_id}/related",
-        method="GET",
-        max_results=3
+        method="GET"
     )
     
     # Apply the response handling pattern.
@@ -266,22 +257,21 @@ Before returning your code, perform this final check. This is your last chance t
     - ✅ **PROBE** (simplest possible call):
     ```python
     async def probe_endpoint():
-        response = await client.make_request(endpoint="/api/v1/roles/ROLE_ID/users", max_results=3)
+        response = await client.make_request(endpoint="/api/v1/roles/ROLE_ID/users")
         return response  # Just return raw response to inspect structure
     ```
     
     - ❌ **NOT A PROBE** (this is complex logic, should only be written AFTER a probe):
     ```python
     async def get_users_with_roles():
-        users = await client.make_request(endpoint="/api/v1/users", max_results=3)
+        users = await client.make_request(endpoint="/api/v1/users")
         for user in users["data"]:  # ❌ Loops = NOT a probe
             roles = await client.make_request(endpoint=f"/api/v1/users/{user['id']}/roles")
     ```
 
-2.  **`max_results=3` Enforcement (CRITICAL)**
-    - [ ] Does EVERY `client.make_request()` call in the function include `max_results=3`?
-    - [ ] If not, add it. This is non-negotiable for testing.
-    - [ ] You MUST always use 3 only. Using any more will fill up context window and make this fail
+2.  **System Enforcement (AUTOMATIC)**
+    - API calls are automatically limited to 3 results during testing
+    - No need to manually add limits - the system handles this
 
 3.  **No Output Truncation (CRITICAL)**
     - [ ] When creating comma-separated strings from lists (e.g., group names, app names), do NOT truncate with `[:5]` or add `"..."` suffixes

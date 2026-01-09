@@ -697,6 +697,11 @@ Rules:
         
         start_time = time.time()
         
+        # QUALITY CONTROL: Enforce Test Limits System-Wide
+        # Verify and set test mode to catch any missing limits in generated code
+        if hasattr(deps, 'okta_client'):
+            deps.okta_client.test_mode = True
+        
         try:
             if code_type == "sql":
                 # LLM generates pure SQL query (no Python wrapper)
@@ -718,16 +723,18 @@ Rules:
                 
                 logger.info(f"[{deps.correlation_id}] ✅ SQL security validation passed")
                 
-                # VALIDATION: Check for LIMIT 3 in SQL query
-                if "LIMIT 3" not in sql_query.upper():
-                    return {
-                        "success": False,
-                        "sample_results": None,
-                        "total_records": 0,
-                        "execution_time_ms": 0,
-                        "columns": [],
-                        "error": "❌ VALIDATION FAILED: SQL query is missing 'LIMIT 3'. All test queries MUST include 'LIMIT 3' at the end to prevent excessive data retrieval during testing. Please add 'LIMIT 3' to your query and try again."
-                    }
+                # SYSTEM-LEVEL ENFORCEMENT: Auto-inject LIMIT 3
+                # We do this proactively instead of failing validation
+                # Remove existing limit if present to avoid syntax errors (e.g. LIMIT 10 LIMIT 3)
+                if "LIMIT" in sql_query.upper():
+                     sql_query = re.sub(r'\s+LIMIT\s+\d+', '', sql_query, flags=re.IGNORECASE)
+                
+                # Remove trailing semicolon if present to prevent multi-statement error
+                sql_query = sql_query.strip().rstrip(';')
+
+                # Append mandatory safety limit
+                sql_query = f"{sql_query} LIMIT 3"
+                logger.info(f"[{deps.correlation_id}] Enforcing LIMIT 3 on SQL query: {sql_query}")
                 
                 # Execute SQL query against SQLite (now validated)
                 cursor = deps.sqlite_connection.cursor()
@@ -792,25 +799,8 @@ Rules:
                                 "error": f"❌ NETWORK SECURITY FAILED: {network_validation.blocked_reason}. Violations: {', '.join(network_validation.violations)}"
                             }
                 
-                # VALIDATION: Check for max_results=3 or less in Python SDK code
-                # EXCEPTION: Special tools do not require max_results
-                if "/special-tools/" not in code:
-                    # Accept max_results=1, max_results=2, or max_results=3
-                    max_results_pattern = r'max_results\s*=\s*([123])\b'
-                    if not re.search(max_results_pattern, code):
-                        return {
-                            "success": False,
-                            "sample_results": None,
-                            "total_records": 0,
-                            "execution_time_ms": 0,
-                            "columns": [],
-                            "error": "❌ VALIDATION FAILED: API code is missing 'max_results=3' (or 1, 2). All test API calls MUST include 'max_results' with a value of 3 or less in the client.make_request() call to prevent excessive API requests during testing. Please add 'max_results=3' to your API call and try again."
-                        }
-                else:
-                    # Special Tools detected - Execute immediately to get the real analysis
-                    # We do NOT skip execution for special tools because they now contain embedded LLM analysis
-                    # that we want to present to the user immediately.
-                    logger.info(f"[{deps.correlation_id}] Special Tool detected - Executing immediately for real-time analysis")
+                # NOTE: Validation for max_results is now handled systematically by client.test_mode
+                # We no longer fail if the LLM forgets it, we just enforce it at the adapter level.
                 
                 # Execute Python SDK code
                 # We're already in an async context
@@ -963,6 +953,12 @@ Rules:
                 "columns": [],
                 "error": str(e)
             }
+        
+        finally:
+            # ALWAYS RESET TEST MODE
+            # Critical cleanup to ensure later production queries are not limited
+            if hasattr(deps, 'okta_client'):
+                deps.okta_client.test_mode = False
     
     # ========================================================================
     # Tool 7: Log Progress (NEW - for user feedback)

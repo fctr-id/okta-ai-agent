@@ -10,9 +10,9 @@ The query will be executed immediately against a SQLite database to test if the 
 
 ### Critical Rules
 1. **QUERY ONLY** - Generate ONLY the SQL query string (no Python code)
-2. **LIMIT 3** - Always include `LIMIT 3` for test queries
-3. **USE SCHEMA** - Use exact table/column names from provided schema (Tool 1)
-4. **VALIDATE VALUES** - Check schema comments for valid field values (e.g., status values, factor types)
+2. **USE SCHEMA** - Use exact table/column names from provided schema (Tool 1)
+3. **VALIDATE VALUES** - Check schema comments for valid field values (e.g., status values, factor types)
+4. **TEST MODE** - Queries are automatically limited to 3 results during testing
 
 ---
 ## THE 4 UNBREAKABLE LAWS
@@ -91,7 +91,6 @@ FROM okta_users u
 JOIN okta_user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
 JOIN okta_groups g ON ugm.group_okta_id = g.okta_id
 WHERE u.status = 'ACTIVE'
-LIMIT 3
 ```
 
 ### 5. Exclusion Queries
@@ -116,7 +115,6 @@ FROM okta_users u
 JOIN okta_user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
 JOIN okta_groups g ON ugm.group_okta_id = g.okta_id
 WHERE u.status = 'ACTIVE' AND g.name LIKE '%Admin%'
-LIMIT 3
 
 -- WRONG: Filtering in ON clause
 JOIN okta_groups g ON ugm.group_okta_id = g.okta_id AND g.name LIKE '%Admin%'  -- Bad!
@@ -142,7 +140,6 @@ FROM okta_users
 WHERE status = 'ACTIVE' 
   AND department = 'Engineering'
   AND user_type = 'Employee'
-LIMIT 3
 ```
 
 ### Pattern 2: Users with MFA Enrolled
@@ -162,7 +159,6 @@ JOIN okta_user_factors f ON u.okta_id = f.user_okta_id
 WHERE u.status = 'ACTIVE'
   AND f.factor_type = 'signed_nonce'
   AND f.status = 'ACTIVE'
-LIMIT 3
 ```
 
 ### Pattern 3: Users in Multiple Groups
@@ -188,7 +184,6 @@ WHERE u.status = 'ACTIVE'
       JOIN okta_groups g2 ON ugm2.group_okta_id = g2.okta_id
       WHERE g2.name = 'Security'
   )
-LIMIT 3
 ```
 
 ### Pattern 4: Users with Application Access
@@ -207,7 +202,6 @@ JOIN okta_applications a ON uaa.app_okta_id = a.okta_id
 WHERE u.status = 'ACTIVE'
   AND a.status = 'ACTIVE'
   AND a.label LIKE '%Salesforce%'
-LIMIT 3
 ```
 
 ### Pattern 5: Users WITHOUT Group Membership
@@ -225,7 +219,6 @@ WHERE status = 'ACTIVE'
       SELECT user_okta_id 
       FROM okta_user_group_memberships
   )
-LIMIT 3
 ```
 
 ### Pattern 6: Aggregation - Count by Department
@@ -238,7 +231,6 @@ FROM okta_users
 WHERE status = 'ACTIVE'
 GROUP BY department
 ORDER BY user_count DESC
-LIMIT 3
 ```
 
 ### Pattern 7: Group-Based App Access
@@ -258,7 +250,6 @@ JOIN okta_group_app_assignments gaa ON g.okta_id = gaa.group_okta_id
 JOIN okta_applications a ON gaa.app_okta_id = a.okta_id
 WHERE u.status = 'ACTIVE'
   AND a.status = 'ACTIVE'
-LIMIT 3
 ```
 
 ---
@@ -301,7 +292,6 @@ Before returning your query, verify:
 - [ ] Uses DISTINCT if joining multiple tables
 - [ ] Uses `label` for application names (not `name`)
 - [ ] Field values match schema (e.g., signed_nonce for WebAuthn)
-- [ ] Includes `LIMIT 3` for testing
 
 ---
 ## RESPONSE FORMAT
