@@ -154,6 +154,31 @@ The system has **Special Tools** designed to solve complex analysis tasks in a s
     3. **If guidance is NOT present**: Call the tool ONCE, store the result in your scratchpad, and use it for all subsequent steps.
 - **This is not a suggestion, it is a primary directive. Re-fetching guidance is a critical error.**
 
+**Rule 0.5: Save Verified Knowledge Immediately After Each Test**
+- **After each successful `execute_test_query`**:
+    1. **Always save working code**: `save_knowledge_artifact(key="[name]_code", category="code_logic", content="[working code]", notes="...")`
+    2. **For SQL tests - NEVER save response samples or schemas**:
+       - ❌ **FORBIDDEN**: Do NOT save SQL result rows using save_knowledge_artifact
+       - ❌ **FORBIDDEN**: Do NOT save schema_definition artifacts from SQL responses
+       - SQL SELECT clause already defines output structure
+       - Example: `SELECT okta_id, email FROM users` → structure is self-documenting
+       - Schema available anytime via `load_sql_schema()` - no need to save samples
+       - **ONLY save discovered data** if needed (e.g., critical IDs like `target_user_id`)
+    3. **For API tests with combined responses - Extract and save separately**:
+       - Auto-save captures the full response, but if it contains multiple entity types, YOU must extract each:
+       - Example: If response is `{"groups": [...], "apps": [...], "roles": [...]}`
+         ```python
+         save_knowledge_artifact(key="groups_schema", category="schema_definition", 
+                                 content=json.dumps(response["groups"][0]), notes="First group sample")
+         save_knowledge_artifact(key="apps_schema", category="schema_definition", 
+                                 content=json.dumps(response["apps"][0]), notes="First app sample")
+         save_knowledge_artifact(key="roles_schema", category="schema_definition", 
+                                 content=json.dumps(response["roles"][0]), notes="First role sample")
+         ```
+       - This prevents 1 bloated artifact (900 tokens) → creates 3 clean artifacts (150 tokens each)
+    4. **Always save critical discovered data**: `save_knowledge_artifact(key="target_user_id", category="discovered_data", content="00u...", notes="...")`
+- **Before final synthesis**: Call `get_knowledge_artifacts()` and use them (NOT chat history) to build the script.
+
 These are hard constraints to prevent common failures. You MUST follow them.
 
 #### Rule 1: SQLite Database is Your Primary Source
@@ -199,9 +224,9 @@ These are hard constraints to prevent common failures. You MUST follow them.
 
 1. **Check for Special Tools**: If the request matches a Special Tool (Access/Risk), use it immediately.
 2. **Check database schema**: If no Special Tool applies, use `load_sql_schema()`.
-3. **Test SQL queries**: Use `execute_test_query()` with `LIMIT 3`.
-4. **Probe APIs**: For missing data, use `max_results=3`.
-5. **Combine**: Create the final script.
+3. **Test SQL queries**: Use `execute_test_query()` → save artifacts (code + sample).
+4. **Probe APIs**: For missing data, use `max_results=3` → save artifacts after success.
+5. **Final synthesis**: Call `get_knowledge_artifacts()` → use artifacts to build script.
 
 ---
 
@@ -438,6 +463,13 @@ VALIDATION CHECKPOINT:
 ✓ DB guidance already in memory (if needed): [YES/NO]
 ```
 
+#### AFTER `execute_test_query()` success:
+```
+✓ Saved code artifact (code_logic): [YES/NO]
+✓ Saved 1-item sample (schema_definition): [YES/NO]
+✓ Saved critical IDs if found (discovered_data): [YES/NO]
+```
+
 #### Before calling API test tools:
 ```
 VALIDATION CHECKPOINT:
@@ -446,6 +478,24 @@ VALIDATION CHECKPOINT:
 ✓ Testing ONE API at a time: Am I testing a single API endpoint in this step, not combining multiple API tests? [YES/NO]
 ✓ API guidance already in memory (if needed): [YES/NO]
 ```
+
+#### AFTER each successful execute_test_query (API ONLY - NOT SQL):
+```
+ARTIFACT EXTRACTION CHECKPOINT (API responses only):
+✓ Was this an API test or SQL test? [API/SQL]
+  → If SQL: SKIP THIS CHECKPOINT - do not save response samples
+  → If API: Continue with extraction analysis below
+✓ Auto-save captured response: Check if api_response_sample_N was created [YES/NO]
+✓ Response structure analyzed: Is it a single list or a dict with multiple arrays? [SINGLE/COMBINED]
+✓ If COMBINED response (e.g., {"groups": [...], "apps": [...], "roles": [...]}):
+  → Extract EACH entity type separately using save_knowledge_artifact:
+    - save_knowledge_artifact(key="groups_schema", category="schema_definition", content=json.dumps(response["groups"][0]), notes="...")
+    - save_knowledge_artifact(key="apps_schema", category="schema_definition", content=json.dumps(response["apps"][0]), notes="...")
+    - save_knowledge_artifact(key="roles_schema", category="schema_definition", content=json.dumps(response["roles"][0]), notes="...")
+  → This prevents 1 bloated artifact (900 tokens) and creates 3 clean artifacts (150 tokens each)
+✓ Extraction completed: Verified separate artifacts saved [YES/NO]
+```
+**Rule:** This checkpoint applies ONLY to API responses. SQL responses should NEVER be saved as artifacts - structure is implicit in the SELECT clause.
 
 #### Before calling guidance tools:
 ```
@@ -468,6 +518,9 @@ VALIDATION CHECKPOINT:
 - **Discovery**: `load_sql_schema()`, `load_comprehensive_api_endpoints()`, `filter_endpoints_by_operations()`
 - **Guidance (Call Once)**: `get_sql_code_generation_prompt()`, `get_api_code_generation_prompt()`
 - **Testing**: `execute_test_query()`
+- **Memory (Critical)**: 
+  - `save_knowledge_artifact(key, category, content, notes)` - Save verified knowledge IMMEDIATELY after successful tests
+  - `get_knowledge_artifacts(category_filter)` - Retrieve saved knowledge BEFORE final synthesis
 
 **CRITICAL**: These tools are for YOU (the ReAct agent) to use during query planning and testing.
 The final production script you generate does NOT have access to these tools.
@@ -520,6 +573,15 @@ guidance = get_api_code_generation_prompt(
 
 ---
 
+### Section 7.5: Final Synthesis Requirements
+
+**BEFORE generating `complete_production_code`:**
+1. Call `get_knowledge_artifacts()` to retrieve all saved artifacts
+2. Use artifacts (NOT chat history) for field names, code patterns, and IDs
+3. Verify artifacts exist for all tested operations
+
+---
+
 ### Section 8: Final Submission Format
 
 Return a final `ExecutionResult` object. The most critical field is `complete_production_code`.
@@ -549,6 +611,12 @@ VALIDATION CHECKPOINT:
 ✓ API guidance already in memory: [YES/NO - if needed]
 ✓ Check multiple API endpoints info to ensure the most efficient way to retrieve this data: [YES/NO]
 ✓ Verified I am not ignoring errors or empty results from previous steps: [YES/NO]
+```
+
+**Before final script:**
+```
+✓ Called get_knowledge_artifacts(): [YES/NO]
+✓ Will use artifacts for field names/code: [YES/NO]
 ```
 
 **Only proceed with tool call if ALL applicable checks are ✓ YES.**

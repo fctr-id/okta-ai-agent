@@ -80,6 +80,9 @@ class OktaAPIClient:
         self.timeout = timeout
         self.max_pages = max_pages
         
+        # Test mode flag - enforces limit=3 and prevents pagination
+        self.test_mode = False
+        
         # OAuth2 authentication support
         self.oauth2_manager = None
         self.auth_method = 'api_token'  # Default to existing method
@@ -458,6 +461,14 @@ class OktaAPIClient:
         Returns:
             Dict with status and data/error
         """
+        # TEST MODE ENFORCEMENT: Force limit=3 and prevent pagination
+        if self.test_mode:
+            if params is None:
+                params = {}
+            params['limit'] = 3
+            max_results = 3
+            self.logger.info(f"🧪 TEST MODE: Enforcing limit=3 for {endpoint}")
+        
         # Emit structured progress events - only for max_results limit
         if max_results:
             self._emit_progress("api_call_limit", {"max_results": max_results})
