@@ -9,7 +9,7 @@ This agent follows the ReAct (Reasoning + Acting) pattern:
 4. Repeat until query is answered or max retries exceeded
 """
 
-from pydantic_ai import Agent, RunContext, FunctionToolset, ModelMessage, ToolReturn, UsageLimits
+from pydantic_ai import Agent, RunContext, FunctionToolset, ModelMessage
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Literal
 from dataclasses import dataclass
@@ -292,9 +292,8 @@ class ReactAgentDependencies:
     MAX_SQL_EXECUTIONS: int = int(os.getenv('REACT_AGENT_MAX_SQL_EXECUTIONS', '5'))
     MAX_API_EXECUTIONS: int = int(os.getenv('REACT_AGENT_MAX_API_EXECUTIONS', '20'))
     
-    # Knowledge artifacts storage (for LLM-generated summaries)
-    artifacts: List[Dict] = None  # Initialized on first save
-    session_id: str = ""  # Session ID for artifact file naming
+    # Memory artifacts storage (NEW - for saving verified knowledge)
+    knowledge_artifacts: Dict[str, KnowledgeArtifact] = None  # Initialized on first save
 
 # ============================================================================
 # Structured Outputs
@@ -319,13 +318,10 @@ class ExecutionResult(BaseModel):
 
 async def compress_history(ctx: RunContext[ReactAgentDependencies], messages: list[ModelMessage]) -> list[ModelMessage]:
     """
-    History Processor: Smart compression using Utilization Trigger + Deduplication.
+    History Processor: Compresses 'Heavy' tool outputs after they have been utilized.
+    Only compresses when agent has moved past discovery into synthesis.
     
-    Key principles:
-    1. Utilization Trigger: Only compress after LLM has USED the data (executed test queries)
-    2. Deduplication: Keep only the LAST occurrence of each heavy tool
-    3. Artifact-Based Phase Detection: Delete SQL tools after sql_results saved
-    4. Safety: Never compress the last message
+    Also logs per-call token tracking using ctx.usage.
     """
     deps = ctx.deps
     
@@ -338,7 +334,7 @@ async def compress_history(ctx: RunContext[ReactAgentDependencies], messages: li
     current_total = ctx.usage.input_tokens if ctx.usage else 0
     current_calls = ctx.usage.requests if ctx.usage else 0
     
-    # Log token usage per call
+    # Only log if we have a new call
     if current_calls > compress_history._call_count:
         incremental = current_total - compress_history._last_tokens
         if incremental > 0:
@@ -349,155 +345,109 @@ async def compress_history(ctx: RunContext[ReactAgentDependencies], messages: li
         compress_history._last_tokens = current_total
         compress_history._call_count = current_calls
     
-    # PHASE 1: Check completion status from artifacts
-    sql_phase_complete = any(a['category'] == 'sql_results' for a in (deps.artifacts or []))
-    api_endpoints_loaded = any(a['category'] == 'api_endpoints' for a in (deps.artifacts or []))
-    api_phase_complete = any(a['category'] == 'api_response' for a in (deps.artifacts or []))
-    
-    # PHASE 2: Utilization Trigger - has LLM executed test queries?
-    has_executed_query = False
+    # 1. Check if agent is in synthesis phase (has executed at least 1 successful query)
+    successful_execution_count = 0
     for msg in messages:
         if hasattr(msg, 'parts'):
             for part in msg.parts:
                 if hasattr(part, 'tool_name') and part.tool_name == "execute_test_query":
-                    has_executed_query = True
-                    break
-        if has_executed_query:
-            break
+                    # Check if this was a successful execution
+                    if hasattr(part, 'content'):
+                        try:
+                            content = json.loads(str(part.content)) if isinstance(part.content, str) else part.content
+                            if content.get('success'):
+                                successful_execution_count += 1
+                        except:
+                            pass
     
-    if not has_executed_query:
-        return messages  # Don't compress until LLM has used the data
+    # Don't compress until we have at least 1 successful execution
+    if successful_execution_count == 0:
+        return messages
     
-    # PHASE 3: Track tool call/result pairs for deletion
-    # Structure: {tool_name: [(call_idx, result_idx), ...]}
-    tool_pairs = {
-        'get_sql_context': [],
+    # 2. Identify heavy tool occurrences to keep only the last one (Deduplication Strategy)
+    heavy_tools_map = {
+        'load_sql_schema': [],
         'load_comprehensive_api_endpoints': [],
-        'filter_endpoints_by_operations': [],
-        'get_api_code_generation_prompt': [],
-        'execute_test_query_sql': [],
-        'execute_test_query_api': []
+        'filter_endpoints_by_operations': []
     }
     
-    # Build map of tool_call_id -> call message index
-    call_id_to_index = {}
-    for i, msg in enumerate(messages[:-1]):  # Exclude last message (safety)
+    for i, msg in enumerate(messages):
         if hasattr(msg, 'parts'):
             for part in msg.parts:
-                # Track tool CALLS (these have tool_call_id)
-                if hasattr(part, 'tool_call_id'):
-                    call_id_to_index[part.tool_call_id] = i
-    
-    # Now find tool RESULTS and pair them with their calls
-    for i, msg in enumerate(messages[:-1]):
+                if hasattr(part, 'tool_name') and part.tool_name in heavy_tools_map and hasattr(part, 'content'):
+                    if len(str(part.content)) > 200:
+                        heavy_tools_map[part.tool_name].append((i, part))
+
+    compressed_count = 0
+    compressed_types = []
+
+    # 3. Apply Compression
+    for i, msg in enumerate(messages):
+        # Skip the very last message (Safety: Agent needs to see the result of its last action!)
+        if i == len(messages) - 1:
+            continue
+
         if hasattr(msg, 'parts'):
             for part in msg.parts:
-                # Tool RESULTS have tool_name and tool_call_id
-                if hasattr(part, 'tool_name') and hasattr(part, 'tool_call_id'):
+                if hasattr(part, 'tool_name') and hasattr(part, 'content'):
+                    
+                    content_str = str(part.content)
                     tool_name = part.tool_name
-                    tool_call_id = part.tool_call_id
                     
-                    # Find the corresponding call message
-                    call_idx = call_id_to_index.get(tool_call_id)
-                    if call_idx is None:
-                        continue  # Call not found, skip
+                    # Discovery Tools: Compress ALL BUT THE LAST occurrence
+                    if tool_name in heavy_tools_map and len(content_str) > 200:
+                        occurrences = heavy_tools_map[tool_name]
+                        if len(occurrences) > 1:
+                            # Check if this is NOT the last occurrence
+                            is_last = (i, part) == occurrences[-1]
+                            if not is_last:
+                                part.content = f"[Compressed: {tool_name} result cached - see later occurrence]"
+                                compressed_count += 1
+                                if tool_name not in compressed_types:
+                                    compressed_types.append(tool_name)
                     
-                    result_idx = i
+                    # Code generation prompts: Compress if multiple successful executions
+                    elif tool_name in ['get_sql_code_generation_prompt', 'get_api_code_generation_prompt'] and len(content_str) > 200:
+                        if successful_execution_count >= 2:  # Only compress if we've moved past first test
+                            part.content = f"[Compressed: Code generation instructions utilized]"
+                            compressed_count += 1
+                            if tool_name not in compressed_types:
+                                compressed_types.append(tool_name)
                     
-                    # Track by tool type
-                    if tool_name in tool_pairs:
-                        tool_pairs[tool_name].append((call_idx, result_idx))
-                    
-                    # Special handling for execute_test_query
-                    elif tool_name == 'execute_test_query':
-                        # Check args in the CALL message to distinguish SQL vs API
-                        call_msg = messages[call_idx]
-                        args_str = ''
-                        if hasattr(call_msg, 'parts'):
-                            for call_part in call_msg.parts:
-                                if hasattr(call_part, 'args'):
-                                    args_str = str(call_part.args)
-                                    break
+                    # Test execution results: Compress older results (keep last 2)
+                    elif tool_name == 'execute_test_query' and len(content_str) > 500:
+                        # Count how many execute_test_query results we've seen so far
+                        exec_count_before_this = 0
+                        for j in range(i):
+                            if hasattr(messages[j], 'parts'):
+                                for p in messages[j].parts:
+                                    if hasattr(p, 'tool_name') and p.tool_name == 'execute_test_query':
+                                        exec_count_before_this += 1
                         
-                        if 'sqlite' in args_str.lower() or 'sql' in args_str.lower():
-                            tool_pairs['execute_test_query_sql'].append((call_idx, result_idx))
-                        else:
-                            tool_pairs['execute_test_query_api'].append((call_idx, result_idx))
-    
-    # PHASE 4: Determine what to delete based on completion status
-    deletable_indices = set()
-    
-    # Helper to add both call and result indices
-    def delete_pairs(pairs):
-        for call_idx, result_idx in pairs:
-            deletable_indices.add(call_idx)
-            deletable_indices.add(result_idx)
-    
-    # CRITICAL RULE: Only delete data after SUCCESSFUL artifact save
-    # Failed attempts mean LLM still needs the data to retry!
-    
-    # Delete SQL schema ONLY after SQL phase successfully complete (artifact saved)
-    if sql_phase_complete and tool_pairs['get_sql_context']:
-        delete_pairs(tool_pairs['get_sql_context'])
-    
-    # Delete SQL test executions ONLY after successful SQL artifact saved
-    if sql_phase_complete and tool_pairs['execute_test_query_sql']:
-        delete_pairs(tool_pairs['execute_test_query_sql'])
-    
-    # Delete API endpoints ONLY after endpoints loaded and successfully filtered
-    if api_endpoints_loaded and tool_pairs['load_comprehensive_api_endpoints']:
-        delete_pairs(tool_pairs['load_comprehensive_api_endpoints'])
-    
-    # Delete endpoint filters (keep only last if multiple successful calls)
-    if len(tool_pairs['filter_endpoints_by_operations']) > 1:
-        delete_pairs(tool_pairs['filter_endpoints_by_operations'][:-1])
-    
-    # Delete API code prompt ONLY after API phase complete (artifact saved)
-    if api_phase_complete and tool_pairs['get_api_code_generation_prompt']:
-        delete_pairs(tool_pairs['get_api_code_generation_prompt'])
-    
-    # PHASE 5: Filter messages (remove deletable indices)
-    compressed = [msg for i, msg in enumerate(messages) if i not in deletable_indices]
-    
-    # Log compression results
-    if len(compressed) < len(messages):
-        deleted_count = len(messages) - len(compressed)
-        logger.info(f"[{deps.correlation_id}] 🗑️ Compressed {deleted_count} messages: {len(messages)} → {len(compressed)}")
-        logger.info(f"[{deps.correlation_id}] 📦 Phases: SQL={'✅' if sql_phase_complete else '⏳'}, API={'✅' if api_phase_complete else '⏳'}")
-    
-    return compressed
+                        # Keep last 2 results uncompressed, compress older ones
+                        if exec_count_before_this < successful_execution_count - 2:
+                            try:
+                                result_dict = json.loads(content_str) if isinstance(content_str, str) else content_str
+                                if result_dict.get('success') and 'sample_results' in result_dict:
+                                    result_dict['sample_results'] = "[Compressed - structure saved to artifact store]"
+                                    part.content = json.dumps(result_dict, separators=(',', ':'))
+                                    compressed_count += 1
+                                    if tool_name not in compressed_types:
+                                        compressed_types.append(tool_name)
+                            except:
+                                pass
 
-# ============================================================================
-# Artifact Helper Function
-# ============================================================================
+    if compressed_count > 0:
+        logger.info(f"[{deps.correlation_id}] 🧹 COMPRESSED {compressed_count} messages (after {successful_execution_count} successful executions): {', '.join(compressed_types)}")
 
-async def dump_artifacts_to_file(session_id: str, artifacts: List[Dict]):
-    """
-    Persist artifacts to disk for crash recovery and debugging.
-    
-    Args:
-        session_id: Correlation ID for the session
-        artifacts: List of artifact dictionaries to save
-    """
-    try:
-        artifacts_dir = Path("logs")
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        
-        artifacts_file = artifacts_dir / f"artifacts_{session_id}.json"
-        
-        with open(artifacts_file, 'w', encoding='utf-8') as f:
-            json.dump(artifacts, f, indent=2)
-        
-        logger.debug(f"[{session_id}] Artifacts persisted to {artifacts_file}")
-    except Exception as e:
-        logger.warning(f"[{session_id}] Failed to persist artifacts: {e}")
+    return messages
 
 # ============================================================================
 # Tool Implementations
 # ============================================================================
 
 def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
-    """Create function toolset with all 9 tools for the ReAct agent"""
+    """Create function toolset with all 7 tools for the ReAct agent"""
     
     toolset = FunctionToolset()
     
@@ -522,86 +472,40 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
             raise asyncio.CancelledError("Execution cancelled by user")
 
     # ========================================================================
-    # Tool 1: Get SQL Context (Combined Schema + Code Generation Guidance)
+    # Tool 1: Load SQLite Schema
     # ========================================================================
     
-    async def get_sql_context(
-        ctx: RunContext[ReactAgentDependencies],
-        query_description: str,
-        limit: int = 3
-    ) -> ToolReturn:
+    async def load_sql_schema(ctx: RunContext[ReactAgentDependencies]) -> Dict[str, Any]:
         """
-        Get complete SQL context: database schema + code generation guidance.
-        This combines schema and generation rules in one call.
-        
-        Call this when you need to write SQL queries. It provides:
-        1. Database schema (tables, columns, relationships)
-        2. SQL code generation rules and best practices
-        
-        Args:
-            query_description: Natural language description of what to query
-            limit: Number of records to return (default 3 for testing)
+        Load SQLite database schema to understand what data is available in the database.
+        Call this FIRST to see what tables, columns, and relationships exist.
         
         Returns:
-            ToolReturn with schema + guidance combined
+            Complete schema description with tables, columns, indexes, and relationships
         """
         check_cancellation()
-        await notify_tool_call("get_sql_context", "Loading SQL schema and generation guidance")
-        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQL context (schema + guidance)")
+        
+        # Notify frontend
+        await notify_tool_call("load_sql_schema", "Loading database schema")
+        
+        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQLite schema on-demand")
         
         try:
-            # 1. Get database schema
+            # Generate the full schema description
             schema_text = get_sqlite_schema_description()
             
-            # 2. Load SQL generation prompt from file
-            sql_prompt_file = Path(__file__).parent / "prompts" / "sql_code_gen_react_agent_system_prompt.txt"
-            try:
-                with open(sql_prompt_file, 'r', encoding='utf-8') as f:
-                    sql_prompt = f.read()
-            except FileNotFoundError:
-                sql_prompt = """Generate a SQLite-compatible SQL query.
-            
-Rules:
-- Use proper SELECT, FROM, JOIN syntax
-- Always include LIMIT clause for safety
-- Use proper table names from the schema below
-- Use proper column names from the schema below
-- Return only the data requested
-"""
-            
-            # 3. Combine schema + guidance into single context
-            combined_context = f"""
-=== DATABASE SCHEMA ===
-{schema_text}
-
-=== SQL CODE GENERATION GUIDANCE ===
-{sql_prompt}
-
-=== YOUR TASK ===
-Query Description: {query_description}
-Test Limit: {limit} rows
-
-Now write your SQL query using the schema above.
-"""
-            
-            return ToolReturn(
-                return_value=f"✅ SQL context loaded: schema + guidance (limit: {limit})",
-                content=combined_context,
-                metadata={
-                    'schema_loaded': True,
-                    'guidance_loaded': True,
-                    'limit': limit,
-                    'query_description': query_description,
-                    'timestamp': time.time()
-                }
-            )
+            return {
+                "status": "success",
+                "schema": schema_text,
+                "note": "Use this schema to understand what data is available in the database and write SQL queries"
+            }
         except Exception as e:
-            logger.error(f"[{deps.correlation_id}] Failed to load SQL context: {e}", exc_info=True)
-            return ToolReturn(
-                return_value=f"❌ SQL context load failed: {str(e)}",
-                content=f"Error loading SQL context: {str(e)}",
-                metadata={'schema_loaded': False, 'error': str(e)}
-            )
+            logger.error(f"[{deps.correlation_id}] Failed to load schema: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "schema": "",
+                "error": str(e)
+            }
     
     # ========================================================================
     # Tool 2: Load Comprehensive API Endpoints
@@ -670,11 +574,7 @@ Now write your SQL query using the schema above.
         
         logger.info(f"[{deps.correlation_id}] Loaded {result['total_entities']} entities with {result['total_operations']} operations (format: {result.get('format')})")
         
-        return ToolReturn(
-            return_value=f"✅ API endpoints loaded: {result['total_entities']} entities, {result['total_operations']} operations",
-            content=json.dumps(result, separators=(',', ':')),
-            metadata={'endpoints_loaded': True, 'total_operations': result['total_operations']}
-        )
+        return result
     
     # ========================================================================
     # Tool 3: Filter Endpoints by Operations
@@ -743,25 +643,71 @@ Now write your SQL query using the schema above.
                             logger.warning(f"Endpoint filtered for security: {endpoint.get('id', 'unknown')} - {'; '.join(security_result.violations)}")
                         break  # Found match, move to next endpoint
         
-        operations_found = [f"{ep.get('entity')}.{ep.get('operation')}" for ep in selected_endpoints]
+        result = {
+            "endpoints": selected_endpoints,
+            "total_endpoints_returned": len(selected_endpoints),
+            "operations_found": [f"{ep.get('entity')}.{ep.get('operation')}" for ep in selected_endpoints]
+        }
         
         logger.info(f"[{deps.correlation_id}] Found {len(selected_endpoints)} endpoints for {len(operation_names)} operation queries")
         
-        return ToolReturn(
-            return_value=f"✅ Filtered {len(selected_endpoints)} endpoints for {len(operation_names)} operations",
-            content=json.dumps(selected_endpoints, separators=(',', ':')),
-            metadata={'filtered_count': len(selected_endpoints), 'operations_found': operations_found}
-        )
+        return result
     
     # ========================================================================
-    # Tool 4: Get API Code Generation Prompt (NOT a code generator!)
+    # Tool 4: Get DB Code Generation Prompt (NOT a code generator!)
+    # ========================================================================
+    
+    async def get_sql_code_generation_prompt(
+        query_description: str,
+        limit: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Get the prompt template for generating SQL queries.
+        The ReAct agent itself will generate the code using this guidance.
+        
+        Args:
+            query_description: Natural language description of what to query
+            limit: Number of records to return (default 3 for testing)
+        
+        Returns:
+            Dictionary with code generation prompt and guidelines (schema already in system context)
+        """
+        check_cancellation()
+        await notify_tool_call("get_sql_code_generation_prompt", "Getting SQL code generation guidance")
+        logger.info(f"[{deps.correlation_id}] Tool 4: Getting SQL code generation prompt")
+        
+        # Load SQL generation prompt from file (ReAct agent specific)
+        sql_prompt_file = Path(__file__).parent / "prompts" / "sql_code_gen_react_agent_system_prompt.txt"
+        try:
+            with open(sql_prompt_file, 'r', encoding='utf-8') as f:
+                sql_prompt = f.read()
+        except FileNotFoundError:
+            sql_prompt = """Generate a SQLite-compatible SQL query.
+            
+Rules:
+- Use proper SELECT, FROM, JOIN syntax
+- Always include LIMIT clause for safety
+- Use proper table names from the schema in your system context
+- Use proper column names from the schema in your system context
+- Return only the data requested
+"""
+        
+        # Schema is already in system prompt - don't duplicate it here
+        return {
+            "code_generation_prompt": sql_prompt,
+            "query_task": query_description,
+            "limit": limit
+        }
+    
+    # ========================================================================
+    # Tool 5: Get API Code Generation Prompt (NOT a code generator!)
     # ========================================================================
     
     async def get_api_code_generation_prompt(
         query_description: str,
         endpoints: List[str],
         max_results: int = 3
-    ) -> ToolReturn:
+    ) -> Dict[str, Any]:
         """
         Get the prompt template for generating Python API code.
         The ReAct agent itself will generate the code using this guidance.
@@ -772,7 +718,7 @@ Now write your SQL query using the schema above.
             max_results: Maximum number of records to return (default 3 for testing)
         
         Returns:
-            ToolReturn with code generation prompt and guidelines
+            Dictionary with code generation prompt and guidelines
         """
         check_cancellation()
         await notify_tool_call("get_api_code_generation_prompt", "Getting API code generation guidance")
@@ -794,58 +740,17 @@ Rules:
 - Return structured data (list of dicts)
 """
         
-        guidance = {
+        return {
             "code_generation_prompt": api_prompt,
             "query_task": query_description,
             "max_results": max_results,
-            "target_operations": endpoints,
+            "target_operations": endpoints,  # Changed from available_endpoints - now just operation names
             "okta_client_available": "YES - Variable 'client' is pre-injected (see prompt for details)"
         }
-        
-        return ToolReturn(
-            return_value=f"✅ API code generation guidance loaded for {len(endpoints)} operations",
-            content=json.dumps(guidance, separators=(',', ':')),
-            metadata={'guidance_loaded': True, 'operations_count': len(endpoints)}
-        )
     
     # ========================================================================
     # Tool 6: Execute Test Query (executes code generated by the agent)
     # ========================================================================
-    
-    def truncate_sql_results(results: list, max_text_length: int = 100) -> list:
-        """
-        Truncate SQL results before sending to LLM to reduce token usage.
-        
-        Handles long CSV columns (e.g., 250 group names concatenated).
-        Truncates text fields beyond max_text_length while preserving structure.
-        
-        Args:
-            results: List of dict results from SQL query
-            max_text_length: Maximum characters per text field (default 100)
-        
-        Returns:
-            List of dicts with truncated text fields
-        
-        Example:
-            Input: {"groups": "Group1,Group2,Group3,...,Group250"} (1000 chars)
-            Output: {"groups": "Group1,Group2,Group3,Group4,Group5,Group6,Group7,Group8,Group9,Group10,Group11,Group12,Grou..."} (100 chars)
-        """
-        if not results:
-            return results
-        
-        truncated = []
-        for row in results:
-            truncated_row = {}
-            for key, value in row.items():
-                if isinstance(value, str) and len(value) > max_text_length:
-                    # Truncate and add ellipsis
-                    truncated_row[key] = value[:max_text_length] + "..."
-                else:
-                    # Keep as-is
-                    truncated_row[key] = value
-            truncated.append(truncated_row)
-        
-        return truncated
     
     async def execute_test_query(
         code: str,
@@ -887,34 +792,28 @@ Rules:
         if code_type == "sql":
             if deps.sql_execution_count >= deps.MAX_SQL_EXECUTIONS:
                 logger.warning(f"[{deps.correlation_id}] SQL circuit breaker triggered: {deps.sql_execution_count}/{deps.MAX_SQL_EXECUTIONS}")
-                return ToolReturn(
-                    return_value=f"⚠️ CIRCUIT BREAKER: SQL execution limit ({deps.MAX_SQL_EXECUTIONS}) exceeded",
-                    content=f"⚠️ CIRCUIT BREAKER: {deps.sql_execution_count} SQL queries attempted (max: {deps.MAX_SQL_EXECUTIONS}). You MUST call stop_execution() tool now.",
-                    metadata={
-                        'success': False,
-                        'circuit_breaker': True,
-                        'execution_count': deps.sql_execution_count,
-                        'max_executions': deps.MAX_SQL_EXECUTIONS,
-                        'error': 'SQL execution limit exceeded'
-                    }
-                )
+                return {
+                    "success": False,
+                    "sample_results": None,
+                    "total_records": 0,
+                    "execution_time_ms": 0,
+                    "columns": [],
+                    "error": f"⚠️ CIRCUIT BREAKER: {deps.sql_execution_count} SQL queries attempted (max: {deps.MAX_SQL_EXECUTIONS}). You MUST call stop_execution() tool now with reason='SQL execution limit exceeded' and user_message='Unable to find an answer to your query after {deps.sql_execution_count} SQL attempts. The data may not be available in the database, or the query is too complex. Please try rephrasing or breaking it into smaller parts.'"
+                }
             deps.sql_execution_count += 1
             logger.info(f"[{deps.correlation_id}] Tool 6: Executing SQL test query (execution #{deps.sql_execution_count}/{deps.MAX_SQL_EXECUTIONS})")
             
         elif code_type == "python_sdk":
             if deps.api_execution_count >= deps.MAX_API_EXECUTIONS:
                 logger.warning(f"[{deps.correlation_id}] API circuit breaker triggered: {deps.api_execution_count}/{deps.MAX_API_EXECUTIONS}")
-                return ToolReturn(
-                    return_value=f"⚠️ CIRCUIT BREAKER: API execution limit ({deps.MAX_API_EXECUTIONS}) exceeded",
-                    content=f"⚠️ CIRCUIT BREAKER: {deps.api_execution_count} API calls attempted (max: {deps.MAX_API_EXECUTIONS}). You MUST call stop_execution() tool now.",
-                    metadata={
-                        'success': False,
-                        'circuit_breaker': True,
-                        'execution_count': deps.api_execution_count,
-                        'max_executions': deps.MAX_API_EXECUTIONS,
-                        'error': 'API execution limit exceeded'
-                    }
-                )
+                return {
+                    "success": False,
+                    "sample_results": None,
+                    "total_records": 0,
+                    "execution_time_ms": 0,
+                    "columns": [],
+                    "error": f"⚠️ CIRCUIT BREAKER: {deps.api_execution_count} API calls attempted (max: {deps.MAX_API_EXECUTIONS}). You MUST call stop_execution() tool now with reason='API execution limit exceeded' and user_message='Unable to find an answer to your query after {deps.api_execution_count} API attempts. The required data may not be accessible via the API, or the query is too complex. Please try rephrasing or breaking it into smaller parts.'"
+                }
             deps.api_execution_count += 1
             logger.info(f"[{deps.correlation_id}] Tool 6: Executing API test query (execution #{deps.api_execution_count}/{deps.MAX_API_EXECUTIONS})")
         
@@ -938,11 +837,14 @@ Rules:
                 is_valid, error_msg = validate_user_sql(sql_query, deps.correlation_id)
                 if not is_valid:
                     logger.error(f"[{deps.correlation_id}] SQL security validation failed: {error_msg}")
-                    return ToolReturn(
-                        return_value=f"❌ SQL security validation failed",
-                        content=f"❌ SECURITY VALIDATION FAILED: {error_msg}",
-                        metadata={'success': False, 'security_error': True, 'error': error_msg}
-                    )
+                    return {
+                        "success": False,
+                        "sample_results": None,
+                        "total_records": 0,
+                        "execution_time_ms": 0,
+                        "columns": [],
+                        "error": f"❌ SECURITY VALIDATION FAILED: {error_msg}"
+                    }
                 
                 logger.info(f"[{deps.correlation_id}] ✅ SQL security validation passed")
                 
@@ -969,55 +871,41 @@ Rules:
                 
                 # Convert to list of dicts
                 if results:
-                    full_results = [dict(zip(columns, row)) for row in results]
+                    sample_results = [dict(zip(columns, row)) for row in results]
                 else:
-                    full_results = []
-                
-                # TRUNCATE RESULTS: Reduce token usage by capping long text fields
-                # Example: Column with 250 group names → truncated to 100 chars
-                # LLM sees truncated data, saves it to artifacts
-                # Full data preserved in metadata for app use (0 tokens to LLM)
-                truncated_results = truncate_sql_results(full_results, max_text_length=100)
+                    sample_results = []
                 
                 execution_time_ms = int((time.time() - start_time) * 1000)
                 
                 # Compact JSON to save tokens (28-39% reduction)
-                truncated_results_compact = json.dumps(truncated_results, separators=(',', ':'))
+                sample_results_compact = json.dumps(sample_results, separators=(',', ':'))
                 
-                # Calculate truncation stats
-                truncation_applied = any(
-                    any(isinstance(v, str) and len(str(full_results[i].get(k, ''))) > 100 
-                        for k, v in row.items()) 
-                    for i, row in enumerate(truncated_results)
-                ) if full_results else False
+                # NOTE: No auto-save for SQL results - the SQL code itself (saved as code_logic)
+                # already defines the output structure. Schema is available via load_sql_schema().
+                # Only API responses need auto-save since their structure is unknown until tested.
                 
-                # Store full results in metadata (0 tokens, accessible to app)
-                return ToolReturn(
-                    return_value=f"✅ Query successful: {len(full_results)} rows returned (text fields truncated to 100 chars for efficiency)",
-                    content=f"Sample results (truncated): {truncated_results_compact}",
-                    metadata={
-                        'success': True,
-                        'sql_code': code,
-                        'full_results': full_results,
-                        'truncated_results': truncated_results,
-                        'sample_schema': full_results[0] if full_results else None,
-                        'total_records': len(full_results),
-                        'execution_time_ms': execution_time_ms,
-                        'columns': columns,
-                        'truncation_applied': truncation_applied
-                    }
-                )
+                return {
+                    "success": True,
+                    "sample_results": sample_results_compact,
+                    "total_records": len(sample_results),
+                    "execution_time_ms": execution_time_ms,
+                    "columns": columns,
+                    "error": None
+                }
             
             elif code_type == "python_sdk":
                 # SECURITY VALIDATION: Check Python code for dangerous patterns
                 validation_result = validate_generated_code(code)
                 if not validation_result.is_valid:
                     logger.warning(f"[{deps.correlation_id}] Python code security validation failed: {validation_result.violations}")
-                    return ToolReturn(
-                        return_value=f"❌ Python security validation failed",
-                        content=f"❌ SECURITY VALIDATION FAILED: {', '.join(validation_result.violations)}",
-                        metadata={'success': False, 'security_error': True, 'violations': validation_result.violations}
-                    )
+                    return {
+                        "success": False,
+                        "sample_results": None,
+                        "total_records": 0,
+                        "execution_time_ms": 0,
+                        "columns": [],
+                        "error": f"❌ SECURITY VALIDATION FAILED: {', '.join(validation_result.violations)}"
+                    }
                 
                 # SECURITY VALIDATION: Check network requests for unauthorized domains
                 # Extract endpoint from code to validate URL
@@ -1031,11 +919,14 @@ Rules:
                         network_validation = validate_request('GET', full_url)
                         if not network_validation.is_allowed:
                             logger.warning(f"[{deps.correlation_id}] Network security validation failed: {network_validation.blocked_reason}")
-                            return ToolReturn(
-                                return_value=f"❌ Network security validation failed",
-                                content=f"❌ NETWORK SECURITY FAILED: {network_validation.blocked_reason}",
-                                metadata={'success': False, 'security_error': True, 'violations': network_validation.violations}
-                            )
+                            return {
+                                "success": False,
+                                "sample_results": None,
+                                "total_records": 0,
+                                "execution_time_ms": 0,
+                                "columns": [],
+                                "error": f"❌ NETWORK SECURITY FAILED: {network_validation.blocked_reason}. Violations: {', '.join(network_validation.violations)}"
+                            }
                 
                 # NOTE: Validation for max_results is now handled systematically by client.test_mode
                 # We no longer fail if the LLM forgets it, we just enforce it at the adapter level.
@@ -1160,47 +1051,223 @@ Rules:
                 sample_results = results[:3]  # Limit to 3 for testing
                 sample_results_compact = json.dumps(sample_results, separators=(',', ':'))
                 
-                # Store full results in metadata (0 tokens, accessible to app)
-                return ToolReturn(
-                    return_value=f"✅ API query successful: {len(results)} records returned",
-                    content=f"Sample results: {sample_results_compact}",
-                    metadata={
-                        'success': True,
-                        'python_code': code,
-                        'full_results': results,
-                        'sample_schema': results[0] if results else None,
-                        'total_records': len(results),
-                        'execution_time_ms': execution_time_ms,
-                        'columns': list(results[0].keys()) if results and isinstance(results[0], dict) else []
-                    }
-                )
+                # AUTO-SAVE: Save first sample to artifacts for later recall
+                if sample_results and len(sample_results) > 0:
+                    try:
+                        # Initialize artifact store if needed
+                        if deps.knowledge_artifacts is None:
+                            deps.knowledge_artifacts = {}
+                        
+                        # Generate unique key for this test
+                        artifact_key = f"api_response_sample_{deps.api_execution_count}"
+                        
+                        artifact_data = {
+                            "key": artifact_key,
+                            "category": "schema_definition",
+                            "content": json.dumps(sample_results[0], separators=(',', ':')),
+                            "notes": f"Auto-saved from API execution #{deps.api_execution_count}",
+                            "timestamp": time.time()
+                        }
+                        
+                        deps.knowledge_artifacts[artifact_key] = artifact_data
+                        
+                        # Log to file immediately
+                        artifacts_log_path = Path(get_default_log_dir()) / f"artifacts_{deps.correlation_id}.json"
+                        try:
+                            if artifacts_log_path.exists():
+                                with open(artifacts_log_path, 'r', encoding='utf-8') as f:
+                                    existing = json.load(f)
+                            else:
+                                existing = []
+                            
+                            existing.append(artifact_data)
+                            
+                            with open(artifacts_log_path, 'w', encoding='utf-8') as f:
+                                json.dump(existing, f, indent=2, ensure_ascii=False)
+                            
+                            logger.info(f"[{deps.correlation_id}] 💾 Auto-saved API response structure: {artifact_key}")
+                        except Exception as e:
+                            logger.warning(f"[{deps.correlation_id}] Failed to write artifact to file: {e}")
+                            
+                    except Exception as e:
+                        logger.warning(f"[{deps.correlation_id}] Failed to auto-save API sample: {e}")
+                
+                return {
+                    "success": True,
+                    "sample_results": sample_results_compact,  # Compact JSON string for LLM
+                    "total_records": len(results),
+                    "execution_time_ms": execution_time_ms,
+                    "columns": list(results[0].keys()) if results and isinstance(results[0], dict) else [],
+                    "error": None
+                }
             
             else:
-                return ToolReturn(
-                    return_value=f"❌ Unknown code_type: {code_type}",
-                    content=f"Error: Unknown code_type '{code_type}'",
-                    metadata={'success': False, 'error': f"Unknown code_type: {code_type}"}
-                )
+                return {
+                    "success": False,
+                    "sample_results": None,
+                    "total_records": 0,
+                    "execution_time_ms": 0,
+                    "columns": [],
+                    "error": f"Unknown code_type: {code_type}"
+                }
         
         except Exception as e:
             execution_time_ms = int((time.time() - start_time) * 1000)
             logger.error(f"[{deps.correlation_id}] Test execution failed: {e}", exc_info=True)
             
-            return ToolReturn(
-                return_value=f"❌ Execution failed: {str(e)[:100]}",
-                content=f"Error: {str(e)}",
-                metadata={
-                    'success': False,
-                    'execution_time_ms': execution_time_ms,
-                    'error': str(e)
-                }
-            )
+            return {
+                "success": False,
+                "sample_results": None,
+                "total_records": 0,
+                "execution_time_ms": execution_time_ms,
+                "columns": [],
+                "error": str(e)
+            }
         
         finally:
             # ALWAYS RESET TEST MODE
             # Critical cleanup to ensure later production queries are not limited
             if hasattr(deps, 'okta_client'):
                 deps.okta_client.test_mode = False
+    
+    # ========================================================================
+    # Tool 9: Save Knowledge Artifact (NEW - for explicit memory)
+    # ========================================================================
+    
+    async def save_knowledge_artifact(
+        key: str,
+        category: Literal["code_logic", "schema_definition", "discovered_data", "error_pattern", "user_intent"],
+        content: str,
+        notes: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Save verified knowledge to prevent "lost in the middle" problems.
+        
+        ⚠️ CRITICAL USAGE: Call this IMMEDIATELY after each successful execute_test_query:
+        1. Save the working code (category: 'code_logic')
+        2. Save a 1-item sample of the response (category: 'schema_definition')
+        3. Save any critical IDs or values (category: 'discovered_data')
+        
+        WHY: By Step 15, your Step 3 results are buried under 50KB of history.
+        Artifacts remain accessible even when history gets compressed.
+        
+        Args:
+            key: Unique ID (e.g., 'fetch_groups_code', 'group_response_schema')
+            category: Type of knowledge
+            content: The actual data (code snippet, JSON sample, etc.)
+            notes: Optional context
+        
+        Returns:
+            Confirmation that artifact was saved
+        """
+        check_cancellation()
+        await notify_tool_call("save_knowledge_artifact", f"Saving artifact: {key}")
+        
+        # Initialize artifact store if needed
+        if deps.knowledge_artifacts is None:
+            deps.knowledge_artifacts = {}
+        
+        # Store as plain dict for consistency with auto-save
+        artifact_data = {
+            "key": key,
+            "category": category,
+            "content": content,
+            "notes": notes,
+            "timestamp": time.time()
+        }
+        
+        deps.knowledge_artifacts[key] = artifact_data
+        
+        logger.info(f"[{deps.correlation_id}] 💾 ARTIFACT SAVED: {key} ({category}) - {len(content)} chars")
+        
+        # Write artifacts to dedicated JSON file for inspection
+        try:
+            from src.utils.logging import get_default_log_dir
+            log_dir = Path(get_default_log_dir())
+            artifact_file = log_dir / f"artifacts_{deps.correlation_id}.json"
+            
+            # Load existing artifacts or create new list
+            if artifact_file.exists():
+                with open(artifact_file, 'r', encoding='utf-8') as f:
+                    artifacts_list = json.load(f)
+            else:
+                artifacts_list = []
+            
+            # Append new artifact
+            artifacts_list.append(artifact_data)
+            
+            # Write back
+            with open(artifact_file, 'w', encoding='utf-8') as f:
+                json.dump(artifacts_list, f, indent=2, default=str)
+            
+            logger.debug(f"[{deps.correlation_id}] Artifact written to {artifact_file}")
+        except Exception as e:
+            logger.warning(f"[{deps.correlation_id}] Failed to write artifact to file: {e}")
+            # Don't fail the tool call if file writing fails
+        
+        return {
+            "saved": True,
+            "key": key,
+            "category": category,
+            "content_length": len(content),
+            "message": f"✅ Artifact '{key}' saved. You can now safely proceed - this knowledge won't be lost."
+        }
+    
+    # ========================================================================
+    # Tool 10: Get Knowledge Artifacts (NEW - recall saved knowledge)
+    # ========================================================================
+    
+    async def get_knowledge_artifacts(
+        category_filter: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Retrieve saved knowledge artifacts (use before final synthesis).
+        
+        Call this BEFORE generating the final production script to recall:
+        - Working code snippets from earlier tests
+        - Response schemas (field names, structure)
+        - Critical data (user IDs, group names, etc.)
+        
+        WHY: Instead of searching through 100KB of chat history, use these
+        clean artifacts that contain only the essential verified information.
+        
+        Args:
+            category_filter: Optional - only return 'code_logic', 'schema_definition', etc.
+        
+        Returns:
+            Dictionary of all saved artifacts (or filtered subset)
+        """
+        check_cancellation()
+        await notify_tool_call("get_knowledge_artifacts", f"Retrieving artifacts (filter: {category_filter or 'all'})")
+        
+        if deps.knowledge_artifacts is None or not deps.knowledge_artifacts:
+            logger.info(f"[{deps.correlation_id}] No artifacts saved yet")
+            return {
+                "artifacts": {},
+                "total_count": 0,
+                "message": "No artifacts saved yet. Use save_knowledge_artifact after successful tests."
+            }
+        
+        # Filter by category if requested
+        if category_filter:
+            # Artifacts are now plain dicts, not KnowledgeArtifact objects
+            filtered = {k: v for k, v in deps.knowledge_artifacts.items() if v.get('category') == category_filter}
+            logger.info(f"[{deps.correlation_id}] Retrieved {len(filtered)} artifacts (category: {category_filter})")
+            return {
+                "artifacts": filtered,
+                "total_count": len(filtered),
+                "category_filter": category_filter
+            }
+        
+        # Return all artifacts (already dicts)
+        all_artifacts = dict(deps.knowledge_artifacts)
+        logger.info(f"[{deps.correlation_id}] Retrieved {len(all_artifacts)} total artifacts")
+        
+        return {
+            "artifacts": all_artifacts,
+            "total_count": len(all_artifacts),
+            "category_filter": None
+        }
     
     # ========================================================================
     # Tool 7: Log Progress (NEW - for user feedback)
@@ -1359,126 +1426,18 @@ Rules:
             )
         }
     
-    # ========================================================================
-    # Tool 9: Save Knowledge Artifact
-    # ========================================================================
-    
-    async def save_knowledge_artifact(
-        ctx: RunContext[ReactAgentDependencies],
-        category: Literal["sql_results", "api_endpoints", "api_response"],
-        content: str,
-        notes: str = ""
-    ) -> ToolReturn:
-        """
-        Save important context while you have data visible.
-        Call IMMEDIATELY after seeing results from execute_test_query() or filter_endpoints_by_operations().
-        
-        ⚠️ IMPORTANT: Save exactly what you SEE, not what you imagine the full data looks like.
-        - SQL results are TRUNCATED (text fields capped at 100 chars) - save the truncated version
-        - API responses may be truncated - save what you received
-        - This ensures artifacts match your analysis
-        
-        Args:
-            category: Type of data being saved
-            content: The ACTUAL data you received (paste the JSON/text as-is, don't summarize)
-            notes: Additional context for later reference
-        
-        Returns:
-            Confirmation that artifact was saved
-        """
-        check_cancellation()
-        await notify_tool_call("save_knowledge_artifact", f"Saving {category} artifact")
-        
-        # Initialize artifacts list if not exists
-        if deps.artifacts is None:
-            deps.artifacts = []
-        
-        # Create artifact
-        artifact = {
-            "key": f"{category}_{len(deps.artifacts) + 1}",
-            "category": category,
-            "content": content,
-            "notes": notes,
-            "timestamp": time.time()
-        }
-        
-        deps.artifacts.append(artifact)
-        
-        # Persist to disk
-        await dump_artifacts_to_file(deps.correlation_id, deps.artifacts)
-        
-        logger.info(f"[{deps.correlation_id}] 💾 Saved artifact: {artifact['key']} ({len(content)} chars)")
-        
-        return ToolReturn(
-            return_value=f"✅ Saved {category} artifact",
-            content=f"Artifact saved as {artifact['key']}",
-            metadata={'artifact_key': artifact['key'], 'category': category, 'timestamp': time.time()}
-        )
-    
-    # ========================================================================
-    # Tool 10: Get Knowledge Artifacts
-    # ========================================================================
-    
-    async def get_knowledge_artifacts(
-        ctx: RunContext[ReactAgentDependencies]
-    ) -> ToolReturn:
-        """
-        Retrieve all saved artifacts for final script generation.
-        Call this before generating the final production script to recall earlier discoveries.
-        
-        Smart retrieval: Only returns artifacts if cumulative usage exceeds 800k tokens.
-        Below that threshold, your conversation history contains all needed information.
-        
-        Returns:
-            All saved artifacts with field names, endpoint paths, and response structures
-            OR a message indicating you have all info in context
-        """
-        check_cancellation()
-        await notify_tool_call("get_knowledge_artifacts", "Checking if artifacts needed")
-        
-        # Check if any artifacts exist
-        if not deps.artifacts or len(deps.artifacts) == 0:
-            return ToolReturn(
-                return_value="No artifacts saved yet",
-                content="[]",
-                metadata={'artifact_count': 0}
-            )
-        
-        # Check cumulative usage to decide if artifacts are needed
-        cumulative_tokens = ctx.usage.input_tokens if ctx.usage else 0
-        
-        # If usage is still low, LLM has all context - no need for artifacts
-        if cumulative_tokens < 800_000:  # 80% of 1M context window
-            logger.info(f"[{deps.correlation_id}] ✅ Context still small ({cumulative_tokens:,} tokens) - artifacts not needed")
-            return ToolReturn(
-                return_value="✅ You have all information in context - proceed with synthesis",
-                content="No artifacts needed - your conversation history contains all data from previous steps",
-                metadata={'skipped_reason': 'low_usage', 'cumulative_tokens': cumulative_tokens}
-            )
-        
-        # High usage - send artifacts to reduce context dependency
-        logger.info(f"[{deps.correlation_id}] 📦 High usage ({cumulative_tokens:,} tokens) - returning {len(deps.artifacts)} artifacts")
-        
-        # Use compact JSON (no indents) to save tokens
-        artifacts_json = json.dumps(deps.artifacts, separators=(',', ':'))
-        categories = [a['category'] for a in deps.artifacts]
-        
-        return ToolReturn(
-            return_value=f"✅ Retrieved {len(deps.artifacts)} artifacts (context exceeds 800k): {', '.join(categories)}",
-            content=artifacts_json,
-            metadata={'artifact_count': len(deps.artifacts), 'categories': categories, 'cumulative_tokens': cumulative_tokens}
-        )
-    
-    # Add all tools to the toolset (9 tools total)
+    # Add all tools to the toolset (10 tools total)
     toolset.tool(log_progress)  # Tool 7: Progress logging
     toolset.tool(stop_execution)  # Tool 8: Stop execution
-    toolset.tool(save_knowledge_artifact)  # Tool 9: Save context summaries
-    toolset.tool(get_knowledge_artifacts)  # Tool 10: Retrieve saved summaries
-    toolset.tool(get_sql_context)  # Tool 1: Combined SQL schema + guidance
+    toolset.tool(save_knowledge_artifact)  # Tool 9: Save verified knowledge (NEW)
+    toolset.tool(get_knowledge_artifacts)  # Tool 10: Retrieve saved knowledge (NEW)
+    toolset.tool(load_sql_schema)  # Tool 1
     toolset.tool(load_comprehensive_api_endpoints)  # Tool 2
     toolset.tool(filter_endpoints_by_operations)  # Tool 3
-    toolset.tool(get_api_code_generation_prompt)  # Tool 4
-    toolset.tool(execute_test_query)  # Tool 5
+    toolset.tool(get_sql_code_generation_prompt)  # Tool 4
+    toolset.tool(get_api_code_generation_prompt)  # Tool 5
+    toolset.tool(execute_test_query)  # Tool 6
+    # Note: generate_production_code removed - agent synthesizes final script directly
     
     return toolset
 
@@ -1511,7 +1470,7 @@ def create_dynamic_instructions(ctx: RunContext[ReactAgentDependencies]) -> str:
     """Create dynamic instructions with context from dependencies"""
     deps = ctx.deps
     
-    # Build dynamic context without duplicating schema (loaded on-demand via get_sql_context)
+    # Build dynamic context without the schema (loaded on-demand via Tool 1)
     dynamic_context = f"""
 
 DYNAMIC CONTEXT FOR THIS REQUEST:
@@ -1519,12 +1478,13 @@ DYNAMIC CONTEXT FOR THIS REQUEST:
 - Correlation ID: {deps.correlation_id}
 - Available API Endpoints: {len(deps.endpoints)} total
 
-⚠️ IMPORTANT REMINDER - CODE GENERATION WORKFLOW (Phase 2 Optimized):
+⚠️ IMPORTANT REMINDER - CODE GENERATION WORKFLOW:
 1. When you need database data:
-   - FIRST: Call get_sql_context(query_description, limit=3) to get schema + SQL rules in one call
-   - SECOND: READ the returned context carefully (includes tables, columns, and generation rules)
-   - THIRD: WRITE your SQL code using the schema and rules provided
-   - FOURTH: Call execute_test_query(your_code, "sql")
+   - FIRST: Call load_sql_schema() to see what tables and columns are available
+   - SECOND: Call get_sql_code_generation_prompt(query_description, limit=3) to get SQL generation rules
+   - THIRD: READ the returned guidance carefully
+   - FOURTH: WRITE your SQL code using the schema and generation rules
+   - FIFTH: Call execute_test_query(your_code, "sql")
 
 2. When you need to generate Python SDK code:
    - FIRST: Call get_api_code_generation_prompt(query_description, endpoints, max_results=3)
@@ -1533,11 +1493,11 @@ DYNAMIC CONTEXT FOR THIS REQUEST:
    - THIRD: WRITE your Python code based on that guidance
    - FOURTH: Call execute_test_query(your_code, "python_sdk")
 
-NOTE: The SQL context shows you EXACTLY what tables (users, groups, applications, etc.) and 
-columns exist in each table. DO NOT invent names - use only what you see in the context.
+The schema above shows you EXACTLY what tables (users, groups, applications, etc.) and 
+columns exist in each table. DO NOT invent names - use only what you see above.
 
-Remember the optimized workflow:
-1. Call get_sql_context() for database queries (combines schema + guidance)
+Remember to follow the workflow:
+1. Load SQL schema first (unless user says "API only")
 2. Determine if data is in SQLite database or needs API
 3. Load comprehensive API endpoints if needed
 4. Filter to specific entities
@@ -1573,19 +1533,11 @@ async def execute_react_query(
     # Create toolset with dependencies
     toolset = create_react_toolset(deps)
     
-    # Create UsageLimits for safety (loop control and token caps)
-    usage_limits = UsageLimits(
-        request_limit=30,  # Maximum 30 LLM calls per query
-        tool_calls_limit=30,  # Maximum 30 tool invocations
-        response_tokens_limit=100000  # Maximum 100k output tokens
-    )
-    
-    # Run agent with toolset and usage limits
+    # Run agent with toolset
     result = await react_agent.run(
         user_query,
         deps=deps,
-        toolsets=[toolset],
-        usage_limits=usage_limits
+        toolsets=[toolset]  # Pass toolset as list
     )
     
     # Access the output from the result (PydanticAI returns output, not data)
@@ -1594,22 +1546,6 @@ async def execute_react_query(
     # Log synthesis phase completion
     if execution_result.complete_production_code:
         logger.info(f"[{deps.correlation_id}] ✅ SYNTHESIS COMPLETE: Generated final production code ({len(execution_result.complete_production_code)} chars)")
-        
-        # Save final script to artifacts
-        if deps.artifacts is None:
-            deps.artifacts = []
-        
-        final_script_artifact = {
-            "key": "final_production_script",
-            "category": "code_generation",
-            "content": execution_result.complete_production_code,
-            "notes": f"Final production script generated after {result.usage().requests if result.usage() else 0} LLM calls",
-            "timestamp": time.time()
-        }
-        
-        deps.artifacts.append(final_script_artifact)
-        await dump_artifacts_to_file(deps.correlation_id, deps.artifacts)
-        logger.info(f"[{deps.correlation_id}] 💾 Saved final production script to artifacts ({len(execution_result.complete_production_code)} chars)")
     else:
         logger.warning(f"[{deps.correlation_id}] ⚠️ SYNTHESIS INCOMPLETE: No production code generated")
     
