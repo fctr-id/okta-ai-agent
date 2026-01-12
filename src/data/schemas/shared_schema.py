@@ -25,6 +25,10 @@ def get_okta_database_schema() -> str:
     # Build the schema string
     schema = """
             ### DB Schema
+            
+            ⚠️ CRITICAL: Use exact table names shown below - DO NOT add "okta_" prefix!
+            Table names are: users, groups, applications (NOT okta_users, okta_groups, etc.)
+            
             TABLE: users
             FIELDS:
             - id (Integer, PrimaryKey)

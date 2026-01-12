@@ -379,29 +379,32 @@ async def compress_history(ctx: RunContext[ReactAgentDependencies], messages: li
         'execute_test_query_api': []
     }
     
-    # Build map of tool_call_id -> call message index
-    call_id_to_index = {}
+    # Build map of tool_call_id -> (call_idx, tool_name)
+    # Tool CALLS have ToolCallPart with tool_name and tool_call_id
+    call_id_to_info = {}
     for i, msg in enumerate(messages[:-1]):  # Exclude last message (safety)
         if hasattr(msg, 'parts'):
             for part in msg.parts:
-                # Track tool CALLS (these have tool_call_id)
-                if hasattr(part, 'tool_call_id'):
-                    call_id_to_index[part.tool_call_id] = i
+                # ToolCallPart has: tool_name, args, tool_call_id
+                if hasattr(part, 'tool_name') and hasattr(part, 'tool_call_id') and hasattr(part, 'args'):
+                    call_id_to_info[part.tool_call_id] = (i, part.tool_name, part.args)
     
     # Now find tool RESULTS and pair them with their calls
+    # Tool RESULTS have ToolReturnPart with tool_call_id (but no tool_name)
     for i, msg in enumerate(messages[:-1]):
         if hasattr(msg, 'parts'):
             for part in msg.parts:
-                # Tool RESULTS have tool_name and tool_call_id
-                if hasattr(part, 'tool_name') and hasattr(part, 'tool_call_id'):
-                    tool_name = part.tool_name
+                # ToolReturnPart has: tool_call_id, content, timestamp
+                # It does NOT have tool_name - we get that from the call
+                if hasattr(part, 'tool_call_id') and hasattr(part, 'content'):
                     tool_call_id = part.tool_call_id
                     
                     # Find the corresponding call message
-                    call_idx = call_id_to_index.get(tool_call_id)
-                    if call_idx is None:
+                    call_info = call_id_to_info.get(tool_call_id)
+                    if call_info is None:
                         continue  # Call not found, skip
                     
+                    call_idx, tool_name, args = call_info
                     result_idx = i
                     
                     # Track by tool type
@@ -410,14 +413,8 @@ async def compress_history(ctx: RunContext[ReactAgentDependencies], messages: li
                     
                     # Special handling for execute_test_query
                     elif tool_name == 'execute_test_query':
-                        # Check args in the CALL message to distinguish SQL vs API
-                        call_msg = messages[call_idx]
-                        args_str = ''
-                        if hasattr(call_msg, 'parts'):
-                            for call_part in call_msg.parts:
-                                if hasattr(call_part, 'args'):
-                                    args_str = str(call_part.args)
-                                    break
+                        # Check args to distinguish SQL vs API
+                        args_str = str(args)
                         
                         if 'sqlite' in args_str.lower() or 'sql' in args_str.lower():
                             tool_pairs['execute_test_query_sql'].append((call_idx, result_idx))
@@ -1469,11 +1466,61 @@ Rules:
             metadata={'artifact_count': len(deps.artifacts), 'categories': categories, 'cumulative_tokens': cumulative_tokens}
         )
     
-    # Add all tools to the toolset (9 tools total)
+    # ========================================================================
+    # Tool 11: Get Final Script Synthesis Prompt
+    # ========================================================================
+    
+    async def get_final_script_synthesis_prompt() -> ToolReturn:
+        """
+        Load the complete script blueprint for final code generation.
+        
+        This guidance includes:
+        - Complete script template with all imports
+        - Database connection patterns
+        - API client usage with concurrent batching
+        - Progress tracking examples
+        - Output formatting (table headers)
+        - Performance requirements
+        
+        Call this BEFORE generating the final production script.
+        
+        Returns:
+            Complete synthesis guidance with script template
+        """
+        check_cancellation()
+        await notify_tool_call("get_final_script_synthesis_prompt", "Loading final script synthesis guidance")
+        logger.info(f"[{deps.correlation_id}] Tool 11: Loading final script synthesis prompt")
+        
+        # Load synthesis prompt from file
+        synthesis_prompt_file = Path(__file__).parent / "prompts" / "final_script_synthesis_prompt.txt"
+        try:
+            with open(synthesis_prompt_file, 'r', encoding='utf-8') as f:
+                synthesis_prompt = f.read()
+        except FileNotFoundError:
+            logger.error(f"[{deps.correlation_id}] Synthesis prompt file not found: {synthesis_prompt_file}")
+            synthesis_prompt = """Generate a complete Python script following best practices.
+            
+Include:
+- Database connection with error handling
+- API client initialization  
+- Concurrent batching for multiple API calls
+- Progress tracking
+- Table-formatted JSON output
+- Proper cleanup
+"""
+        
+        return ToolReturn(
+            return_value="✅ Final script synthesis guidance loaded",
+            content=synthesis_prompt,
+            metadata={'guidance_loaded': True, 'file': str(synthesis_prompt_file)}
+        )
+    
+    # Add all tools to the toolset (10 tools total)
     toolset.tool(log_progress)  # Tool 7: Progress logging
     toolset.tool(stop_execution)  # Tool 8: Stop execution
     toolset.tool(save_knowledge_artifact)  # Tool 9: Save context summaries
     toolset.tool(get_knowledge_artifacts)  # Tool 10: Retrieve saved summaries
+    toolset.tool(get_final_script_synthesis_prompt)  # Tool 11: Final script template
     toolset.tool(get_sql_context)  # Tool 1: Combined SQL schema + guidance
     toolset.tool(load_comprehensive_api_endpoints)  # Tool 2
     toolset.tool(filter_endpoints_by_operations)  # Tool 3

@@ -233,22 +233,23 @@ export function useReactStream() {
         const isFinalPhase = data.step === 'validation' || data.step === 'execution';
         
         if (!isFinalPhase) {
-            // Clean up the title - remove "STEP X:" prefix to show just the action
-            let cleanTitle = data.title
-            if (cleanTitle) {
-                // Remove "STEP 1:", "STEP 2:", etc. from the beginning
-                cleanTitle = cleanTitle.replace(/^STEP\s+\d+:\s*/i, '')
-                // Also handle variations like "Step 1 -", "STEP 1 -", etc.
-                cleanTitle = cleanTitle.replace(/^STEP\s+\d+\s*[-–—]\s*/i, '')
+            // Clean up the text - remove "🎯 STARTING:" prefix to show just the action
+            let cleanText = data.text || data.title
+            if (cleanText) {
+                // Remove "🎯 STARTING:" prefix
+                cleanText = cleanText.replace(/^🎯\s*STARTING:\s*/i, '')
+                // Also handle "STEP 1:", "STEP 2:", etc. for backward compatibility
+                cleanText = cleanText.replace(/^STEP\s+\d+:\s*/i, '')
+                cleanText = cleanText.replace(/^STEP\s+\d+\s*[-–—]\s*/i, '')
             }
             
             discoverySteps.value.push({
                 id: `step-${discoverySteps.value.length + 1}`,
                 step: data.step || discoverySteps.value.length + 1,
-                title: cleanTitle || data.title, // Use cleaned title
-                reasoning: data.text || data.reasoning || null, // Reasoning is in data.text field
+                title: cleanText || data.title, // Use cleaned text as title
+                reasoning: cleanText || data.reasoning || null, // Use cleaned text as reasoning
                 tool: data.tool || null, // Add tool info if available
-                text: data.text,
+                text: cleanText, // Store cleaned text
                 status: 'in-progress',
                 timestamp: new Date(data.timestamp * 1000).toLocaleTimeString(),
                 tools: [] // Initialize empty tools array for future tool tracking
