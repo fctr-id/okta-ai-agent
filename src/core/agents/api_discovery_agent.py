@@ -81,9 +81,83 @@ class APIDiscoveryDeps:
 # Helper Functions
 # ============================================================================
 
+def generate_lightweight_onereact_json(force_regenerate: bool = False) -> Dict[str, Any]:
+    """
+    Generate a minimal lightweight JSON structure for API endpoints.
+    Uses simple dot notation: entity.operation (e.g., "application.list")
+    
+    Args:
+        force_regenerate: If True, regenerate even if file exists
+        
+    Returns:
+        Dict with 'operations' (list of strings)
+    """
+    schemas_dir = Path("src/data/schemas")
+    lightweight_path = schemas_dir / "lightweight_onereact.json"
+    source_path = schemas_dir / "Okta_API_entitity_endpoint_reference_GET_ONLY.json"
+    
+    # Load existing file if it exists and regeneration not forced
+    if lightweight_path.exists() and not force_regenerate:
+        logger.info(f"Loading existing lightweight_onereact.json from {lightweight_path}")
+        try:
+            with open(lightweight_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load existing file: {e}. Regenerating...")
+    
+    # Generate new lightweight structure
+    logger.info("Generating new lightweight_onereact.json...")
+    
+    # Load source endpoint data
+    if not source_path.exists():
+        logger.error(f"Source file not found: {source_path}")
+        return {"operations": []}
+    
+    try:
+        with open(source_path, 'r', encoding='utf-8') as f:
+            source_data = json.load(f)
+    except Exception as e:
+        logger.error(f"Failed to load source file: {e}")
+        return {"operations": []}
+    
+    # Extract operations in dot notation format
+    operations = []
+    seen_operations = set()  # Deduplicate
+    
+    endpoints = source_data.get('endpoints', [])
+    for endpoint in endpoints:
+        entity = endpoint.get('entity', '')
+        operation = endpoint.get('operation', '')
+        
+        if entity and operation:
+            # Create dot notation: entity.operation
+            op_string = f"{entity}.{operation}"
+            if op_string not in seen_operations:
+                operations.append(op_string)
+                seen_operations.add(op_string)
+    
+    # Sort for consistency
+    operations.sort()
+    
+    # Create minimal structure
+    lightweight_data = {
+        "operations": operations
+    }
+    
+    # Save to file
+    try:
+        schemas_dir.mkdir(parents=True, exist_ok=True)
+        with open(lightweight_path, 'w', encoding='utf-8') as f:
+            json.dump(lightweight_data, f, indent=2)
+        logger.info(f"Generated lightweight_onereact.json with {len(operations)} operations")
+    except Exception as e:
+        logger.error(f"Failed to save lightweight_onereact.json: {e}")
+    
+    return lightweight_data
+
+
 def load_lightweight_endpoints() -> Dict[str, Any]:
     """Load lightweight endpoint structure"""
-    from src.core.agents.one_react_agent import generate_lightweight_onereact_json
     return generate_lightweight_onereact_json()
 
 
