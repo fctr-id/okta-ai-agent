@@ -1025,9 +1025,14 @@ class OktaAPIClient:
                 data = await response.json()
                 # Normalize the data structure to ensure consistent format
                 normalized_data = self._normalize_okta_response(data)
+                
+                # Clean data (remove _links, truncate lists in test_mode)
+                # This programmatically enforces the "max 3 items" rule and reduces token usage
+                final_data = self._clean_data_structure(normalized_data)
+                
                 return {
                     "status": "success", 
-                    "data": normalized_data
+                    "data": final_data
                 }
         except Exception as e:
             return {
@@ -1105,6 +1110,43 @@ class OktaAPIClient:
         
         # Fallback: return as-is (similar to Okta SDK approach)
         self.logger.debug(f"Response format not recognized, returning as-is: {type(data)}")
+        return data
+
+    def _clean_data_structure(self, data: Any) -> Any:
+        """
+        Clean response data to optimize for LLM context usage:
+        1. Remove '_links' (HATEOAS) which consume massive tokens but are rarely used by LLMs
+        2. Enforce list truncation to 3 items ONLY when test_mode=True
+        
+        Args:
+            data: The normalized data structure (list or dict)
+            
+        Returns:
+            Cleaned and potentially truncated data
+        """
+        if isinstance(data, list):
+            # Enforce hard truncation in test mode
+            if self.test_mode and len(data) > 3:
+                self.logger.debug(f"Test Mode: Truncating result list from {len(data)} to 3 items")
+                data = data[:3]
+            
+            # Recurse (list comprehension creates new list, safe for mutation)
+            return [self._clean_data_structure(item) for item in data]
+        
+        if isinstance(data, dict):
+            # Remove _links to reduce noise (mutate in place for efficiency)
+            if "_links" in data:
+                del data["_links"]
+            
+            # Remove logo links often found in profile or at root level (sometimes outside _links)
+            # Okta groups often have _links inside, but sometimes other metadata
+            
+            # Recurse into values
+            for key, value in data.items():
+                if isinstance(value, (dict, list)):
+                    data[key] = self._clean_data_structure(value)
+            return data
+            
         return data
 
 

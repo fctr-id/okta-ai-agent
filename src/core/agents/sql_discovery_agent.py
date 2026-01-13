@@ -65,8 +65,14 @@ class SQLDiscoveryDeps:
     tool_call_callback: Optional[callable] = None  # For tool call notifications
     progress_callback: Optional[callable] = None  # For intermediate progress updates
     
+    # Tool call limits (shared across all agents)
+    global_tool_calls: int = 0  # Current count across all agents
+    max_global_tool_calls: int = 30  # From env variable MAX_TOOL_CALLS
+    
+    # Per-tool limits (prevent infinite testing loops)
+    sql_tests_executed: int = 0  # Max 3
+    
     # State tracking
-    sql_tests_executed: int = 0
     current_step: int = 0
     current_tools: List[Dict[str, str]] = None  # Track tools used in current step
     
@@ -224,9 +230,18 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
             Schema + SQL patterns for query generation
         """
         check_cancellation()
+        
+        # Enforce global tool call limit
+        deps.global_tool_calls += 1
+        if deps.global_tool_calls > deps.max_global_tool_calls:
+            raise RuntimeError(
+                f"Global tool call limit exceeded ({deps.global_tool_calls}/{deps.max_global_tool_calls}). "
+                f"Cannot execute further tools. Adjust MAX_TOOL_CALLS environment variable if needed."
+            )
+        
         await notify_tool_call("get_sql_context", f"Loading SQL schema for: {query_description}")
         
-        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQL context")
+        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQL context (global: {deps.global_tool_calls}/{deps.max_global_tool_calls})")
         
         # Load schema ONLY - the agent prompt already has SQL patterns
         schema_description = get_sqlite_schema_description()
@@ -296,17 +311,27 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         """
         check_cancellation()
         
-        await notify_tool_call("execute_test_query_sql", f"Testing SQL query on database (test #{deps.sql_tests_executed + 1})")
-        
+        # Enforce tool call limits
+        deps.global_tool_calls += 1
         deps.sql_tests_executed += 1
-        if deps.sql_tests_executed > 5:
-            return ToolReturn(
-                return_value="❌ Test limit exceeded (5 tests max)",
-                content="Stop testing. Finalize your conclusion with found_data and needs_api.",
-                metadata={'error': True}
+        
+        # Check global limit
+        if deps.global_tool_calls > deps.max_global_tool_calls:
+            raise RuntimeError(
+                f"Global tool call limit exceeded ({deps.global_tool_calls}/{deps.max_global_tool_calls}). "
+                f"Cannot execute further tools. Adjust MAX_TOOL_CALLS environment variable if needed."
             )
         
-        logger.info(f"[{deps.correlation_id}] Executing SQL test query #{deps.sql_tests_executed}")
+        # Check per-tool limit
+        if deps.sql_tests_executed > 3:
+            raise RuntimeError(
+                f"SQL test query limit exceeded ({deps.sql_tests_executed}/3). "
+                f"Stop testing and finalize your conclusion with found_data and needs_api."
+            )
+        
+        await notify_tool_call("execute_test_query_sql", f"Testing SQL query on database (test #{deps.sql_tests_executed})")
+        
+        logger.info(f"[{deps.correlation_id}] Executing SQL test query #{deps.sql_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, sql_tests: {deps.sql_tests_executed}/3)")
         
         # Log the generated SQL query
         sql_query = code.strip()
@@ -394,10 +419,9 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
             
         except Exception as e:
             logger.error(f"[{deps.correlation_id}] SQL execution failed: {e}")
-            await notify_step_end(
-                "SQL Execution Failed",
-                f"Error: {str(e)}"
-            )
+            # NOTE: Don't call notify_step_end here - this is a recoverable error
+            # The LLM will see the error in ToolReturn and can retry or adjust
+            # Only call notify_step_end for successful operations or terminating failures
             return ToolReturn(
                 return_value=f"❌ SQL error: {str(e)}",
                 content=f"Query failed: {str(e)}",
@@ -544,7 +568,7 @@ async def execute_sql_discovery(
         result = await sql_discovery_agent.run(
             user_query,
             deps=deps,
-            toolsets=[toolset]  # Pass toolset to run()
+            toolsets=[toolset]
         )
         
         logger.info(f"[{deps.correlation_id}] SQL discovery complete: found={result.output.found_data}, needs_api={result.output.needs_api}")
@@ -575,6 +599,9 @@ async def execute_sql_discovery(
             success=False,
             found_data=[],
             needs_api=[],
+            reasoning=f"SQL discovery failed: {str(e)}",
+            error=str(e)
+        ), None  # Return tuple with None usage
             reasoning=f"SQL discovery failed: {str(e)}",
             error=str(e)
         )

@@ -52,10 +52,11 @@ class APIDiscoveryDeps:
     """Dependencies for API Discovery Agent"""
     correlation_id: str
     artifacts_file: Path
-    sql_reasoning: str  # Feedback from SQL agent
-    okta_client: Any  # OktaClient instance
-    cancellation_check: callable
-    endpoints: List[Dict[str, Any]]  # Full endpoint details (injected like one_react_agent)
+    sql_reasoning: Optional[str] = None  # Feedback from SQL agent (None if SQL phase skipped)
+    sql_discovered_data: Optional[str] = None  # JSON string of data SQL found (None if SQL phase skipped)
+    okta_client: Any = None  # OktaClient instance
+    cancellation_check: callable = None
+    endpoints: List[Dict[str, Any]] = None  # Full endpoint details (injected like one_react_agent)
     
     # Streaming callbacks
     step_start_callback: Optional[callable] = None
@@ -63,8 +64,14 @@ class APIDiscoveryDeps:
     tool_call_callback: Optional[callable] = None  # For tool call notifications
     progress_callback: Optional[callable] = None  # For intermediate progress updates
     
+    # Tool call limits (shared across all agents)
+    global_tool_calls: int = 0  # Current count across all agents
+    max_global_tool_calls: int = 30  # From env variable MAX_TOOL_CALLS
+    
+    # Per-tool limits (manual tracking where Pydantic AI can't help)
+    api_tests_executed: int = 0  # Max 3
+    
     # State tracking
-    api_tests_executed: int = 0
     current_step: int = 5  # Starts after SQL (steps 1-5)
     current_tools: List[Dict[str, str]] = None  # Track tools used in current step
     artifacts: List[Dict] = None  # Artifact storage (shared with orchestrator)
@@ -179,7 +186,7 @@ async def dump_artifacts_to_file(artifacts_file: Path, artifacts: List[dict]):
         # Append new
         existing.extend(artifacts)
         
-        # Save
+        # Save (pretty-printed for human readability)
         with open(artifacts_file, 'w', encoding='utf-8') as f:
             json.dump(existing, f, indent=2, default=str)
         
@@ -301,7 +308,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             
             return ToolReturn(
                 return_value=f"✅ Loaded {len(operations)} operations",
-                content=json.dumps(operations, indent=2),
+                content=json.dumps(operations, separators=(',', ':')),
                 metadata={'operation_count': len(operations)}
             )
         except Exception as e:
@@ -367,7 +374,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             
             return ToolReturn(
                 return_value=f"✅ Filtered {len(filtered)} endpoints",
-                content=json.dumps(filtered, indent=2),
+                content=json.dumps(filtered, separators=(',', ':')),
                 metadata={'filtered_count': len(filtered)}
             )
         except Exception as e:
@@ -392,20 +399,28 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         """
         check_cancellation()
         
-        await notify_tool_call("execute_test_query_api", f"Testing API call (test #{deps.api_tests_executed + 1})")
-        
+        # Enforce tool call limits
+        deps.global_tool_calls += 1
         deps.api_tests_executed += 1
-        if deps.api_tests_executed > 5:
-            return ToolReturn(
-                return_value="❌ Test limit exceeded (5 tests max)",
-                content="Stop testing. Finalize with success/failure.",
-                metadata={'error': True}
+        
+        # Check global limit
+        if deps.global_tool_calls > deps.max_global_tool_calls:
+            raise RuntimeError(
+                f"Global tool call limit exceeded ({deps.global_tool_calls}/{deps.max_global_tool_calls}). "
+                f"Cannot execute further tools. Adjust MAX_TOOL_CALLS environment variable if needed."
+            )
+        
+        # Check per-tool limit
+        if deps.api_tests_executed > 3:
+            raise RuntimeError(
+                f"API test query limit exceeded ({deps.api_tests_executed}/3). "
+                f"Stop testing and finalize with success/failure."
             )
         
         # Notify tool call start
         await notify_tool_call("execute_test_query_api", f"Testing API code (attempt #{deps.api_tests_executed})")
         
-        logger.info(f"[{deps.correlation_id}] Executing API test #{deps.api_tests_executed}")
+        logger.info(f"[{deps.correlation_id}] Executing API test #{deps.api_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, api_tests: {deps.api_tests_executed}/3)")
         
         # Log the generated API code
         logger.info(f"[{deps.correlation_id}] 📝 Generated API code:\n{code}")
@@ -414,10 +429,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         validation_result = validate_generated_code(code)
         if not validation_result.is_valid:
             logger.warning(f"[{deps.correlation_id}] Code validation failed: {validation_result.violations}")
-            await notify_step_end(
-                "Validation Failed",
-                f"Security: {', '.join(validation_result.violations)}"
-            )
+            # NOTE: Don't notify_step_end for tool-level failures - let LLM retry
             return ToolReturn(
                 return_value=f"❌ Security validation failed",
                 content=f"Violations: {', '.join(validation_result.violations)}",
@@ -435,10 +447,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                 network_validation = validate_request('GET', full_url)
                 if not network_validation.is_allowed:
                     logger.warning(f"[{deps.correlation_id}] Network security validation failed: {network_validation.blocked_reason}")
-                    await notify_step_end(
-                        "Network Security Failed",
-                        f"Blocked: {network_validation.blocked_reason}"
-                    )
+                    # NOTE: Don't notify_step_end for tool failures - let LLM adjust endpoint
                     return ToolReturn(
                         return_value=f"❌ Network security validation failed",
                         content=f"❌ NETWORK SECURITY FAILED: {network_validation.blocked_reason}",
@@ -501,16 +510,13 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             
             return ToolReturn(
                 return_value=f"✅ API executed successfully",
-                content=json.dumps(result, indent=2, default=str)[:1000],
+                content=json.dumps(result, separators=(',', ':'), default=str)[:4000],
                 metadata={'success': True}
             )
             
         except Exception as e:
             logger.error(f"[{deps.correlation_id}] API execution failed: {e}")
-            await notify_step_end(
-                "API Execution Failed",
-                f"Error: {str(e)}"
-            )
+            # NOTE: Don't notify_step_end for tool errors - let LLM retry with adjusted code
             return ToolReturn(
                 return_value=f"❌ API error: {str(e)}",
                 content=f"Execution failed: {str(e)}",
@@ -648,10 +654,46 @@ async def execute_api_discovery(
     toolset = create_api_toolset(deps)
     
     try:
+        # Build dynamic prompt: base query + optional SQL context
+        # Following Pydantic AI pattern: clean static prompt + dynamic extension
+        full_prompt = user_query
+        
+        # Dynamically extend prompt ONLY if SQL phase ran and found data
+        if deps.sql_reasoning and deps.sql_discovered_data:
+            full_prompt = f"""{user_query}
+
+─────────────────────────────────────────
+📊 DATA ALREADY RETRIEVED FROM SQL DATABASE
+─────────────────────────────────────────
+
+SQL Agent Analysis:
+{deps.sql_reasoning}
+
+Entities Found in Database (with IDs):
+```json
+{deps.sql_discovered_data}
+```
+
+🎯 YOUR TASK:
+- The above entities are ALREADY KNOWN (check the "okta_id" field in the JSON)
+- Extract entity IDs from the JSON and use them with targeted endpoints
+- Example: If JSON has user ID "00u123", use path parameter endpoints like `/api/v1/users/00u123/...`
+- Only fetch what the SQL analysis says is MISSING from the database
+- DO NOT re-search for entities that are already identified above
+
+Apply the ENDPOINT EFFICIENCY PRINCIPLE:
+✅ Use path parameter endpoints with known entity IDs from JSON above
+❌ Don't use list/search endpoints for entities you already have IDs for
+─────────────────────────────────────────
+"""
+        # else: API-only mode - prompt stays clean with just the user query
+        
+        # Context includes SQL reasoning but NOT artifacts
+        # The API agent must discover data independently based on what SQL found/missed
         result = await api_discovery_agent.run(
-            f"{user_query}\n\nSQL Phase Results: {deps.sql_reasoning}",
+            full_prompt,
             deps=deps,
-            toolsets=[toolset]  # Pass toolset to run()
+            toolsets=[toolset]
         )
         
         logger.info(f"[{deps.correlation_id}] API discovery complete: success={result.output.success}")

@@ -15,6 +15,7 @@ from typing import Optional, Dict, Any, List
 import asyncio
 import time
 import json
+import os
 
 from src.utils.logging import get_logger
 
@@ -166,6 +167,11 @@ async def execute_multi_agent_query(
     
     result = OrchestratorResult()
     
+    # Initialize global tool call limits from environment
+    max_tool_calls = int(os.getenv('MAX_TOOL_CALLS', '30'))
+    global_tool_calls_counter = 0  # Shared across all agents
+    logger.info(f"[{correlation_id}] Tool call limits: {max_tool_calls} total, 3 per tool type")
+    
     # Load API endpoints data (needed for API discovery agent)
     endpoints_file = Path("src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json")
     endpoints_list = []
@@ -240,10 +246,17 @@ async def execute_multi_agent_query(
                 step_start_callback=aggregator.step_start,
                 step_end_callback=aggregator.step_end,
                 tool_call_callback=aggregator.tool_call,
-                progress_callback=aggregator.progress
+                progress_callback=aggregator.progress,
+                # Tool call limits
+                global_tool_calls=global_tool_calls_counter,
+                max_global_tool_calls=max_tool_calls
             )
             
             result.sql_result, sql_usage = await execute_sql_discovery(user_query, sql_deps)
+            
+            # Update global counter after SQL phase
+            global_tool_calls_counter = sql_deps.global_tool_calls
+            logger.info(f"[{correlation_id}] Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
             
             # Track token usage
             if sql_usage:
@@ -253,8 +266,22 @@ async def execute_multi_agent_query(
                 result.total_requests += sql_usage.requests
             
             if not result.sql_result.success:
-                logger.error(f"[{correlation_id}] SQL phase failed: {result.sql_result.error}")
-                # Continue anyway - API might still work
+                error_msg = result.sql_result.error or "SQL phase failed"
+                logger.error(f"[{correlation_id}] SQL phase failed: {error_msg}")
+                
+                # Check if it's a hard limit error
+                if "limit exceeded" in error_msg.lower():
+                    # Hard stop - notify frontend and return
+                    await aggregator.step_end({
+                        "title": "Execution Stopped",
+                        "text": f"❌ {error_msg}",
+                        "timestamp": time.time()
+                    })
+                    result.error = error_msg
+                    return result
+                
+                # Other SQL errors - continue anyway, API might still work
+                logger.info(f"[{correlation_id}] Continuing to API phase despite SQL error")
         else:
             logger.info(f"[{correlation_id}] Skipped SQL Discovery (Router decision: {phase})")
         
@@ -281,30 +308,59 @@ async def execute_multi_agent_query(
             aggregator.set_phase('api')
             result.phases_executed.append('api')
             
-            # Get SQL reasoning for API agent
-            sql_reasoning = ""
-            if result.sql_result:
-                if result.sql_result.success:
-                    sql_reasoning = result.sql_result.reasoning
-                else:
-                    sql_reasoning = f"SQL phase failed: {result.sql_result.error}"
-            else:
-                sql_reasoning = "SQL phase skipped - API-only query"
+            # Get SQL reasoning and data for API agent (only if SQL phase ran)
+            sql_reasoning = None
+            sql_discovered_data = None
+            
+            if result.sql_result and result.sql_result.success:
+                # SQL phase ran and succeeded - pass reasoning and data
+                sql_reasoning = result.sql_result.reasoning
+                
+                # Load SQL artifacts and extract content
+                if artifacts_file.exists():
+                    try:
+                        with open(artifacts_file, 'r', encoding='utf-8') as f:
+                            artifacts = json.load(f)
+                        
+                        # Extract content from sql_results artifacts
+                        sql_contents = []
+                        for artifact in artifacts:
+                            if artifact.get('category') == 'sql_results':
+                                sql_contents.append(artifact.get('content', ''))
+                        
+                        # Combine all SQL result contents
+                        if sql_contents:
+                            sql_discovered_data = '\n'.join(sql_contents)
+                            logger.info(f"[{correlation_id}] Passing SQL discovered data to API agent ({len(sql_discovered_data)} chars)")
+                    except Exception as e:
+                        logger.warning(f"[{correlation_id}] Failed to load SQL artifacts: {e}")
+            elif result.sql_result and not result.sql_result.success:
+                # SQL phase ran but failed - pass error message only
+                sql_reasoning = f"SQL phase failed: {result.sql_result.error}"
+            # else: SQL phase skipped (API-only mode) - both remain None
             
             api_deps = APIDiscoveryDeps(
                 correlation_id=correlation_id,
                 artifacts_file=artifacts_file,
                 endpoints=endpoints_list,
                 sql_reasoning=sql_reasoning,
+                sql_discovered_data=sql_discovered_data,  # Pass SQL content
                 okta_client=okta_client,
                 cancellation_check=cancellation_check,
                 step_start_callback=aggregator.step_start,
                 step_end_callback=aggregator.step_end,
                 tool_call_callback=aggregator.tool_call,
-                progress_callback=aggregator.progress
+                progress_callback=aggregator.progress,
+                # Tool call limits (continue from SQL phase)
+                global_tool_calls=global_tool_calls_counter,
+                max_global_tool_calls=max_tool_calls
             )
             
             result.api_result, api_usage = await execute_api_discovery(user_query, api_deps)
+            
+            # Update global counter after API phase
+            global_tool_calls_counter = api_deps.global_tool_calls
+            logger.info(f"[{correlation_id}] Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
             
             # Track token usage
             if api_usage:
@@ -380,9 +436,34 @@ async def execute_multi_agent_query(
     except asyncio.CancelledError:
         logger.warning(f"[{correlation_id}] Multi-agent workflow cancelled by user")
         result.error = "Cancelled by user"
+        # Notify frontend of cancellation
+        await aggregator.step_end({
+            "title": "Workflow Cancelled",
+            "text": "❌ Execution cancelled by user",
+            "timestamp": time.time()
+        })
+        return result
+        
+    except RuntimeError as e:
+        # Tool call limit exceeded or other hard stop
+        error_msg = str(e)
+        logger.error(f"[{correlation_id}] Hard stop triggered: {error_msg}")
+        result.error = error_msg
+        # Notify frontend with proper error format
+        await aggregator.step_end({
+            "title": "Execution Stopped",
+            "text": f"❌ {error_msg}",
+            "timestamp": time.time()
+        })
         return result
         
     except Exception as e:
         logger.error(f"[{correlation_id}] Orchestrator error: {e}", exc_info=True)
         result.error = str(e)
+        # Notify frontend of unexpected error
+        await aggregator.step_end({
+            "title": "Unexpected Error",
+            "text": f"❌ An error occurred: {str(e)}",
+            "timestamp": time.time()
+        })
         return result
