@@ -54,6 +54,8 @@ class APIDiscoveryDeps:
     artifacts_file: Path
     sql_reasoning: Optional[str] = None  # Feedback from SQL agent (None if SQL phase skipped)
     sql_discovered_data: Optional[str] = None  # JSON string of data SQL found (None if SQL phase skipped)
+    sql_needs_api: Optional[List[str]] = None  # Structured list of entities to fetch via API
+    sql_found_data: Optional[List[str]] = None  # Structured list of entities already found in SQL
     okta_client: Any = None  # OktaClient instance
     cancellation_check: callable = None
     endpoints: List[Dict[str, Any]] = None  # Full endpoint details (injected like one_react_agent)
@@ -389,13 +391,14 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
     # Tool 3: Execute API Test
     # ========================================================================
     
-    async def execute_test_query(code: str) -> ToolReturn:
+    async def execute_test_query(code: str, description: str = "Testing API query") -> ToolReturn:
         """
         Execute API code (Python using OktaSDKClientManager).
         Auto-limited to 3 results during testing.
         
         Args:
             code: Python code using okta_client
+            description: Brief description of what this query tests (e.g., "Find group sso-super-admins")
         """
         check_cancellation()
         
@@ -411,16 +414,16 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             )
         
         # Check per-tool limit
-        if deps.api_tests_executed > 3:
+        if deps.api_tests_executed > 10:
             raise RuntimeError(
-                f"API test query limit exceeded ({deps.api_tests_executed}/3). "
+                f"API test query limit exceeded ({deps.api_tests_executed}/10). "
                 f"Stop testing and finalize with success/failure."
             )
         
         # Notify tool call start
-        await notify_tool_call("execute_test_query_api", f"Testing API code (attempt #{deps.api_tests_executed})")
+        await notify_tool_call("execute_test_query_api", description)
         
-        logger.info(f"[{deps.correlation_id}] Executing API test #{deps.api_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, api_tests: {deps.api_tests_executed}/3)")
+        logger.info(f"[{deps.correlation_id}] Executing API test #{deps.api_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, api_tests: {deps.api_tests_executed}/10)")
         
         # Log the generated API code
         logger.info(f"[{deps.correlation_id}] 📝 Generated API code:\n{code}")
@@ -659,12 +662,23 @@ async def execute_api_discovery(
         full_prompt = user_query
         
         # Dynamically extend prompt ONLY if SQL phase ran and found data
+        # If SQL phase ran, inject its discovered data as context
         if deps.sql_reasoning and deps.sql_discovered_data:
+            # Format structured lists
+            needs_api_str = str(deps.sql_needs_api) if deps.sql_needs_api else "[]"
+            found_data_str = str(deps.sql_found_data) if deps.sql_found_data else "[]"
+            
             full_prompt = f"""{user_query}
 
 ─────────────────────────────────────────
 📊 DATA ALREADY RETRIEVED FROM SQL DATABASE
 ─────────────────────────────────────────
+
+🎯 YOUR SCOPE - FETCH ONLY:
+{needs_api_str}
+
+✅ ALREADY FOUND (DO NOT SEARCH/FETCH):
+{found_data_str}
 
 SQL Agent Analysis:
 {deps.sql_reasoning}
@@ -674,16 +688,12 @@ Entities Found in Database (with IDs):
 {deps.sql_discovered_data}
 ```
 
-🎯 YOUR TASK:
-- The above entities are ALREADY KNOWN (check the "okta_id" field in the JSON)
-- Extract entity IDs from the JSON and use them with targeted endpoints
-- Example: If JSON has user ID "00u123", use path parameter endpoints like `/api/v1/users/00u123/...`
-- Only fetch what the SQL analysis says is MISSING from the database
-- DO NOT re-search for entities that are already identified above
-
-Apply the ENDPOINT EFFICIENCY PRINCIPLE:
-✅ Use path parameter endpoints with known entity IDs from JSON above
-❌ Don't use list/search endpoints for entities you already have IDs for
+🚨 CRITICAL RULES:
+1. **ONLY fetch entities listed in YOUR SCOPE** - If it says ['roles'], fetch ONLY roles
+2. **EXTRACT IDs from JSON** - Check "okta_id" fields in the JSON above
+3. **DO NOT search for anything in ALREADY FOUND list** - No /api/v1/users?q=..., no /api/v1/groups?q=...
+4. **USE path parameter endpoints** - Example: /api/v1/users/{{user_id}}/roles (not search endpoints)
+5. **One test per entity type** - If scope says ['roles'], make 1 test for roles, that's it
 ─────────────────────────────────────────
 """
         # else: API-only mode - prompt stays clean with just the user query

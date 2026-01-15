@@ -311,10 +311,14 @@ async def execute_multi_agent_query(
             # Get SQL reasoning and data for API agent (only if SQL phase ran)
             sql_reasoning = None
             sql_discovered_data = None
+            sql_needs_api = None
+            sql_found_data = None
             
             if result.sql_result and result.sql_result.success:
-                # SQL phase ran and succeeded - pass reasoning and data
+                # SQL phase ran and succeeded - pass reasoning and structured data
                 sql_reasoning = result.sql_result.reasoning
+                sql_needs_api = result.sql_result.needs_api
+                sql_found_data = result.sql_result.found_data
                 
                 # Load SQL artifacts and extract content
                 if artifacts_file.exists():
@@ -345,6 +349,8 @@ async def execute_multi_agent_query(
                 endpoints=endpoints_list,
                 sql_reasoning=sql_reasoning,
                 sql_discovered_data=sql_discovered_data,  # Pass SQL content
+                sql_needs_api=sql_needs_api,  # Pass structured list
+                sql_found_data=sql_found_data,  # Pass structured list
                 okta_client=okta_client,
                 cancellation_check=cancellation_check,
                 step_start_callback=aggregator.step_start,
@@ -369,9 +375,24 @@ async def execute_multi_agent_query(
                 result.total_tokens += api_usage.total_tokens
                 result.total_requests += api_usage.requests
             
+            # Check for API limit errors and stop execution
             if not result.api_result.success:
-                logger.error(f"[{correlation_id}] API phase failed: {result.api_result.error}")
-                # Continue to synthesis - might have partial data
+                error_msg = result.api_result.error or "API phase failed"
+                logger.error(f"[{correlation_id}] API phase failed: {error_msg}")
+                
+                # Check if it's a hard limit error
+                if "limit exceeded" in error_msg.lower():
+                    # Hard stop - notify frontend and return
+                    await aggregator.step_end({
+                        "title": "Execution Stopped",
+                        "text": f"❌ {error_msg}",
+                        "timestamp": time.time()
+                    })
+                    result.error = error_msg
+                    return result
+                
+                # Other API errors - continue to synthesis
+                logger.info(f"[{correlation_id}] Continuing to synthesis despite API error")
         else:
             logger.info(f"[{correlation_id}] Skipped API Discovery (Router decision: {phase} or SQL found all data)")
         
@@ -384,7 +405,7 @@ async def execute_multi_agent_query(
         # Notify user synthesis is starting
         await aggregator.step_start({
             "title": "",
-            "text": "🎯 STARTING: Processing collected data and generating final script",
+            "text": "🎯 STARTING: Processing collected data and generating final script (please wait, this may take a moment)",
             "timestamp": time.time()
         })
         result.phases_executed.append('synthesis')

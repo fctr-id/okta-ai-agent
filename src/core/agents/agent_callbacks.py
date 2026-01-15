@@ -31,8 +31,12 @@ async def notify_progress_to_user(
         message: Progress message to display
         details: Optional additional details
     """
+    # Strip emojis from message (safety net if LLM adds them)
+    import re
+    clean_message = re.sub(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF]', '', message).strip()
+    
     # Log to backend
-    log_msg = f"[{correlation_id}] 📊 Progress: {message}"
+    log_msg = f"[{correlation_id}] Progress: {clean_message}"
     if details:
         log_msg += f" - {details}"
     logger.info(log_msg)
@@ -41,7 +45,7 @@ async def notify_progress_to_user(
     if progress_callback:
         await progress_callback({
             "type": "STEP-PROGRESS",
-            "message": message,
+            "message": clean_message,
             "details": details or "",
             "timestamp": time.time()
         })

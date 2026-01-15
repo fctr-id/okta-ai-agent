@@ -233,14 +233,18 @@ export function useReactStream() {
         const isFinalPhase = data.step === 'validation' || data.step === 'execution';
         
         if (!isFinalPhase) {
-            // Clean up the text - remove "🎯 STARTING:" prefix to show just the action
+            // Clean up the text - remove emojis and "STARTING:" prefix
             let cleanText = data.text || data.title
             if (cleanText) {
-                // Remove "🎯 STARTING:" prefix
-                cleanText = cleanText.replace(/^🎯\s*STARTING:\s*/i, '')
+                // Strip all emojis first
+                cleanText = cleanText.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+                // Remove "STARTING:" prefix
+                cleanText = cleanText.replace(/^STARTING:\s*/i, '')
                 // Also handle "STEP 1:", "STEP 2:", etc. for backward compatibility
                 cleanText = cleanText.replace(/^STEP\s+\d+:\s*/i, '')
                 cleanText = cleanText.replace(/^STEP\s+\d+\s*[-–—]\s*/i, '')
+                // Trim any extra whitespace
+                cleanText = cleanText.trim()
             }
             
             discoverySteps.value.push({

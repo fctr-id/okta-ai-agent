@@ -50,26 +50,36 @@ def run_command(command):
         return_code = process.wait()
     except KeyboardInterrupt:
         print("\nStopping server...")
-        import signal
         
-        # Try graceful shutdown first
+        # On Windows, CTRL_C_EVENT doesn't work reliably with subprocess
+        # Skip graceful shutdown and go straight to terminate
         if os.name == 'nt':
-            process.send_signal(signal.CTRL_C_EVENT)
-        else:
-            process.send_signal(signal.SIGINT)
-            
-        try:
-            # Give uvicorn time to close streaming connections and cleanup
-            return_code = process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            print("Server did not stop gracefully, forcing termination...")
+            print("Terminating server process...")
             process.terminate()
             try:
-                return_code = process.wait(timeout=5)
+                return_code = process.wait(timeout=2)
+                print("Server stopped.")
             except subprocess.TimeoutExpired:
-                print("Server still running, forcing kill...")
+                print("Force killing server...")
                 process.kill()
+                process.wait(timeout=1)  # Final wait after kill
                 return_code = 1
+        else:
+            # Unix: Try graceful SIGINT first
+            import signal
+            process.send_signal(signal.SIGINT)
+            try:
+                return_code = process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                print("Forcing termination...")
+                process.terminate()
+                try:
+                    return_code = process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    print("Force killing...")
+                    process.kill()
+                    process.wait(timeout=1)
+                    return_code = 1
     
     # Give the threads a moment to finish printing any remaining output
     stdout_thread.join(1)
@@ -188,7 +198,7 @@ if __name__ == "__main__":
     if args.no_https:
         print("WARNING: Running without HTTPS. This is not recommended for production use.")
         reload_flag = " --reload" if args.reload else ""
-        command = f"{sys.executable} -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level}{reload_flag}"
+        command = f"{sys.executable} -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level} --timeout-graceful-shutdown 2{reload_flag}"
         run_command(command)
     else:
         # Generate certificates if needed
@@ -200,6 +210,6 @@ if __name__ == "__main__":
         command = (
             f"{sys.executable} -m uvicorn src.api.main:app --host {args.host} "
             f"--port {args.port} --log-level {args.log_level} "
-            f"--ssl-keyfile {key_path} --ssl-certfile {cert_path}{reload_flag}"
+            f"--ssl-keyfile {key_path} --ssl-certfile {cert_path} --timeout-graceful-shutdown 2{reload_flag}"
         )
         run_command(command)

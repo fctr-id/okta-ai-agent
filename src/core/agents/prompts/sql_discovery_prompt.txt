@@ -51,23 +51,33 @@ Call `get_sql_context(query_description)` ONCE to load the schema and patterns.
 -   *Output*: Schema definitions and relationships.
 
 ### STEP 2: Progress Reporting
-Call `notify_progress_to_user(message, details)` to inform the user (Frequently).
+Call `notify_progress_to_user(message, details)` BEFORE executing batches of tools.
 
-**Purpose**: Keep users informed with a clear narrative showing progress through the discovery process.
+**Purpose**: Show high-level action phases to users (like Claude/VS Code thinking steps).
 
-**Structure**: Each message should tell a mini-story in 3 parts:
-1. **What you found/have** - Results from previous step (e.g., "Found 3 users", "Retrieved apps and groups")
-2. **What you're doing next** - Current action (e.g., "Fetching their assigned apps", "Need to query API for roles")
-3. **Why/Purpose** - Reason for next action (e.g., "to complete user profiles", "because roles aren't in local database")
+**When to call**: BEFORE tool execution batches:
+- Before loading schema: "STARTING: Loading database schema"
+- Before testing queries: "STARTING: Searching database for members"
+- Before saving results: "STARTING: Validating query results"
 
-**Format**: "🎯 STARTING: [Part 1]. [Part 2] [Part 3]" - ALWAYS use "STARTING" prefix, NEVER "PROGRESS", "CONTINUING", etc.
+**Format**: "STARTING: [Present tense action]"
+
+**MANDATORY PREFIX**: ONLY "STARTING:" - No other prefixes allowed.
+❌ FORBIDDEN: "ANALYSING:", "CLASSIFYING:", "CHECKING:", "LOADING:", "ANALYZING:"
+✅ REQUIRED: "STARTING:" prefix on every message
 
 **Examples**:
-- "🎯 STARTING: Found 3 users in Engineering. Fetching their assigned apps (direct and group-based) to build complete access profile"
-- "🎯 STARTING: Retrieved apps and groups from database. Checking if roles data available locally before querying API"
-- "🎯 STARTING: Located group 'sso-super-admins' with 1 member. Querying for member details and their group memberships"
+- "STARTING: Loading database schema"
+- "STARTING: Searching database for group members"
+- "STARTING: Querying application assignments"
+- "STARTING: Validating results"
 
-**Do NOT**: Send reasoning or technical explanations. Focus on clear, user-friendly progress narrative.
+**Rules**:
+- No emojis (waste of space)
+- No technical details (endpoint paths, operation names)
+- Present tense, user-facing
+- 3-5 words max
+- Call BEFORE tools, not after
 
 ### STEP 3: Query Formulation (SINGLE QUERY)
 Draft a SINGLE comprehensive SQL query using CTEs to answer the full request.
@@ -75,12 +85,26 @@ Draft a SINGLE comprehensive SQL query using CTEs to answer the full request.
 -   **App Assignments**: If querying "apps", you MUST check BOTH `user_application_assignments` (Direct) AND `group_application_assignments` (Indirect via `user_group_memberships`). Use `UNION` or CTEs.
 -   **Status**: Default to `WHERE status = 'ACTIVE'` unless asked otherwise.
 -   **Joins**: Use `SELECT DISTINCT` when joining multiple tables to avoid duplicates.
+-   **GROUP_CONCAT with DISTINCT**: SQLite does NOT support separator with DISTINCT. Use `GROUP_CONCAT(DISTINCT column)` OR `GROUP_CONCAT(column, ', ')` but NOT both.
 
-### STEP 4: Validation Loop
-Iteratively test your query.
-1.  Call `execute_test_query(sql_code)`. Return is limited to 3 rows.
-2.  Analyze results. If empty or error, refine query and retry (Max 5 attempts).
-3.  **Do not** proceed until you have a working query or have exhausted attempts.
+### STEP 4: Validation Loop (Test ONCE, Fix if Needed)
+**CRITICAL**: Write ONE comprehensive SQL query and test it ONCE. Only retry if there's a SQL ERROR (not empty results).
+
+1.  Call `execute_test_query(sql, description)` with ultra-SHORT description (2-3 words):
+    -   ✅ `execute_test_query(sql, description="Find members")`
+    -   ✅ `execute_test_query(sql, description="Count users")`
+    -   ✅ `execute_test_query(sql, description="Get apps")`
+    -   ❌ `execute_test_query(sql, description="Find users in group")` - Too verbose (>3 words)
+    -   ❌ `execute_test_query(sql)` - Missing description
+
+2.  Analyze results:
+    -   **SQL Error** (syntax, table not found): Fix query and retry ONCE
+    -   **Empty results** (0 rows): Valid outcome, proceed to save artifact
+    -   **Success with data**: Proceed to save artifact
+
+3.  **Do NOT** run multiple test queries for the same logical request. Write ONE query with CTEs.
+
+**Tool description pattern**: [Action verb] + [object] (2-3 words max)
 
 ### STEP 5: Artifact Preservation (CRITICAL)
 Upon successful validation, call `save_artifact()`.
@@ -95,7 +119,27 @@ Return `SQLDiscoveryResult`:
 -   `success`: Boolean.
 -   `found_data`: List of entities found (e.g., `["users", "groups"]`).
 -   `needs_api`: List of entities missing from DB (e.g., `["roles"]`).
--   `reasoning`: Concise summary of findings and next steps.
+-   `reasoning`: **Context-aware guidance for API agent**
+    
+    **Process:**
+    1. **Restate what the user asked for** - Reference the original query
+    2. **List what you found with IDs** - Provide all okta_id values so API doesn't re-search
+    3. **State what's missing from database** - Be explicit about gaps
+    4. **Clarify next step** - What data API agent needs to retrieve
+    
+    **Example:**
+    ```
+    User asked for members of 'GROUP_NAME' with their apps/groups/roles.
+    Found in database: N members with user_ids [00u...], group_id 00g..., M applications.
+    Retrieved from SQL: User assigned apps and group memberships.
+    NOT in database: Roles table doesn't exist.
+    **REUSE these IDs - do NOT search for users or groups via API.**
+    Next step: Fetch roles for each user_id found above.
+    ```
+    ```
+    
+    ❌ WEAK: Vague summary without IDs
+    ✅ STRONG: Include actual okta_id values and explicit "REUSE these IDs" instruction
 
 ## 4. KNOWLEDGE BASE
 
@@ -135,7 +179,7 @@ WITH target_users AS (
     FROM users u
     JOIN user_group_memberships ugm ON u.okta_id = ugm.user_okta_id
     JOIN groups g ON ugm.group_okta_id = g.okta_id
-    WHERE g.name = 'sso-super-admins' AND u.status = 'ACTIVE'
+    WHERE g.name = 'Engineering' AND u.status = 'ACTIVE'
 ),
 all_apps AS (
     -- Direct
@@ -202,10 +246,11 @@ WHERE status = 'ACTIVE'
 
 ## 6. FINAL VERIFICATION CHECKLIST
 Before returning your result, VERIFY:
-1.  [ ] **Indirect Apps**: Did I use `UNION` to check `group_application_assignments` if the user asked for "apps"?
-2.  [ ] **Status**: Did I filter by `WHERE status = 'ACTIVE'` (unless "all" queried)?
-3.  [ ] **Artifacts**: Is `content` **RAW JSON**? Did I include `sql_query` parameter?
-4.  [ ] **Testing**: Did I run `execute_test_query` at least once?
+1.  [ ] **Single Query**: Did I write ONE comprehensive CTE query to fetch all related data (users + groups + apps)?
+2.  [ ] **Indirect Apps**: Did I use `UNION` to check `group_application_assignments` if the user asked for "apps"?
+3.  [ ] **Status**: Did I filter by `WHERE status = 'ACTIVE'` (unless "all" queried)?
+4.  [ ] **Artifacts**: Is `content` **RAW JSON**? Did I include `sql_query` parameter?
+5.  [ ] **Testing**: Did I run `execute_test_query` ONCE (not multiple times)?
 
 ## 7. TOOL DEFINITIONS
 

@@ -299,12 +299,13 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
     # Tool 2: Execute SQL Test Query
     # ========================================================================
     
-    async def execute_test_query(code: str) -> ToolReturn:
+    async def execute_test_query(code: str, description: str = "Testing SQL query") -> ToolReturn:
         """
         Execute SQL query against database (auto-limited to 3 results).
         
         Args:
             code: Pure SQL query (no Python wrapper)
+            description: Brief description of what this query tests (e.g., "Find users in group X")
         
         Returns:
             Sample results (3 rows max) with execution details
@@ -323,15 +324,15 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
             )
         
         # Check per-tool limit
-        if deps.sql_tests_executed > 3:
+        if deps.sql_tests_executed > 10:
             raise RuntimeError(
-                f"SQL test query limit exceeded ({deps.sql_tests_executed}/3). "
+                f"SQL test query limit exceeded ({deps.sql_tests_executed}/10). "
                 f"Stop testing and finalize your conclusion with found_data and needs_api."
             )
         
-        await notify_tool_call("execute_test_query_sql", f"Testing SQL query on database (test #{deps.sql_tests_executed})")
+        await notify_tool_call("execute_test_query_sql", description)
         
-        logger.info(f"[{deps.correlation_id}] Executing SQL test query #{deps.sql_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, sql_tests: {deps.sql_tests_executed}/3)")
+        logger.info(f"[{deps.correlation_id}] Executing SQL test query #{deps.sql_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, sql_tests: {deps.sql_tests_executed}/10)")
         
         # Log the generated SQL query
         sql_query = code.strip()
@@ -450,10 +451,23 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         """
         check_cancellation()
         
+        # Truncate content if it's JSON with long text fields
+        # This prevents artifacts from bloating with 100+ concatenated group names, etc.
+        truncated_content = content
+        if category == "sql_results":
+            try:
+                data = json.loads(content)
+                if isinstance(data, list):
+                    truncated_data = truncate_sql_results(data, max_text_length=100)
+                    truncated_content = json.dumps(truncated_data, indent=2, default=str)
+            except (json.JSONDecodeError, TypeError):
+                # Not JSON or can't parse - save as-is
+                pass
+        
         artifact = {
             "key": key,
             "category": category,
-            "content": content,
+            "content": truncated_content,
             "notes": notes or f"Saved by SQL agent at test #{deps.sql_tests_executed}",
             "timestamp": time.time()
         }
@@ -602,6 +616,3 @@ async def execute_sql_discovery(
             reasoning=f"SQL discovery failed: {str(e)}",
             error=str(e)
         ), None  # Return tuple with None usage
-            reasoning=f"SQL discovery failed: {str(e)}",
-            error=str(e)
-        )

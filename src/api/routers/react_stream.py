@@ -437,9 +437,16 @@ async def stream_react_updates(
                     await event_queue.put(sse_event)
                 
                 elif event_type == "progress":
+                    message = event_data.get("message", "")
+                    
+                    # Filter out internal progress messages
+                    skip_prefixes = ["STARTING:", "ANALYSING:", "ANALYZING:", "CLASSIFYING:", "CHECKING:", "LOADING:"]
+                    if any(message.startswith(prefix) for prefix in skip_prefixes):
+                        return  # Skip this progress event
+                    
                     sse_event = {
                         "type": "STEP-PROGRESS",
-                        "message": event_data.get("message", ""),
+                        "message": message,
                         "details": event_data.get("details", ""),
                         "timestamp": time.time()
                     }
