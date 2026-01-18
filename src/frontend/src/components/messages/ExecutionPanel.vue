@@ -474,8 +474,9 @@ const getExecutionClass = computed(() => {
 
 .progress-fill {
   height: 100%;
-  background: #4C64E2;
-  border-radius: 2px;
+  background: linear-gradient(90deg, #4C64E2, #8B5CF6);
+  border-radius: 99px;
+  box-shadow: 0 0 12px rgba(76, 100, 226, 0.3);
   transition: width 0.3s ease;
 }
 

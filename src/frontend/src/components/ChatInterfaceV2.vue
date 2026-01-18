@@ -3,12 +3,14 @@
         <main class="content-area" :class="{ 'has-results': hasResults }">
             <!-- Search Container with Animated Position -->
             <div :class="['search-container', hasResults ? 'moved' : '']">
-                <!-- Big title -->
-                <div :class="['title-wrapper', hasResults ? 'hidden' : '']">
-                    <h1 class="main-title gradient-title">
-                        Hey there! I'm Tako
-                    </h1>
-                    <p class="main-subtitle">Ask your AI agent anything about your Okta tenant</p>
+                <!-- Hero title -->
+                <div class="hero-card" :class="{ hidden: hasResults }">
+                    <div class="title-wrapper">
+                        <h1 class="main-title gradient-title">
+                            Hey there! I'm Tako
+                        </h1>
+                        <p class="main-subtitle">Ask your AI agent anything about your Okta tenant</p>
+                    </div>
                 </div>
 
                 <!-- Modern integrated search - Plain CSS Card -->
@@ -772,24 +774,34 @@ onMounted(() => {
 }
 
 /* Title with animated underline */
-.title-wrapper {
-    margin-bottom: 28px;
-    transition: opacity 0.4s ease;
-    text-align: center;
-    opacity: 1;
+
+.hero-card {
+    max-width: 920px;
+    margin: 0 auto 16px;
+    padding: 10px 0 6px;
+    border-radius: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    transition: opacity 0.35s ease, transform 0.35s ease;
 }
 
-.title-wrapper.hidden {
+.hero-card.hidden {
     opacity: 0;
-    transform: translateY(-20px);
+    transform: translateY(-16px);
     pointer-events: none;
+}
+
+.title-wrapper {
+    margin: 0;
+    text-align: center;
 }
 
 .main-title {
     font-family: var(--font-family-display);
     font-size: 55px;
     font-weight: 700;
-    margin-bottom: 24px;
+    margin-bottom: 10px;
     color: #1a1a1a;
     position: relative;
 }
@@ -804,10 +816,10 @@ onMounted(() => {
 .main-subtitle {
     font-family: var(--font-family-display);
     font-size: 18px;
-    font-weight: 500;
-    color: #8B5CF6;
-    margin: -18px 0 0 0;
-    letter-spacing: -0.01em;
+    font-weight: 600;
+    color: #475569;
+    margin: 6px 0 0 0;
+    letter-spacing: -0.005em;
 }
 
 /* Main content area */
@@ -956,7 +968,7 @@ onMounted(() => {
 
 /* Modern 2026 Suggestion Cards - Clean minimal style */
 .suggestions-wrapper {
-    margin-top: 2.5rem;
+    margin-top: 2rem;
     padding: 0 1rem;
     width: calc(100vw - 2rem);
     max-width: 1200px;
@@ -970,10 +982,10 @@ onMounted(() => {
 .suggestions-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 10px;
+    gap: 6px 10px;
     justify-content: center;
     width: 100%;
-    max-width: 1200px;
+    max-width: 1400px;
     margin: 0 auto;
 }
 

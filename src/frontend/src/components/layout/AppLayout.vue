@@ -3,19 +3,18 @@
         <!-- Header -->
         <header v-if="showHeader" class="floating-header">
             <div class="header-content">
-                <!-- Brand section only shows when logged in -->
-                <div v-if="showLogout" class="brand">
-                    <img src="@/assets/fctr-icon.svg" alt="fctr" height="28" />
+                <!-- Brand section: Wordmark + Tako AI -->
+                <div class="brand">
+                    <img src="@/assets/fctr-wordmark.svg" alt="fctr" />
+                    
                     <div class="brand-divider"></div>
                     <div class="title-with-badge">
                         <div class="tako-title-container">
                             <span class="tako-name">Tako AI</span>
                         </div>
-                        <div class="beta-badge">BETA</div>
+                        <div v-if="showLogout" class="beta-badge">BETA</div>
                     </div>
                 </div>
-                <!-- Empty spacer when not logged in -->
-                <div v-else></div>
 
                 <div class="header-actions">
                     <!-- Add SyncStatusButton here -->
@@ -90,7 +89,7 @@ const handleLogout = async () => {
 <style>
 .app-page {
     min-height: 100vh;
-    background: #FFFFFF;
+    background: #ffffff;
     position: relative;
     overflow-y: auto;
     overflow-x: hidden;
@@ -103,11 +102,8 @@ const handleLogout = async () => {
     flex: 1;
     display: flex;
     flex-direction: column;
-    margin: 0 16px 16px 16px;
-    border-top-left-radius: 24px;
-    border-top-right-radius: 24px;
-    border-bottom-left-radius: 24px;
-    border-bottom-right-radius: 24px;
+    margin: 0;
+    border-radius: 0;
     /* Calm Slate - soft blue gradient */
     background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
     overflow: hidden;
@@ -118,19 +114,21 @@ const handleLogout = async () => {
 
 /* Header */
 .floating-header {
-    position: relative;
+    position: sticky;
+    top: 0;
+    left: 0;
+    right: 0;
     margin: 0;
     z-index: 100;
     width: 100%;
-    max-width: 100%;
-    min-height: 56px;
+    min-height: 64px;
 
-    /* Frosted glass effect */
-    background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(12px) saturate(180%);
-    -webkit-backdrop-filter: blur(12px) saturate(180%);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
-    transition: all 0.2s ease;
+    /* High-end frosted glass */
+    background: rgba(255, 255, 255, 0.75);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    transition: all 0.3s ease;
 }
 
 .header-content {
@@ -140,14 +138,14 @@ const handleLogout = async () => {
     width: 100%;
     max-width: 100%;
     margin: 0;
-    padding: 12px 24px;
-    box-shadow: none;
+    padding: 0 32px;
+    height: 64px;
     position: relative;
     z-index: 2;
 }
 
 .floating-header:hover {
-    background: #ffffff;
+    background: rgba(255, 255, 255, 0.9);
 }
 
 .header-actions {
@@ -160,16 +158,24 @@ const handleLogout = async () => {
     display: flex;
     align-items: center;
     gap: 12px;
-    font-weight: 500;
-    color: var(--text-primary);
+}
+
+.brand img {
+    display: block;
+    height: 28px;
+    width: auto;
+    object-fit: contain;
 }
 
 .tako-name {
     font-family: var(--font-family-display);
-    font-weight: 700;
-    font-size: 19px;
-    letter-spacing: -0.01em;
-    color: #1e293b;
+    font-weight: 800;
+    font-size: 17px;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: #475569;
+    display: flex;
+    align-items: center;
 }
 
 .title-with-badge {
@@ -179,19 +185,23 @@ const handleLogout = async () => {
 }
 
 .brand-divider {
-    height: 16px;
-    width: 1px;
-    background: rgba(76, 100, 226, 0.18);
+    height: 14px;
+    width: 2px;
+    background: #4C64E2;
+    align-self: center;
+    border-radius: 4px;
+    opacity: 0.2;
 }
 
 .beta-badge {
-    background: rgba(76, 100, 226, 0.1);
+    background: rgba(76, 100, 226, 0.08);
+    border: 1px solid rgba(76, 100, 226, 0.2);
     color: #4C64E2;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 4px 8px;
+    font-size: 9px;
+    font-weight: 800;
+    padding: 2px 6px;
     border-radius: 6px;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.05em;
     line-height: 1;
 }
 
@@ -199,25 +209,23 @@ const handleLogout = async () => {
     display: flex;
     align-items: center;
     gap: 6px;
-    background: rgba(248, 250, 252, 0.9);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid rgba(100, 116, 139, 0.15);
-    color: #64748b;
+    background: transparent;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    color: #475569;
     cursor: pointer;
-    padding: 8px 14px;
-    border-radius: 20px;
+    padding: 7px 16px;
+    border-radius: 8px;
     font-family: var(--font-family-body);
     font-size: 13px;
-    font-weight: 500;
+    font-weight: 600;
     transition: all 0.2s ease;
 }
 
 .logout-btn:hover {
     background: #ffffff;
-    border-color: rgba(100, 116, 139, 0.25);
-    color: #475569;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    border-color: rgba(15, 23, 42, 0.2);
+    color: #0f172a;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 /* Main content area */
@@ -362,13 +370,6 @@ const handleLogout = async () => {
     .app-card {
         padding: 30px 20px;
     }
-}
-
-.title-with-badge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
 }
 
 /* For mobile responsiveness */

@@ -1,14 +1,9 @@
 <template>
   <AppLayout :showHeader="true" :showLogout="false" contentClass="auth-content">
     <div class="auth-box animate-entry">
-      <div class="auth-logo">
-        <img src="@/assets/fctr-logo-full.svg" alt="fctr" />
+      <div class="auth-header">
+        <h1 class="auth-subtitle">Login to Tako AI</h1>
       </div>
-      <h1 class="auth-title">
-        <span class="title-main">Tako AI</span>
-        <span class="title-divider">|</span>
-        <span class="title-sub">AI Agent for Okta</span>
-      </h1>
 
       <form @submit.prevent="handleLogin" class="auth-form">
         <transition name="fade-slide">
@@ -154,48 +149,17 @@ const handleLogin = async () => {
   margin-bottom: 1.5rem;
 }
 
-.auth-logo img {
-  height: 28px;
+.auth-header {
+  text-align: center;
+  margin-bottom: 2.5rem;
 }
 
-@keyframes card-appear {
-  0% {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-entry {
-  animation: card-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.auth-title {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 2rem;
-  font-size: 18px;
-  font-weight: 500;
-}
-
-.title-main {
-  color: #1a1a1a;
-  font-weight: 600;
-}
-
-.title-divider {
-  color: #d1d5db;
-  font-weight: 300;
-}
-
-.title-sub {
-  color: #888;
-  font-weight: 400;
+.auth-subtitle {
+  color: #64748b;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .auth-form {

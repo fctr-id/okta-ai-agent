@@ -188,8 +188,8 @@ async def execute_multi_agent_query(
     
     # Send initial progress message
     await aggregator.step_start({
-        "title": "",
-        "text": "🎯 STARTING: Analyzing your request and planning data retrieval",
+        "title": "Planning",
+        "text": "Analyzing your request and planning data retrieval",
         "step": 0,  # Explicitly set step 0
         "timestamp": __import__('time').time()
     })
@@ -404,8 +404,8 @@ async def execute_multi_agent_query(
         
         # Notify user synthesis is starting
         await aggregator.step_start({
-            "title": "",
-            "text": "🎯 STARTING: Processing collected data and generating final script (please wait, this may take a moment)",
+            "title": "Synthesis",
+            "text": "Processing collected data and generating final script",
             "timestamp": time.time()
         })
         result.phases_executed.append('synthesis')

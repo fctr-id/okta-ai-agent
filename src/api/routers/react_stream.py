@@ -406,11 +406,19 @@ async def stream_react_updates(
             async def event_callback(event_type: str, event_data: Dict[str, Any]):
                 """Convert orchestrator events to SSE format and queue them"""
                 if event_type == "step_start":
+                    text = event_data.get("text", "")
+                    
+                    # Filter out internal status messages that start with "WORD:" pattern
+                    # This catches: "STARTING:", "ROUTING:", "CLASSIFYING:", "ANALYZING:", etc.
+                    import re
+                    if re.match(r'^[🎯🔍⚡]*\s*[A-Z]+:', text):
+                        return  # Skip messages with prefix pattern
+                    
                     sse_event = {
                         "type": "STEP-START",
                         "step": event_data.get("step", 0),
                         "title": event_data.get("title", ""),
-                        "text": event_data.get("text", ""),
+                        "text": text,
                         "tools": event_data.get("tools", []),  # Tool calls for frontend
                         "timestamp": time.time()
                     }
@@ -439,10 +447,10 @@ async def stream_react_updates(
                 elif event_type == "progress":
                     message = event_data.get("message", "")
                     
-                    # Filter out internal progress messages
-                    skip_prefixes = ["STARTING:", "ANALYSING:", "ANALYZING:", "CLASSIFYING:", "CHECKING:", "LOADING:"]
-                    if any(message.startswith(prefix) for prefix in skip_prefixes):
-                        return  # Skip this progress event
+                    # Filter out internal progress messages using same pattern as step_start
+                    import re
+                    if re.match(r'^[🎯🔍⚡]*\s*[A-Z]+:', message):
+                        return  # Skip messages with prefix pattern
                     
                     sse_event = {
                         "type": "STEP-PROGRESS",
