@@ -1,6 +1,6 @@
 # Core dependencies
 pydantic~=2.11.7
-pydantic-ai-slim[openai,anthropic,google,bedrock]~=1.34.0
+pydantic-ai-slim[openai,anthropic,google,bedrock]~=1.44.0
 # Note: pydantic-ai-slim 1.17.0 requires openai>=1.107.2
 python-dotenv~=1.1.1
 okta~=2.9.13
