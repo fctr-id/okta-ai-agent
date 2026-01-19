@@ -542,7 +542,25 @@ async def stream_react_updates(
                 yield f"data: {json.dumps(script_event)}\n\n"
                 logger.debug(f"[{process_id}] Sent SCRIPT-GENERATED event")
             
-            # Check for direct answer (Special Tool) - Skip validation/execution if no script
+            # Check for direct answer (Special Tool) - Skip validation/execution if special tool
+            # SECURITY: Verify this is actually from special tools phase (defense in depth)
+            if result.is_special_tool and 'special' in result.phases_executed:
+                logger.info(f"[{process_id}] ⚡ Special tool result - skipping validation and execution")
+                
+                # Send COMPLETE event with special tool results
+                complete_event = {
+                    "type": "COMPLETE",
+                    "display_type": result.display_type or "markdown",
+                    "content": result.script_code,  # Contains the llm_summary
+                    "timestamp": time.time(),
+                    "is_special_tool": True
+                }
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                
+                process["status"] = "completed"
+                return
+            
+            # Check for no script
             if not result.script_code:
                 logger.info(f"[{process_id}] ⚡ No script generated - checking for direct answer")
                 

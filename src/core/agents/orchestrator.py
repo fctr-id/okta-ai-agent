@@ -52,6 +52,7 @@ class OrchestratorResult:
         self.script_code: Optional[str] = None
         self.display_type: str = "table"
         self.error: Optional[str] = None
+        self.is_special_tool: bool = False  # Flag to skip validation for special tools
         
         # Phase results
         self.router_decision: Optional[RouterDecision] = None
@@ -242,6 +243,7 @@ async def execute_multi_agent_query(
                 result.success = True
                 result.script_code = result_text  # The llm_summary text
                 result.display_type = display_type or "markdown"
+                result.is_special_tool = True  # Flag to skip validation
                 logger.info(f"[{correlation_id}] Special tool execution successful")
             else:
                 result.error = error or "Special tool execution failed"

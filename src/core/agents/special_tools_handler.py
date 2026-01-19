@@ -14,20 +14,13 @@ import json
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 from pydantic_ai import Agent
-from pydantic import BaseModel
+import json
 
 from src.utils.logging import get_logger
 from src.core.tools.special_tools import discover_special_tools, get_special_tool_endpoints
 from src.core.models.model_picker import ModelConfig, ModelType
 
 logger = get_logger("okta_ai_agent")
-
-
-class ToolParametersExtraction(BaseModel):
-    """Extracted parameters for special tool execution"""
-    tool_operation: str
-    parameters: Dict[str, Any]
-    reasoning: str
 
 
 async def extract_tool_parameters(
@@ -78,7 +71,7 @@ TASK:
 2. Extract all parameter values from the query (user identifiers, app names, group names, etc.)
 3. For identifiers: Use the EXACT text from the query (email addresses, app names as written)
 
-Return a JSON object with:
+Return ONLY a JSON object with:
 - tool_operation: The operation name (e.g., "special_tool_analyze_user_app_access")
 - parameters: Dict of parameter names to their values extracted from the query
 - reasoning: Brief explanation of your choice
@@ -98,16 +91,27 @@ Response:
         
         # Use fast model for extraction
         model = ModelConfig.get_model(ModelType.REASONING)
-        agent = Agent(model, result_type=ToolParametersExtraction)
+        agent = Agent(model)
         
         logger.info(f"[{correlation_id}] Extracting parameters from query")
         result = await agent.run(prompt)
         
-        extraction = result.data
-        logger.info(f"[{correlation_id}] Extracted tool: {extraction.tool_operation}")
-        logger.info(f"[{correlation_id}] Extracted parameters: {extraction.parameters}")
+        # Parse JSON response
+        response_text = result.output.strip()
+        # Remove markdown code blocks if present
+        if response_text.startswith("```"):
+            lines = response_text.split("\n")
+            response_text = "\n".join(lines[1:-1]) if len(lines) > 2 else response_text
         
-        return extraction.tool_operation, extraction.parameters, None
+        extraction = json.loads(response_text)
+        
+        tool_operation = extraction.get("tool_operation")
+        parameters = extraction.get("parameters", {})
+        
+        logger.info(f"[{correlation_id}] Extracted tool: {tool_operation}")
+        logger.info(f"[{correlation_id}] Extracted parameters: {parameters}")
+        
+        return tool_operation, parameters, None
         
     except Exception as e:
         error_msg = f"Failed to extract tool parameters: {str(e)}"
