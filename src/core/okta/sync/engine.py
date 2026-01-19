@@ -410,6 +410,8 @@ class SyncOrchestrator:
         
     async def sync_model_streaming(self, model: Type[ModelType], list_method: Callable, batch_size: int = 100) -> None:
         """Sync model with direct API-to-DB streaming (no memory accumulation)."""
+        import time
+        start_time = time.time()
         logger.info(f"Starting sync for {model.__name__}")
         try:
             # Make sure the database operations object has the tenant_id set
@@ -477,7 +479,8 @@ class SyncOrchestrator:
                     # Call list method with direct processor function 
                     await list_method(processor_func=process_batch_directly)
                     
-                    logger.info(f"Processed {total_records} {model.__name__} records")
+                    duration = time.time() - start_time
+                    logger.info(f"Processed {total_records} {model.__name__} records in {format_duration(duration)}")
                     
                 except Exception as e:
                     logger.error(f"Error during {model.__name__} sync: {str(e)}")
@@ -502,6 +505,8 @@ class SyncOrchestrator:
         Supports cancellation via cancellation_flag attribute.
         """
         try:
+            import time
+            overall_start_time = time.time()
             await self._initialize()
             
             # Pass the cancellation flag to the OktaClientWrapper
@@ -566,13 +571,16 @@ class SyncOrchestrator:
                         logger.error(f"Sync completed with auth errors: {error_msg}")
                         raise Exception(error_msg)
                     
-                    logger.info(f"Sync completed for tenant {self.tenant_id}")
+                    # Log total duration
+                    total_duration = time.time() - overall_start_time
+                    logger.info(f"Sync completed for tenant {self.tenant_id} in {format_duration(total_duration)}")
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return
                 
         except asyncio.CancelledError:
-            logger.info(f"Sync for tenant {self.tenant_id} was cancelled")
+            duration = time.time() - overall_start_time
+            logger.info(f"Sync for tenant {self.tenant_id} was cancelled after {format_duration(duration)}")
             raise
         except Exception as e:
             logger.error(f"Sync orchestration error: {str(e)}")

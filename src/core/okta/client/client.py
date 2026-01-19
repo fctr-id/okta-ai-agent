@@ -207,8 +207,8 @@ class OktaClientWrapper:
     FACTOR_PAGE_SIZE: Final[int] = 50
     DEVICE_PAGE_SIZE: Final[int] = 200
   
-    # Rate limit delay between requests
-    RATE_LIMIT_DELAY: Final[float] = 0.1
+    # Rate limit delay between requests (minimal delay to yield to event loop)
+    RATE_LIMIT_DELAY: Final[float] = 0.01
     
     def __init__(self, tenant_id: str, cancellation_flag=None):
         self.tenant_id = tenant_id
@@ -728,14 +728,23 @@ class OktaClientWrapper:
             
             # Only fetch relationships for non-deprovisioned users
             if user_status != 'DEPROVISIONED':
-                # Fetch relationships with small delays between calls
-                app_links = await self.get_user_app_links(user_okta_id)
-                await asyncio.sleep(0.1)  # Small delay after first API call
+                # PARALLEL EXECUTION: Fire all 3 requests simultaneously
+                # This reduces wait time from ~0.6s (sequential) to ~0.2s (parallel)
+                results = await asyncio.gather(
+                    self.get_user_app_links(user_okta_id),
+                    self.get_user_groups(user_okta_id),
+                    self.list_user_factors([user_okta_id]),
+                    return_exceptions=True
+                )
                 
-                group_memberships = await self.get_user_groups(user_okta_id)
-                await asyncio.sleep(0.1)  # Small delay after second API call
+                # Unpack results and handle failures gracefully
+                app_links = results[0] if not isinstance(results[0], Exception) else []
+                group_memberships = results[1] if not isinstance(results[1], Exception) else []
+                factors = results[2] if not isinstance(results[2], Exception) else []
                 
-                factors = await self.list_user_factors([user_okta_id])
+                # Log if any calls failed
+                if any(isinstance(r, Exception) for r in results):
+                    logger.warning(f"Partial data failure for user {user_okta_id}")
             else:
                 logger.debug(f"User {user_okta_id} is DEPROVISIONED - skipping relationship fetching")
             

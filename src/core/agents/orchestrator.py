@@ -36,6 +36,7 @@ from src.core.agents.synthesis_agent import (
     SynthesisDeps,
     SynthesisResult
 )
+from src.core.agents.special_tools_handler import handle_special_query
 
 logger = get_logger("okta_ai_agent")
 
@@ -225,7 +226,27 @@ async def execute_multi_agent_query(
             return result
         
         if phase == "SPECIAL":
-            result.error = "Special tool queries not yet migrated to multi-agent architecture"
+            # Execute special tools
+            logger.info(f"[{correlation_id}] Executing special tool handler")
+            result.phases_executed.append('special')
+            
+            success, result_text, display_type, error = await handle_special_query(
+                user_query=user_query,
+                okta_client=okta_client,
+                correlation_id=correlation_id,
+                progress_callback=aggregator.progress
+            )
+            
+            if success:
+                # Special tools return pre-formatted results
+                result.success = True
+                result.script_code = result_text  # The llm_summary text
+                result.display_type = display_type or "markdown"
+                logger.info(f"[{correlation_id}] Special tool execution successful")
+            else:
+                result.error = error or "Special tool execution failed"
+                logger.error(f"[{correlation_id}] Special tool failed: {result.error}")
+            
             return result
         
         # ====================================================================
