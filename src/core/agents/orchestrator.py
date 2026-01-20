@@ -261,6 +261,13 @@ async def execute_multi_agent_query(
             aggregator.set_phase('sql')
             result.phases_executed.append('sql')
             
+            # Send STEP-START for SQL Discovery phase
+            await aggregator.step_start({
+                "title": "SQL Discovery",
+                "text": "Analyzing database schema and executing SQL queries",
+                "timestamp": time.time()
+            })
+            
             sql_deps = SQLDiscoveryDeps(
                 correlation_id=correlation_id,
                 artifacts_file=artifacts_file,
@@ -366,6 +373,13 @@ async def execute_multi_agent_query(
                 sql_reasoning = f"SQL phase failed: {result.sql_result.error}"
             # else: SQL phase skipped (API-only mode) - both remain None
             
+            # Send STEP-START for API Discovery phase
+            await aggregator.step_start({
+                "title": "API Discovery",
+                "text": "Generating and testing API code to fetch additional data",
+                "timestamp": time.time()
+            })
+            
             api_deps = APIDiscoveryDeps(
                 correlation_id=correlation_id,
                 artifacts_file=artifacts_file,
@@ -438,6 +452,7 @@ async def execute_multi_agent_query(
             artifacts_file=artifacts_file,
             step_start_callback=aggregator.step_start,
             step_end_callback=aggregator.step_end,
+            tool_call_callback=aggregator.tool_call,
             progress_callback=aggregator.progress
         )
         

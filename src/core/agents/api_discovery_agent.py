@@ -563,49 +563,11 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             metadata={'artifact_count': len(deps.artifacts)}
         )
     
-    # ========================================================================
-    # Tool 5: Notify Progress (for LLM to report progress to user)
-    # ========================================================================
-    
-    async def notify_progress_to_user(
-        ctx: RunContext[APIDiscoveryDeps],
-        message: str,
-        details: str = ""
-    ) -> str:
-        """
-        Report progress to the user. Call this to keep users informed of what you're doing.
-        Use this for intermediate updates like "Fetched 10 users", "Testing endpoint X", etc.
-        
-        Args:
-            message: Progress message (e.g., "Testing API endpoint")
-            details: Optional additional details
-        
-        Returns:
-            Confirmation that progress was logged
-        """
-        check_cancellation()
-        
-        # Log to server with full details
-        logger.info(f"[{deps.correlation_id}] 📊 Progress: {message}")
-        if details:
-            logger.info(f"[{deps.correlation_id}] 📊 Details: {details}")
-        
-        # Send to frontend via step_start callback (creates STEP-START events)
-        if deps.step_start_callback:
-            await deps.step_start_callback({
-                "title": "",
-                "text": message,  # Frontend displays text field
-                "timestamp": time.time()
-            })
-        
-        return f"✅ Progress logged: {message}"
-    
     # Register tools
     toolset.tool(load_comprehensive_api_endpoints)
     toolset.tool(filter_endpoints_by_operations)
     toolset.tool(execute_test_query)
     toolset.tool(save_artifact)
-    toolset.tool(notify_progress_to_user)
     
     return toolset
 

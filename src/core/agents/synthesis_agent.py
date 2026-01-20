@@ -51,6 +51,7 @@ class SynthesisDeps:
     current_step: int = field(default=0)
     step_start_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     step_end_callback: Optional[Callable[[dict], Awaitable[None]]] = None
+    tool_call_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     progress_callback: Optional[Callable[[dict], Awaitable[None]]] = None
 
 
@@ -139,6 +140,15 @@ async def execute_synthesis(
                 success=False,
                 error="No artifacts found from previous phases"
             )
+        
+        # Notify: Loading artifacts
+        if deps.tool_call_callback:
+            await deps.tool_call_callback({
+                "name": "load_artifacts",
+                "arguments": {"source": "memory"},
+                "description": "Loading collected data from SQL and API phases",
+                "timestamp": time.time()
+            })
         
         with open(deps.artifacts_file, 'r', encoding='utf-8') as f:
             artifacts = json.load(f)
