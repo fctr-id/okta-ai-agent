@@ -613,7 +613,7 @@ class OktaClientWrapper:
             return await self._paginate(
                 api_method=self.client.list_applications,
                 query_params=query_params,
-                transform_batch_func=self._transform_app_with_groups,
+                transform_batch_func=self._transform_app_with_users,
                 processor_func=processor_func,
                 page_size=self.APP_PAGE_SIZE,
                 entity_name="applications",
@@ -728,19 +728,17 @@ class OktaClientWrapper:
             
             # Only fetch relationships for non-deprovisioned users
             if user_status != 'DEPROVISIONED':
-                # PARALLEL EXECUTION: Fire all 3 requests simultaneously
-                # This reduces wait time from ~0.6s (sequential) to ~0.2s (parallel)
+                # PARALLEL EXECUTION: Fire both requests simultaneously
+                # This reduces wait time from sequential to parallel
                 results = await asyncio.gather(
-                    self.get_user_app_links(user_okta_id),
                     self.get_user_groups(user_okta_id),
                     self.list_user_factors([user_okta_id]),
                     return_exceptions=True
                 )
                 
                 # Unpack results and handle failures gracefully
-                app_links = results[0] if not isinstance(results[0], Exception) else []
-                group_memberships = results[1] if not isinstance(results[1], Exception) else []
-                factors = results[2] if not isinstance(results[2], Exception) else []
+                group_memberships = results[0] if not isinstance(results[0], Exception) else []
+                factors = results[1] if not isinstance(results[1], Exception) else []
                 
                 # Log if any calls failed
                 if any(isinstance(r, Exception) for r in results):
@@ -777,7 +775,6 @@ class OktaClientWrapper:
                 'organization': profile.get('organization'),
                 'custom_attributes': custom_attributes,  # Add custom attributes
                 'factors': factors,
-                'app_links': app_links,
                 'group_memberships': group_memberships
             }
             
@@ -785,7 +782,7 @@ class OktaClientWrapper:
                 logger.debug(f"User {user_okta_id} (DEPROVISIONED) processed with basic data only")
             else:
                 logger.debug(
-                    f"User {user_okta_id} processed with {len(app_links)} app links, "
+                    f"User {user_okta_id} processed with "
                     f"{len(group_memberships)} groups, {len(factors)} factors, "
                     f"and {len(custom_attributes)} custom attributes"
                 )
@@ -795,8 +792,14 @@ class OktaClientWrapper:
             logger.error(f"Error processing user: {str(e)}")
             raise
     
-    async def _transform_app_with_groups(self, app) -> Dict:
-        """Transform application with group assignments"""
+    async def _transform_app_with_users(self, app) -> Dict:
+        """
+        Transform application with ALL user assignments (direct + group).
+        
+        Note: Fetches all user assignments for the app in memory.
+        For most apps (<1000 users), this is fine (~50KB).
+        For apps with 10,000+ users, consider streaming implementation.
+        """
         try:
             # Extract app ID
             okta_id = app.get('id') if isinstance(app, dict) else getattr(app, 'id', None)
@@ -809,17 +812,19 @@ class OktaClientWrapper:
             if not app_data:
                 return None
             
-            # Get group assignments for this app - use app_group_assignments instead of 'groups'
-            group_assignments = await self.get_app_groups(okta_id)
-            await asyncio.sleep(0.1)  # Add small delay after API call
+            # Get ALL user assignments for this app (replaces group-only fetching)
+            # Pagination is handled internally by get_app_users()
+            user_assignments = await self.get_app_users(okta_id)
+            await asyncio.sleep(0.1)
             
-            if group_assignments:
-                app_data['app_group_assignments'] = group_assignments
+            if user_assignments:
+                app_data['user_assignments'] = user_assignments
+                logger.debug(f"App {okta_id} has {len(user_assignments)} user assignments")
             
             return app_data
             
         except Exception as e:
-            logger.error(f"Error transforming app with groups: {str(e)}")
+            logger.error(f"Error transforming app with users: {str(e)}")
             return None
         
     async def _transform_application(self, app) -> Dict:
@@ -1415,6 +1420,138 @@ class OktaClientWrapper:
             
         except Exception as e:
             logger.error(f"Error getting groups for app {app_okta_id}: {str(e)}")
+            return []
+
+    async def get_app_users(self, app_okta_id: str) -> List[Dict]:
+        """
+        Fetch ALL user assignments for an application.
+        Uses /api/v1/apps/{appId}/users endpoint.
+        Handles pagination for apps with 100s of users.
+        
+        Returns assignments with scope information (USER vs GROUP).
+        """
+        try:
+            logger.debug(f"Fetching users for application {app_okta_id}")
+            
+            # Check for cancellation
+            if self.cancellation_flag and self.cancellation_flag.is_set():
+                logger.info(f"Cancellation requested, skipping users for app {app_okta_id}")
+                return []
+                
+            # Set pagination parameters - apps can have 100s of users
+            query_params = {"limit": 200}
+            
+            # Initial API call
+            api_response = await self._execute_with_semaphore(
+                self.client.list_application_users,
+                app_okta_id, 
+                query_params=query_params
+            )
+            
+            # Process response
+            users, error = normalize_okta_response(api_response)
+            response = api_response[1] if isinstance(api_response, tuple) and len(api_response) > 1 else None
+            
+            if error:
+                logger.error(f"Error getting users for app {app_okta_id}: {error}")
+                return []
+            
+            # Process first page
+            all_users = []
+            for user_assignment in users:
+                user_dict = user_assignment if isinstance(user_assignment, dict) else user_assignment.as_dict()
+                
+                user_id = user_dict.get('id')
+                scope = user_dict.get('scope', 'USER')
+                assignment_type = 'DIRECT' if scope == 'USER' else 'GROUP'
+                
+                # Extract group info from _links if scope=GROUP
+                links = user_dict.get('_links', {})
+                group_info = links.get('group', {})
+                group_name = group_info.get('name') if scope == 'GROUP' else None
+                group_okta_id = None
+                if scope == 'GROUP' and group_info.get('href'):
+                    group_okta_id = group_info['href'].split('/')[-1]
+                
+                if user_id:
+                    all_users.append({
+                        'user_okta_id': user_id,
+                        'application_okta_id': app_okta_id,
+                        'assignment_id': user_id,
+                        'scope': scope,
+                        'assignment_type': assignment_type,
+                        'group_name': group_name,
+                        'group_okta_id': group_okta_id,
+                        'created_at': parse_timestamp(user_dict.get('created')),
+                        'last_updated_at': parse_timestamp(user_dict.get('lastUpdated')),
+                        'status': user_dict.get('status', 'ACTIVE'),
+                        'credentials_setup': False,  # Not available in this endpoint
+                        'hidden': False              # Not available in this endpoint
+                    })
+            
+            # Handle pagination
+            page_num = 1
+            while response and hasattr(response, 'has_next') and response.has_next():
+                if self.cancellation_flag and self.cancellation_flag.is_set():
+                    logger.info(f"Cancellation requested, stopping users pagination")
+                    break
+                
+                page_num += 1
+                logger.debug(f"Fetching page {page_num} of users for app {app_okta_id}")
+                
+                try:
+                    async with self.api_semaphore:
+                        next_response = await response.next()
+                        await asyncio.sleep(self.RATE_LIMIT_DELAY)
+                    
+                    users, error = normalize_okta_response(next_response)
+                    
+                    if error:
+                        logger.error(f"Error on page {page_num}: {error}")
+                        break
+                        
+                    # Process this page
+                    for user_assignment in users:
+                        user_dict = user_assignment if isinstance(user_assignment, dict) else user_assignment.as_dict()
+                        user_id = user_dict.get('id')
+                        scope = user_dict.get('scope', 'USER')
+                        assignment_type = 'DIRECT' if scope == 'USER' else 'GROUP'
+                        
+                        links = user_dict.get('_links', {})
+                        group_info = links.get('group', {})
+                        group_name = group_info.get('name') if scope == 'GROUP' else None
+                        group_okta_id = None
+                        if scope == 'GROUP' and group_info.get('href'):
+                            group_okta_id = group_info['href'].split('/')[-1]
+                        
+                        if user_id:
+                            all_users.append({
+                                'user_okta_id': user_id,
+                                'application_okta_id': app_okta_id,
+                                'assignment_id': user_id,
+                                'scope': scope,
+                                'assignment_type': assignment_type,
+                                'group_name': group_name,
+                                'group_okta_id': group_okta_id,
+                                'created_at': parse_timestamp(user_dict.get('created')),
+                                'last_updated_at': parse_timestamp(user_dict.get('lastUpdated')),
+                                'status': user_dict.get('status', 'ACTIVE'),
+                                'credentials_setup': False,
+                                'hidden': False
+                            })
+                
+                except StopAsyncIteration:
+                    logger.info(f"Pagination complete after {page_num} pages")
+                    break
+                except Exception as e:
+                    logger.error(f"Error processing page {page_num}: {str(e)}")
+                    break
+            
+            logger.debug(f"Retrieved {len(all_users)} users for app {app_okta_id}")
+            return all_users
+            
+        except Exception as e:
+            logger.error(f"Error getting users for app {app_okta_id}: {str(e)}")
             return []
 
     async def get_group_apps(self, group_okta_id: str) -> List[Dict]:
