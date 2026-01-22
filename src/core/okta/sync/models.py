@@ -69,14 +69,18 @@ user_application_assignments = Table(
     Column('user_okta_id', String, ForeignKey('users.okta_id', ondelete='CASCADE'), primary_key=True),
     Column('application_okta_id', String, ForeignKey('applications.okta_id', ondelete='CASCADE'), primary_key=True),
     Column('tenant_id', String, nullable=False),
-    Column('assignment_id', String, nullable=False),  # appAssignmentId from appLinks
-    Column('app_instance_id', String, nullable=False),  # appInstanceId from appLinks
+    Column('assignment_id', String, nullable=False),
+    Column('assignment_type', String, default='DIRECT', nullable=False),  # 'DIRECT' or 'GROUP'
+    Column('group_name', String, nullable=True),  # Group name if GROUP type
+    Column('group_okta_id', String, nullable=True),  # Group ID if GROUP type
+    Column('assignment_status', String, default='ACTIVE', nullable=False),  # From API
     Column('credentials_setup', Boolean, default=False),
     Column('hidden', Boolean, default=False),
     Column('created_at', DateTime(timezone=True), default=get_utc_now),
     Column('updated_at', DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now),
     Index('idx_user_app_tenant', 'tenant_id'),
     Index('idx_uaa_application', 'tenant_id', 'application_okta_id'),
+    Index('idx_uaa_assignment_type', 'tenant_id', 'assignment_type'),
     UniqueConstraint('tenant_id', 'user_okta_id', 'application_okta_id', name='uix_user_app_assignment')
 )
 

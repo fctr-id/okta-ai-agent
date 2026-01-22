@@ -147,38 +147,6 @@ class SyncOrchestrator:
             user_okta_id = user_data['okta_id']
             logger.debug(f"Starting relationship sync for user {user_okta_id}")
     
-            # Handle app assignments with upsert
-            app_links = user_data.pop('app_links', [])
-            if app_links:
-                for link in app_links:
-                    stmt = text("""
-                        INSERT INTO user_application_assignments 
-                        (tenant_id, user_okta_id, application_okta_id, assignment_id, 
-                        app_instance_id, credentials_setup, hidden, created_at, updated_at)
-                        VALUES (:tenant_id, :user_okta_id, :application_okta_id, :assignment_id,
-                                :app_instance_id, :credentials_setup, :hidden, :created_at, :updated_at)
-                        ON CONFLICT (tenant_id, user_okta_id, application_okta_id) 
-                        DO UPDATE SET
-                            assignment_id = excluded.assignment_id,
-                            app_instance_id = excluded.app_instance_id,
-                            credentials_setup = excluded.credentials_setup,
-                            hidden = excluded.hidden,
-                            updated_at = excluded.updated_at
-                    """)
-                    
-                    now = datetime.now(timezone.utc)
-                    await session.execute(stmt, {
-                        'tenant_id': self.tenant_id,
-                        'user_okta_id': user_okta_id,
-                        'application_okta_id': link['application_okta_id'],
-                        'assignment_id': link['assignment_id'],
-                        'app_instance_id': link['app_instance_id'],
-                        'credentials_setup': link['credentials_setup'],
-                        'hidden': link['hidden'],
-                        'created_at': now,
-                        'updated_at': now
-                    })
-    
             # Handle group memberships with upsert
             group_memberships = user_data.pop('group_memberships', [])
             if group_memberships:
@@ -315,44 +283,77 @@ class SyncOrchestrator:
         session: AsyncSession,
         app_data: Dict,
     ) -> None:
-        """Process application relationships with cleanup of removed assignments"""
+        """
+        Process application user assignments with scope awareness.
+        Uses batched INSERTs for performance with large apps (10K+ users).
+        """
         try:
             # Get current assignments from Okta response
-            current_group_assignments = app_data.pop('app_group_assignments', [])
+            user_assignments = app_data.pop('user_assignments', [])
             app_okta_id = str(app_data['okta_id'])
             
-            # Delete all existing assignments for this application first
-            delete_all_stmt = text("""
-                DELETE FROM group_application_assignments 
+            # DELETE all existing assignments for this app first
+            delete_stmt = text("""
+                DELETE FROM user_application_assignments 
                 WHERE tenant_id = :tenant_id 
                 AND application_okta_id = :app_okta_id
             """)
             
-            await session.execute(delete_all_stmt, {
+            await session.execute(delete_stmt, {
                 'tenant_id': str(self.tenant_id),
                 'app_okta_id': app_okta_id
             })
-    
-            # Insert current assignments
-            if current_group_assignments:
-                for assignment in current_group_assignments:
-                    insert_stmt = text("""
-                        INSERT INTO group_application_assignments 
-                        (tenant_id, group_okta_id, application_okta_id, assignment_id, created_at, updated_at)
-                        VALUES (:tenant_id, :group_okta_id, :application_okta_id, :assignment_id, :created_at, :updated_at)
-                    """)
+            
+            # INSERT current assignments with batched execution for performance
+            if user_assignments:
+                BATCH_SIZE = 1000
+                now = datetime.now(timezone.utc)
+                
+                # Prepare INSERT statement (reuse for all batches)
+                insert_stmt = text("""
+                    INSERT INTO user_application_assignments 
+                    (tenant_id, user_okta_id, application_okta_id, 
+                     assignment_id, assignment_type, group_name, group_okta_id,
+                     assignment_status, credentials_setup, hidden,
+                     created_at, updated_at)
+                    VALUES (:tenant_id, :user_okta_id, :application_okta_id,
+                            :assignment_id, :assignment_type, :group_name, :group_okta_id,
+                            :assignment_status, :credentials_setup, :hidden,
+                            :created_at, :updated_at)
+                """)
+                
+                # Process in batches of 1000 for optimal performance
+                total_inserted = 0
+                for i in range(0, len(user_assignments), BATCH_SIZE):
+                    batch = user_assignments[i:i + BATCH_SIZE]
                     
-                    now = datetime.now(timezone.utc)
-                    await session.execute(insert_stmt, {
-                        'tenant_id': str(self.tenant_id),
-                        'group_okta_id': str(assignment['group_okta_id']),
-                        'application_okta_id': str(assignment['application_okta_id']),
-                        'assignment_id': str(assignment['assignment_id']),
-                        'created_at': now,
-                        'updated_at': now
-                    })
-    
-            logger.debug(f"Processed {len(current_group_assignments)} group assignments for app {app_okta_id}")
+                    # Prepare batch parameters
+                    batch_params = []
+                    for assignment in batch:
+                        batch_params.append({
+                            'tenant_id': str(self.tenant_id),
+                            'user_okta_id': str(assignment['user_okta_id']),
+                            'application_okta_id': app_okta_id,
+                            'assignment_id': str(assignment['assignment_id']),
+                            'assignment_type': str(assignment['assignment_type']),
+                            'group_name': assignment.get('group_name'),
+                            'group_okta_id': assignment.get('group_okta_id'),
+                            'assignment_status': str(assignment['status']),
+                            'credentials_setup': assignment.get('credentials_setup', False),
+                            'hidden': assignment.get('hidden', False),
+                            'created_at': assignment.get('created_at', now),
+                            'updated_at': now
+                        })
+                    
+                    # Execute batch insert
+                    await session.execute(insert_stmt, batch_params)
+                    total_inserted += len(batch)
+                    
+                    if len(user_assignments) > BATCH_SIZE:
+                        logger.debug(f"Inserted batch {i//BATCH_SIZE + 1}: {len(batch)} assignments for app {app_okta_id}")
+            
+            await session.commit()
+            logger.debug(f"Processed {len(user_assignments)} assignments for app {app_okta_id}")
             
         except Exception as e:
             logger.error(f"Error processing app relationships: {str(e)}")
@@ -510,12 +511,15 @@ class SyncOrchestrator:
         Run entity syncs in sequential order to manage dependencies.
         
         Flow:
-        1. Groups first (for initial sync)
-        2. Applications second
-        3. Authenticators third (no dependencies)
-        4. Devices fourth (conditional sync, no dependencies) 
-        5. Users fifth (depends on groups and apps)
+        1. Groups first (no dependencies)
+        2. Users second (depends on groups for memberships)
+        3. Applications third (depends on users for FK constraint on user_application_assignments)
+        4. Authenticators fourth (no dependencies)
+        5. Devices fifth (conditional sync, no dependencies) 
         6. Policies last (depends on apps)
+        
+        CRITICAL: Users MUST be synced before Applications because _process_app_relationships()
+        inserts into user_application_assignments table which has FK constraint on users.okta_id.
         
         Supports cancellation via cancellation_flag attribute.
         """
@@ -529,7 +533,7 @@ class SyncOrchestrator:
                 logger.info(f"Starting sync in dependency order for tenant {self.tenant_id}")
                 
                 # Check cancellation before each major step
-                # 1. Groups first (for initial sync)
+                # 1. Groups first (no dependencies)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     logger.info("Step 1: Syncing Groups")
                     await self.sync_model_streaming(Group, okta.list_groups)
@@ -537,47 +541,47 @@ class SyncOrchestrator:
                     logger.info("Sync cancelled - skipping Groups")
                     return
                     
-                # 2. Applications second
+                # 2. Users second (depends on groups, must be before apps for FK constraint)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
-                    logger.info("Step 2: Syncing Applications")
+                    logger.info("Step 2: Syncing Users")
+                    await self.sync_model_streaming(User, okta.list_users)
+                else:
+                    logger.info("Sync cancelled - skipping remaining steps")
+                    return
+    
+                # 3. Applications third (depends on users for user_application_assignments FK)
+                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
+                    logger.info("Step 3: Syncing Applications")
                     await self.sync_model_streaming(Application, okta.list_applications)
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return
-    
-                # 3. Authenticators third (no dependencies)
-                if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
-                    logger.info("Step 3: Syncing Authenticators")
-                    await self.sync_model_streaming(Authenticator, okta.list_authenticators)
-                else:
-                    logger.info("Sync cancelled - skipping remaining steps")
-                    return
                 
-                # 4. Users last (depends on groups and apps)
+                # 4. Authenticators fourth (no dependencies)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
-                    logger.info("Step 4: Syncing Users")
-                    await self.sync_model_streaming(User, okta.list_users)
+                    logger.info("Step 4: Syncing Authenticators")
+                    await self.sync_model_streaming(Authenticator, okta.list_authenticators)
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return                
                 
-                # 5. Devices fourth (conditional sync)
+                # 5. Devices fifth (conditional sync)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     # Check if device sync is enabled
                     from src.config.settings import settings
                     if settings.SYNC_OKTA_DEVICES:
-                        logger.info("Step 4: Syncing Devices")
+                        logger.info("Step 5: Syncing Devices")
                         await self.sync_model_streaming(Device, okta.list_devices)
                     else:
-                        logger.info("Step 4: Skipping Devices (SYNC_OKTA_DEVICES=false)")
+                        logger.info("Step 5: Skipping Devices (SYNC_OKTA_DEVICES=false)")
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return                
     
     
-                # 6. Policies (depends on apps)
+                # 6. Policies last (depends on apps)
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
-                    logger.info("Step 5: Syncing Policies")
+                    logger.info("Step 6: Syncing Policies")
                     await self.sync_model_streaming(Policy, okta.list_policies)
                     
                     # Check if there were authentication errors

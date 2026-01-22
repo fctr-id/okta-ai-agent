@@ -54,9 +54,9 @@ def check_database_health() -> bool:
     try:
         # Check multiple possible database locations
         possible_paths = [
-            Path("sqlite_db/okta_data.db"),
-            Path("okta_data.db"),
-            Path("../sqlite_db/okta_data.db")
+            Path("sqlite_db/okta_sync.db"),
+            Path("okta_sync.db"),
+            Path("../sqlite_db/okta_sync.db")
         ]
         
         db_path = None
