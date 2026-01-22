@@ -1,6 +1,46 @@
 # Version History
 
-## Current latest: v1.5.0-beta - "The React Revolution"
+## Current latest: v2.0.0-beta - "The Committee Returns"
+
+**🚨 BREAKING CHANGES - Database Migration Required:**
+- **CRITICAL**: If upgrading from v1.x, you MUST delete your existing `sqlite_db/okta_sync.db` and perform a full resync
+- **Why**: Complete architecture rewrite + fundamental schema changes to app assignments
+- **Action**: Delete database → Restart → Run full sync
+
+**2. Multi-Agent Committee Architecture:**
+- **Specialized Agents**: Router, SQL Discovery, API Discovery, and Synthesis agents working in concert
+- **50-70% Cost Reduction**: Isolated contexts prevent token bloat, significantly reducing API costs
+- **Artifact-Based Communication**: Agents pass validated JSON artifacts, eliminating context pollution
+- **SQL-to-API Handoff**: SQL agents pass Entity IDs to API agents for targeted lookups
+- **Granular Progress**: Real-time visibility into each agent's execution
+
+**Performance Improvements:**
+- **10x Faster Sync Operations**: Reduced RATE_LIMIT_DELAY from 100ms to 10ms plus parallel relationship fetching
+- **Human-Readable Duration Logging**: "2m 15s" instead of "135.42s"
+- **Optimized Sync Order**: Groups → Users → Apps (fixed FK constraint issues)
+
+**AI Provider Enhancements:**
+- **Google AI Studio Support**: Added simple API key-based access to Google Gemini models via the new `google` provider option
+- **Modern Google Integration**: Updated to use `GoogleModel` and `GoogleProvider` from pydantic-ai
+- **Vertex AI Improvements**: Enhanced enterprise Vertex AI configuration
+
+**Database Schema Changes:**
+- **user_application_assignments**: Added `assignment_type` (DIRECT/GROUP), `group_name`, `group_okta_id`, `assignment_status`; Removed `app_instance_id`
+- **New index**: `idx_uaa_assignment_type` for efficient filtering
+- **Sync strategy**: Changed to DELETE-INSERT (replaced UPSERT)
+
+**Documentation & Query Enhancements:**
+- Updated SQL discovery prompts with new schema patterns
+- Added 5 new SQL query patterns (simple + complex)
+- Case-insensitive searches by default for entity names
+- Updated shared_schema.py with complete field documentation
+
+**Bug Fixes:**
+- Fixed database path detection (now finds `okta_sync.db` correctly)
+- Fixed router setup redirect (prevents access to setup after completion)
+- Removed legacy `okta_data.db` references
+
+## v1.5.0-beta - "The React Revolution"
 
 **Major Architecture Shift:**
 - **Single ReAct Agent**: Collapsed the multi-agent committee into a single, autonomous ReAct (Reason & Act) engineer.
