@@ -16,6 +16,7 @@ import asyncio
 import time
 import json
 import os
+import sqlite3
 
 from src.utils.logging import get_logger
 
@@ -39,6 +40,59 @@ from src.core.agents.synthesis_agent import (
 from src.core.agents.special_tools_handler import handle_special_query
 
 logger = get_logger("okta_ai_agent")
+
+
+# ============================================================================
+# Database Health Check
+# ============================================================================
+
+def check_database_health() -> bool:
+    """
+    Check if database exists and has data.
+    Returns False if database is unavailable or empty (no users).
+    """
+    try:
+        # Check multiple possible database locations
+        possible_paths = [
+            Path("sqlite_db/okta_data.db"),
+            Path("okta_data.db"),
+            Path("../sqlite_db/okta_data.db")
+        ]
+        
+        db_path = None
+        for path in possible_paths:
+            if path.exists():
+                db_path = path
+                break
+        
+        if not db_path:
+            logger.warning("Database file not found in any expected location - Skipping SQL phase")
+            return False
+        
+        # Check if database is accessible and has users
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            
+            # Check if users table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cursor.fetchone():
+                logger.warning("Users table not found in database - Skipping SQL phase")
+                return False
+            
+            # Check if users table has at least 1 record
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+            
+            if user_count < 1:
+                logger.warning("Database has no users - Skipping SQL phase")
+                return False
+            
+            logger.info(f"Database health check passed: Found {user_count} users")
+            return True
+            
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e} - Skipping SQL phase")
+        return False
 
 
 # ============================================================================
@@ -252,9 +306,16 @@ async def execute_multi_agent_query(
             return result
         
         # ====================================================================
-        # PHASE 1: SQL Discovery (always run unless user forced API-only)
+        # PHASE 1: SQL Discovery (run if router says PROCEED/SQL AND DB is healthy)
         # ====================================================================
         should_run_sql = phase in ["PROCEED", "SQL"]
+        
+        # Check database health before attempting SQL phase
+        if should_run_sql:
+            db_healthy = check_database_health()
+            if not db_healthy:
+                logger.info(f"[{correlation_id}] Database unavailable or empty - Skipping SQL phase")
+                should_run_sql = False
         
         if should_run_sql:
             logger.info(f"[{correlation_id}] Running SQL Discovery Agent")
@@ -316,7 +377,7 @@ async def execute_multi_agent_query(
             logger.info(f"[{correlation_id}] Skipped SQL Discovery (Router decision: {phase})")
         
         # ====================================================================
-        # PHASE 2: API Discovery (if SQL says we need it, or user forced API-only)
+        # PHASE 2: API Discovery (if SQL says we need it, or user forced API-only, or SQL was skipped)
         # ====================================================================
         should_run_api = False
         
@@ -326,12 +387,18 @@ async def execute_multi_agent_query(
             logger.info(f"[{correlation_id}] User forced API-only mode")
         
         # PROCEED or SQL mode: Check if SQL found all data
-        elif phase in ["PROCEED", "SQL"] and result.sql_result:
-            if result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
-                should_run_api = True
-                logger.info(f"[{correlation_id}] SQL says we need API data: {result.sql_result.needs_api}")
+        elif phase in ["PROCEED", "SQL"]:
+            if result.sql_result:
+                # SQL ran - check if it needs API
+                if result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
+                    should_run_api = True
+                    logger.info(f"[{correlation_id}] SQL says we need API data: {result.sql_result.needs_api}")
+                else:
+                    logger.info(f"[{correlation_id}] SQL found all data, skipping API")
             else:
-                logger.info(f"[{correlation_id}] SQL found all data, skipping API")
+                # SQL was skipped (DB unhealthy) - go straight to API
+                should_run_api = True
+                logger.info(f"[{correlation_id}] SQL phase was skipped - Running API-only mode")
         
         if should_run_api:
             logger.info(f"[{correlation_id}] Running API Discovery Agent")
