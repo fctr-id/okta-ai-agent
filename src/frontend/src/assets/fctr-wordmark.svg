@@ -1,53 +1,82 @@
 <svg viewBox="0 0 340 80" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
-  <!-- FCTR 2026 - HEADER WORDMARK [LIGHT MODE STEEL EDITION]
-       - Aesthetic: High-Contrast Slate-Navy on Transparent/Cool-White
-       - Detailing: "Milled" inner groove catches light (#475569)
-       - Logic: Inverted palette for 2026 B2B Security Authority
+  <!-- 
+    FCTR IDENTITY - LIGHT MODE FINAL (Unified Colors)
+    
+    CORRECTION:
+    - The "I" border now matches the FCTR Wordmark color (#0f172a).
+    - This links the "Identity Core" visually to the "Brand Name".
   -->
 
-  <!-- 1. ICON (Left Aligned) -->
-  <g transform="translate(14, 9) scale(0.62)">
+  <!-- Transparent Background -->
+
+  <defs>
+    <!-- TITANIUM SHELL -->
+    <linearGradient id="titaniumGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#cbd5e1" />
+      <stop offset="50%" stop-color="#94a3b8" />
+      <stop offset="100%" stop-color="#475569" />
+    </linearGradient>
+
+    <!-- RECESSED GROOVE -->
+    <linearGradient id="grooveGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#64748b" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+
+    <!-- CORE GRADIENT -->
+    <linearGradient id="coreGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#22d3ee" />   <!-- Cyan -->
+      <stop offset="100%" style="stop-color:#2563eb" /> <!-- Blue -->
+    </linearGradient>
+
+    <!-- TEXT METAL (Dark Steel) -->
+    <linearGradient id="darkMetalGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#475569" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+
+    <!-- SATIN TEXTURE -->
+    <filter id="matteSatin" x="-20%" y="-20%" width="140%" height="140%">
+      <feDiffuseLighting in="SourceAlpha" surfaceScale="1" diffuseConstant="1.2" lighting-color="#ffffff" result="diffuse"><feDistantLight azimuth="45" elevation="60"/></feDiffuseLighting><feComposite in="diffuse" in2="SourceAlpha" operator="in" result="diffuseOut"/><feComposite in="SourceGraphic" in2="diffuseOut" operator="arithmetic" k1="1" k2="0.3" k3="0" k4="0"/></filter>
     
-    <!-- BASE LAYER: The Structural Mass 
-         Color: Mid-Slate (#475569) - Shifted from Slate-Navy for a lighter modern look.
-    -->
-    <g fill="none" stroke="#475569" stroke-linecap="round" stroke-linejoin="round">
-      <!-- OUTER RIDGE -->
-      <path d="M 8,95 V 42 A 42,38 0 0 1 92,42 V 58" stroke-width="11" />
-      
-      <!-- SHADOW RIDGE (Architectural Ghost-line) 
-           Subtle Cool-Gray (#94a3b8) at low opacity.
-      -->
-      <path d="M 18,90 V 42 A 32,28 0 0 1 82,42 V 66" stroke-width="10" stroke="#94a3b8" stroke-opacity="0.25" />
-               
-      <!-- INNER RIDGE -->
-      <path d="M 35,44 A 15,13 0 0 1 65,44 V 74 A 15,13 0 0 1 35,74 V 70" stroke-width="10" />
-      
-      <!-- CENTRAL PILL -->
-      <path d="M 50,52 V 66" stroke-width="10" />
+    <!-- HARD SHADOW (For White Backgrounds) -->
+    <filter id="hardShadow">
+      <feDropShadow dx="0" dy="2" stdDeviation="1.5" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- === 1. THE ICON (Titanium) === -->
+  <g transform="translate(-2, 3) scale(0.75)">
+    
+    <!-- Structure (Filtered) -->
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round" filter="url(#matteSatin)">
+      <!-- F (Outer) -->
+      <g filter="url(#hardShadow)">
+        <path d="M 8,95 V 42 A 42,38 0 0 1 92,42 V 58" stroke="url(#titaniumGrad)" stroke-width="11" />
+      </g>
+      <!-- Groove (Middle) -->
+      <path d="M 18,90 V 42 A 32,28 0 0 1 82,42 V 66" stroke="url(#grooveGrad)" stroke-width="10" />
+      <!-- D (Inner) -->
+      <g filter="url(#hardShadow)">
+        <path d="M 35,44 A 15,13 0 0 1 65,44 V 74 A 15,13 0 0 1 35,74 V 70" stroke="url(#titaniumGrad)" stroke-width="10" />
+      </g>
     </g>
 
-    <!-- DETAIL LAYER: The Milled Groove 
-         - In Light Mode, we use a lighter Slate (#475569) inside the dark stroke.
-         - This makes the groove look like a "Milled Glint" inside the dark steel.
-    -->
+    <!-- THE CORE I (Unified) -->
+    <!-- Layer 1: Dark Backing (Matches the Text Color #0f172a) -->
+    <path d="M 50,52 V 66" stroke="#64748b" stroke-width="13" stroke-linecap="round" />
+    
+    <!-- Layer 2: The Cyan Pill -->
+    <path d="M 50,52 V 66" stroke="url(#coreGrad)" stroke-width="9" stroke-linecap="round" />
+
   </g>
 
-  <!-- 2. WORDMARK (Right Aligned) -->
-  <g transform="translate(110, 21) scale(0.95)">
-    <!-- Main Slate-Navy Fill (Now Mid-Slate #475569) -->
-    <g fill="#475569">
-      <path d="M 0,0 H 36 V 10 H 13 V 16 H 32 V 26 H 13 V 40 H 0 V 0 Z" />
-      <path d="M 85.5,14 A 20,20 0 1 0 85.5,26 H 71.5 A 7,9 0 1 1 71.5,14 Z" />
-      <path d="M 94,0 H 134 V 10 H 120.5 V 40 H 107.5 V 10 H 94 V 0 Z" />
-      <path d="M 144,0 H 170 C 182,0 188,5 188,13 C 188,19 184,23 176,25 L 190,40 H 176 L 164,26 H 157 V 40 H 144 V 0 Z M 157,9 V 17 H 170 C 174,17 175,16 175,13.5 C 175,11 174,10 170,10 H 157 Z" />
-    </g>
-    <!-- Milled Bevel: A subtle inner-detail in light-slate -->
-    <g fill="none" stroke="#64748b" stroke-width="0.3" stroke-opacity="0.6">
-      <path d="M 0,0 H 36 V 10 H 13 V 16 H 32 V 26 H 13 V 40 H 0 V 0 Z" />
-      <path d="M 85.5,14 A 20,20 0 1 0 85.5,26 H 71.5 A 7,9 0 1 1 71.5,14 Z" />
-      <path d="M 94,0 H 134 V 10 H 120.5 V 40 H 107.5 V 10 H 94 V 0 Z" />
-      <path d="M 144,0 H 170 C 182,0 188,5 188,13 C 188,19 184,23 176,25 L 190,40 H 176 L 164,26 H 157 V 40 H 144 V 0 Z M 157,9 V 17 H 170 C 174,17 175,16 175,13.5 C 175,11 174,10 170,10 H 157 Z" />
-    </g>
+  <!-- === 2. THE WORDMARK (Dark Gunmetal) === -->
+  <g transform="translate(100, 23) scale(1)" fill="url(#darkMetalGrad)">
+    <path d="M 0,0 H 36 V 10 H 13 V 16 H 32 V 26 H 13 V 40 H 0 V 0 Z" />
+    <path d="M 85.5,14 A 20,20 0 1 0 85.5,26 H 71.5 A 7,9 0 1 1 71.5,14 Z" />
+    <path d="M 94,0 H 134 V 10 H 120.5 V 40 H 107.5 V 10 H 94 V 0 Z" />
+    <path d="M 144,0 H 170 C 182,0 188,5 188,13 C 188,19 184,23 176,25 L 190,40 H 176 L 164,26 H 157 V 40 H 144 V 0 Z M 157,9 V 17 H 170 C 174,18 175,17 175,13 C 175,11 174,10 170,10 H 157 Z" />
   </g>
+
 </svg>
