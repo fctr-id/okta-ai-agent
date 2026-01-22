@@ -29,8 +29,23 @@ from src.utils.logging import logger
 import asyncio
 from sqlalchemy import insert, text, select, and_
 from datetime import datetime
+import time
 
 ModelType = TypeVar('ModelType', bound=Base)
+
+
+def format_duration(seconds: float) -> str:
+    """Format duration in seconds to human-readable string."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m {secs:.1f}s"
+    else:
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        return f"{hours}h {minutes}m"
 
 class SyncOrchestrator:
     """
