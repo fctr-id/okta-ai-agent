@@ -223,26 +223,49 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
         
         # Parse results from stdout
         stdout = '\n'.join(stdout_lines)
-        # COMMENTED: Reduces log noise
-        # logger.debug(f"[{process_id}] Captured {len(stdout_lines)} lines of stdout ({len(stdout)} chars)")
-        # if len(stdout) < 500:
-        #     logger.debug(f"[{process_id}] Full stdout:\n{stdout}")
-        # else:
-        #     logger.debug(f"[{process_id}] First 500 chars of stdout:\n{stdout[:500]}")
+        logger.debug(f"[{process_id}] Captured {len(stdout_lines)} lines of stdout ({len(stdout)} chars)")
+        if len(stdout) < 2000:
+            logger.debug(f"[{process_id}] Full stdout:\n{stdout}")
+        else:
+            logger.debug(f"[{process_id}] First 1000 chars of stdout:\n{stdout[:1000]}")
         
         results_data = _parse_script_output(stdout)
+        logger.debug(f"[{process_id}] Parse result: {results_data is not None}")
         
         if results_data:
-            # Send final results
-            yield {
-                "type": "COMPLETE",
-                "success": True,
-                "display_type": results_data.get("display_type", "table"),
-                "results": results_data.get("data", []),
-                "headers": results_data.get("headers", []),
-                "count": results_data.get("count", 0),
-                "timestamp": time.time()
-            }
+            # Check if script returned markdown format (for summaries/special responses)
+            if results_data.get("display_type") == "markdown":
+                logger.info(f"[{process_id}] Script returned markdown format")
+                yield {
+                    "type": "COMPLETE",
+                    "success": True,
+                    "display_type": "markdown",
+                    "content": results_data.get("content", ""),
+                    "timestamp": time.time()
+                }
+            # Check if results are empty (no data found)
+            elif results_data.get("count", 0) == 0:
+                logger.info(f"[{process_id}] Script returned zero results - sending empty results message")
+                # Send markdown message instead of empty table
+                yield {
+                    "type": "COMPLETE",
+                    "success": True,
+                    "display_type": "markdown",
+                    "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                    "timestamp": time.time()
+                }
+            else:
+                # Send normal table results
+                result_count = results_data.get("count", 0)
+                yield {
+                    "type": "COMPLETE",
+                    "success": True,
+                    "display_type": results_data.get("display_type", "table"),
+                    "results": results_data.get("data", []),
+                    "headers": results_data.get("headers", []),
+                    "count": result_count,
+                    "timestamp": time.time()
+                }
     
     finally:
         # Ensure process is terminated
@@ -693,6 +716,13 @@ async def stream_react_updates(
             
             logger.info(f"[{process_id}] ✅ All phases complete - query execution finished")
             process["status"] = "complete"
+            
+            # Send final DONE event to close the stream
+            done_event = {
+                "type": "DONE",
+                "timestamp": time.time()
+            }
+            yield f"data: {json.dumps(done_event)}\n\n"
             
         except asyncio.CancelledError:
             logger.info(f"[{process_id}] Process cancelled by user")

@@ -37,7 +37,7 @@ def get_sqlite_schema_description() -> str:
 
 class RouterDecision(BaseModel):
     """Router decision for query execution path"""
-    phase: Literal["PROCEED", "SQL", "API", "SPECIAL", "NOT_RELEVANT"]
+    phase: Literal["SQL", "API", "SPECIAL", "NOT_RELEVANT"]
     reasoning: str
 
 

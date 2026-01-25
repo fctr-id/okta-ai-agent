@@ -36,9 +36,9 @@ class SQLDiscoveryResult(BaseModel):
         default_factory=list,
         description="Data found in DB: ['users', 'groups', 'apps']"
     )
-    needs_api: List[str] = Field(
-        default_factory=list,
-        description="Data missing from DB: ['roles', 'mfa_factors']"
+    needs_api: Optional[List[str]] = Field(
+        default=None,
+        description="Data missing from DB: ['roles', 'mfa_factors']. Set to None to stop handoff."
     )
     reasoning: str = Field(
         ...,
@@ -58,6 +58,12 @@ class SQLDiscoveryDeps:
     artifacts_file: Path
     okta_client: Any  # OktaClient instance
     cancellation_check: callable
+    
+    # API context (if API agent ran first)
+    api_reasoning: Optional[str] = None  # Feedback from API agent (None if API phase skipped)
+    api_discovered_data: Optional[str] = None  # JSON string of data API found (None if API phase skipped)
+    api_needs_sql: Optional[List[str]] = None  # Structured list of entities to fetch via SQL
+    api_found_data: Optional[List[str]] = None  # Structured list of entities already found via API
     
     # Streaming callbacks
     step_start_callback: Optional[callable] = None
@@ -541,8 +547,48 @@ async def execute_sql_discovery(
     toolset = create_sql_toolset(deps)
     
     try:
+        # Build dynamic prompt: base query + optional API context
+        # Following same pattern as API agent: clean static prompt + dynamic extension
+        full_prompt = user_query
+        
+        # Dynamically extend prompt ONLY if API phase ran first and found data
+        # If API phase ran, inject its discovered data as context
+        if deps.api_reasoning and deps.api_discovered_data:
+            # Format structured lists
+            needs_sql_str = str(deps.api_needs_sql) if deps.api_needs_sql else "[]"
+            found_data_str = str(deps.api_found_data) if deps.api_found_data else "[]"
+            
+            full_prompt = f"""{user_query}
+
+─────────────────────────────────────────
+📊 DATA ALREADY RETRIEVED FROM API
+─────────────────────────────────────────
+
+🎯 YOUR SCOPE - FETCH ONLY:
+{needs_sql_str}
+
+✅ ALREADY FOUND (DO NOT QUERY):
+{found_data_str}
+
+API Agent Analysis:
+{deps.api_reasoning}
+
+Entities Found via API:
+```json
+{deps.api_discovered_data}
+```
+
+🚨 CRITICAL RULES:
+1. **ONLY query for entities listed in YOUR SCOPE** - If it says ['users'], query ONLY users
+2. **DO NOT query for anything in ALREADY FOUND list** - No need to fetch what API already got
+3. **Use JOINs if needed** - If scope needs related data, use proper JOINs
+4. **One test per entity type** - If scope says ['users'], make 1 test for users
+─────────────────────────────────────────
+"""
+        # else: SQL-only mode - prompt stays clean with just the user query
+        
         result = await sql_discovery_agent.run(
-            user_query,
+            full_prompt,
             deps=deps,
             toolsets=[toolset]
         )

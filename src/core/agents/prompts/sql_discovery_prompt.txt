@@ -94,7 +94,23 @@ Upon successful validation, call `save_artifact()`.
 Return `SQLDiscoveryResult`:
 -   `success`: Boolean.
 -   `found_data`: List of entities found (e.g., `["users", "groups"]`).
--   `needs_api`: List of entities missing from DB (e.g., `["roles"]`).
+-   `needs_api`: List of entities missing from DB OR `None` to stop handoff.
+    
+    **STOPPING LOGIC - Prevent Futile API Handoffs:**
+    Before setting needs_api, evaluate if the API phase can proceed with your results.
+    
+    Set `needs_api=None` if:
+    -   You found 0 of the base entities that subsequent API lookups would require
+    -   You retrieved all data the user requested (nothing missing from DB schema)
+    -   API cannot fetch the requested data without entities you couldn't find
+    
+    Only set `needs_api=["entity_name"]` if:
+    -   User explicitly asked for that data
+    -   It doesn't exist in the database schema
+    -   API can fetch it independently OR you found the base entities it needs
+    
+    **Core principle:** Don't request work on non-existent data.
+
 -   `reasoning`: **Context-aware guidance for API agent**
     
     **Process:**

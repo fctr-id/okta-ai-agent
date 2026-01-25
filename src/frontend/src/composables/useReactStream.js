@@ -6,13 +6,36 @@
  */
 
 import { ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useAuth } from './useAuth'
 
 // Use relative URL to go through Vite proxy
 const API_BASE_URL = ''
 
 export function useReactStream() {
-    const router = useRouter()
+    const auth = useAuth()
+    
+    // Centralized auth error handler - follows pattern from useSync.js
+    const handleAuthError = async (status) => {
+        if (status === 401 || status === 403) {
+            console.warn(`[useReactStream] Authentication error (${status}), logging out and redirecting`)
+            
+            try {
+                // Clean up auth state
+                await auth.logout()
+                
+                // Force navigation after logout completes
+                setTimeout(() => {
+                    window.location.href = '/login'
+                }, 100)
+            } catch (err) {
+                console.error('[useReactStream] Error during logout:', err)
+                // Force navigation even if logout fails
+                window.location.href = '/login'
+            }
+            return true
+        }
+        return false
+    }
     
     // State
     const isLoading = ref(false)
@@ -75,14 +98,8 @@ export function useReactStream() {
                 body: JSON.stringify({ query })
             })
             
-            // Handle session timeout (401)
-            if (response.status === 401) {
-                console.log('[useReactStream] Session expired (401), redirecting to login')
-                if (router) {
-                    router.push('/login')
-                } else {
-                    window.location.href = '/login'
-                }
+            // Handle session timeout (401/403)
+            if (await handleAuthError(response.status)) {
                 return null
             }
             
@@ -114,6 +131,22 @@ export function useReactStream() {
             return
         }
         
+        // PRE-FLIGHT AUTH CHECK: Verify session before establishing SSE connection
+        // EventSource doesn't expose HTTP status codes, so we check proactively
+        try {
+            const authCheck = await fetch(`${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`, {
+                method: 'HEAD',
+                credentials: 'include'
+            })
+            
+            if (await handleAuthError(authCheck.status)) {
+                return
+            }
+        } catch (err) {
+            // If HEAD fails, try to proceed with SSE anyway (might be unsupported)
+            console.warn('[useReactStream] Pre-flight check failed, proceeding with SSE:', err)
+        }
+        
         isProcessing.value = true
         
         const url = `${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`
@@ -130,6 +163,15 @@ export function useReactStream() {
                 eventSource = null
             }
         })
+        
+        // Handle SSE connection errors
+        eventSource.onerror = (event) => {
+            console.error('[useReactStream] EventSource connection failed:', event)
+            error.value = 'Connection to server lost'
+            closeStream()
+            isLoading.value = false
+            isProcessing.value = false
+        }
         
         // Handle all messages with unified JSON format {type: "...", ...data}
         eventSource.onmessage = (event) => {
@@ -579,13 +621,8 @@ export function useReactStream() {
                 })
             })
             
-            // Handle session timeout (401)
-            if (response.status === 401) {
-                if (router) {
-                    router.push('/login')
-                } else {
-                    window.location.href = '/login'
-                }
+            // Handle session timeout (401/403)
+            if (await handleAuthError(response.status)) {
                 return
             }
             

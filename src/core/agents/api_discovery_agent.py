@@ -30,7 +30,23 @@ from src.core.agents.agent_callbacks import (
     notify_step_end_to_user
 )
 
+# Import schema function for database context
+from src.data.schemas.shared_schema import get_okta_database_schema
+
 logger = get_logger("okta_ai_agent")
+
+# Load Okta event types for system log queries
+EVENT_TYPES_PATH = Path("src/data/schemas/Okta_eventTypes.json")
+OKTA_EVENT_TYPES = {}
+
+try:
+    with open(EVENT_TYPES_PATH, 'r', encoding='utf-8') as f:
+        OKTA_EVENT_TYPES = json.load(f)
+    logger.info(f"Loaded {len(OKTA_EVENT_TYPES)} event type categories")
+except FileNotFoundError:
+    logger.warning(f"Event types file not found at {EVENT_TYPES_PATH}")
+except json.JSONDecodeError as e:
+    logger.error(f"Error parsing event types JSON: {e}")
 
 # ============================================================================
 # Output Models
@@ -40,6 +56,9 @@ class APIDiscoveryResult(BaseModel):
     """Output from API Discovery Agent"""
     success: bool
     api_data_retrieved: bool = False
+    found_data: List[str] = []  # Entities successfully retrieved: ['roles', 'mfa_factors']
+    needs_sql: Optional[List[str]] = None  # Entities API agent realized it needs from SQL: ['users', 'groups']
+    reasoning: str = ""  # Plain English: 'Fetched roles for 3 users. MFA factors retrieved.'
     error: Optional[str] = None
 
 
@@ -563,11 +582,60 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             metadata={'artifact_count': len(deps.artifacts)}
         )
     
+    # ========================================================================
+    # Tool 5: Get Event Types
+    # ========================================================================
+    
+    async def get_detailed_events_from_keys(category_keys: List[str]) -> ToolReturn:
+        """
+        Get detailed Okta event types for selected categories.
+        Use this when querying system logs to get specific event type strings.
+        
+        Args:
+            category_keys: List of event category keys (e.g., ["user-authentication-session", "user-lifecycle"])
+        
+        Returns:
+            Dict mapping category keys to their event type lists
+        
+        Example:
+            - Input: ["user-authentication-session"]
+            - Output: {"user-authentication-session": ["user.session.start", "user.authentication.sso", ...]}
+        """
+        check_cancellation()
+        await notify_tool_call("get_detailed_events_from_keys", f"Loading event types for: {', '.join(category_keys)}")
+        
+        logger.info(f"[{deps.correlation_id}] Loading event types for categories: {category_keys}")
+        
+        result = {}
+        all_event_types = []  # Flattened list for convenience
+        
+        for key in category_keys:
+            if key in OKTA_EVENT_TYPES:
+                result[key] = OKTA_EVENT_TYPES[key]
+                all_event_types.extend(OKTA_EVENT_TYPES[key])
+                logger.debug(f"[{deps.correlation_id}] Category '{key}': {len(OKTA_EVENT_TYPES[key])} event types")
+            else:
+                logger.warning(f"[{deps.correlation_id}] Category key '{key}' not found in event types schema")
+        
+        # Add flattened list for convenience
+        if all_event_types:
+            result['_all_event_types'] = all_event_types
+        
+        total_events = len(all_event_types)
+        logger.info(f"[{deps.correlation_id}] Retrieved {total_events} total event types across {len(result)-1 if all_event_types else len(result)} categories")
+        
+        return ToolReturn(
+            return_value=f"✅ Loaded {total_events} event types from {len(category_keys)} categories",
+            content=json.dumps(result, separators=(',', ':')),
+            metadata={'event_count': total_events, 'categories': len(category_keys)}
+        )
+    
     # Register tools
     toolset.tool(load_comprehensive_api_endpoints)
     toolset.tool(filter_endpoints_by_operations)
     toolset.tool(execute_test_query)
     toolset.tool(save_artifact)
+    toolset.tool(get_detailed_events_from_keys)
     
     return toolset
 
@@ -619,12 +687,32 @@ async def execute_api_discovery(
     toolset = create_api_toolset(deps)
     
     try:
-        # Build dynamic prompt: base query + optional SQL context
-        # Following Pydantic AI pattern: clean static prompt + dynamic extension
-        full_prompt = user_query
+        # Load the base prompt
+        prompt_path = Path("src/core/agents/prompts/api_discovery_prompt.txt")
+        base_prompt = prompt_path.read_text(encoding='utf-8')
         
-        # Dynamically extend prompt ONLY if SQL phase ran and found data
-        # If SQL phase ran, inject its discovered data as context
+        # Get DB schema for intelligent needs_sql decisions
+        db_schema = get_okta_database_schema()
+        
+        # Add schema context to prompt
+        schema_context = f"""
+─────────────────────────────────────────
+📊 DATABASE SCHEMA (For needs_sql Decisions)
+─────────────────────────────────────────
+{db_schema}
+
+💡 USE THIS TO DECIDE:
+- If you need base entities (users, groups, apps) → check schema → if in schema, set needs_sql: ["users", "groups"]
+- Example: Query asks for "roles for all users" but you have no user IDs → needs_sql: ["users"]
+- Example: You have user IDs, need groups → check schema → groups in okta_groups → needs_sql: ["user_group_memberships"]
+- This provides a safety net if Router made the wrong routing decision
+─────────────────────────────────────────
+"""
+        
+        # Build dynamic prompt: base query + schema + optional SQL context
+        full_prompt = user_query + "\n" + schema_context
+        
+        # If SQL phase ran, extend prompt with SQL context
         if deps.sql_reasoning and deps.sql_discovered_data:
             # Format structured lists
             needs_api_str = str(deps.sql_needs_api) if deps.sql_needs_api else "[]"
@@ -669,6 +757,14 @@ Entities Found in Database (with IDs):
         )
         
         logger.info(f"[{deps.correlation_id}] API discovery complete: success={result.output.success}")
+        
+        # Log detailed result for debugging
+        if not result.output.success:
+            logger.error(f"[{deps.correlation_id}] API agent failure details:")
+            logger.error(f"[{deps.correlation_id}]   - error: {result.output.error}")
+            logger.error(f"[{deps.correlation_id}]   - reasoning: {result.output.reasoning}")
+            logger.error(f"[{deps.correlation_id}]   - found_data: {result.output.found_data}")
+            logger.error(f"[{deps.correlation_id}]   - needs_sql: {result.output.needs_sql}")
         
         # Notify frontend of completion
         await notify_step_end(

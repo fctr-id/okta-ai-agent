@@ -146,7 +146,7 @@ async def execute_synthesis(
             await deps.tool_call_callback({
                 "name": "load_artifacts",
                 "arguments": {"source": "memory"},
-                "description": "Loading collected data from SQL and API phases",
+                "description": "Loading memory artifacts from previous phases",
                 "timestamp": time.time()
             })
         
