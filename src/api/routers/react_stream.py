@@ -818,6 +818,12 @@ async def _create_artifacts_file(correlation_id: str) -> Path:
     
     Returns path to artifacts file.
     """
+    # Validate correlation_id is a valid UUID to prevent path traversal attacks
+    try:
+        uuid.UUID(correlation_id, version=4)
+    except ValueError as exc:
+        raise ValueError(f"Invalid correlation_id format; expected UUID v4, got: {correlation_id}") from exc
+    
     artifacts_dir = Path("logs")
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     artifacts_file = artifacts_dir / f"artifacts_{correlation_id}.json"

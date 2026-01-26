@@ -310,6 +310,13 @@ async def execute_multi_agent_query(
         # ====================================================================
         def load_artifacts_by_category(category: str) -> Optional[str]:
             """Load and combine artifacts of specified category"""
+            # Validate artifacts_file is within logs directory to prevent path traversal
+            try:
+                artifacts_file.resolve().relative_to(Path("logs").resolve())
+            except ValueError:
+                logger.error(f"[{correlation_id}] Unsafe artifacts file path: {artifacts_file}")
+                return None
+            
             if not artifacts_file.exists():
                 return None
             try:
