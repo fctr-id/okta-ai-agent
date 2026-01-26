@@ -317,7 +317,8 @@ async def execute_multi_agent_query(
                 logger.error(f"[{correlation_id}] Unsafe artifacts file path: {artifacts_file}")
                 return None
             
-            if not artifacts_file.exists():
+            # Only proceed if the artifacts path points to an actual file
+            if not artifacts_file.is_file():
                 return None
             try:
                 with open(artifacts_file, 'r', encoding='utf-8') as f:

@@ -824,9 +824,15 @@ async def _create_artifacts_file(correlation_id: str) -> Path:
     except ValueError as exc:
         raise ValueError(f"Invalid correlation_id format; expected UUID v4, got: {correlation_id}") from exc
     
-    artifacts_dir = Path("logs")
+    artifacts_dir = Path("logs").resolve()
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    artifacts_file = artifacts_dir / f"artifacts_{correlation_id}.json"
+    artifacts_file = (artifacts_dir / f"artifacts_{correlation_id}.json").resolve()
+    
+    # Ensure the resolved artifacts_file is contained within the logs directory
+    try:
+        artifacts_file.relative_to(artifacts_dir)
+    except ValueError as exc:
+        raise ValueError(f"Unsafe artifacts file path derived from correlation_id: {correlation_id}") from exc
     
     # Initialize empty artifacts file as flat array
     with open(artifacts_file, 'w', encoding='utf-8') as f:
