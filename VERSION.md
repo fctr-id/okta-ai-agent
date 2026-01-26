@@ -11,7 +11,7 @@
 - **Specialized Agents**: Router, SQL Discovery, API Discovery, and Synthesis agents working in concert
 - **50-70% Cost Reduction**: Isolated contexts prevent token bloat, significantly reducing API costs
 - **Artifact-Based Communication**: Agents pass validated JSON artifacts, eliminating context pollution
-- **SQL-to-API Handoff**: SQL agents pass Entity IDs to API agents for targeted lookups
+- **Bidirectional Handoff**: SQL ↔ API agents dynamically request data from each other (up to 6 phases per query)
 - **Granular Progress**: Real-time visibility into each agent's execution
 
 **Performance Improvements:**
