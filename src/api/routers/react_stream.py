@@ -829,3 +829,60 @@ async def _create_artifacts_file(correlation_id: str) -> Path:
     logger.info(f"[{correlation_id}] Created artifacts file: {artifacts_file}")
     return artifacts_file
 
+
+# ============================================================================
+# Special Tools Discovery Endpoint
+# ============================================================================
+
+@router.get("/special-tools")
+async def get_special_tools(current_user: AuthUser = Depends(get_current_user)):
+    """
+    Get available special tools with metadata for UI discovery.
+    
+    Returns dynamic list of special tools with:
+    - name: Tool display name
+    - description: What the tool does
+    - examples: Sample queries that use this tool
+    """
+    try:
+        from src.core.tools.special_tools import get_special_tool_endpoints
+        
+        # Get all special tool endpoints
+        endpoints = get_special_tool_endpoints()
+        
+        # Transform to UI-friendly format
+        tools = []
+        seen_operations = set()  # Deduplicate by operation name
+        
+        for endpoint in endpoints:
+            operation = endpoint.get("operation", "")
+            
+            # Skip duplicates
+            if operation in seen_operations:
+                continue
+            seen_operations.add(operation)
+            
+            # Extract display name from operation (remove "special_tool_" prefix)
+            display_name = operation.replace("special_tool_", "").replace("_", " ").title()
+            
+            tool_data = {
+                "name": display_name,
+                "description": endpoint.get("description", ""),
+                "examples": endpoint.get("examples", [])
+            }
+            
+            tools.append(tool_data)
+        
+        logger.info(f"Returning {len(tools)} special tools for UI")
+        
+        return {
+            "success": True,
+            "tools": tools
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching special tools: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to fetch special tools"
+        )

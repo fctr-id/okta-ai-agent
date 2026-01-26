@@ -77,7 +77,7 @@ const router = useRouter()
 
 const appVersion = computed(() => {
     const version = import.meta.env.VITE_APP_VERSION
-    return version ? `v${version}` : 'v1.3-beta'
+    return version ? `v${version}` : 'v2.0.0-beta'
 })
 
 const handleLogout = async () => {

@@ -85,6 +85,14 @@
                                 <span class="suggestion-text">{{ suggestion.query }}</span>
                             </button>
                         </div>
+                        
+                        <!-- Special Tools Button -->
+                        <div class="special-tools-container">
+                            <button class="special-tools-btn" @click="showSpecialToolsModal = true">
+                                <v-icon icon="mdi-tools" size="18" />
+                                <span>Special Tools</span>
+                            </button>
+                        </div>
                     </div>
                 </transition>
             </div>
@@ -174,6 +182,68 @@
                 </div>
             </transition>
         </main>
+        
+        <!-- Special Tools Modal -->
+        <v-dialog v-model="showSpecialToolsModal" max-width="800px">
+            <v-card class="special-tools-modal">
+                <v-card-title class="modal-header">
+                    <div class="modal-title">
+                        <v-icon icon="mdi-tools" size="24" class="title-icon" />
+                        <span>Special Tools</span>
+                    </div>
+                    <v-btn icon="mdi-close" variant="text" @click="showSpecialToolsModal = false" />
+                </v-card-title>
+                
+                <v-card-text class="modal-content">
+                    <!-- Info Note -->
+                    <div class="info-note">
+                        <v-icon icon="mdi-information" size="20" color="#4C64E2" />
+                        <span>These tools will automatically be invoked when your query matches the criteria. You don't need to do anything special.</span>
+                    </div>
+                    
+                    <!-- Loading State -->
+                    <div v-if="specialToolsLoading" class="loading-state">
+                        <v-progress-circular indeterminate color="primary" />
+                        <p>Loading special tools...</p>
+                    </div>
+                    
+                    <!-- Error State -->
+                    <div v-else-if="specialToolsError" class="error-state">
+                        <v-icon icon="mdi-alert-circle" color="error" size="48" />
+                        <p>{{ specialToolsError }}</p>
+                    </div>
+                    
+                    <!-- Tools Grid -->
+                    <div v-else-if="specialTools.length > 0" class="tools-grid">
+                        <div v-for="(tool, index) in specialTools" 
+                             :key="index" 
+                             class="tool-card"
+                             @click="selectToolExample(tool)">
+                            <div class="tool-header">
+                                <h3 class="tool-name">{{ tool.name }}</h3>
+                            </div>
+                            <p class="tool-description">{{ extractSpecialToolText(tool.description) }}</p>
+                            <div v-if="tool.examples && tool.examples.length > 0" class="tool-examples">
+                                <p class="examples-label">Try asking:</p>
+                                <ul class="examples-list">
+                                    <li v-for="(example, i) in tool.examples.slice(0, 2)" 
+                                        :key="i"
+                                        class="example-item">
+                                        "{{ example }}"
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Empty State -->
+                    <div v-else class="empty-state">
+                        <v-icon icon="mdi-information-outline" size="48" />
+                        <p>No special tools available</p>
+                    </div>
+                </v-card-text>
+            </v-card>
+        </v-dialog>
     </AppLayout>
 </template>
 
@@ -189,6 +259,7 @@ import { ref, watch, nextTick, onMounted } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import { useSanitize } from '@/composables/useSanitize'
 import { useReactStream } from '@/composables/useReactStream'
+import { useSpecialTools } from '@/composables/useSpecialTools'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
 import DiscoveryPanel from '@/components/messages/DiscoveryPanel.vue'
 import ExecutionPanel from '@/components/messages/ExecutionPanel.vue'
@@ -252,6 +323,10 @@ const {
 
 // Initialize sanitization utilities
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
+
+// Special Tools
+const { tools: specialTools, loading: specialToolsLoading, error: specialToolsError, fetchTools } = useSpecialTools()
+const showSpecialToolsModal = ref(false)
 
 /**
  * Response data state
@@ -448,6 +523,36 @@ const selectSuggestion = (suggestion) => {
 }
 
 /**
+ * Handles clicking on a special tool card
+ * Populates the first example query into the search field
+ * @param {Object} tool - The selected tool object
+ */
+const selectToolExample = (tool) => {
+    if (tool.examples && tool.examples.length > 0) {
+        // Use the first example
+        userInput.value = sanitizeQuery(tool.examples[0])
+        showSpecialToolsModal.value = false
+        
+        // Focus input field
+        nextTick(() => {
+            if (searchTextarea.value) {
+                searchTextarea.value.focus()
+            }
+        })
+    }
+}
+
+/**
+ * Extracts text after "SPECIAL TOOL:" from description
+ * @param {String} description - The full description text
+ * @returns {String} Text after SPECIAL TOOL: or original description
+ */
+const extractSpecialToolText = (description) => {
+    const match = description.match(/SPECIAL TOOL:\s*(.+)/s)
+    return match ? match[1].trim() : description
+}
+
+/**
  * Submits the query to the backend API
  */
 const sendQuery = async () => {
@@ -584,7 +689,7 @@ const messageHistory = ref([])
 const historyIndex = ref(-1)
 
 // Add this mounted hook to load saved history
-onMounted(() => {
+onMounted(async () => {
     try {
         const savedHistory = localStorage.getItem('messageHistory')
         if (savedHistory) {
@@ -603,6 +708,9 @@ onMounted(() => {
         if (modeParam) {
             localStorage.setItem('agentMode', modeParam)
         }
+        
+        // Fetch special tools on mount
+        await fetchTools()
     } catch (error) {
         console.error('Failed to load message history:', error)
         localStorage.removeItem('messageHistory')
@@ -1330,5 +1438,171 @@ onMounted(() => {
 .error-dismiss:hover {
     background: rgba(248, 113, 113, 0.1);
     color: #dc2626;
+}
+
+/* Special Tools Button */
+.special-tools-container {
+    margin-top: 20px;
+    display: flex;
+    justify-content: center;
+}
+
+.special-tools-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 13px 24px;
+    background: linear-gradient(135deg, #4C64E2, #8B5CF6);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.2);
+}
+
+.special-tools-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.3);
+}
+
+.special-tools-btn:active {
+    transform: translateY(0);
+}
+
+.special-tools-btn .sparkle-icon {
+    opacity: 0.9;
+}
+
+/* Special Tools Modal */
+.special-tools-modal {
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    background: linear-gradient(135deg, #f8f9fb 0%, #ffffff 100%);
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 2#ffffff;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 20px;
+    font-weight: 700;
+    color: #1a1a1a;
+}
+
+.title-icon {
+    color: #4C64E2;
+}
+
+.modal-content {
+    padding: 16px;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+/* Loading/Error/Empty States */
+.loading-state, .error-state, .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    min-height: 300px;
+    color: #6b7280;
+}
+
+.loading-state p, .error-state p, .empty-state p {
+    font-size: 14px;
+    margin: 0;
+}
+
+/* Info Note */
+.info-note {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #EEF2FF;
+    border: 1px solid #C7D2FE;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: #4338CA;
+    line-height: 1.5;
+}
+
+/* Tools List - Row Layout */
+.tools-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.tool-card {
+    padding: 20px;
+    background: #ffffff;
+    border: 2px solid #d1d5db;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.tool-card:hover {
+    border-color: #4C64E2;
+    background: #f8f9fb;
+    transform: translateX(4px);
+}
+
+.tool-header {
+    margin-bottom: 8px;
+}
+
+.tool-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin: 0;
+}
+
+.tool-description {
+    font-size: 12px;
+    color: #6b7280;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.tool-examples {
+    display: none;
+}
+
+.examples-label {
+    display: none;
+}
+
+.examples-list {
+    display: none;
+}
+
+.example-item {
+    display: none;
 }
 </style>
