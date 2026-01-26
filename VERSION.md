@@ -1,9 +1,9 @@
 # Version History
 
-## Current latest: v2.0.0-beta - "The Committee Returns"
+## Current latest: v2.0.0-beta - "Tako Swarm"
 
 **🚨 BREAKING CHANGES - Database Migration Required:**
-- **CRITICAL**: If upgrading from v1.x, you MUST delete your existing `sqlite_db/okta_sync.db` and perform a full resync
+- **CRITICAL**: If upgrading from v1.5, you MUST delete your existing `sqlite_db/okta_sync.db` and perform a full resync
 - **Why**: Complete architecture rewrite + fundamental schema changes to app assignments
 - **Action**: Delete database → Restart → Run full sync
 
