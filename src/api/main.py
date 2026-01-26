@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
     
     # Generate lightweight reference for React agent if missing
     try:
-        from src.core.agents.one_react_agent import generate_lightweight_onereact_json
+        from src.core.agents.api_discovery_agent import generate_lightweight_onereact_json
         lightweight_data = generate_lightweight_onereact_json(force_regenerate=False)
         logger.info(f"Lightweight reference ready: {len(lightweight_data.get('operations', []))} operations")
     except Exception as e:

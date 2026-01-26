@@ -859,12 +859,10 @@ const downloadCSV = () => {
 
 :deep(.v-data-table__wrapper) {
     overflow-x: auto;
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.06);
+    border-radius: 14px;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.1);
 }
 
 /* 2026 Minimal Table Header */
@@ -944,18 +942,20 @@ const downloadCSV = () => {
     border-radius: 0 0 16px 16px !important;
 }
 
-/* Compact markdown styling with consistent background */
+/* Compact markdown styling - Studio Focus Card */
 .markdown-content {
-  padding: 16px;
-  line-height: 1.5;
-  font-size: 14px;
-  color: #374151;
+  padding: 32px;
+  line-height: 1.7;
+  font-size: 14.5px;
+  color: #1e293b;
   width: 100%;
   overflow-wrap: break-word;
-  background-color: #f8fafc; /* Consistent light background for entire content */
-  border-radius: 8px;
-  border: 1px solid #edf2f7;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  background-color: #ffffff;
+  border-radius: 20px;
+  border: 1px solid #cbd5e1; /* Sharp Slate-300 border */
+  box-shadow: 
+    0 4px 20px rgba(15, 23, 42, 0.04),
+    0 20px 40px -20px rgba(15, 23, 42, 0.1);
   animation: fade-in-up 0.5s ease-out;
 }
 

@@ -1,0 +1,21 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" shape-rendering="geometricPrecision">
+  <!-- FCTR 2026 - ICON ONLY [STEEL EDITION] 
+       Perfectly balanced 100x100 box
+  -->
+  <g transform="translate(0, 5)">
+    <!-- BASE LAYER: Slate-Navy (#1e293b) -->
+    <g fill="none" stroke="#1e293b" stroke-linecap="round" stroke-linejoin="round">
+      <!-- OUTER RIDGE -->
+      <path d="M 12,85 V 35 A 38,34 0 0 1 88,35 V 50" stroke-width="10" />
+      
+      <!-- SHADOW RIDGE (Architectural Glint) -->
+      <path d="M 22,80 V 35 A 28,24 0 0 1 78,35 V 57" stroke-width="9" stroke="#64748b" stroke-opacity="0.32" />
+               
+      <!-- INNER RIDGE -->
+      <path d="M 38,37 A 12,11 0 0 1 62,37 V 65 A 12,11 0 0 1 38,65 V 61" stroke-width="9" />
+      
+      <!-- CENTRAL PILL -->
+      <path d="M 50,45 V 57" stroke-width="9" />
+    </g>
+  </g>
+</svg>

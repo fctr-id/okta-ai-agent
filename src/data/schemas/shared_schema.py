@@ -25,6 +25,10 @@ def get_okta_database_schema() -> str:
     # Build the schema string
     schema = """
             ### DB Schema
+            
+            ⚠️ CRITICAL: Use exact table names shown below - DO NOT add "okta_" prefix!
+            Table names are: users, groups, applications (NOT okta_users, okta_groups, etc.)
+            
             TABLE: users
             FIELDS:
             - id (Integer, PrimaryKey)
@@ -265,7 +269,10 @@ def get_okta_database_schema() -> str:
             - application_okta_id (String, ForeignKey -> applications.okta_id)
             - tenant_id (String)
             - assignment_id (String)
-            - app_instance_id (String)
+            - assignment_type (String, INDEX)  # Values: DIRECT (user assigned directly), GROUP (user assigned via group)
+            - group_name (String, NULL)  # Populated when assignment_type='GROUP', shows which group granted access
+            - group_okta_id (String, NULL)  # Populated when assignment_type='GROUP', the group's Okta ID
+            - assignment_status (String)  # Values: ACTIVE, INACTIVE, SUSPENDED, etc.
             - credentials_setup (Boolean)
             - hidden (Boolean)
             - created_at (DateTime)
@@ -274,6 +281,7 @@ def get_okta_database_schema() -> str:
             INDEXES:
             - idx_user_app_tenant (tenant_id)
             - idx_uaa_application (tenant_id, application_okta_id)
+            - idx_uaa_assignment_type (tenant_id, assignment_type)
             UNIQUE:
             - uix_user_app_assignment (tenant_id, user_okta_id, application_okta_id)
 

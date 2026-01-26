@@ -1,13 +1,10 @@
 <template>
   <AppLayout :showHeader="true" :showLogout="false" contentClass="auth-content">
     <div class="auth-box animate-entry">
-      <div class="auth-logo">
-        <img src="@/assets/fctr-logo-full.svg" alt="fctr" />
+      <div class="auth-header">
+        <h1 class="auth-subtitle">Initial Setup</h1>
       </div>
-      <h1 class="auth-title">
-        <span class="title-main">Initial Setup for Tako AI</span>
-      </h1>
-      <p class="auth-subtitle">Create your admin account to get started</p>
+      <p class="auth-subtitle-secondary">Create your admin account to get started</p>
 
       <form @submit.prevent="handleSetup" class="auth-form">
         <div v-if="auth.error.value" class="error-alert">
@@ -264,25 +261,25 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   animation: card-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.auth-title {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-bottom: 0.25rem;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.title-main {
-  color: #1a1a1a;
+.auth-header {
+  text-align: center;
+  margin-bottom: 1rem;
 }
 
 .auth-subtitle {
+  color: #64748b;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.auth-subtitle-secondary {
   font-size: 14px;
   color: #888;
   text-align: center;
   margin-bottom: 2rem;
+  margin-top: 0.5rem;
 }
 
 .auth-form {

@@ -32,6 +32,7 @@ from src.core.agents.one_react_agent import (
     should_force_api_only_mode,
     check_database_health
 )
+from src.core.agents.orchestrator import execute_multi_agent_query, OrchestratorResult
 from src.utils.security_config import validate_generated_code
 
 logger = logging.getLogger(__name__)
@@ -204,106 +205,126 @@ class ReActAgentExecutor:
     
     async def _execute_discovery_phase(self) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Execute ReAct agent discovery with step-by-step streaming.
+        Execute multi-agent discovery with step-by-step streaming.
         
-        Attaches callbacks to ReactAgentDependencies to capture:
-        - step_start_callback: When agent starts a discovery step
-        - step_end_callback: When agent completes a discovery step
-        - step_tokens_callback: Final token usage
+        Uses orchestrator to coordinate SQL, API, and Synthesis agents.
+        Attaches callbacks to capture agent progress steps.
         """
         # Queue with size limit to prevent unbounded growth if frontend disconnects
         step_queue = asyncio.Queue(maxsize=100)
         
-        # Define callbacks to capture agent progress
-        async def on_step_start(data: Dict[str, Any]):
-            """Called when agent starts a step"""
-            self.state.current_step += 1
+        # Define unified event callback for orchestrator
+        async def on_event(event_type: str, data: Dict[str, Any]):
+            """Unified callback for all agent events"""
+            if event_type == 'step_start':
+                self.state.current_step = data.get("step", self.state.current_step)
+                
+                event = {
+                    "event_type": EventType.STEP_START,
+                    "step": data.get("step"),
+                    "title": data.get("title", ""),
+                    "reasoning": data.get("text", ""),
+                    "timestamp": data.get("timestamp", time.time())
+                }
+                try:
+                    await asyncio.wait_for(step_queue.put(event), timeout=1.0)
+                except asyncio.TimeoutError:
+                    logger.warning(f"[{self.correlation_id}] Queue full, dropping step_start event")
             
-            title = data.get("title", "")
-            reasoning = data.get("text", "")
-            
-            event = {
-                "event_type": EventType.STEP_START,
-                "step": self.state.current_step,
-                "title": title,
-                "reasoning": reasoning,
-                "timestamp": data.get("timestamp", time.time())
-            }
-            try:
-                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"[{self.correlation_id}] Queue full, dropping step_start event")
+            elif event_type == 'step_end':
+                event = {
+                    "event_type": EventType.STEP_END,
+                    "step": data.get("step"),
+                    "title": data.get("title", ""),
+                    "result": data.get("text", ""),
+                    "timestamp": data.get("timestamp", time.time())
+                }
+                try:
+                    await asyncio.wait_for(step_queue.put(event), timeout=1.0)
+                except asyncio.TimeoutError:
+                    logger.warning(f"[{self.correlation_id}] Queue full, dropping step_end event")
         
-        async def on_step_end(data: Dict[str, Any]):
-            """Called when agent completes a step"""
-            title = data.get("title", "")
-            result_text = data.get("text", "")
-            
-            event = {
-                "event_type": EventType.STEP_END,
-                "step": self.state.current_step,
-                "title": title,
-                "result": result_text,
-                "timestamp": data.get("timestamp", time.time())
-            }
-            try:
-                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"[{self.correlation_id}] Queue full, dropping step_end event")
+        # Artifacts file
+        artifacts_file = Path(f"logs/artifacts_{self.correlation_id}.json")
+        artifacts_file.parent.mkdir(parents=True, exist_ok=True)
         
-        async def on_tokens(data: Dict[str, Any]):
-            """Called with token usage info"""
-            event = {
-                "event_type": EventType.STEP_TOKENS,
-                "input_tokens": data.get("input_tokens", 0),
-                "output_tokens": data.get("output_tokens", 0),
-                "total_tokens": data.get("total_tokens", 0),
-                "requests": data.get("requests", 0)
-            }
+        # Run orchestrator in background task
+        async def run_orchestrator():
             try:
-                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"[{self.correlation_id}] Queue full, dropping tokens event")
-        
-        async def on_tool_call(data: Dict[str, Any]):
-            """Called when a tool is invoked"""
-            event = {
-                "event_type": "TOOL-CALL",
-                "tool_name": data.get("tool_name", ""),
-                "description": data.get("description", ""),
-                "timestamp": data.get("timestamp", time.time())
-            }
-            try:
-                await asyncio.wait_for(step_queue.put(event), timeout=1.0)
-            except asyncio.TimeoutError:
-                logger.warning(f"[{self.correlation_id}] Queue full, dropping tool_call event")
-        
-        # Attach callbacks to deps
-        self.deps.step_start_callback = on_step_start
-        self.deps.step_end_callback = on_step_end
-        self.deps.step_tokens_callback = on_tokens
-        self.deps.tool_call_callback = on_tool_call
-        
-        # Run agent in background task
-        async def run_agent():
-            try:
-                execution_result, usage = await execute_react_query(
-                    self.user_query,
-                    self.deps
+                # Execute multi-agent workflow
+                result: OrchestratorResult = await execute_multi_agent_query(
+                    user_query=self.user_query,
+                    correlation_id=self.correlation_id,
+                    artifacts_file=artifacts_file,
+                    okta_client=self.deps.okta_client,
+                    cancellation_check=self.cancellation_check,
+                    event_callback=on_event
                 )
                 
                 # Store results
                 self.state.discovery_complete = True
                 self.state.final_results = {
-                    "success": execution_result.success,
-                    "execution_plan": execution_result.execution_plan,
-                    "steps_taken": execution_result.steps_taken,
-                    "complete_production_code": execution_result.complete_production_code,
-                    "results": execution_result.results
+                    "success": result.success,
+                    "execution_plan": f"Multi-agent workflow: {', '.join(result.phases_executed)}",
+                    "steps_taken": len(result.phases_executed),
+                    "complete_production_code": result.script_code,
+                    "results": None  # Will be populated after execution
                 }
                 
-                # Log the final production script summary (not full content to avoid log spam)
-                if execution_result.complete_production_code:
+                # Log the final production script summary
+                if result.script_code:
+                    script_length = len(result.script_code)
+                    script_lines = result.script_code.split('\n')
+                    total_lines = len(script_lines)
+                    logger.info(f"[{self.correlation_id}] ✅ SYNTHESIS COMPLETE: Generated final production code ({script_length} chars, {total_lines} lines)")
+                    
+                    # Only log first 30 and last 20 lines to avoid log flooding
+                    if total_lines > 50:
+                        logger.debug(f"[{self.correlation_id}] First 30 lines:")
+                        for i, line in enumerate(script_lines[:30], 1):
+                            logger.debug(f"[{self.correlation_id}] {i:4d} | {line}")
+                        logger.debug(f"[{self.correlation_id}] ... ({total_lines - 50} lines omitted) ...")
+                        logger.debug(f"[{self.correlation_id}] Last 20 lines:")
+                        for i, line in enumerate(script_lines[-20:], total_lines - 19):
+                            logger.debug(f"[{self.correlation_id}] {i:4d} | {line}")
+                    else:
+                        # Small script - log all
+                        for i, line in enumerate(script_lines, 1):
+                            logger.debug(f"[{self.correlation_id}] {i:4d} | {line}")
+                
+                if not result.success:
+                    # Handle errors
+                    raw_error = result.error or "Discovery failed"
+                    
+                    if raw_error == "NOT-OKTA-RELATED":
+                        # Convert to user-friendly message
+                        user_friendly_error = "I can only assist with Okta-related queries. Please ask a question about your Okta tenant."
+                        self.state.error = user_friendly_error
+                        logger.warning(f"[{self.correlation_id}] Safety violation detected: Query rejected as non-Okta-related")
+                    else:
+                        self.state.error = raw_error
+                    
+                    # Send error event to frontend
+                    await step_queue.put(self._create_error_event(self.state.error))
+            
+            except asyncio.CancelledError:
+                logger.warning(f"[{self.correlation_id}] Orchestrator execution cancelled")
+                raise
+            except Exception as e:
+                # Check if it's a wrapped cancellation error
+                if "Execution cancelled by user" in str(e):
+                    logger.warning(f"[{self.correlation_id}] Orchestrator execution cancelled (caught via exception message)")
+                    raise asyncio.CancelledError("Execution cancelled by user")
+                
+                self.state.error = f"Discovery phase error: {str(e)}"
+                logger.error(f"[{self.correlation_id}] {self.state.error}", exc_info=True)
+                # Send error event to frontend
+                await step_queue.put(self._create_error_event(self.state.error))
+            finally:
+                await step_queue.put(None)  # Signal completion
+        
+        # Start orchestrator task
+        orchestrator_task = asyncio.create_task(run_orchestrator())
                     script_length = len(execution_result.complete_production_code)
                     script_lines = execution_result.complete_production_code.split('\n')
                     total_lines = len(script_lines)
@@ -346,29 +367,19 @@ class ReActAgentExecutor:
                 if "Execution cancelled by user" in str(e):
                     logger.warning(f"[{self.correlation_id}] Agent execution cancelled (caught via exception message)")
                     raise asyncio.CancelledError("Execution cancelled by user")
-                
-                self.state.error = f"Discovery phase error: {str(e)}"
-                logger.error(f"[{self.correlation_id}] {self.state.error}", exc_info=True)
-                # Send error event to frontend
-                await step_queue.put(self._create_error_event(self.state.error))
-            finally:
-                await step_queue.put(None)  # Signal completion
-        
-        # Start agent task
-        agent_task = asyncio.create_task(run_agent())
         
         # Stream events as they arrive
         while True:
             # Check for cancellation
             if self.cancellation_check and self.cancellation_check():
                 logger.warning(f"[{self.correlation_id}] Cancellation detected in discovery phase")
-                agent_task.cancel()
+                orchestrator_task.cancel()
                 try:
-                    await agent_task
+                    await orchestrator_task
                 except asyncio.CancelledError:
-                    logger.info(f"[{self.correlation_id}] Agent task cancelled successfully")
+                    logger.info(f"[{self.correlation_id}] Orchestrator task cancelled successfully")
                 except Exception as e:
-                    logger.error(f"[{self.correlation_id}] Error cancelling agent task: {e}")
+                    logger.error(f"[{self.correlation_id}] Error cancelling orchestrator task: {e}")
                 
                 # Ensure we stop the generator
                 raise asyncio.CancelledError("Process cancelled by user")
@@ -382,11 +393,11 @@ class ReActAgentExecutor:
             except asyncio.TimeoutError:
                 continue
         
-        # Wait for agent to finish
+        # Wait for orchestrator to finish
         try:
-            await agent_task
+            await orchestrator_task
         except asyncio.CancelledError:
-            logger.info(f"[{self.correlation_id}] Agent task cancelled (awaited)")
+            logger.info(f"[{self.correlation_id}] Orchestrator task cancelled (awaited)")
             raise
         except Exception as e:
             logger.error(f"[{self.correlation_id}] Agent task failed: {e}")

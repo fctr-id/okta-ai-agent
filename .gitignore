@@ -139,6 +139,7 @@ docs/Tako_vs_MCP_Code_Mode_Analysis.md
 .gitignore
 docs/MCP_Server_MVP.md
 .gitignore
-docs/MCP_Server_Implementation.md
+docs/*.md
 docs/MCP_Migration_Strategy.md
 docs/Tako_Architecture_Deep_Analysis.md
+_backup_before_restore_20260108_165423/*

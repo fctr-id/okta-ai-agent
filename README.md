@@ -1,67 +1,44 @@
 <div align="center">
   <a href="https://fctr.io">
-    <img src="https://fctr.io/images/logo.svg" alt="fctr.io" width="110" height="auto">
+    <img src="./media/fctr-wordmark.svg" alt="fctr.io" width="180" height="auto">
   </a>
   
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
+  <br/>
   
-  <h1>Tako: AI Agent for Okta (v1.5.0-beta)</h1>
+  <h1>Tako AI Agent for Okta (v2.0.0-beta)</h1>
   
-  <p>🚀 <strong>NEW RELEASE:</strong> v1.5.0-beta introduces an Autonomous Reasoning Engine for Okta administrators, IAM managers, and IT teams. </p>
   <p><a href="VERSION.md">📋 Changelog →</a></p>
 </div>
 
 ## What is Tako?
 
-The world's first **Autonomous AI Engineer** for Okta. Built on the **ReAct (Reason and Act)** pattern, Tako doesn't just answer questions—it **thinks, writes code, and self-heals** errors in real-time to deliver deterministic, production-ready results.
+The world's first Autonomous AI Engineer for Okta. Built on the ReAct (Reason and Act) pattern, Tako doesn't just answer questions—it thinks, writes code, and self-heals errors in real-time to deliver deterministic, production-ready results.
 
-### **Think → Generate Code → Sample Results → Repeat → Final Results**
+### New in v2.0: Multi-Agent Architecture
 
-Tako follows a deterministic workflow that validates every step, **catches its own mistakes**, and generates production-ready Python across **all 107+ Okta GET APIs**. Ask questions in plain English, get reproducible results with full transparency. **No scripting required.**
+Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, API, Synthesis) that collaborate by sharing only validated results, cutting AI costs by 50-70% and reducing hallucinations. Your experience stays the same as prior version.
 
-**Key Features:**
-- 🗣️ **Natural language queries** - Ask questions in plain English, get instant results
-- 🤖 **Autonomous ReAct agent** - Single intelligent agent with specialized tools for consistent, deterministic results  
-- 💰 **Cost-effective models** - Runs on small, efficient LLMs. Faster and cheaper. (Gemini 2.0 Flash, Claude 3.5 Haiku, GPT-4o-mini)
-- 📊 **Live progress tracking** - Real-time percentage updates, error counts, and cancellation support
-- 📚 **Context-engineered grounding** - Okta API documentation optimized for LLM comprehension
-- 🔄 **Flexible data access** - Query local SQLite database OR call Okta APIs directly (database sync is optional)
-- 🔒 **Security-first** - Multiple validation layers, sandboxed execution, read-only by default
-- 🐳 **Easy deployment** - Docker support for AMD64 and ARM64 platforms
+> ⚠️ **BREAKING CHANGE:** v2.0 requires deleting existing SQLite database and resyncing.
 
-### Architecture Overview
+---
 
-<img src="docs/media/tako-ai.jpeg" alt="Tako ReAct Agent Architecture" width="1024px" height="auto">
+### Key Features
 
+- 🗣️ Natural language queries - Ask questions in plain English, get instant results
+- 🤖 Multi-agent committee - Specialized agents working in concert for accurate results
+- 📊 Redesigned user apps logic - Changed the API endpoint to pull from /apps/appid/users when writing to sql for accurate representation.
+- ⚡ 10x faster sync - Optimized API → DB sync operations with parallel processing
+- 🛡️ Multi-layer security - Security validation at every code generation point
+- 🔒 Read-only by default - Strict permissions ensuring safe exploration
+- 🐳 Easy deployment - Docker support for AMD64 and ARM64 platforms
 
+> **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected. 
 ### See Tako in Action (play video below)
 
 <video src="https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad" width="1024px" ></video>
 
 *Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download*
-
-## 📋 Table of Contents
-
-- [What is Tako?](#what-is-tako)
-- [What Makes Tako Different?](#-what-makes-tako-different)
-- [Quick Start (Docker)](#-quick-start-docker)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Configure Rate Limits](#-configure-rate-limits-critical)
-  - [Launch Application](#launch-application)
-- [Featured Articles & Videos](#-featured-articles--videos)
-- [AI Provider Support](#ai-provider-support)
-  - [Supported Providers](#supported-providers)
-  - [Tested Model Combinations](#tested-model-combinations)
-- [Security & Privacy](#️-security--privacy)
-  - [Architecture Overview](#architecture-overview)
-  - [Security Features](#security-features)
-  - [Database Schema](#database-schema)
-- [Documentation & Support](#-documentation--support)
-  - [Documentation](#documentation)
-  - [Current Status](#current-status)
-  - [Get Help](#get-help)
-  - [Roadmap](#roadmap)
 
 ## 🆕 What Makes Tako Different?
 
@@ -69,21 +46,12 @@ Tako follows a deterministic workflow that validates every step, **catches its o
 Tako auto-corrects syntax errors, validates API parameters against Okta's spec, and retries intelligently when issues occur. Built-in circuit breakers prevent runaway loops, while automatic error tracking reports exactly what failed and why - eliminating trial-and-error cycles.
 
 ### **Cost-Effective Intelligence**
-Run on lightweight, low-cost models (Gemini 3 Flash, Claude 4.5 Haiku, GPT-4.1) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's deterministic workflow.
+Run on lightweight, low-cost models (Gemini 3 Flash, Claude 4.5 Haiku, GPT-4.1) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's structured multi-agent workflow.
 
 ### **Flexible Data Access**
 - **API Mode** - Real-time Okta API calls (no database sync required)
 - **Database Mode** - Optional: Sync to local SQLite for faster queries
 - **Hybrid Mode** - Automatically selects optimal source when database is synced
-
-### **Context-Engineered API Documentation**
-Tako uses context-engineered Okta API documentation optimized for LLM comprehension, enabling accurate API calls and parameter validation without hallucination.
-
-### Enterprise Performance & Security
-- Intelligent rate limit management with dynamic batching (respects Okta's API quotas automatically)
-- Optimized data processing for fast query execution
-- 99% token reduction through intelligent filtering
-- **Multiple security checks**: Schema validation, parameter verification, syntax checking, sandboxed execution
 
 ### 🆚 Tako vs. Okta MCP Server
 While the Okta MCP Server is excellent for developers working inside IDEs (Cursor, Claude Desktop), Tako is designed as a **centralized team platform**.
@@ -206,6 +174,39 @@ docker compose logs -f
 https://localhost:8001
 ```
 
+## 🔄 Migration from v1.x
+
+**v2.0.0 includes complete architecture rewrite and schema changes that require database recreation:**
+
+```bash
+# 1. Stop the running container
+docker compose down
+
+# 2. Delete the existing database
+rm sqlite_db/okta_sync.db   # Linux/macOS
+# OR
+Remove-Item sqlite_db\okta_sync.db  # Windows PowerShell
+
+# 3. Pull the latest image and restart
+docker compose pull
+docker compose up -d
+
+# 4. Navigate to the UI and run a full sync
+# https://localhost:8001 → Click "Sync" button
+```
+
+**What changed:**
+- **Complete architecture rewrite**: New multi-agent committee system
+- **App assignment overhaul**: `user_application_assignments` schema redesigned with group attribution
+- **New fields**: `assignment_type`, `group_name`, `group_okta_id`, `assignment_status`
+- **Sync order**: Groups → Users → Apps
+
+**Why upgrade:**
+- **50-70% lower AI costs**: Isolated agent contexts prevent token bloat
+- **95% fewer API calls**: Smart app-centric sync (50 vs 1000+ calls)
+- **Complete data**: Captures ALL assignments including hidden apps and group access
+- **Enterprise scale**: Batched operations for 50K+ users per app
+
 > ⚠️ **CRITICAL**: The application will not function unless your `.env` file is properly configured with all required authentication, AI provider, and rate limit variables. Double-check all settings before launching.
 
 ## 📖 Featured Articles & Videos
@@ -294,11 +295,13 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 | **Users** | id, okta_id, email, login, first_name, last_name, status, mobile_phone, primary_phone, employee_number, department, manager, password_changed_at, status_changed_at, user_type, country_code, title, organization, custom_attributes, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
 | **Groups** | id, okta_id, name, description, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
 | **Applications** | id, okta_id, name, label, status, sign_on_mode, metadata_url, policy_id, sign_on_url, audience, destination, signing_kid, username_template, username_template_type, implicit_assignment, admin_note, attribute_statements, honor_force_authn, hide_ios, hide_web, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **UserFactors** | id, okta_id, user_okta_id, factor_type, provider, status, authenticator_name, email, phone_number, device_type, device_name, platform, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
 | **Policies** | id, okta_id, name, description, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
 | **Devices** | id, okta_id, status, display_name, platform, manufacturer, model, os_version, registered, secure_hardware_present, disk_encryption_type, serial_number, udid, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
-| **UserDevices** | id, user_okta_id, device_okta_id, management_status, user_device_created_at, screen_lock_type, created_at, updated_at |
-| **Authenticators** | id, okta_id, name, status, type, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **UserDevices** | id, user_okta_id, device_okta_id, management_status, screen_lock_type, user_device_created_at, created_at, last_updated_at, updated_at, last_synced_at, is_deleted |
+| **UserFactors** | id, okta_id, user_okta_id, factor_type, provider, status, authenticator_name, email, phone_number, device_type, device_name, platform, created_at, last_updated_at, last_synced_at, updated_at, is_deleted |
+| **UserApplicationAssignments** | user_okta_id, application_okta_id, assignment_id, assignment_type, group_name, group_okta_id, assignment_status, credentials_setup, hidden, created_at, updated_at |
+| **GroupApplicationAssignments** | group_okta_id, application_okta_id, assignment_id, created_at, updated_at |
+| **UserGroupMemberships** | user_okta_id, group_okta_id, created_at, updated_at |
 
 **Note:** You can view the synced data using tools like DB Browser for SQLite.
 
@@ -336,24 +339,6 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 ### Feature Requests & Ideas
 - Have an enhancement in mind? [Open a feature request](https://github.com/fctr-id/okta-ai-agent/issues/new?labels=enhancement) and describe the use case.
 - Clearly state data entities & outcome expected—this shortens triage time.
-
-### Acknowledgements
-Thanks to early community testers providing feedback on rate limits, hybrid mode edge cases, and model selection strategies—your input directly improved stability.
-
-### Roadmap
-
-**✅ Completed:**
-- ReAct agent foundation with enterprise security
-- Intelligent data source selection and query optimization  
-- Modern LLM integration with advanced web interface
-
-**🚧 In Progress:**
-- Autonomous workflows and intelligent monitoring
-- Self-service integration and advanced analytics
-
-**🔮 Future:**
-- AI-driven policy management and user lifecycle automation
-- Risk-based authentication and autonomous administration
 
 ## 💡 Contributing
 

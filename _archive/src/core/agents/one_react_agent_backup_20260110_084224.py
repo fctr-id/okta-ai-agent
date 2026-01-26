@@ -9,7 +9,7 @@ This agent follows the ReAct (Reasoning + Acting) pattern:
 4. Repeat until query is answered or max retries exceeded
 """
 
-from pydantic_ai import Agent, RunContext, FunctionToolset
+from pydantic_ai import Agent, RunContext, FunctionToolset, ModelMessage
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Literal
 from dataclasses import dataclass
@@ -243,7 +243,23 @@ def get_sqlite_schema_description() -> str:
         Formatted schema description string with complete table details
     """
     from src.data.schemas.shared_schema import get_okta_database_schema
-    return get_okta_database_schema()# ============================================================================
+    return get_okta_database_schema()
+
+# ============================================================================
+# Knowledge Artifact Model (must be defined before ReactAgentDependencies)
+# ============================================================================
+
+class KnowledgeArtifact(BaseModel):
+    """Represents verified knowledge saved during agent execution"""
+    key: str = Field(..., description="Unique identifier (e.g., 'fetch_groups_code')")
+    category: Literal["code_logic", "schema_definition", "discovered_data", "error_pattern", "user_intent"] = Field(
+        ..., description="Type of knowledge"
+    )
+    content: str = Field(..., description="The actual content (code snippet, JSON sample, ID list)")
+    notes: Optional[str] = Field(None, description="Contextual notes for the agent")
+    timestamp: float = Field(default_factory=time.time)
+
+# ============================================================================
 # Dependencies (Dataclass for PydanticAI)
 # ============================================================================
 
@@ -268,17 +284,16 @@ class ReactAgentDependencies:
     # NEW: Cancellation check callback
     cancellation_check: Optional[callable] = None   # Called to check if execution should stop
     
-    # Circuit breaker counters for tool execution limits
+    # Circuit breaker counters for tool execution limits (execution only, not discovery)
     sql_execution_count: int = 0
     api_execution_count: int = 0
-    schema_load_count: int = 0
-    endpoint_filter_count: int = 0
     
     # Circuit breaker limits (configurable via environment variables)
     MAX_SQL_EXECUTIONS: int = int(os.getenv('REACT_AGENT_MAX_SQL_EXECUTIONS', '5'))
     MAX_API_EXECUTIONS: int = int(os.getenv('REACT_AGENT_MAX_API_EXECUTIONS', '20'))
-    MAX_SCHEMA_LOADS: int = int(os.getenv('REACT_AGENT_MAX_SCHEMA_LOADS', '3'))
-    MAX_ENDPOINT_FILTERS: int = int(os.getenv('REACT_AGENT_MAX_ENDPOINT_FILTERS', '10'))
+    
+    # Memory artifacts storage (NEW - for saving verified knowledge)
+    knowledge_artifacts: Dict[str, KnowledgeArtifact] = None  # Initialized on first save
 
 # ============================================================================
 # Structured Outputs
@@ -296,6 +311,136 @@ class ExecutionResult(BaseModel):
     steps_taken: List[str]
     error: Optional[str] = None
     complete_production_code: str = ""  # REQUIRED: The final, complete, runnable Python script to reproduce results
+
+# ============================================================================
+# History Compression (Phase 2 - Token Optimization)
+# ============================================================================
+
+async def compress_history(ctx: RunContext[ReactAgentDependencies], messages: list[ModelMessage]) -> list[ModelMessage]:
+    """
+    History Processor: Compresses 'Heavy' tool outputs after they have been utilized.
+    Only compresses when agent has moved past discovery into synthesis.
+    
+    Also logs per-call token tracking using ctx.usage.
+    """
+    deps = ctx.deps
+    
+    # Track tokens per call (using cumulative usage from context)
+    if not hasattr(compress_history, '_last_tokens'):
+        compress_history._last_tokens = 0
+    if not hasattr(compress_history, '_call_count'):
+        compress_history._call_count = 0
+    
+    current_total = ctx.usage.input_tokens if ctx.usage else 0
+    current_calls = ctx.usage.requests if ctx.usage else 0
+    
+    # Only log if we have a new call
+    if current_calls > compress_history._call_count:
+        incremental = current_total - compress_history._last_tokens
+        if incremental > 0:
+            logger.info(
+                f"[{deps.correlation_id}] 📊 Call #{current_calls}: "
+                f"+{incremental:,} tokens (cumulative: {current_total:,} input)"
+            )
+        compress_history._last_tokens = current_total
+        compress_history._call_count = current_calls
+    
+    # 1. Check if agent is in synthesis phase (has executed at least 1 successful query)
+    successful_execution_count = 0
+    for msg in messages:
+        if hasattr(msg, 'parts'):
+            for part in msg.parts:
+                if hasattr(part, 'tool_name') and part.tool_name == "execute_test_query":
+                    # Check if this was a successful execution
+                    if hasattr(part, 'content'):
+                        try:
+                            content = json.loads(str(part.content)) if isinstance(part.content, str) else part.content
+                            if content.get('success'):
+                                successful_execution_count += 1
+                        except:
+                            pass
+    
+    # Don't compress until we have at least 1 successful execution
+    if successful_execution_count == 0:
+        return messages
+    
+    # 2. Identify heavy tool occurrences to keep only the last one (Deduplication Strategy)
+    heavy_tools_map = {
+        'load_sql_schema': [],
+        'load_comprehensive_api_endpoints': [],
+        'filter_endpoints_by_operations': []
+    }
+    
+    for i, msg in enumerate(messages):
+        if hasattr(msg, 'parts'):
+            for part in msg.parts:
+                if hasattr(part, 'tool_name') and part.tool_name in heavy_tools_map and hasattr(part, 'content'):
+                    if len(str(part.content)) > 200:
+                        heavy_tools_map[part.tool_name].append((i, part))
+
+    compressed_count = 0
+    compressed_types = []
+
+    # 3. Apply Compression
+    for i, msg in enumerate(messages):
+        # Skip the very last message (Safety: Agent needs to see the result of its last action!)
+        if i == len(messages) - 1:
+            continue
+
+        if hasattr(msg, 'parts'):
+            for part in msg.parts:
+                if hasattr(part, 'tool_name') and hasattr(part, 'content'):
+                    
+                    content_str = str(part.content)
+                    tool_name = part.tool_name
+                    
+                    # Discovery Tools: Compress ALL BUT THE LAST occurrence
+                    if tool_name in heavy_tools_map and len(content_str) > 200:
+                        occurrences = heavy_tools_map[tool_name]
+                        if len(occurrences) > 1:
+                            # Check if this is NOT the last occurrence
+                            is_last = (i, part) == occurrences[-1]
+                            if not is_last:
+                                part.content = f"[Compressed: {tool_name} result cached - see later occurrence]"
+                                compressed_count += 1
+                                if tool_name not in compressed_types:
+                                    compressed_types.append(tool_name)
+                    
+                    # Code generation prompts: Compress if multiple successful executions
+                    elif tool_name in ['get_sql_code_generation_prompt', 'get_api_code_generation_prompt'] and len(content_str) > 200:
+                        if successful_execution_count >= 2:  # Only compress if we've moved past first test
+                            part.content = f"[Compressed: Code generation instructions utilized]"
+                            compressed_count += 1
+                            if tool_name not in compressed_types:
+                                compressed_types.append(tool_name)
+                    
+                    # Test execution results: Compress older results (keep last 2)
+                    elif tool_name == 'execute_test_query' and len(content_str) > 500:
+                        # Count how many execute_test_query results we've seen so far
+                        exec_count_before_this = 0
+                        for j in range(i):
+                            if hasattr(messages[j], 'parts'):
+                                for p in messages[j].parts:
+                                    if hasattr(p, 'tool_name') and p.tool_name == 'execute_test_query':
+                                        exec_count_before_this += 1
+                        
+                        # Keep last 2 results uncompressed, compress older ones
+                        if exec_count_before_this < successful_execution_count - 2:
+                            try:
+                                result_dict = json.loads(content_str) if isinstance(content_str, str) else content_str
+                                if result_dict.get('success') and 'sample_results' in result_dict:
+                                    result_dict['sample_results'] = "[Compressed - structure saved to artifact store]"
+                                    part.content = json.dumps(result_dict, separators=(',', ':'))
+                                    compressed_count += 1
+                                    if tool_name not in compressed_types:
+                                        compressed_types.append(tool_name)
+                            except:
+                                pass
+
+    if compressed_count > 0:
+        logger.info(f"[{deps.correlation_id}] 🧹 COMPRESSED {compressed_count} messages (after {successful_execution_count} successful executions): {', '.join(compressed_types)}")
+
+    return messages
 
 # ============================================================================
 # Tool Implementations
@@ -343,17 +488,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         # Notify frontend
         await notify_tool_call("load_sql_schema", "Loading database schema")
         
-        # Circuit breaker check
-        if deps.schema_load_count >= deps.MAX_SCHEMA_LOADS:
-            logger.warning(f"[{deps.correlation_id}] Schema load circuit breaker triggered: {deps.schema_load_count}/{deps.MAX_SCHEMA_LOADS}")
-            return {
-                "status": "error",
-                "schema": "",
-                "error": f"⚠️ CIRCUIT BREAKER: Schema loaded {deps.schema_load_count} times (max: {deps.MAX_SCHEMA_LOADS}). You MUST call stop_execution() tool now with reason='Schema load limit exceeded' and a clear user message explaining the query couldn't be completed due to repeated schema loads."
-            }
-        
-        deps.schema_load_count += 1
-        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQLite schema on-demand (load #{deps.schema_load_count}/{deps.MAX_SCHEMA_LOADS})")
+        logger.info(f"[{deps.correlation_id}] Tool 1: Loading SQLite schema on-demand")
         
         try:
             # Generate the full schema description
@@ -461,17 +596,7 @@ def create_react_toolset(deps: ReactAgentDependencies) -> FunctionToolset:
         check_cancellation()
         await notify_tool_call("filter_endpoints_by_operations", f"Filtering endpoints: {operation_names}")
         
-        # Circuit breaker check
-        if deps.endpoint_filter_count >= deps.MAX_ENDPOINT_FILTERS:
-            logger.warning(f"[{deps.correlation_id}] Endpoint filter circuit breaker triggered: {deps.endpoint_filter_count}/{deps.MAX_ENDPOINT_FILTERS}")
-            return {
-                "endpoints": [],
-                "total_endpoints_returned": 0,
-                "error": f"⚠️ CIRCUIT BREAKER: Endpoint filtering called {deps.endpoint_filter_count} times (max: {deps.MAX_ENDPOINT_FILTERS}). You MUST call stop_execution() tool now with reason='Endpoint filter limit exceeded' and a clear user message explaining the query couldn't be completed."
-            }
-        
-        deps.endpoint_filter_count += 1
-        logger.info(f"[{deps.correlation_id}] Tool 3: Filtering endpoints for operations: {operation_names} (call #{deps.endpoint_filter_count}/{deps.MAX_ENDPOINT_FILTERS})")
+        logger.info(f"[{deps.correlation_id}] Tool 3: Filtering endpoints for operations: {operation_names}")
         
         selected_endpoints = []
         
@@ -697,6 +822,11 @@ Rules:
         
         start_time = time.time()
         
+        # QUALITY CONTROL: Enforce Test Limits System-Wide
+        # Verify and set test mode to catch any missing limits in generated code
+        if hasattr(deps, 'okta_client'):
+            deps.okta_client.test_mode = True
+        
         try:
             if code_type == "sql":
                 # LLM generates pure SQL query (no Python wrapper)
@@ -718,16 +848,18 @@ Rules:
                 
                 logger.info(f"[{deps.correlation_id}] ✅ SQL security validation passed")
                 
-                # VALIDATION: Check for LIMIT 3 in SQL query
-                if "LIMIT 3" not in sql_query.upper():
-                    return {
-                        "success": False,
-                        "sample_results": None,
-                        "total_records": 0,
-                        "execution_time_ms": 0,
-                        "columns": [],
-                        "error": "❌ VALIDATION FAILED: SQL query is missing 'LIMIT 3'. All test queries MUST include 'LIMIT 3' at the end to prevent excessive data retrieval during testing. Please add 'LIMIT 3' to your query and try again."
-                    }
+                # SYSTEM-LEVEL ENFORCEMENT: Auto-inject LIMIT 3
+                # We do this proactively instead of failing validation
+                # Remove existing limit if present to avoid syntax errors (e.g. LIMIT 10 LIMIT 3)
+                if "LIMIT" in sql_query.upper():
+                     sql_query = re.sub(r'\s+LIMIT\s+\d+', '', sql_query, flags=re.IGNORECASE)
+                
+                # Remove trailing semicolon if present to prevent multi-statement error
+                sql_query = sql_query.strip().rstrip(';')
+
+                # Append mandatory safety limit
+                sql_query = f"{sql_query} LIMIT 3"
+                logger.info(f"[{deps.correlation_id}] Enforcing LIMIT 3 on SQL query: {sql_query}")
                 
                 # Execute SQL query against SQLite (now validated)
                 cursor = deps.sqlite_connection.cursor()
@@ -747,6 +879,10 @@ Rules:
                 
                 # Compact JSON to save tokens (28-39% reduction)
                 sample_results_compact = json.dumps(sample_results, separators=(',', ':'))
+                
+                # NOTE: No auto-save for SQL results - the SQL code itself (saved as code_logic)
+                # already defines the output structure. Schema is available via load_sql_schema().
+                # Only API responses need auto-save since their structure is unknown until tested.
                 
                 return {
                     "success": True,
@@ -792,25 +928,8 @@ Rules:
                                 "error": f"❌ NETWORK SECURITY FAILED: {network_validation.blocked_reason}. Violations: {', '.join(network_validation.violations)}"
                             }
                 
-                # VALIDATION: Check for max_results=3 or less in Python SDK code
-                # EXCEPTION: Special tools do not require max_results
-                if "/special-tools/" not in code:
-                    # Accept max_results=1, max_results=2, or max_results=3
-                    max_results_pattern = r'max_results\s*=\s*([123])\b'
-                    if not re.search(max_results_pattern, code):
-                        return {
-                            "success": False,
-                            "sample_results": None,
-                            "total_records": 0,
-                            "execution_time_ms": 0,
-                            "columns": [],
-                            "error": "❌ VALIDATION FAILED: API code is missing 'max_results=3' (or 1, 2). All test API calls MUST include 'max_results' with a value of 3 or less in the client.make_request() call to prevent excessive API requests during testing. Please add 'max_results=3' to your API call and try again."
-                        }
-                else:
-                    # Special Tools detected - Execute immediately to get the real analysis
-                    # We do NOT skip execution for special tools because they now contain embedded LLM analysis
-                    # that we want to present to the user immediately.
-                    logger.info(f"[{deps.correlation_id}] Special Tool detected - Executing immediately for real-time analysis")
+                # NOTE: Validation for max_results is now handled systematically by client.test_mode
+                # We no longer fail if the LLM forgets it, we just enforce it at the adapter level.
                 
                 # Execute Python SDK code
                 # We're already in an async context
@@ -932,6 +1051,47 @@ Rules:
                 sample_results = results[:3]  # Limit to 3 for testing
                 sample_results_compact = json.dumps(sample_results, separators=(',', ':'))
                 
+                # AUTO-SAVE: Save first sample to artifacts for later recall
+                if sample_results and len(sample_results) > 0:
+                    try:
+                        # Initialize artifact store if needed
+                        if deps.knowledge_artifacts is None:
+                            deps.knowledge_artifacts = {}
+                        
+                        # Generate unique key for this test
+                        artifact_key = f"api_response_sample_{deps.api_execution_count}"
+                        
+                        artifact_data = {
+                            "key": artifact_key,
+                            "category": "schema_definition",
+                            "content": json.dumps(sample_results[0], separators=(',', ':')),
+                            "notes": f"Auto-saved from API execution #{deps.api_execution_count}",
+                            "timestamp": time.time()
+                        }
+                        
+                        deps.knowledge_artifacts[artifact_key] = artifact_data
+                        
+                        # Log to file immediately
+                        artifacts_log_path = Path(get_default_log_dir()) / f"artifacts_{deps.correlation_id}.json"
+                        try:
+                            if artifacts_log_path.exists():
+                                with open(artifacts_log_path, 'r', encoding='utf-8') as f:
+                                    existing = json.load(f)
+                            else:
+                                existing = []
+                            
+                            existing.append(artifact_data)
+                            
+                            with open(artifacts_log_path, 'w', encoding='utf-8') as f:
+                                json.dump(existing, f, indent=2, ensure_ascii=False)
+                            
+                            logger.info(f"[{deps.correlation_id}] 💾 Auto-saved API response structure: {artifact_key}")
+                        except Exception as e:
+                            logger.warning(f"[{deps.correlation_id}] Failed to write artifact to file: {e}")
+                            
+                    except Exception as e:
+                        logger.warning(f"[{deps.correlation_id}] Failed to auto-save API sample: {e}")
+                
                 return {
                     "success": True,
                     "sample_results": sample_results_compact,  # Compact JSON string for LLM
@@ -963,6 +1123,151 @@ Rules:
                 "columns": [],
                 "error": str(e)
             }
+        
+        finally:
+            # ALWAYS RESET TEST MODE
+            # Critical cleanup to ensure later production queries are not limited
+            if hasattr(deps, 'okta_client'):
+                deps.okta_client.test_mode = False
+    
+    # ========================================================================
+    # Tool 9: Save Knowledge Artifact (NEW - for explicit memory)
+    # ========================================================================
+    
+    async def save_knowledge_artifact(
+        key: str,
+        category: Literal["code_logic", "schema_definition", "discovered_data", "error_pattern", "user_intent"],
+        content: str,
+        notes: str = ""
+    ) -> Dict[str, Any]:
+        """
+        Save verified knowledge to prevent "lost in the middle" problems.
+        
+        ⚠️ CRITICAL USAGE: Call this IMMEDIATELY after each successful execute_test_query:
+        1. Save the working code (category: 'code_logic')
+        2. Save a 1-item sample of the response (category: 'schema_definition')
+        3. Save any critical IDs or values (category: 'discovered_data')
+        
+        WHY: By Step 15, your Step 3 results are buried under 50KB of history.
+        Artifacts remain accessible even when history gets compressed.
+        
+        Args:
+            key: Unique ID (e.g., 'fetch_groups_code', 'group_response_schema')
+            category: Type of knowledge
+            content: The actual data (code snippet, JSON sample, etc.)
+            notes: Optional context
+        
+        Returns:
+            Confirmation that artifact was saved
+        """
+        check_cancellation()
+        await notify_tool_call("save_knowledge_artifact", f"Saving artifact: {key}")
+        
+        # Initialize artifact store if needed
+        if deps.knowledge_artifacts is None:
+            deps.knowledge_artifacts = {}
+        
+        # Store as plain dict for consistency with auto-save
+        artifact_data = {
+            "key": key,
+            "category": category,
+            "content": content,
+            "notes": notes,
+            "timestamp": time.time()
+        }
+        
+        deps.knowledge_artifacts[key] = artifact_data
+        
+        logger.info(f"[{deps.correlation_id}] 💾 ARTIFACT SAVED: {key} ({category}) - {len(content)} chars")
+        
+        # Write artifacts to dedicated JSON file for inspection
+        try:
+            from src.utils.logging import get_default_log_dir
+            log_dir = Path(get_default_log_dir())
+            artifact_file = log_dir / f"artifacts_{deps.correlation_id}.json"
+            
+            # Load existing artifacts or create new list
+            if artifact_file.exists():
+                with open(artifact_file, 'r', encoding='utf-8') as f:
+                    artifacts_list = json.load(f)
+            else:
+                artifacts_list = []
+            
+            # Append new artifact
+            artifacts_list.append(artifact_data)
+            
+            # Write back
+            with open(artifact_file, 'w', encoding='utf-8') as f:
+                json.dump(artifacts_list, f, indent=2, default=str)
+            
+            logger.debug(f"[{deps.correlation_id}] Artifact written to {artifact_file}")
+        except Exception as e:
+            logger.warning(f"[{deps.correlation_id}] Failed to write artifact to file: {e}")
+            # Don't fail the tool call if file writing fails
+        
+        return {
+            "saved": True,
+            "key": key,
+            "category": category,
+            "content_length": len(content),
+            "message": f"✅ Artifact '{key}' saved. You can now safely proceed - this knowledge won't be lost."
+        }
+    
+    # ========================================================================
+    # Tool 10: Get Knowledge Artifacts (NEW - recall saved knowledge)
+    # ========================================================================
+    
+    async def get_knowledge_artifacts(
+        category_filter: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Retrieve saved knowledge artifacts (use before final synthesis).
+        
+        Call this BEFORE generating the final production script to recall:
+        - Working code snippets from earlier tests
+        - Response schemas (field names, structure)
+        - Critical data (user IDs, group names, etc.)
+        
+        WHY: Instead of searching through 100KB of chat history, use these
+        clean artifacts that contain only the essential verified information.
+        
+        Args:
+            category_filter: Optional - only return 'code_logic', 'schema_definition', etc.
+        
+        Returns:
+            Dictionary of all saved artifacts (or filtered subset)
+        """
+        check_cancellation()
+        await notify_tool_call("get_knowledge_artifacts", f"Retrieving artifacts (filter: {category_filter or 'all'})")
+        
+        if deps.knowledge_artifacts is None or not deps.knowledge_artifacts:
+            logger.info(f"[{deps.correlation_id}] No artifacts saved yet")
+            return {
+                "artifacts": {},
+                "total_count": 0,
+                "message": "No artifacts saved yet. Use save_knowledge_artifact after successful tests."
+            }
+        
+        # Filter by category if requested
+        if category_filter:
+            # Artifacts are now plain dicts, not KnowledgeArtifact objects
+            filtered = {k: v for k, v in deps.knowledge_artifacts.items() if v.get('category') == category_filter}
+            logger.info(f"[{deps.correlation_id}] Retrieved {len(filtered)} artifacts (category: {category_filter})")
+            return {
+                "artifacts": filtered,
+                "total_count": len(filtered),
+                "category_filter": category_filter
+            }
+        
+        # Return all artifacts (already dicts)
+        all_artifacts = dict(deps.knowledge_artifacts)
+        logger.info(f"[{deps.correlation_id}] Retrieved {len(all_artifacts)} total artifacts")
+        
+        return {
+            "artifacts": all_artifacts,
+            "total_count": len(all_artifacts),
+            "category_filter": None
+        }
     
     # ========================================================================
     # Tool 7: Log Progress (NEW - for user feedback)
@@ -1121,12 +1426,14 @@ Rules:
             )
         }
     
-    # Add all tools to the toolset (8 tools total)
+    # Add all tools to the toolset (10 tools total)
     toolset.tool(log_progress)  # Tool 7: Progress logging
-    toolset.tool(stop_execution)  # Tool 8: Stop execution (NEW)
+    toolset.tool(stop_execution)  # Tool 8: Stop execution
+    toolset.tool(save_knowledge_artifact)  # Tool 9: Save verified knowledge (NEW)
+    toolset.tool(get_knowledge_artifacts)  # Tool 10: Retrieve saved knowledge (NEW)
     toolset.tool(load_sql_schema)  # Tool 1
     toolset.tool(load_comprehensive_api_endpoints)  # Tool 2
-    toolset.tool(filter_endpoints_by_operations)  # Tool 3 (RENAMED from filter_endpoints_by_entities)
+    toolset.tool(filter_endpoints_by_operations)  # Tool 3
     toolset.tool(get_sql_code_generation_prompt)  # Tool 4
     toolset.tool(get_api_code_generation_prompt)  # Tool 5
     toolset.tool(execute_test_query)  # Tool 6
@@ -1148,13 +1455,14 @@ except FileNotFoundError:
     logger.warning(f"Prompt file not found: {PROMPT_FILE}. Using default prompt.")
     BASE_SYSTEM_PROMPT = "You are a ReAct agent for Okta query execution."
 
-# Create the ReAct agent
+# Create the ReAct agent with history compression
 react_agent = Agent(
     model,  # Use model from model_picker
     instructions=BASE_SYSTEM_PROMPT,  # Static base instructions
     output_type=ExecutionResult,
     deps_type=ReactAgentDependencies,
-    retries=0  # No retries to avoid wasting money on failed attempts
+    retries=0,  # No retries to avoid wasting money on failed attempts
+    history_processors=[compress_history]  # Phase 2: Compress heavy responses after artifact save
 )
 
 @react_agent.instructions  
@@ -1241,10 +1549,16 @@ async def execute_react_query(
     else:
         logger.warning(f"[{deps.correlation_id}] ⚠️ SYNTHESIS INCOMPLETE: No production code generated")
     
-    # Log token usage (accumulated across all LLM calls)
+    # Log final token usage summary (accumulated across all LLM calls)
     if result.usage():
         usage = result.usage()
-        logger.info(f"[{deps.correlation_id}] Token Usage: {usage.input_tokens} input, {usage.output_tokens} output, {usage.total_tokens} total (across {usage.requests} API calls)")
+        avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
+        logger.info(
+            f"[{deps.correlation_id}] 📊 FINAL Token Usage: "
+            f"{usage.input_tokens:,} input, {usage.output_tokens:,} output, "
+            f"{usage.total_tokens:,} total (across {usage.requests} API calls, "
+            f"avg {avg_per_call:,.0f} input/call)"
+        )
         
         # NEW: Report token usage via SSE callback
         if hasattr(deps, 'step_tokens_callback') and deps.step_tokens_callback:

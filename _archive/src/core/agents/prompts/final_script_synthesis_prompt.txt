@@ -1,0 +1,232 @@
+### Final Script Synthesis Guidance
+
+Generate the final production Python script using patterns observed during testing.
+
+---
+
+## 1. OktaAPIClient Methods
+
+**Available methods (NO OTHER METHODS EXIST):**
+- `make_request(endpoint, method, params=None, entity_label=None)` - Make API calls
+- `start_entity_progress(label, total)` - Start progress tracking
+- `update_entity_progress(label, processed)` - Update progress (parameter is `processed`, NOT `current`)
+- `complete_entity_progress(label, success)` - Complete progress tracking
+
+**DO NOT use:** `client.log_progress()`, `client.get()`, `log_progress()` - These don't exist!
+
+---
+
+## 2. API Response Structure (CRITICAL)
+
+**`client.make_request()` ALWAYS returns this structure:**
+```python
+{
+  "status": "success" | "error",
+  "data": [...]  # The actual API response
+}
+```
+
+**MANDATORY parsing pattern:**
+```python
+response = await client.make_request(endpoint="...", method="GET", entity_label="...")
+if response and response.get("status") == "success":
+    data = response.get("data", [])  # Extract data field FIRST!
+    # Now process data (list, dict, or None)
+```
+
+**FORBIDDEN patterns:**
+```python
+# ❌ Treating response as data
+if response and isinstance(response, list):  # WRONG! response is a dict
+    for item in response:  # Missing data extraction
+
+# ❌ Not extracting data
+if response["data"]:
+    for item in response:  # Still using response, not response["data"]
+```
+
+---
+
+## 3. Output Format
+
+**Table Format (for lists of records):**
+```python
+output = {
+    "display_type": "table",
+    "data": all_results,  # List of dicts with flat structure
+    "headers": headers,   # Auto-generated from first result
+    "count": len(all_results)
+}
+print("=" * 80)
+print("QUERY RESULTS")
+print("=" * 80)
+print(json.dumps(output, indent=2, default=str))
+print("=" * 80)
+```
+
+**Markdown Format (for summaries):**
+```python
+output = {
+    "display_type": "markdown",
+    "content": "## Results\n\nYour markdown here..."
+}
+# Same print pattern as above
+```
+
+**Header generation:**
+```python
+headers = []
+if all_results:
+    for key in all_results[0].keys():
+        headers.append({
+            "value": key,
+            "text": key.replace('_', ' ').title(),
+            "sortable": True,
+            "align": "start"
+        })
+```
+
+---
+
+## 4. Data Structure Rules
+
+**Essential entity fields (when user doesn't specify):**
+- Users: okta_id, email, login, first_name, last_name, status
+- Groups: okta_id, name, description, type
+- Applications: okta_id, label, name, status, sign_on_mode
+
+**NO nested JSON in tables:**
+- ❌ `{"apps": [...]}`  - Will break table display
+- ✅ Flatten or summarize nested data
+
+---
+
+## 5. Script Template
+
+```python
+#!/usr/bin/env python3
+"""[One-sentence description]"""
+
+import asyncio
+import json
+import sys
+from pathlib import Path
+from base_okta_api_client import OktaAPIClient
+import sqlite3
+
+async def main():
+    sys.stdout.reconfigure(encoding='utf-8')
+    
+    # --- DATABASE ---
+    db_connection = None
+    try:
+        script_dir = Path(__file__).parent
+        possible_paths = [
+            Path("/app/sqlite_db/okta_sync.db"),
+            script_dir.parent / "sqlite_db" / "okta_sync.db"
+        ]
+        db_path = next((p for p in possible_paths if p.exists()), None)
+        if not db_path:
+            print("Error: Database not found", file=sys.stderr)
+            sys.exit(1)
+        db_connection = sqlite3.connect(str(db_path))
+        cursor = db_connection.cursor()
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    
+    client = OktaAPIClient(timeout=180)
+    
+    # --- SQL QUERY ---
+    try:
+        query = """[Your validated SQL - NO LIMIT 3]"""
+        cursor.execute(query)
+        rows = cursor.fetchall()
+        print(f"Found {len(rows)} records")
+    except Exception as e:
+        print(f"Error: {e}")
+        if db_connection:
+            db_connection.close()
+        sys.exit(1)
+    
+    # --- API CALLS (concurrent batching) ---
+    entity_ids = [row[0] for row in rows]
+    concurrent_limit = client.concurrent_limit  # Never hardcode!
+    all_results = []
+    
+    client.start_entity_progress("operations", len(entity_ids))
+    processed = 0
+    
+    try:
+        for i in range(0, len(entity_ids), concurrent_limit):
+            chunk = entity_ids[i:i + concurrent_limit]
+            
+            tasks = [
+                client.make_request(
+                    endpoint=f"/api/v1/users/{eid}/roles",
+                    method="GET",
+                    entity_label="operations"
+                ) for eid in chunk
+            ]
+            responses = await asyncio.gather(*tasks)
+            
+            # Extract data field from EVERY response
+            for idx, response in enumerate(responses):
+                if response and response.get("status") == "success":
+                    data = response.get("data", [])
+                    # Process data and append to all_results
+                    all_results.append({
+                        'entity_id': chunk[idx],
+                        'field': data.get('field') if isinstance(data, dict) else None
+                    })
+                processed += 1
+                client.update_entity_progress("operations", processed)
+            
+            if i + concurrent_limit < len(entity_ids):
+                await asyncio.sleep(0.1)
+        
+        client.complete_entity_progress("operations", success=True)
+    except Exception as e:
+        client.complete_entity_progress("operations", success=False)
+        raise
+    
+    # --- OUTPUT ---
+    headers = []
+    if all_results:
+        for key in all_results[0].keys():
+            headers.append({
+                "value": key,
+                "text": key.replace('_', ' ').title(),
+                "sortable": True,
+                "align": "start"
+            })
+    
+    output = {
+        "display_type": "table",
+        "data": all_results,
+        "headers": headers,
+        "count": len(all_results)
+    }
+    
+    print("=" * 80)
+    print("QUERY RESULTS")
+    print("=" * 80)
+    print(json.dumps(output, indent=2, default=str))
+    print("=" * 80)
+    
+    if db_connection:
+        db_connection.close()
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+---
+
+## Key Reminders
+
+- Use field names/patterns from test results
+- Remove `max_results=3` from production
+- Extract `response.get("data")` for EVERY API call
+- Use `client.concurrent_limit` for batch size
+- Use `asyncio.gather()` for concurrent calls

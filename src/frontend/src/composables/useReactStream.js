@@ -6,13 +6,36 @@
  */
 
 import { ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useAuth } from './useAuth'
 
 // Use relative URL to go through Vite proxy
 const API_BASE_URL = ''
 
 export function useReactStream() {
-    const router = useRouter()
+    const auth = useAuth()
+    
+    // Centralized auth error handler - follows pattern from useSync.js
+    const handleAuthError = async (status) => {
+        if (status === 401 || status === 403) {
+            console.warn(`[useReactStream] Authentication error (${status}), logging out and redirecting`)
+            
+            try {
+                // Clean up auth state
+                await auth.logout()
+                
+                // Force navigation after logout completes
+                setTimeout(() => {
+                    window.location.href = '/login'
+                }, 100)
+            } catch (err) {
+                console.error('[useReactStream] Error during logout:', err)
+                // Force navigation even if logout fails
+                window.location.href = '/login'
+            }
+            return true
+        }
+        return false
+    }
     
     // State
     const isLoading = ref(false)
@@ -75,14 +98,8 @@ export function useReactStream() {
                 body: JSON.stringify({ query })
             })
             
-            // Handle session timeout (401)
-            if (response.status === 401) {
-                console.log('[useReactStream] Session expired (401), redirecting to login')
-                if (router) {
-                    router.push('/login')
-                } else {
-                    window.location.href = '/login'
-                }
+            // Handle session timeout (401/403)
+            if (await handleAuthError(response.status)) {
                 return null
             }
             
@@ -114,6 +131,22 @@ export function useReactStream() {
             return
         }
         
+        // PRE-FLIGHT AUTH CHECK: Verify session before establishing SSE connection
+        // EventSource doesn't expose HTTP status codes, so we check proactively
+        try {
+            const authCheck = await fetch(`${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`, {
+                method: 'HEAD',
+                credentials: 'include'
+            })
+            
+            if (await handleAuthError(authCheck.status)) {
+                return
+            }
+        } catch (err) {
+            // If HEAD fails, try to proceed with SSE anyway (might be unsupported)
+            console.warn('[useReactStream] Pre-flight check failed, proceeding with SSE:', err)
+        }
+        
         isProcessing.value = true
         
         const url = `${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`
@@ -130,6 +163,15 @@ export function useReactStream() {
                 eventSource = null
             }
         })
+        
+        // Handle SSE connection errors
+        eventSource.onerror = (event) => {
+            console.error('[useReactStream] EventSource connection failed:', event)
+            error.value = 'Connection to server lost'
+            closeStream()
+            isLoading.value = false
+            isProcessing.value = false
+        }
         
         // Handle all messages with unified JSON format {type: "...", ...data}
         eventSource.onmessage = (event) => {
@@ -233,22 +275,27 @@ export function useReactStream() {
         const isFinalPhase = data.step === 'validation' || data.step === 'execution';
         
         if (!isFinalPhase) {
-            // Clean up the title - remove "STEP X:" prefix to show just the action
-            let cleanTitle = data.title
-            if (cleanTitle) {
-                // Remove "STEP 1:", "STEP 2:", etc. from the beginning
-                cleanTitle = cleanTitle.replace(/^STEP\s+\d+:\s*/i, '')
-                // Also handle variations like "Step 1 -", "STEP 1 -", etc.
-                cleanTitle = cleanTitle.replace(/^STEP\s+\d+\s*[-–—]\s*/i, '')
+            // Clean up the text - remove emojis and "STARTING:" prefix
+            let cleanText = data.text || data.title
+            if (cleanText) {
+                // Strip all emojis first
+                cleanText = cleanText.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+                // Remove "STARTING:" prefix
+                cleanText = cleanText.replace(/^STARTING:\s*/i, '')
+                // Also handle "STEP 1:", "STEP 2:", etc. for backward compatibility
+                cleanText = cleanText.replace(/^STEP\s+\d+:\s*/i, '')
+                cleanText = cleanText.replace(/^STEP\s+\d+\s*[-–—]\s*/i, '')
+                // Trim any extra whitespace
+                cleanText = cleanText.trim()
             }
             
             discoverySteps.value.push({
                 id: `step-${discoverySteps.value.length + 1}`,
                 step: data.step || discoverySteps.value.length + 1,
-                title: cleanTitle || data.title, // Use cleaned title
-                reasoning: data.text || data.reasoning || null, // Reasoning is in data.text field
+                title: cleanText || data.title, // Use cleaned text as title
+                reasoning: cleanText || data.reasoning || null, // Use cleaned text as reasoning
                 tool: data.tool || null, // Add tool info if available
-                text: data.text,
+                text: cleanText, // Store cleaned text
                 status: 'in-progress',
                 timestamp: new Date(data.timestamp * 1000).toLocaleTimeString(),
                 tools: [] // Initialize empty tools array for future tool tracking
@@ -574,13 +621,8 @@ export function useReactStream() {
                 })
             })
             
-            // Handle session timeout (401)
-            if (response.status === 401) {
-                if (router) {
-                    router.push('/login')
-                } else {
-                    window.location.href = '/login'
-                }
+            // Handle session timeout (401/403)
+            if (await handleAuthError(response.status)) {
                 return
             }
             

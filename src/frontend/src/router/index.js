@@ -55,6 +55,12 @@ router.beforeEach(async (to, from, next) => {
     return
   }
   
+  // If setup is already complete and trying to access setup page, redirect to login
+  if (!auth.needsSetup.value && to.path === '/setup') {
+    next('/login')
+    return
+  }
+  
   // If page requires auth, check logged in status
   if (to.meta.requiresAuth) {
     // Check auth status if unknown

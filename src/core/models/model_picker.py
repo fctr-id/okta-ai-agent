@@ -1,13 +1,13 @@
 from enum import Enum
 from typing import Optional, Dict
 from pydantic import BaseModel
-from pydantic_ai.models.gemini import GeminiModel
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from openai import AsyncAzureOpenAI
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.models.gemini import GeminiModelSettings
 from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.providers.bedrock import BedrockProvider
 from pydantic_ai import Agent
@@ -144,6 +144,7 @@ def parse_headers() -> Dict[str, str]:
         return {}
 
 class AIProvider(str, Enum):
+    GOOGLE = "google"
     VERTEX_AI = "vertex_ai"
     OPENAI = "openai"
     AZURE_OPENAI = "azure_openai"
@@ -160,21 +161,53 @@ class ModelConfig:
     def get_models() -> Dict[ModelType, any]:
         provider = os.getenv('AI_PROVIDER', 'vertex_ai').lower()
         
-        if provider == AIProvider.VERTEX_AI:
-            # Set environment variables for Vertex AI configuration
-            if os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
-                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-            if os.getenv('VERTEX_AI_PROJECT'):
-                os.environ['GOOGLE_CLOUD_PROJECT'] = os.getenv('VERTEX_AI_PROJECT')
-            if os.getenv('VERTEX_AI_LOCATION'):
-                os.environ['GOOGLE_CLOUD_LOCATION'] = os.getenv('VERTEX_AI_LOCATION', 'us-central1')
+        if provider == AIProvider.GOOGLE:
+            # Simple Google AI Studio with API key
+            google_provider = GoogleProvider(api_key=os.getenv('GOOGLE_API_KEY'))
             
-            reasoning_model_name = os.getenv('VERTEX_AI_REASONING_MODEL', 'gemini-1.5-pro')
-            coding_model_name = os.getenv('VERTEX_AI_CODING_MODEL', 'gemini-1.5-pro')
+            reasoning_model_name = os.getenv('GOOGLE_REASONING_MODEL', 'gemini-2.5-pro')
+            coding_model_name = os.getenv('GOOGLE_CODING_MODEL', 'gemini-2.5-pro')
             
             return {
-                ModelType.REASONING: GeminiModel(reasoning_model_name),
-                ModelType.CODING: GeminiModel(coding_model_name)
+                ModelType.REASONING: GoogleModel(reasoning_model_name, provider=google_provider),
+                ModelType.CODING: GoogleModel(coding_model_name, provider=google_provider)
+            }
+        
+        elif provider == AIProvider.VERTEX_AI:
+            # Enterprise Vertex AI with service account
+            from google.oauth2 import service_account
+            
+            # Check VERTEX_AI_SERVICE_ACCOUNT_FILE first, then fallback to GOOGLE_APPLICATION_CREDENTIALS
+            # Only use if it's a valid file path (not placeholder)
+            service_account_file = os.getenv('VERTEX_AI_SERVICE_ACCOUNT_FILE')
+            if service_account_file and not os.path.isfile(service_account_file):
+                # If set but not a valid file, try fallback
+                service_account_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            elif not service_account_file:
+                # If not set at all, try fallback
+                service_account_file = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+            
+            if not service_account_file:
+                raise ValueError("VERTEX_AI_SERVICE_ACCOUNT_FILE or GOOGLE_APPLICATION_CREDENTIALS is required for vertex_ai provider")
+            
+            credentials = service_account.Credentials.from_service_account_file(
+                service_account_file,
+                scopes=['https://www.googleapis.com/auth/cloud-platform']
+            )
+            
+            vertex_provider = GoogleProvider(
+                credentials=credentials,
+                vertexai=True,
+                project=os.getenv('VERTEX_AI_PROJECT'),
+                location=os.getenv('VERTEX_AI_LOCATION', 'global')
+            )
+            
+            reasoning_model_name = os.getenv('VERTEX_AI_REASONING_MODEL', 'gemini-2.5-pro')
+            coding_model_name = os.getenv('VERTEX_AI_CODING_MODEL', 'gemini-2.5-pro')
+            
+            return {
+                ModelType.REASONING: GoogleModel(reasoning_model_name, provider=vertex_provider),
+                ModelType.CODING: GoogleModel(coding_model_name, provider=vertex_provider)
             }
         
         elif provider == AIProvider.OPENAI_COMPATIBLE:

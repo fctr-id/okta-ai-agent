@@ -154,6 +154,39 @@ ALLOWED_PYTHON_METHODS = {
 ALLOWED_HTTP_METHODS = {'GET'}
 
 # ------------------------------------------------------------------------
+# Code Preprocessing Utilities
+# ------------------------------------------------------------------------
+
+def preprocess_llm_generated_code(code: str) -> str:
+    """
+    Preprocess LLM-generated code to fix common formatting issues.
+    
+    Common LLM mistakes when generating code in JSON:
+    1. Escaped docstrings: backslash-triple-quote instead of triple-quote
+    2. Escaped quotes in strings: backslash-quote instead of quote
+    3. Escaped newlines: double-backslash-n instead of backslash-n
+    
+    This preprocessing happens BEFORE syntax validation to fix these issues.
+    """
+    # Fix escaped triple quotes (docstrings)
+    # Pattern: \""" or \''' at line start or after newline
+    code = re.sub(r'\\(""")', r'\1', code)  # \""" -> """
+    code = re.sub(r"\\(''')", r"\1", code)  # \''' -> '''
+    
+    # Fix escaped single/double quotes in Python strings
+    # Only fix if not part of actual escape sequences
+    # We do this carefully to avoid breaking legitimate escapes
+    
+    # Pattern 1: \"string\" (JSON-style escaping) -> "string"
+    # But NOT if it's already inside a string literal
+    # This is tricky, so we use a simple heuristic:
+    # If we see \", check if it's at word boundaries
+    code = re.sub(r'\\"([^"]*)\\"', r'"\1"', code)
+    code = re.sub(r"\\'([^']*)\\'", r"'\1'", code)
+    
+    return code
+
+# ------------------------------------------------------------------------
 # Enhanced Security Validator
 # ------------------------------------------------------------------------
 
@@ -174,6 +207,9 @@ class EnhancedSecurityValidator:
         violations = []
         blocked_patterns = []
         risk_level = 'LOW'
+        
+        # Preprocess code to fix common LLM formatting mistakes
+        code = preprocess_llm_generated_code(code)
         
         try:
             # Parse AST to validate structure
