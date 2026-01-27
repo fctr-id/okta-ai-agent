@@ -45,9 +45,12 @@
 
                                     <div class="sync-info">
                                         <v-icon class="sync-icon" size="small">mdi-update</v-icon>
-                                        <span v-if="getDataSourceDisplay.showRealtime">{{ getDataSourceDisplay.text }}</span>
-                                        <span v-else-if="metadata?.data_source_type === 'hybrid'">{{ getDataSourceDisplay.text }}: {{ getLastSyncTime }} & Realtime API</span>
-                                        <span v-else>{{ getDataSourceDisplay.text }}: {{ getLastSyncTime }}</span>
+                                        <span v-if="getDataSourceDisplay.showRealtime">
+                                            {{ getDataSourceDisplay.prefix }} {{ getDataSourceDisplay.source }}
+                                        </span>
+                                        <span v-else>
+                                            {{ getDataSourceDisplay.prefix }} {{ getDataSourceDisplay.source }} (synced: {{ getLastSyncTime }}){{ getDataSourceDisplay.suffix || '' }}
+                                        </span>
                                     </div>
                                 </div>
 
@@ -338,24 +341,28 @@ const displayMode = computed(() => {
 
 const getDataSourceDisplay = computed(() => {
     // Get data source type from metadata
-    const dataSourceType = props.metadata?.data_source_type || 'realtime';
+    const dataSourceType = props.metadata?.data_source_type || 'api';
     
     switch (dataSourceType) {
         case 'sql':
             return {
                 showRealtime: false,
-                text: 'DB Last Updated'
+                prefix: 'Data Source:',
+                source: 'Database'
             };
         case 'hybrid':
             return {
                 showRealtime: false,
-                text: 'DB Last Synced'
+                prefix: 'Data Source:',
+                source: 'Database',
+                suffix: ' + Live API'
             };
-        case 'realtime':
+        case 'api':
         default:
             return {
                 showRealtime: true,
-                text: 'Realtime Mode'
+                prefix: 'Data Source:',
+                source: 'Live API'
             };
     }
 })

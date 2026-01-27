@@ -46,6 +46,64 @@ logger = get_logger("okta_ai_agent")
 # Database Health Check
 # ============================================================================
 
+def get_last_sync_timestamp() -> Optional[str]:
+    """
+    Get the last successful sync timestamp from the database.
+    Returns ISO 8601 timestamp string or None if unavailable.
+    """
+    try:
+        # Check multiple possible database locations
+        possible_paths = [
+            Path("sqlite_db/okta_sync.db"),
+            Path("okta_sync.db"),
+            Path("../sqlite_db/okta_sync.db")
+        ]
+        
+        db_path = None
+        for path in possible_paths:
+            if path.exists():
+                db_path = path
+                break
+        
+        if not db_path:
+            return None
+        
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            
+            # Check if sync_history table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_history'")
+            if not cursor.fetchone():
+                return None
+            
+            # Get most recent SUCCESSFUL sync time
+            cursor.execute("""
+                SELECT end_time 
+                FROM sync_history 
+                WHERE success = 1 AND end_time IS NOT NULL 
+                ORDER BY end_time DESC 
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            
+            if not row or not row[0]:
+                return None
+            
+            # Convert to ISO 8601 format for JavaScript Date parsing
+            # Database stores: '2026-01-22 14:51:57.424133'
+            # Return: '2026-01-22T14:51:57.424133Z' (assume UTC)
+            timestamp_str = row[0]
+            if 'T' not in timestamp_str:
+                # Replace space with T for ISO format
+                timestamp_str = timestamp_str.replace(' ', 'T') + 'Z'
+            
+            return timestamp_str
+            
+    except Exception as e:
+        logger.debug(f"Could not retrieve last sync timestamp: {e}")
+        return None
+
+
 def check_database_health() -> bool:
     """
     Check if database exists and has data.
@@ -116,6 +174,10 @@ class OrchestratorResult:
         
         # Phases executed
         self.phases_executed: List[str] = []
+        
+        # Data source tracking (for frontend display)
+        self.data_source_type: Optional[str] = None  # "sql", "api", or "hybrid"
+        self.last_sync_time: Optional[str] = None  # ISO timestamp from database
         
         # Token usage tracking
         self.total_input_tokens: int = 0
@@ -712,8 +774,24 @@ async def execute_multi_agent_query(
         result.script_code = result.synthesis_result.script_code
         result.display_type = result.synthesis_result.display_type
         
+        # Determine data source type based on which agents ran successfully
+        sql_succeeded = result.sql_result and result.sql_result.success
+        api_succeeded = result.api_result and result.api_result.success
+        
+        if sql_succeeded and api_succeeded:
+            result.data_source_type = "hybrid"
+        elif sql_succeeded:
+            result.data_source_type = "sql"
+        elif api_succeeded:
+            result.data_source_type = "api"
+        
+        # Get last sync timestamp if SQL was used
+        if result.data_source_type in ["sql", "hybrid"]:
+            result.last_sync_time = get_last_sync_timestamp()
+        
         logger.info(f"[{correlation_id}] Multi-agent workflow complete")
         logger.info(f"[{correlation_id}] Phases executed: {', '.join(result.phases_executed)}")
+        logger.info(f"[{correlation_id}] Data source: {result.data_source_type}")
         
         # Log cumulative token usage
         if result.total_tokens > 0:

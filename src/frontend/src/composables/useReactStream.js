@@ -530,7 +530,8 @@ export function useReactStream() {
                 content: data.content,
                 metadata: {
                     isStreaming: false,
-                    execution_plan: data.execution_plan
+                    execution_plan: data.execution_plan,
+                    ...data.metadata  // Merge backend metadata
                 }
             }
             console.log('[useReactStream] Results set to:', results.value)
@@ -544,7 +545,8 @@ export function useReactStream() {
                 metadata: {
                     isStreaming: false,
                     execution_plan: data.execution_plan,
-                    count: data.count
+                    count: data.count,
+                    ...data.metadata  // Merge backend metadata (data_source_type, last_sync)
                 }
             }
             

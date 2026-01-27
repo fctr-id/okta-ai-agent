@@ -124,7 +124,7 @@ def _write_temp_script(process_id: str, code: str) -> str:
     return normalized_script
 
 
-async def _execute_script(process_id: str, script_path: str, check_cancelled: callable) -> AsyncGenerator[Dict[str, Any], None]:
+async def _execute_script(process_id: str, script_path: str, check_cancelled: callable, orchestrator_result: 'OrchestratorResult' = None) -> AsyncGenerator[Dict[str, Any], None]:
     """Execute script and stream results"""
     # Get Python executable
     venv_python = Path("venv/Scripts/python.exe")
@@ -257,6 +257,19 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
             else:
                 # Send normal table results
                 result_count = results_data.get("count", 0)
+                
+                # Build metadata with data source information
+                metadata = {}
+                if orchestrator_result and hasattr(orchestrator_result, 'data_source_type'):
+                    if orchestrator_result.data_source_type:
+                        metadata["data_source_type"] = orchestrator_result.data_source_type
+                        
+                        # Add last_sync timestamp if SQL was used
+                        if orchestrator_result.data_source_type in ["sql", "hybrid"] and orchestrator_result.last_sync_time:
+                            metadata["last_sync"] = {"last_sync": orchestrator_result.last_sync_time}
+                        
+                        logger.info(f"[{process_id}] Metadata: {metadata}")
+                
                 yield {
                     "type": "COMPLETE",
                     "success": True,
@@ -264,6 +277,7 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
                     "results": results_data.get("data", []),
                     "headers": results_data.get("headers", []),
                     "count": result_count,
+                    "metadata": metadata,
                     "timestamp": time.time()
                 }
     
@@ -686,7 +700,7 @@ async def stream_react_updates(
             # Execute and stream results
             # COMMENTED: Reduces log noise (subprocess execution is implicit)
             # logger.info(f"[{process_id}] Starting subprocess execution")
-            async for execution_event in _execute_script(process_id, script_path, check_cancelled):
+            async for execution_event in _execute_script(process_id, script_path, check_cancelled, result):
                 yield f"data: {json.dumps(execution_event)}\n\n"
             
             # Note: Cleanup disabled - scripts kept in generated_scripts/ for debugging
