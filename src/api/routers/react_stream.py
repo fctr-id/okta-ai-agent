@@ -537,6 +537,20 @@ async def stream_react_updates(
             
             # Orchestrator already logged completion and phases
             
+            # Check if discovery succeeded but found no data (0 artifacts)
+            if result.no_data_found:
+                logger.info(f"[{process_id}] Discovery succeeded but found no data")
+                complete_event = {
+                    "type": "COMPLETE",
+                    "success": True,
+                    "display_type": "markdown",
+                    "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                process["status"] = "completed"
+                return
+            
             if not result.success:
                 error_event = {
                     "type": "ERROR",

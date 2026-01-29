@@ -165,6 +165,7 @@ class OrchestratorResult:
         self.display_type: str = "table"
         self.error: Optional[str] = None
         self.is_special_tool: bool = False  # Flag to skip validation for special tools
+        self.no_data_found: bool = False  # Flag when discovery succeeds but finds no data (0 artifacts)
         
         # Phase results
         self.router_decision: Optional[RouterDecision] = None
@@ -729,6 +730,21 @@ async def execute_multi_agent_query(
             return result
         
         logger.info(f"[{correlation_id}] Discovery validation passed (SQL: {sql_succeeded}, API: {api_succeeded})")
+        
+        # Check if discovery succeeded but found no data (0 artifacts)
+        try:
+            with open(artifacts_file, 'r', encoding='utf-8') as f:
+                artifacts = json.load(f)
+            artifact_count = len(artifacts) if isinstance(artifacts, list) else 0
+            
+            if artifact_count == 0:
+                logger.info(f"[{correlation_id}] Discovery succeeded but found no data (0 artifacts)")
+                result.no_data_found = True
+                result.success = True
+                return result
+        except Exception as e:
+            logger.warning(f"[{correlation_id}] Failed to check artifact count: {e}")
+            # Continue to synthesis anyway
         
         # ====================================================================
         # PHASE 3: Synthesis
