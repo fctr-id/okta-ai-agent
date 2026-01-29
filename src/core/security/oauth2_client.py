@@ -66,6 +66,8 @@ class OktaOAuth2Manager:
             bool: True if initialization successful
         """
         try:
+            self.logger.info(f"Starting OAuth2 initialization for domain: {okta_domain}")
+            
             # Validate input domain
             if not okta_domain or not isinstance(okta_domain, str):
                 self.logger.error("Invalid okta_domain parameter")
@@ -82,7 +84,18 @@ class OktaOAuth2Manager:
             # Load configuration
             self.client_id = os.getenv('OKTA_OAUTH2_CLIENT_ID')
             self.private_key_pem = os.getenv('OKTA_OAUTH2_PRIVATE_KEY_PEM')
-            self.scopes = os.getenv('OKTA_OAUTH2_SCOPES', 'okta.users.read')
+            raw_scopes = os.getenv('OKTA_OAUTH2_SCOPES')
+            
+            # Sanitize scopes - remove wrapping quotes if present
+            if raw_scopes:
+                self.scopes = raw_scopes.strip().strip('"').strip("'")
+            else:
+                self.scopes = None
+            
+            if self.scopes:
+                self.logger.debug(f"OAuth2 scopes configured: {self.scopes[:100]}...")
+            else:
+                self.logger.warning("No OAuth2 scopes configured - OKTA_OAUTH2_SCOPES not set")
             
             # Validate configuration
             if not self.client_id or not isinstance(self.client_id, str):
@@ -100,13 +113,14 @@ class OktaOAuth2Manager:
             
             # Validate scopes
             if not self.scopes or not isinstance(self.scopes, str):
-                self.logger.error("Invalid scopes configuration")
+                self.logger.error("Invalid scopes configuration - OKTA_OAUTH2_SCOPES must be set")
                 return False
             
             # Okta Org Authorization Server endpoint (HTTPS only)
             self.token_endpoint = f"https://{okta_domain}/oauth2/v1/token"
             
             # Initialize AuthLib OAuth2 client with private_key_jwt (RFC 7523)
+            self.logger.info("Creating AsyncOAuth2Client with private_key_jwt authentication")
             self.oauth2_client = AsyncOAuth2Client(
                 client_id=self.client_id,
                 client_secret=self.private_key_pem,  # Private key as string
@@ -114,6 +128,7 @@ class OktaOAuth2Manager:
                 timeout=self.timeout
             )
             
+            self.logger.info("OAuth2 client initialization successful")
             return True
             
         except Exception as e:
@@ -188,6 +203,12 @@ class OktaOAuth2Manager:
                 
         except Exception as e:
             self.logger.error(f"OAuth2 token fetch failed: {type(e).__name__}")
+            self.logger.error(f"Error details: {str(e)}")
+            # Log more context for debugging
+            if hasattr(e, 'error'):
+                self.logger.error(f"OAuth error: {e.error}")
+            if hasattr(e, 'description'):
+                self.logger.error(f"Error description: {e.description}")
             # Clear any partial tokens on error
             self._cached_token = None
             self._token_expires_at = None

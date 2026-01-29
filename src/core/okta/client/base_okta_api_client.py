@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional
 from urllib.parse import urlencode
 from datetime import datetime, timezone
 import json  # NEW: for structured progress events
+import importlib
 
 # Import settings for configuration
 try:
@@ -34,9 +35,11 @@ except ImportError:
         security_path = Path(__file__).parent.parent.parent / "security"
         sys.path.insert(0, str(security_path))
         
-        from oauth2_client import OktaOAuth2Manager
+        # Use dynamic import to avoid static analysis warnings about missing module
+        module = importlib.import_module("oauth2_client")
+        OktaOAuth2Manager = getattr(module, "OktaOAuth2Manager")
         import_success = "oauth2_client (via security path)"
-    except ImportError:
+    except (ImportError, AttributeError):
         try:
             # Try relative import
             import sys
@@ -48,9 +51,12 @@ except ImportError:
             security_dir = core_dir / "security"
             
             sys.path.insert(0, str(security_dir))
-            from oauth2_client import OktaOAuth2Manager
+            
+            # Use dynamic import to avoid static analysis warnings about missing module
+            module = importlib.import_module("oauth2_client")
+            OktaOAuth2Manager = getattr(module, "OktaOAuth2Manager")
             import_success = f"oauth2_client (via {security_dir})"
-        except ImportError:
+        except (ImportError, AttributeError):
             # Final fallback - OAuth2 not available
             import_success = False
             OktaOAuth2Manager = None
@@ -1115,7 +1121,7 @@ class OktaAPIClient:
     def _clean_data_structure(self, data: Any) -> Any:
         """
         Clean response data to optimize for LLM context usage:
-        1. Remove '_links' (HATEOAS) which consume massive tokens but are rarely used by LLMs
+        1. Remove '_links' ONLY in test_mode - they're needed for special tools
         2. Enforce list truncation to 3 items ONLY when test_mode=True
         
         Args:
@@ -1134,8 +1140,8 @@ class OktaAPIClient:
             return [self._clean_data_structure(item) for item in data]
         
         if isinstance(data, dict):
-            # Remove _links to reduce noise (mutate in place for efficiency)
-            if "_links" in data:
+            # Remove _links ONLY in test mode (special tools need them for policy links, etc.)
+            if self.test_mode and "_links" in data:
                 del data["_links"]
             
             # Remove logo links often found in profile or at root level (sometimes outside _links)
