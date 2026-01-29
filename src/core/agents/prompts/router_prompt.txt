@@ -111,8 +111,7 @@ The database schema is dynamically injected below. Use it to determine what data
 
 ## 7. IMPORTANT NOTES
 -   **Be Explicit**: Choose SQL or API based on schema knowledge. No ambiguous defaults.
--   **Keywords Matter**: "using logs", "login events", "authentication logs" → API. "list users", "find groups" → SQL.
--   **User Intent**: If user says "API only" or "database only", respect it.
--   **Roles Exception**: User roles are NEVER in database - always route to API if roles mentioned.
+-   **User Intent**: If user says "API only" or "database only", respect it. This is the ONLY override to schema-based routing.
+-   **Schema-Driven**: Check the database schema to determine what data is available locally. If not in schema, route to API.
 -   **Do NOT Plan**: You do not decide *how* to fetch data. That is the job of the SQL and API agents. You just route.
 -   **Structure**: Do NOT return markdown code blocks. Return the JSON object directly.
