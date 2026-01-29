@@ -222,6 +222,7 @@ async def can_user_access_application(
             def info(self, msg): print(f"INFO: {msg}", file=sys.stderr)
             def debug(self, msg): print(f"DEBUG: {msg}", file=sys.stderr)
             def error(self, msg): print(f"ERROR: {msg}", file=sys.stderr)
+            def warning(self, msg): print(f"WARNING: {msg}", file=sys.stderr)
         logger = FakeLogger()
     
     logger.info(f"can_user_access_application called with user='{user_identifier}', app='{app_identifier}', group='{group_identifier}'")

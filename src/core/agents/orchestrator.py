@@ -348,6 +348,13 @@ async def execute_multi_agent_query(
             logger.info(f"[{correlation_id}] Executing special tool handler")
             result.phases_executed.append('special')
             
+            # Send initial status to frontend
+            await aggregator.step_start({
+                "title": "Special Tool",
+                "text": "Using specialized tool to fetch your answer. Please wait...",
+                "timestamp": time.time()
+            })
+            
             success, result_text, display_type, error = await handle_special_query(
                 user_query=user_query,
                 okta_client=okta_client,

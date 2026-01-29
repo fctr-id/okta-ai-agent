@@ -11,10 +11,10 @@ Designed to scale automatically as new special tools are added.
 """
 
 import json
+import time
 from typing import Dict, Any, Optional, Tuple
 from pathlib import Path
 from pydantic_ai import Agent
-import json
 
 from src.utils.logging import get_logger
 from src.core.tools.special_tools import discover_special_tools, get_special_tool_endpoints
@@ -161,14 +161,17 @@ async def execute_special_tool(
         if not tool_info:
             return False, None, f"Special tool operation '{tool_operation}' not found"
         
-        logger.info(f"[{correlation_id}] Found special tool: {tool_info['module_name']}")
+        tool_name = tool_info['module_name']
+        logger.info(f"[{correlation_id}] Found special tool: {tool_name}")
         
-        # Send progress update
+        # Send simple progress with tool name
         if progress_callback:
             await progress_callback({
-                "action": f"Executing special tool: {tool_info['module_name']}",
-                "reasoning": f"Running comprehensive analysis: {tool_operation}",
-                "status": "starting"
+                "entity": tool_name,
+                "current": 1,
+                "total": 1,
+                "message": "Analyzing access",
+                "timestamp": time.time()
             })
         
         # Get the tool function
@@ -190,14 +193,7 @@ async def execute_special_tool(
         # Check if execution was successful
         if result.get("status") == "success":
             logger.info(f"[{correlation_id}] Special tool execution successful")
-            
-            if progress_callback:
-                await progress_callback({
-                    "action": "Special tool execution complete",
-                    "reasoning": "Analysis complete, preparing results",
-                    "status": "completed"
-                })
-            
+            # Note: Progress completion message sent by caller after extracting tool name
             return True, result, None
         else:
             error = result.get("error", "Unknown error")
@@ -236,12 +232,7 @@ async def handle_special_query(
     
     try:
         # Step 1: Extract tool operation and parameters
-        if progress_callback:
-            await progress_callback({
-                "action": "Analyzing query",
-                "reasoning": "Identifying special tool and extracting parameters",
-                "status": "starting"
-            })
+        logger.info(f"[{correlation_id}] Extracting parameters from query")
         
         tool_operation, parameters, error = await extract_tool_parameters(
             user_query, 
