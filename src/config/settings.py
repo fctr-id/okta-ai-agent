@@ -48,8 +48,10 @@ class Settings(BaseSettings):
     COOKIE_MAX_AGE_MINUTES: int = int(os.getenv("COOKIE_MAX_AGE_MINUTES", "30"))
     
     #Okta API concurrent limits setting
-    # Get concurrent limit from environment variable (default to 15 - free tier)
-    OKTA_CONCURRENT_LIMIT: int = int(os.environ.get("OKTA_CONCURRENT_LIMIT", "15"))
+    # Actual Okta limits: Free/One App=35, Workforce/Customer Identity=75, DynamicScale=75+
+    # Users should set this to match their plan's actual concurrent limit
+    # The multipliers below (/2 for users, 0.4 for apps) provide safety margins
+    OKTA_CONCURRENT_LIMIT: int = int(os.environ.get("OKTA_CONCURRENT_LIMIT", "35"))
 
     
     # AI Provider
@@ -123,14 +125,18 @@ class Settings(BaseSettings):
     @property
     def MAX_CONCURRENT_USERS(self) -> int:
         """Calculate the maximum number of concurrent users based on rate limit (rounded down)"""
-        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT / 3))
+        # We make ~2 calls per user (groups, factors) so we can run Limit/2 safely
+        # Formula: Concurrency = (RPM/60) * (latency_ms/1000)
+        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT / 2))
     
     @property
     def MAX_CONCURRENT_APPS(self) -> int:
         """Calculate the maximum number of concurrent apps based on apps API rate limit"""
-        # Apps API has much lower rate limits than user APIs
-        # Use a conservative conversion factor of 0.2 (1/5th of user limit)
-        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT * 0.2))        
+        # /api/v1/apps/{id}/users endpoint: 500 req/min limit
+        # 0.4 multiplier balances speed vs safety
+        # Free tier (35): 14 apps | Workforce (75): 30 apps
+        # RATE_LIMIT_DELAY and natural latency keep us under 500 RPM limit
+        return max(1, math.floor(self.OKTA_CONCURRENT_LIMIT * 0.4))        
     
     @property
     def MAX_CONCURRENT_GROUPS(self) -> int:

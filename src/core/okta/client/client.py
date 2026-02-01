@@ -373,38 +373,35 @@ class OktaClientWrapper:
             # Process first page
             if items:
                 if batch_size and concurrent_transform:
-                    # Process items in smaller batches with concurrency
-                    for i in range(0, len(items), batch_size):
+                    # Continuous pipelining: Use semaphore to limit concurrency without rigid batching
+                    # This eliminates the "straggler problem" where fast items wait for slow ones
+                    semaphore = asyncio.Semaphore(batch_size)
+                    
+                    async def process_with_limit(item):
                         # Check for cancellation
                         if self.cancellation_flag and self.cancellation_flag.is_set():
-                            logger.info(f"Cancellation requested, stopping {entity_name} processing")
-                            return [] if not processor_func else total_processed
-                            
-                        small_batch = items[i:i + batch_size]
-                        logger.debug(f"Processing batch of {len(small_batch)} {entity_name} concurrently")
+                            return None
                         
-                        # Process items with concurrent transformations
-                        batch_tasks = []
-                        for item in small_batch:
+                        async with semaphore:
                             if asyncio.iscoroutinefunction(transform_batch_func):
-                                batch_tasks.append(transform_batch_func(item))
+                                return await transform_batch_func(item)
                             else:
-                                batch_tasks.append(asyncio.to_thread(transform_batch_func, item))
-                        
-                        # Gather results and filter failures
-                        batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                        transformed_batch = [r for r in batch_results if not isinstance(r, Exception) and r]
-                        
-                        # Process or collect the transformed batch
-                        if processor_func and transformed_batch:
-                            await processor_func(transformed_batch)
-                            total_processed += len(transformed_batch)
-                            logger.info(f"Processed {len(transformed_batch)} {entity_name}, total: {total_processed}")
-                        elif transformed_batch:
-                            all_items.extend(transformed_batch)
-                        
-                        # Short delay between batches
-                        await asyncio.sleep(0.2)
+                                return await asyncio.to_thread(transform_batch_func, item)
+                    
+                    # Launch all tasks (semaphore controls concurrency)
+                    all_tasks = [process_with_limit(item) for item in items]
+                    results = await asyncio.gather(*all_tasks, return_exceptions=True)
+                    
+                    # Filter successful results
+                    transformed_batch = [r for r in results if r is not None and not isinstance(r, Exception)]
+                    
+                    # Process or collect the transformed batch
+                    if processor_func and transformed_batch:
+                        await processor_func(transformed_batch)
+                        total_processed += len(transformed_batch)
+                        logger.info(f"Processed {len(transformed_batch)} {entity_name}, total: {total_processed}")
+                    elif transformed_batch:
+                        all_items.extend(transformed_batch)
                 else:
                     # Simple transformation for the whole batch
                     if asyncio.iscoroutinefunction(transform_batch_func):
@@ -449,38 +446,34 @@ class OktaClientWrapper:
                     
                     # Process items using the same logic as the first page
                     if batch_size and concurrent_transform:
-                        # Process items in smaller batches with concurrency
-                        for i in range(0, len(items), batch_size):
+                        # Continuous pipelining: Use semaphore to limit concurrency
+                        semaphore = asyncio.Semaphore(batch_size)
+                        
+                        async def process_with_limit(item):
                             # Check for cancellation
-                            if self.cancellation_flag and self.cancellation_flag.is_set():  # Check is_set() method
-                                logger.info(f"Cancellation requested, stopping {entity_name} pagination")
-                                break
-                                
-                            small_batch = items[i:i + batch_size]
-                            logger.debug(f"Processing batch of {len(small_batch)} {entity_name} from page {page_num} concurrently")
+                            if self.cancellation_flag and self.cancellation_flag.is_set():
+                                return None
                             
-                            # Process items with concurrent transformations
-                            batch_tasks = []
-                            for item in small_batch:
+                            async with semaphore:
                                 if asyncio.iscoroutinefunction(transform_batch_func):
-                                    batch_tasks.append(transform_batch_func(item))
+                                    return await transform_batch_func(item)
                                 else:
-                                    batch_tasks.append(asyncio.to_thread(transform_batch_func, item))
-                            
-                            # Gather results and filter failures
-                            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
-                            transformed_batch = [r for r in batch_results if not isinstance(r, Exception) and r]
-                            
-                            # Process or collect the transformed batch
-                            if processor_func and transformed_batch:
-                                await processor_func(transformed_batch)
-                                total_processed += len(transformed_batch)
-                                logger.info(f"Processed {len(transformed_batch)} {entity_name} from page {page_num}, total: {total_processed}")
-                            elif transformed_batch:
-                                all_items.extend(transformed_batch)
-                            
-                            # Short delay between batches
-                            await asyncio.sleep(0.2)
+                                    return await asyncio.to_thread(transform_batch_func, item)
+                        
+                        # Launch all tasks (semaphore controls concurrency)
+                        all_tasks = [process_with_limit(item) for item in items]
+                        results = await asyncio.gather(*all_tasks, return_exceptions=True)
+                        
+                        # Filter successful results
+                        transformed_batch = [r for r in results if r is not None and not isinstance(r, Exception)]
+                        
+                        # Process or collect the transformed batch
+                        if processor_func and transformed_batch:
+                            await processor_func(transformed_batch)
+                            total_processed += len(transformed_batch)
+                            logger.info(f"Processed {len(transformed_batch)} {entity_name} from page {page_num}, total: {total_processed}")
+                        elif transformed_batch:
+                            all_items.extend(transformed_batch)
                     else:
                         # Simple transformation for the whole batch
                         if asyncio.iscoroutinefunction(transform_batch_func):

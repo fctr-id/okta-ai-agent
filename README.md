@@ -132,22 +132,26 @@ Rename-Item -Path ".env.sample" -NewName ".env"
 
 <img src="docs/api-rate-limits.png" alt="API Rate Limits Configuration" width="550" height="auto">
 
-**Step 2:** Set `OKTA_CONCURRENT_LIMIT` in your `.env` file based on your Okta plan:
+**Step 2:** Set `OKTA_CONCURRENT_LIMIT` in your `.env` file based on your Okta plan and rate limit percentage:
 
-| Tenant Type | API Rate Limit % | Recommended Setting | Tested Maximum (CAUTION ⚠️) |
-|-------------|------------------|---------------------|------------------------------|
-| Integrator | 50% | 22 | 30 |
-| Integrator | 75% | 34 | 40 |
-| Integrator | 100% | 45 | 50 |
-| One App | 50% | 135 | 200 |
-| One App | 75% | 203 | 300 |
-| One App | 100% | 270 | 400 |
-| Enterprise | 50% | 135 | 200 |
-| Enterprise | 75% | 203 | 300 |
-| Enterprise | 100% | 270 | 400 |
-| Workforce Identity | 50% | 135 | 270 |
-| Workforce Identity | 75% | 203 | 405 |
-| Workforce Identity | 100% | 270 | 540 |
+| Tenant Type | Rate Limit % | Concurrent Limit (Max) | Recommended Setting | Why? |
+|-------------|--------------|------------------------|---------------------|------|
+| Integrator (Free) | 100% | 35 | 35 | Full capacity: 500 RPM apps, 600 RPM users |
+| Integrator (Free) | 75% | 35 | 26 | RPM reduced to 375/450, need lower concurrency |
+| Integrator (Free) | 50% | 35 | 18 | RPM reduced to 250/300, avoid rate limits |
+| One App | 100% | 35 | 35 | Same as Integrator tier |
+| One App | 75% | 35 | 26 | Conservative for reduced RPM caps |
+| One App | 50% | 35 | 18 | Very conservative for low RPM |
+| Enterprise | 100% | 75 | 75 | Full capacity for Workforce tier |
+| Enterprise | 75% | 75 | 56 | RPM reduced, scale down concurrency |
+| Enterprise | 50% | 75 | 38 | Conservative for halved RPM limits |
+| Workforce Identity | 100% | 75 | 75 | Standard limit with DynamicScale |
+| Workforce Identity | 75% | 75 | 56 | Balance speed vs reduced RPM |
+| Workforce Identity | 50% | 75 | 38 | Avoid hitting reduced rate limits |
+
+**Key Points:**
+- **Concurrent Limit (Max)** = Hard limit from Okta (35 or 75) - never exceed this
+- **Recommended Setting** = Adjusted for your rate limit % to avoid hitting per-minute caps
 
 **⚠️ Monitor for Rate Limit Warnings:**
 ```
