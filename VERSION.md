@@ -1,6 +1,25 @@
 # Version History
 
-## Current latest: v2.0.0-beta - "Tako Swarm"
+## Current latest: v2.0.5-beta - "Swarm Surge"
+
+**Release Date**: February 1, 2026
+
+**Performance Improvements:**
+- **3x Faster Sync**: Updated concurrent limits to match Okta's actual tier limits (35 for Free, 75 for Enterprise)
+- **Smoother Processing**: Eliminated sync bottlenecks with continuous pipeline processing
+- **Better Rate Limit Guidance**: Added table to help you set optimal `OKTA_CONCURRENT_LIMIT` based on your plan and rate limit slider
+
+**UI Enhancements:**
+- Shows data source (Database/Live API/Hybrid) and last sync time
+- Cleaner progress updates during operations
+
+**Bug Fixes:**
+- OAuth2 authentication and scope handling
+- API→SQL routing logic
+- Special tools progress reporting
+- Empty payload optimization
+
+## v2.0.0-beta - "Tako Swarm"
 
 **🚨 BREAKING CHANGES - Database Migration Required:**
 - **CRITICAL**: If upgrading from v1.5, you MUST delete your existing `sqlite_db/okta_sync.db` and perform a full resync
