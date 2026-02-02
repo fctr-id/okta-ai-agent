@@ -31,14 +31,6 @@
 
         <!-- Content Surface (rounded top corners, gradient background) -->
         <div class="content-surface">
-            <!-- Sidebar -->
-            <HistorySidebar 
-                v-if="showLogout" 
-                ref="sidebarRef"
-                @select="handleSelectHistory"
-                @execute="handleExecuteHistory"
-            />
-
             <!-- Main Content -->
             <main class="main-content" :class="contentClass">
                 <slot></slot>
@@ -56,6 +48,14 @@
             </div>
         </footer>
         </div>
+
+        <!-- Sidebar (Moved outside content-surface to avoid flex interference) -->
+        <HistorySidebar 
+            v-if="showLogout" 
+            ref="sidebarRef"
+            @select="handleSelectHistory"
+            @execute="handleExecuteHistory"
+        />
     </div>
 </template>
 
@@ -241,26 +241,28 @@ const handleExecuteHistory = (item) => {
 /* Content surface below header with rounded top corners and gradient */
 .content-surface {
     height: calc(100vh - 64px); /* Fixed height to enable independent scrolling */
-    display: flex;
-    flex-direction: row; /* Changed to row for sidebar */
+    width: 100%;
     margin: 0;
     border-radius: 0;
     /* Calm Slate - soft blue gradient */
     background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
     overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
 }
 
 /* Main content area */
 .main-content {
-    flex: 1;
     width: 100%;
     max-width: var(--max-width);
-    margin: 0 auto;
+    margin: 0 auto; /* This centers the content in the 100% width container */
     padding: 0 20px 30px;
     overflow-y: auto; /* Independent scroll for content */
     display: flex;
     flex-direction: column;
     position: relative; /* Base for absolute positioning of search container */
+    z-index: 1;
 }
 
 
