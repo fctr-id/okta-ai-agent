@@ -67,6 +67,12 @@ class QueryRequest(BaseModel):
     query: str
 
 
+class ScriptExecuteRequest(BaseModel):
+    """Request body for direct script execution"""
+    query: str
+    script_code: str
+
+
 class QueryResponse(BaseModel):
     """Response with process ID for SSE connection"""
     process_id: str
@@ -384,6 +390,48 @@ async def start_react_process(
         )
 
 
+@router.post("/execute-script", response_model=QueryResponse)
+async def execute_script_directly(
+    request: ScriptExecuteRequest,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Start execution of a pre-generated script.
+    
+    Returns process_id for connecting to SSE stream.
+    Skips the multi-agent discovery phase.
+    """
+    correlation_id = str(uuid.uuid4())
+    set_correlation_id(correlation_id)
+    
+    try:
+        username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
+        logger.info(f"[{correlation_id}] Starting direct script execution for user: {username}")
+        
+        # Create process tracking entry with pre-generated script
+        active_processes[correlation_id] = {
+            "status": "initializing",
+            "query": request.query,
+            "script_code": request.script_code,  # Pre-generated script
+            "user_id": current_user.id,
+            "created_at": time.time(),
+            "cancelled": False,
+            "skip_discovery": True  # Flag to skip orchestrator
+        }
+        
+        return QueryResponse(
+            process_id=correlation_id,
+            message="Script execution started. Connect to /stream-react-updates to receive events."
+        )
+        
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to start direct execution: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start direct execution: {str(e)}"
+        )
+
+
 @router.get("/stream-react-updates")
 async def stream_react_updates(
     process_id: str,
@@ -497,43 +545,58 @@ async def stream_react_updates(
                     }
                     await event_queue.put(sse_event)
             
-            # Run orchestrator in background
-            async def run_orchestrator():
-                """Execute orchestrator and send sentinel when done"""
-                try:
-                    return await execute_multi_agent_query(
-                        user_query=process["query"],
-                        correlation_id=process_id,
-                        artifacts_file=artifacts_file,
-                        okta_client=okta_client,
-                        cancellation_check=check_cancelled,
-                        event_callback=event_callback
-                    )
-                finally:
-                    # Send sentinel to signal completion
-                    await event_queue.put(None)
-            
-            # Start orchestrator
-            logger.info(f"[{process_id}] Starting multi-agent orchestrator")
-            orchestrator_task = asyncio.create_task(run_orchestrator())
-            
-            # Stream events as they arrive (loop until sentinel)
-            while True:
-                # Check for cancellation
-                if check_cancelled():
-                    orchestrator_task.cancel()
-                    break
+            # Check if we should skip discovery and use pre-generated script
+            if process.get("skip_discovery") and process.get("script_code"):
+                logger.info(f"[{process_id}] Skipping discovery phase, using pre-generated script")
                 
-                try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                    if event is None:  # Sentinel - orchestrator done
+                # Create a minimal OrchestratorResult
+                from src.core.agents.orchestrator import OrchestratorResult
+                result = OrchestratorResult()
+                result.success = True
+                result.script_code = process["script_code"]
+                result.data_source_type = "hybrid" # Default for re-execution
+                
+                # Send a notification that we are starting from a saved script
+                await event_callback("progress", {"message": "🚀 Starting execution from saved script..."})
+                
+            else:
+                # Run orchestrator in background
+                async def run_orchestrator():
+                    """Execute orchestrator and send sentinel when done"""
+                    try:
+                        return await execute_multi_agent_query(
+                            user_query=process["query"],
+                            correlation_id=process_id,
+                            artifacts_file=artifacts_file,
+                            okta_client=okta_client,
+                            cancellation_check=check_cancelled,
+                            event_callback=event_callback
+                        )
+                    finally:
+                        # Send sentinel to signal completion
+                        await event_queue.put(None)
+                
+                # Start orchestrator
+                logger.info(f"[{process_id}] Starting multi-agent orchestrator")
+                orchestrator_task = asyncio.create_task(run_orchestrator())
+                
+                # Stream events as they arrive (loop until sentinel)
+                while True:
+                    # Check for cancellation
+                    if check_cancelled():
+                        orchestrator_task.cancel()
                         break
-                    yield f"data: {json.dumps(event)}\n\n"
-                except asyncio.TimeoutError:
-                    continue
-            
-            # Get orchestrator result
-            result = await orchestrator_task
+                    
+                    try:
+                        event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                        if event is None:  # Sentinel - orchestrator done
+                            break
+                        yield f"data: {json.dumps(event)}\n\n"
+                    except asyncio.TimeoutError:
+                        continue
+                
+                # Get orchestrator result
+                result = await orchestrator_task
             
             # Orchestrator already logged completion and phases
             

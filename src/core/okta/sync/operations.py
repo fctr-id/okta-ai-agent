@@ -14,7 +14,7 @@ from sqlalchemy import select, and_, not_, or_, update, func, text
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
-from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice
+from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice, QueryHistory
 from src.core.security.password_hasher import hash_password, verify_password, check_password_needs_rehash, calculate_lockout_time
 from src.config.settings import settings
 from src.utils.logging import logger
@@ -51,6 +51,20 @@ class DatabaseOperations:
                 await conn.execute(text("PRAGMA synchronous=NORMAL"))
                 # Create tables
                 await conn.run_sync(Base.metadata.create_all)
+                
+                # Ensure query_history table exists (for existing databases)
+                from sqlalchemy import inspect
+                def get_tables(connection):
+                    inspector = inspect(connection)
+                    return inspector.get_table_names()
+                
+                tables = await conn.run_sync(get_tables)
+                if 'query_history' not in tables:
+                    logger.info("Creating query_history table...")
+                    from sqlalchemy.schema import CreateTable
+                    await conn.execute(CreateTable(QueryHistory.__table__))
+                    logger.info("Query history table created successfully")
+            
             self._initialized = True
             
     async def close(self):
