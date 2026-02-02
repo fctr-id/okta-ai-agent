@@ -20,6 +20,8 @@ from src.core.okta.sync.operations import DatabaseOperations
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, update, desc, func
 from src.utils.logging import get_logger
+from pathlib import Path
+import os
 
 logger = get_logger(__name__)
 
@@ -28,6 +30,26 @@ router = APIRouter(prefix="/history", tags=["history"])
 async def ensure_history_table():
     """Ensure the query_history table exists in the database"""
     try:
+        # --- DATABASE DISCOVERY ---
+        # Find the right DB and not create a new one
+        script_dir = Path(__file__).parent
+        project_root = script_dir.parent.parent.parent
+        
+        possible_paths = [
+            Path("/app/sqlite_db/okta_sync.db"),
+            project_root / "sqlite_db" / "okta_sync.db",
+            Path(os.getcwd()) / "sqlite_db" / "okta_sync.db"
+        ]
+        
+        db_path = next((p for p in possible_paths if p.exists()), None)
+        
+        if db_path:
+            logger.info(f"Found existing database for history at: {db_path}")
+            # Update settings temporarily for this request's context if needed
+            # but DatabaseOperations uses settings.DATABASE_URL
+            settings.SQLITE_PATH = str(db_path)
+            settings.DATABASE_URL = f"sqlite+aiosqlite:///{db_path}"
+        
         db = DatabaseOperations()
         await db.init_db()
     except Exception as e:
