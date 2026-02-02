@@ -474,48 +474,27 @@ class AuthUser(Base):
     login_attempts = Column(Integer, default=0, nullable=False)
     locked_until = Column(DateTime, nullable=True)
 
-        def __repr__(self):
+    def __repr__(self):
+        return f"<AuthUser username={self.username}, role={self.role}>"
 
-            return f"<AuthUser username={self.username}, role={self.role}>"
-
+class QueryHistory(Base):
+    """Table to store rolling history of queries and their results"""
+    __tablename__ = "query_history"
     
-
-    class QueryHistory(Base):
-
-        """Table to store rolling history of queries and their results"""
-
-        __tablename__ = "query_history"
-
-        
-
-        id = Column(Integer, primary_key=True, autoincrement=True)
-
-        tenant_id = Column(String, nullable=False, index=True)
-
-        query_text = Column(Text, nullable=False)
-
-        final_script = Column(Text, nullable=False)
-
-        results_summary = Column(Text, nullable=True)
-
-        is_favorite = Column(Boolean, default=False, index=True)
-
-        created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
-
-        
-
-        __table_args__ = (
-
-            Index('idx_query_history_tenant_fav', 'tenant_id', 'is_favorite'),
-
-            Index('idx_query_history_created', 'created_at'),
-
-        )
-
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    query_text = Column(Text, nullable=False)
+    final_script = Column(Text, nullable=False)
+    results_summary = Column(Text, nullable=True)
+    is_favorite = Column(Boolean, default=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     
+    __table_args__ = (
+        Index('idx_query_history_tenant_fav', 'tenant_id', 'is_favorite'),
+        Index('idx_query_history_created', 'created_at'),
+    )
 
-        def __repr__(self):
-
-            return f"<QueryHistory id={self.id}, query={self.query_text[:50]}...>"
+    def __repr__(self):
+        return f"<QueryHistory id={self.id}, query={self.query_text[:50]}...>"
 
         
