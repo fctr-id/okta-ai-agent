@@ -183,19 +183,22 @@ export function useReactStream() {
         }
         
         // PRE-FLIGHT AUTH CHECK: Verify session before establishing SSE connection
-        // EventSource doesn't expose HTTP status codes, so we check proactively
         try {
+            const controller = new AbortController()
             const authCheck = await fetch(`${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`, {
-                method: 'HEAD',
-                credentials: 'include'
+                method: 'GET',
+                credentials: 'include',
+                signal: controller.signal
             })
+            controller.abort() // Immediately abort, we just wanted the status code
             
             if (await handleAuthError(authCheck.status)) {
                 return
             }
         } catch (err) {
-            // If HEAD fails, try to proceed with SSE anyway (might be unsupported)
-            console.warn('[useReactStream] Pre-flight check failed, proceeding with SSE:', err)
+            if (err.name !== 'AbortError') {
+                console.warn('[useReactStream] Pre-flight check failed, proceeding with SSE:', err)
+            }
         }
         
         isProcessing.value = true

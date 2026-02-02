@@ -110,155 +110,22 @@ const handleExecuteHistory = (item) => {
 
 <style>
 .app-page {
-    min-height: 100vh;
+    height: 100vh; /* Fixed viewport height */
     background: #ffffff;
     position: relative;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden; /* Main page shouldn't scroll, inner areas will */
     display: flex;
     flex-direction: column;
 }
-
-/* Content surface below header with rounded top corners and gradient */
-.content-surface {
-    flex: 1;
-    display: flex;
-    flex-direction: row; /* Changed to row for sidebar */
-    margin: 0;
-    border-radius: 0;
-    /* Calm Slate - soft blue gradient */
-    background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
-    overflow: hidden;
-}
-
-
-
-
-/* Header */
-.floating-header {
-    position: sticky;
-    top: 0;
-    left: 0;
-    right: 0;
-    margin: 0;
-    z-index: 100;
-    width: 100%;
-    min-height: 64px;
-
-    /* High-end frosted glass */
-    background: rgba(255, 255, 255, 0.75);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    transition: all 0.3s ease;
-}
-
-.header-content {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    max-width: 100%;
-    margin: 0;
-    padding: 0 32px;
-    height: 64px;
-    position: relative;
-    z-index: 2;
-}
-
-.floating-header:hover {
-    background: rgba(255, 255, 255, 0.9);
-}
-
-.header-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.brand img {
-    display: block;
-    height: 28px;
-    width: auto;
-    object-fit: contain;
-}
-
-.tako-name {
-    font-family: var(--font-family-display);
-    font-weight: 800;
-    font-size: 17px;
-    line-height: 1;
-    letter-spacing: -0.02em;
-    color: #475569;
-    display: flex;
-    align-items: center;
-}
-
-.title-with-badge {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.brand-divider {
-    height: 14px;
-    width: 2px;
-    background: #4C64E2;
-    align-self: center;
-    border-radius: 4px;
-    opacity: 0.2;
-}
-
-.beta-badge {
-    background: rgba(76, 100, 226, 0.08);
-    border: 1px solid rgba(76, 100, 226, 0.2);
-    color: #4C64E2;
-    font-size: 9px;
-    font-weight: 800;
-    padding: 2px 6px;
-    border-radius: 6px;
-    letter-spacing: 0.05em;
-    line-height: 1;
-}
-
-.logout-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    background: transparent;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    color: #475569;
-    cursor: pointer;
-    padding: 7px 16px;
-    border-radius: 8px;
-    font-family: var(--font-family-body);
-    font-size: 13px;
-    font-weight: 600;
-    transition: all 0.2s ease;
-}
-
-.logout-btn:hover {
-    background: #ffffff;
-    border-color: rgba(15, 23, 42, 0.2);
-    color: #0f172a;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
-}
-
+...
 /* Main content area */
 .main-content {
     flex: 1;
+    width: 100%;
     max-width: var(--max-width);
     margin: 0 auto;
-    padding-top: 0;
-    padding-bottom: 30px;
-    /* Reduced from 80px */
-    overflow-y: auto;
+    padding: 0 20px 30px;
+    overflow-y: auto; /* Independent scroll for content */
     display: flex;
     flex-direction: column;
 }
