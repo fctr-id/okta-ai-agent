@@ -25,6 +25,14 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/history", tags=["history"])
 
+async def ensure_history_table():
+    """Ensure the query_history table exists in the database"""
+    try:
+        db = DatabaseOperations()
+        await db.init_db()
+    except Exception as e:
+        logger.error(f"Failed to ensure query_history table: {e}")
+
 class QueryHistoryCreate(BaseModel):
     query_text: str
     final_script: str
@@ -48,6 +56,7 @@ async def get_history(
     current_user: AuthUser = Depends(get_current_user)
 ):
     """Get the last 10 queries for the sidebar"""
+    await ensure_history_table()
     tenant_id = settings.tenant_id
     
     stmt = select(QueryHistory).where(
@@ -65,6 +74,7 @@ async def get_favorites(
     current_user: AuthUser = Depends(get_current_user)
 ):
     """Get all favorite queries (max 10)"""
+    await ensure_history_table()
     tenant_id = settings.tenant_id
     
     stmt = select(QueryHistory).where(
@@ -84,6 +94,7 @@ async def save_history(
     current_user: AuthUser = Depends(get_current_user)
 ):
     """Save a new query execution to history"""
+    await ensure_history_table()
     tenant_id = settings.tenant_id
     
     new_history = QueryHistory(
