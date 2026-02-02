@@ -254,6 +254,7 @@ const handleExecuteHistory = (item) => {
 
 /* Main content area */
 .main-content {
+    flex: 1; /* Take up all available vertical space */
     width: 100%;
     max-width: var(--max-width);
     margin: 0 auto; /* This centers the content in the 100% width container */
@@ -263,6 +264,7 @@ const handleExecuteHistory = (item) => {
     flex-direction: column;
     position: relative; /* Base for absolute positioning of search container */
     z-index: 1;
+    min-height: 0; /* Important for flex child scrolling */
 }
 
 
