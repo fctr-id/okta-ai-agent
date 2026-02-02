@@ -31,6 +31,14 @@
 
         <!-- Content Surface (rounded top corners, gradient background) -->
         <div class="content-surface">
+            <!-- Sidebar -->
+            <HistorySidebar 
+                v-if="showLogout" 
+                ref="sidebarRef"
+                @select="handleSelectHistory"
+                @execute="handleExecuteHistory"
+            />
+
             <!-- Main Content -->
             <main class="main-content" :class="contentClass">
                 <slot></slot>
@@ -54,8 +62,9 @@
 <script setup>
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
-import { computed } from 'vue'
+import { computed, ref, provide } from 'vue'
 import SyncStatusButton from '@/components/sync/SyncStatusButton.vue'
+import HistorySidebar from './HistorySidebar.vue'
 
 const props = defineProps({
     showHeader: {
@@ -74,6 +83,10 @@ const props = defineProps({
 
 const auth = useAuth()
 const router = useRouter()
+const sidebarRef = ref(null)
+
+// Provide sidebar refresh to children
+provide('refreshHistory', () => sidebarRef.value?.refresh())
 
 const appVersion = computed(() => {
     const version = import.meta.env.VITE_APP_VERSION
@@ -83,6 +96,15 @@ const appVersion = computed(() => {
 const handleLogout = async () => {
     await auth.logout()
     router.push('/login')
+}
+
+// Global event bus for history interactions
+const handleSelectHistory = (item) => {
+    window.dispatchEvent(new CustomEvent('tako:select-history', { detail: item }))
+}
+
+const handleExecuteHistory = (item) => {
+    window.dispatchEvent(new CustomEvent('tako:execute-history', { detail: item }))
 }
 </script>
 
@@ -101,7 +123,7 @@ const handleLogout = async () => {
 .content-surface {
     flex: 1;
     display: flex;
-    flex-direction: column;
+    flex-direction: row; /* Changed to row for sidebar */
     margin: 0;
     border-radius: 0;
     /* Calm Slate - soft blue gradient */
@@ -230,14 +252,15 @@ const handleLogout = async () => {
 
 /* Main content area */
 .main-content {
-    width: calc(100% - 40px);
+    flex: 1;
     max-width: var(--max-width);
     margin: 0 auto;
     padding-top: 0;
     padding-bottom: 30px;
     /* Reduced from 80px */
-    flex-grow: 1;
-    /* Add this to make it expand and fill space */
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
 

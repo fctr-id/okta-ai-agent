@@ -255,11 +255,12 @@
  * user input, displays results, and manages the overall UI state.
  */
 
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, inject } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import { useSanitize } from '@/composables/useSanitize'
 import { useReactStream } from '@/composables/useReactStream'
 import { useSpecialTools } from '@/composables/useSpecialTools'
+import { useHistory } from '@/composables/useHistory'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
 import DiscoveryPanel from '@/components/messages/DiscoveryPanel.vue'
 import ExecutionPanel from '@/components/messages/ExecutionPanel.vue'
@@ -317,12 +318,17 @@ const {
     results: reactResults,
     tokenUsage: reactTokenUsage,
     startProcess: startReActProcess,
+    startScriptExecution,
     connectToStream: connectReActStream,
     cancelProcess: cancelReAct
 } = useReactStream()
 
 // Initialize sanitization utilities
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
+
+// History Management
+const { saveToHistory } = useHistory()
+const refreshHistory = inject('refreshHistory', () => {})
 
 // Special Tools
 const { tools: specialTools, loading: specialToolsLoading, error: specialToolsError, fetchTools } = useSpecialTools()
@@ -711,9 +717,47 @@ onMounted(async () => {
         
         // Fetch special tools on mount
         await fetchTools()
+
+        // History Event Listeners
+        window.addEventListener('tako:select-history', (e) => {
+            userInput.value = e.detail.query_text
+            nextTick(autoResizeTextarea)
+        })
+
+        window.addEventListener('tako:execute-history', async (e) => {
+            const item = e.detail
+            lastQuestion.value = item.query_text
+            isLoading.value = true
+            hasResults.value = true
+            
+            try {
+                const pid = await startScriptExecution(item.query_text, item.final_script)
+                if (pid) {
+                    await connectReActStream(pid)
+                }
+            } finally {
+                isLoading.value = false
+            }
+        })
     } catch (error) {
         console.error('Failed to load message history:', error)
         localStorage.removeItem('messageHistory')
+    }
+})
+
+// Watch for final results to save to history
+watch(reactResults, async (newResults) => {
+    if (newResults && !reactLoading.value && !reactProcessing.value) {
+        try {
+            const summary = newResults.display_type === 'markdown' 
+                ? (newResults.content?.substring(0, 100) + '...') 
+                : `Found ${newResults.metadata?.count || 0} results`
+                
+            await saveToHistory(lastQuestion.value, reactGeneratedScript.value, summary)
+            refreshHistory()
+        } catch (err) {
+            console.error('Failed to save to history:', err)
+        }
     }
 })
 

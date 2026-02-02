@@ -121,6 +121,57 @@ export function useReactStream() {
     }
     
     /**
+     * Start execution from saved script
+     */
+    const startScriptExecution = async (query, scriptCode) => {
+        console.log('[useReactStream] startScriptExecution called')
+        
+        isLoading.value = true
+        error.value = null
+        discoverySteps.value = []
+        isDiscoveryComplete.value = true // Skip discovery
+        validationStep.value = null
+        executionStarted.value = false
+        isExecuting.value = false
+        executionMessage.value = ''
+        executionProgress.value = 0
+        subprocessProgress.value = []
+        rateLimitWarning.value = 0
+        generatedScript.value = scriptCode
+        results.value = null
+        tokenUsage.value = null
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/react/execute-script`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify({ query, script_code: scriptCode })
+            })
+            
+            if (await handleAuthError(response.status)) {
+                return null
+            }
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+            
+            const data = await response.json()
+            currentProcessId.value = data.process_id
+            return data.process_id
+            
+        } catch (err) {
+            console.error('[useReactStream] Failed to start script execution:', err)
+            error.value = err.message
+            isLoading.value = false
+            return null
+        }
+    }
+    
+    /**
      * Connect to SSE stream
      */
     const connectToStream = async (processId) => {
@@ -674,6 +725,7 @@ export function useReactStream() {
         
         // Methods
         startProcess,
+        startScriptExecution,
         connectToStream,
         cancelProcess
     }
