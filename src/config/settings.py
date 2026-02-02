@@ -65,8 +65,27 @@ class Settings(BaseSettings):
         if self.OKTA_CLIENT_ORGURL and self.OKTA_CLIENT_ORGURL.endswith('/'):
             self.OKTA_CLIENT_ORGURL = self.OKTA_CLIENT_ORGURL.rstrip('/')
         
-        # Create database file path
-        db_path = Path(self.DB_DIR) / self.DB_FILENAME
+        # Robust database path finding logic
+        # 1. Try to find existing database in common locations
+        # 2. Fall back to environment variable or default
+        possible_paths = [
+            Path("/app/sqlite_db") / self.DB_FILENAME,
+            BASE_DIR / "sqlite_db" / self.DB_FILENAME,
+            Path(os.getcwd()) / "sqlite_db" / self.DB_FILENAME,
+            Path(self.DB_DIR) / self.DB_FILENAME
+        ]
+        
+        db_path = None
+        for p in possible_paths:
+            if p.exists():
+                db_path = p
+                logging.info(f"Found existing database at: {db_path}")
+                break
+        
+        # If no existing database found, use the default from DB_DIR
+        if not db_path:
+            db_path = Path(self.DB_DIR) / self.DB_FILENAME
+            logging.info(f"No existing database found, using default path: {db_path}")
         
         # Create database directory if it doesn't exist
         os.makedirs(os.path.dirname(db_path), exist_ok=True)

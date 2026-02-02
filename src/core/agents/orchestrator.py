@@ -18,6 +18,7 @@ import json
 import os
 import sqlite3
 
+from src.config.settings import settings
 from src.utils.logging import get_logger
 
 # Import agents
@@ -52,20 +53,9 @@ def get_last_sync_timestamp() -> Optional[str]:
     Returns ISO 8601 timestamp string or None if unavailable.
     """
     try:
-        # Check multiple possible database locations
-        possible_paths = [
-            Path("sqlite_db/okta_sync.db"),
-            Path("okta_sync.db"),
-            Path("../sqlite_db/okta_sync.db")
-        ]
+        db_path = Path(settings.SQLITE_PATH)
         
-        db_path = None
-        for path in possible_paths:
-            if path.exists():
-                db_path = path
-                break
-        
-        if not db_path:
+        if not db_path.exists():
             return None
         
         with sqlite3.connect(db_path, timeout=5) as conn:
@@ -110,21 +100,10 @@ def check_database_health() -> bool:
     Returns False if database is unavailable or empty (no users).
     """
     try:
-        # Check multiple possible database locations
-        possible_paths = [
-            Path("sqlite_db/okta_sync.db"),
-            Path("okta_sync.db"),
-            Path("../sqlite_db/okta_sync.db")
-        ]
+        db_path = Path(settings.SQLITE_PATH)
         
-        db_path = None
-        for path in possible_paths:
-            if path.exists():
-                db_path = path
-                break
-        
-        if not db_path:
-            logger.warning("Database file not found in any expected location - Skipping SQL phase")
+        if not db_path.exists():
+            logger.warning(f"Database file not found at {db_path} - Skipping SQL phase")
             return False
         
         # Check if database is accessible and has users
