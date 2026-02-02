@@ -110,10 +110,11 @@ const handleExecuteHistory = (item) => {
 
 <style>
 .app-page {
-    height: 100vh; /* Fixed viewport height */
+    min-height: 100vh;
     background: #ffffff;
     position: relative;
-    overflow: hidden; /* Main page shouldn't scroll, inner areas will */
+    overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
 }
@@ -240,31 +241,28 @@ const handleExecuteHistory = (item) => {
 
 /* Content surface below header with rounded top corners and gradient */
 .content-surface {
-    height: calc(100vh - 64px); /* Fixed height to enable independent scrolling */
-    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
     margin: 0;
     border-radius: 0;
     /* Calm Slate - soft blue gradient */
     background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
     overflow: hidden;
-    position: relative;
-    display: flex;
-    flex-direction: column;
 }
 
 /* Main content area */
 .main-content {
-    flex: 1; /* Take up all available vertical space */
-    width: 100%;
+    width: calc(100% - 40px);
     max-width: var(--max-width);
-    margin: 0 auto; /* This centers the content in the 100% width container */
-    padding: 0 20px 30px;
-    overflow-y: auto; /* Independent scroll for content */
+    margin: 0 auto;
+    padding-top: 0;
+    padding-bottom: 30px;
+    /* Reduced from 80px */
+    flex-grow: 1;
+    /* Add this to make it expand and fill space */
     display: flex;
     flex-direction: column;
-    position: relative; /* Base for absolute positioning of search container */
-    z-index: 1;
-    min-height: 0; /* Important for flex child scrolling */
 }
 
 
@@ -274,7 +272,8 @@ const handleExecuteHistory = (item) => {
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    flex-grow: 1;
+    flex: 1;
+    width: 100%;
     padding: 20px 0;
 }
 

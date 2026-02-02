@@ -816,28 +816,43 @@ onMounted(() => {
 /* Search container */
 .chat-content {
     background: transparent;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.content-area {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+/* Initially center the search container vertically and horizontally */
+.content-area:not(.has-results) {
+    justify-content: center;
+    align-items: center;
 }
 
 .search-container {
-    position: fixed;
-    left: 50%;
-    top: 46%; /* Moved down from center */
-    transform: translate(-50%, -50%);
     width: 100%;
     max-width: 900px;
-    margin: 0 auto;
     padding-bottom: 40px;
-    transition: transform 0.3s ease-out;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     z-index: 50;
-    will-change: transform;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
+    margin: 0 auto;
 }
 
+/* When results appear, move search to the bottom and make it sticky */
 .search-container.moved {
-    top: auto;
+    position: sticky;
     bottom: 24px;
-    transform: translateX(-50%);
+    margin-top: auto; /* Push to bottom of flex container */
+    padding-bottom: 0;
+    order: 100; /* Ensure it stays at the bottom */
 }
 
 /* Hide placeholder when in mini mode */
@@ -972,15 +987,6 @@ onMounted(() => {
     color: #475569;
     margin: 6px 0 0 0;
     letter-spacing: -0.005em;
-}
-
-/* Main content area */
-.content-area {
-    width: calc(100% - 40px);
-    max-width: var(--max-width);
-    margin: 0 auto;
-    padding: 0;
-    transition: all 0.3s ease;
 }
 
 .content-area.has-results {
