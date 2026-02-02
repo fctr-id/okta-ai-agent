@@ -14,6 +14,7 @@
 ## Database
 - **Engine:** SQLite
 - **ORM:** SQLAlchemy (with `aiosqlite` for async support)
+- **Schema:** Includes `query_history` for persistent history and favorites.
 
 ## Infrastructure
 - **Containerization:** Docker & Docker Compose

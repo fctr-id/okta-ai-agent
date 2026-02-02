@@ -20,6 +20,8 @@ Tako AI is the world's first Autonomous AI Engineer for Okta. It is designed to 
 
 ## Key Features & Capabilities
 - **Natural Language Command Center:** Ask questions and give instructions in plain English to manage users, groups, apps, and policies.
+- **Interactive CLI Agent:** Powerful command-line interface for querying and synchronization with pipeline support (e.g., --scriptonly).
+- **Query History & Favorites:** Smart sidebar in the Web UI to recall, favorite, and instantly re-execute successful queries.
 - **Self-Healing Multi-Agent Architecture:** Specialized agents collaborate to generate, validate, and auto-correct code for deterministic data retrieval and manipulation.
 - **Hybrid Data Access:** Optimized retrieval using a combination of real-time Okta API calls and high-performance local SQLite synchronization.
 - **Lifecycle Automation:** (Future Focus) Automated onboarding, offboarding, and attribute management.
