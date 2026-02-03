@@ -15,6 +15,7 @@ declare module 'vue' {
     DataDisplay: typeof import('./src/components/messages/DataDisplay.vue')['default']
     DiscoveryPanel: typeof import('./src/components/messages/DiscoveryPanel.vue')['default']
     ExecutionPanel: typeof import('./src/components/messages/ExecutionPanel.vue')['default']
+    HistorySidebar: typeof import('./src/components/layout/HistorySidebar.vue')['default']
     LoginView: typeof import('./src/components/views/LoginView.vue')['default']
     NotFoundView: typeof import('./src/components/views/NotFoundView.vue')['default']
     ReActThinkingSteps: typeof import('./src/components/messages/ReActThinkingSteps.vue')['default']

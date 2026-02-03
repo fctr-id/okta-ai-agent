@@ -30,26 +30,6 @@ router = APIRouter(prefix="/history", tags=["history"])
 async def ensure_history_table():
     """Ensure the query_history table exists in the database"""
     try:
-        # --- DATABASE DISCOVERY ---
-        # Find the right DB and not create a new one
-        script_dir = Path(__file__).parent
-        project_root = script_dir.parent.parent.parent
-        
-        possible_paths = [
-            Path("/app/sqlite_db/okta_sync.db"),
-            project_root / "sqlite_db" / "okta_sync.db",
-            Path(os.getcwd()) / "sqlite_db" / "okta_sync.db"
-        ]
-        
-        db_path = next((p for p in possible_paths if p.exists()), None)
-        
-        if db_path:
-            logger.info(f"Found existing database for history at: {db_path}")
-            # Update settings temporarily for this request's context if needed
-            # but DatabaseOperations uses settings.DATABASE_URL
-            settings.SQLITE_PATH = str(db_path)
-            settings.DATABASE_URL = f"sqlite+aiosqlite:///{db_path}"
-        
         db = DatabaseOperations()
         await db.init_db()
     except Exception as e:
@@ -82,9 +62,13 @@ async def get_history(
     tenant_id = settings.tenant_id
     
     stmt = select(QueryHistory).where(
-        QueryHistory.tenant_id == tenant_id
+        and_(
+            QueryHistory.tenant_id == tenant_id,
+            QueryHistory.user_id == current_user.id
+        )
     ).order_by(
-        desc(QueryHistory.created_at)
+        desc(QueryHistory.is_favorite),
+        desc(QueryHistory.last_run_at)
     ).limit(limit)
     
     result = await session.execute(stmt)
@@ -102,6 +86,7 @@ async def get_favorites(
     stmt = select(QueryHistory).where(
         and_(
             QueryHistory.tenant_id == tenant_id,
+            QueryHistory.user_id == current_user.id,
             QueryHistory.is_favorite == True
         )
     ).order_by(desc(QueryHistory.created_at))
@@ -121,6 +106,7 @@ async def save_history(
     
     new_history = QueryHistory(
         tenant_id=tenant_id,
+        user_id=current_user.id,
         query_text=history_data.query_text,
         final_script=history_data.final_script,
         results_summary=history_data.results_summary,
@@ -140,17 +126,20 @@ async def toggle_favorite(
     session: AsyncSession = Depends(get_db_session),
     current_user: AuthUser = Depends(get_current_user)
 ):
-    """Toggle the favorite status of a query"""
+    """Toggle the favorite status of a query (max 10 favorites enforced)"""
     tenant_id = settings.tenant_id
     
-    # If marking as favorite, check the limit of 10
+    # If marking as favorite, check the limit with row-level locking
     if is_favorite:
+        # Use SELECT FOR UPDATE to prevent race condition (per-user limit)
         stmt = select(func.count(QueryHistory.id)).where(
             and_(
                 QueryHistory.tenant_id == tenant_id,
+                QueryHistory.user_id == current_user.id,
                 QueryHistory.is_favorite == True
             )
-        )
+        ).with_for_update()
+        
         result = await session.execute(stmt)
         count = result.scalar()
         
@@ -160,13 +149,16 @@ async def toggle_favorite(
                 detail="Maximum of 10 favorite queries allowed. Please unfavorite one before adding a new one."
             )
     
-    # Find the record
+    # Find and lock the record to prevent concurrent modifications
+    # Security: verify user owns this history item
     stmt = select(QueryHistory).where(
         and_(
             QueryHistory.id == history_id,
-            QueryHistory.tenant_id == tenant_id
+            QueryHistory.tenant_id == tenant_id,
+            QueryHistory.user_id == current_user.id
         )
-    )
+    ).with_for_update()
+    
     result = await session.execute(stmt)
     history_item = result.scalar_one_or_none()
     
@@ -195,7 +187,8 @@ async def execute_saved_script(
     stmt = select(QueryHistory).where(
         and_(
             QueryHistory.id == history_id,
-            QueryHistory.tenant_id == tenant_id
+            QueryHistory.tenant_id == tenant_id,
+            QueryHistory.user_id == current_user.id
         )
     )
     result = await session.execute(stmt)

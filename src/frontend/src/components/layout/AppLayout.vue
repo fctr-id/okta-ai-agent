@@ -32,7 +32,7 @@
         <!-- Content Surface (rounded top corners, gradient background) -->
         <div class="content-surface">
             <!-- Main Content -->
-            <main class="main-content" :class="contentClass">
+            <main class="main-content" :class="[contentClass, { 'sidebar-expanded': !sidebarCollapsed }]">
                 <slot></slot>
             </main>
 
@@ -55,6 +55,7 @@
             ref="sidebarRef"
             @select="handleSelectHistory"
             @execute="handleExecuteHistory"
+            @collapse-change="handleCollapseChange"
         />
     </div>
 </template>
@@ -84,9 +85,16 @@ const props = defineProps({
 const auth = useAuth()
 const router = useRouter()
 const sidebarRef = ref(null)
+const sidebarCollapsed = ref(false)
 
 // Provide sidebar refresh to children
-provide('refreshHistory', () => sidebarRef.value?.refresh())
+const refreshHistory = () => sidebarRef.value?.refresh()
+provide('refreshHistory', refreshHistory)
+
+// Expose for parent components (like ChatInterfaceV2)
+defineExpose({
+    refreshHistory
+})
 
 const appVersion = computed(() => {
     const version = import.meta.env.VITE_APP_VERSION
@@ -96,6 +104,11 @@ const appVersion = computed(() => {
 const handleLogout = async () => {
     await auth.logout()
     router.push('/login')
+}
+
+// Track sidebar collapse state
+const handleCollapseChange = (isCollapsed) => {
+    sidebarCollapsed.value = isCollapsed
 }
 
 // Global event bus for history interactions
@@ -248,7 +261,7 @@ const handleExecuteHistory = (item) => {
     border-radius: 0;
     /* Calm Slate - soft blue gradient */
     background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
-    overflow: hidden;
+    /* overflow: hidden; Removed to allow sticky positioning in children */
 }
 
 /* Main content area */
@@ -263,6 +276,14 @@ const handleExecuteHistory = (item) => {
     /* Add this to make it expand and fill space */
     display: flex;
     flex-direction: column;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Adjust content positioning when sidebar is expanded */
+/* Use padding instead of margin to maintain centering */
+.main-content.sidebar-expanded {
+    padding-left: 280px;
+    width: calc(100% - 40px);
 }
 
 

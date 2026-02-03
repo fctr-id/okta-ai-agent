@@ -1,84 +1,124 @@
 <template>
   <aside class="history-sidebar" :class="{ 'is-collapsed': isCollapsed }">
-    <div class="sidebar-header">
+    <!-- Header -->
+    <div class="sidebar-header" @click="isCollapsed = !isCollapsed">
       <div v-if="!isCollapsed" class="sidebar-title">
-        <v-icon icon="mdi-history" size="20" class="title-icon" />
-        <span>Recent Queries</span>
+        <div class="title-icon-bg">
+          <v-icon icon="mdi-history" size="16" class="title-icon" />
+        </div>
+        <span>Recent Activity</span>
       </div>
-      <button class="collapse-toggle" @click="isCollapsed = !isCollapsed" :title="isCollapsed ? 'Expand' : 'Collapse'">
-        <v-icon :icon="isCollapsed ? 'mdi-chevron-right' : 'mdi-chevron-left'" size="20" />
+      <div class="header-spacer"></div>
+      <button class="collapse-toggle" :title="isCollapsed ? 'Expand' : 'Collapse'">
+        <v-icon :icon="isCollapsed ? 'mdi-chevron-right' : 'mdi-chevron-left'" size="18" />
       </button>
     </div>
 
+    <!-- Content Area -->
     <div v-if="!isCollapsed" class="sidebar-content">
+      <!-- Loading State -->
       <div v-if="loading && history.length === 0" class="loading-state">
-        <v-progress-circular indeterminate size="24" width="3" color="primary" />
-        <p>Loading history...</p>
+        <div class="loading-shimmer">
+          <div class="shimmer-bar"></div>
+          <div class="shimmer-bar short"></div>
+        </div>
       </div>
+
+      <!-- Empty State -->
       <div v-else-if="history.length === 0" class="empty-state">
-        <v-icon icon="mdi-text-search-variant" size="32" class="mb-2 opacity-20" />
-        <p>No queries yet</p>
+        <div class="empty-icon-bg">
+          <v-icon icon="mdi-text-search-variant" size="24" class="opacity-40" />
+        </div>
+        <p>No queries found</p>
       </div>
+
+      <!-- History List -->
       <div v-else class="history-list">
         <div 
           v-for="item in history" 
           :key="item.id" 
-          class="history-item" 
+          class="history-card" 
           :class="{ 'is-favorite': item.is_favorite }"
           @click="$emit('select', item)"
         >
-          <div class="item-body">
-            <div class="item-query" :title="item.query_text">{{ item.query_text }}</div>
-            <div v-if="item.results_summary" class="item-summary">{{ item.results_summary }}</div>
-            <div class="item-meta">
-              <span class="item-date">{{ formatDate(item.created_at) }}</span>
-              <v-icon v-if="item.is_favorite" icon="mdi-star" size="10" color="#f59e0b" class="ml-1" />
-            </div>
+          <div class="card-glow"></div>
+          
+          <!-- Query Title -->
+          <div class="card-query" :title="item.query_text">
+            {{ item.query_text }}
           </div>
-          <div class="item-actions">
+          
+          <!-- Results Summary -->
+          <div v-if="item.results_summary" class="card-summary">
+            <v-icon icon="mdi-circle-small" size="12" class="mr-1" />
+            {{ item.results_summary }}
+          </div>
+
+          <!-- Card Footer -->
+          <div class="card-footer">
+            <span class="card-date">{{ formatDate(item.last_run_at) }}</span>
+          </div>
+          
+          <!-- Always Visible Actions -->
+          <div class="card-actions">
             <button 
-              class="action-btn fav-btn" 
+              class="card-btn fav-btn" 
               :class="{ 'active': item.is_favorite }"
               @click.stop="toggleFav(item)"
-              :title="item.is_favorite ? 'Remove from favorites' : 'Add to favorites'"
             >
-              <v-icon :icon="item.is_favorite ? 'mdi-star' : 'mdi-star-outline'" size="16" />
+              <v-icon :icon="item.is_favorite ? 'mdi-star' : 'mdi-star-outline'" size="14" />
+              <span>{{ item.is_favorite ? 'Saved' : 'Save' }}</span>
             </button>
+            
+            <div class="btn-divider"></div>
+
             <button 
-              class="action-btn exec-btn" 
+              class="card-btn exec-btn" 
               @click.stop="$emit('execute', item)"
-              title="Run query again"
             >
-              <v-icon icon="mdi-play" size="16" />
+              <v-icon icon="mdi-play" size="14" />
+              <span>Run</span>
             </button>
           </div>
         </div>
       </div>
     </div>
     
-    <!-- Collapsed state icon -->
-    <div v-else class="collapsed-icons">
-      <v-icon icon="mdi-history" size="20" class="mt-4 opacity-50" />
-      <div class="fav-count" v-if="favoritesCount > 0">{{ favoritesCount }}</div>
+    <!-- Collapsed State Icons -->
+    <div v-else class="collapsed-icons" @click="isCollapsed = false">
+      <div class="collapsed-icon-wrapper">
+        <v-icon icon="mdi-history" size="20" class="icon-dim" />
+        <div v-if="favoritesCount > 0" class="mini-fav-badge">{{ favoritesCount }}</div>
+      </div>
     </div>
   </aside>
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useHistory } from '@/composables/useHistory'
 
-const emit = defineEmits(['select', 'execute'])
-const { history, favorites, loading, fetchHistory, fetchFavorites, toggleFavorite } = useHistory()
+const emit = defineEmits(['select', 'execute', 'collapse-change'])
+const { history, loading, fetchHistory, toggleFavorite } = useHistory()
 const isCollapsed = ref(false)
 
 const favoritesCount = computed(() => history.value.filter(h => h.is_favorite).length)
+
+// Emit collapse state changes to parent
+watch(isCollapsed, (newVal) => {
+  emit('collapse-change', newVal)
+})
 
 onMounted(() => {
   fetchHistory()
 })
 
+const toggleFav = async (item) => {
+  await toggleFavorite(item.id, !item.is_favorite)
+}
+
 const formatDate = (dateStr) => {
+  if (!dateStr) return ''
   const date = new Date(dateStr)
   const now = new Date()
   const isToday = date.toDateString() === now.toDateString()
@@ -90,27 +130,27 @@ const formatDate = (dateStr) => {
   }
 }
 
-const toggleFav = async (item) => {
-  await toggleFavorite(item.id, !item.is_favorite)
-}
-
 defineExpose({ refresh: fetchHistory })
 </script>
 
 <style scoped>
+/* Main Sidebar Container */
 .history-sidebar {
-  width: 300px;
-  height: 100%;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-right: 1px solid rgba(255, 255, 255, 0.3);
+  position: fixed;
+  left: 0;
+  top: 64px; /* Below header */
+  bottom: 0; /* Stick to bottom instead of calc height */
+  width: 280px;
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-right: 1px solid rgba(255, 255, 255, 0.4);
   display: flex;
   flex-direction: column;
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
-  z-index: 90;
-  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.02);
+  z-index: 80;
+  box-shadow: 1px 0 0 rgba(0, 0, 0, 0.02);
 }
 
 .history-sidebar.is-collapsed {
@@ -118,49 +158,61 @@ defineExpose({ refresh: fetchHistory })
   background: rgba(255, 255, 255, 0.4);
 }
 
+/* Sidebar Header */
 .sidebar-header {
-  height: 64px;
+  height: 60px;
   padding: 0 16px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
-  flex-shrink: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .sidebar-title {
-  font-family: var(--font-family-display);
-  font-weight: 700;
-  font-size: 15px;
-  color: #475569;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  font-family: var(--font-family-display);
+  font-weight: 700;
+  font-size: 13px;
+  color: #1e293b;
+  letter-spacing: -0.01em;
 }
 
-.title-icon {
+.title-icon-bg {
+  width: 28px;
+  height: 28px;
+  background: rgba(76, 100, 226, 0.08);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   color: #4C64E2;
 }
+
+.header-spacer { flex: 1; }
 
 .collapse-toggle {
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: none;
-  background: rgba(0, 0, 0, 0.03);
+  background: transparent;
   cursor: pointer;
-  color: #64748b;
+  color: #94a3b8;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.2s;
 }
 
 .collapse-toggle:hover {
-  background: rgba(76, 100, 226, 0.1);
-  color: #4C64E2;
+  background: rgba(0, 0, 0, 0.04);
+  color: #475569;
 }
 
+/* Sidebar Content Area */
 .sidebar-content {
   flex: 1;
   overflow-y: auto;
@@ -170,172 +222,239 @@ defineExpose({ refresh: fetchHistory })
 }
 
 /* Custom Scrollbar */
-.sidebar-content::-webkit-scrollbar {
-  width: 4px;
-}
-.sidebar-content::-webkit-scrollbar-track {
-  background: transparent;
-}
+.sidebar-content::-webkit-scrollbar { width: 4px; }
+.sidebar-content::-webkit-scrollbar-track { background: transparent; }
 .sidebar-content::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.05);
   border-radius: 10px;
 }
-.sidebar-content:hover::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-}
 
+/* History Cards List */
 .history-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-.history-item {
+.history-card {
   position: relative;
-  padding: 14px;
-  background: #ffffff;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.01);
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 
+    0 2px 4px rgba(0, 0, 0, 0.01),
+    0 1px 2px rgba(0, 0, 0, 0.01);
+  overflow: hidden;
 }
 
-.history-item:hover {
-  border-color: #4C64E2;
-  box-shadow: 0 8px 20px rgba(76, 100, 226, 0.08);
+.card-glow {
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 100%;
+  background: linear-gradient(135deg, rgba(76, 100, 226, 0.05), transparent);
+  opacity: 0;
+  transition: opacity 0.4s;
+}
+
+.history-card:hover {
+  background: #ffffff;
+  border-color: rgba(76, 100, 226, 0.2);
   transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(76, 100, 226, 0.08);
 }
 
-.history-item.is-favorite {
-  background: linear-gradient(to bottom right, #ffffff, #fffcf0);
-  border-left: 4px solid #f59e0b;
+.history-card:hover .card-glow { opacity: 1; }
+
+.history-card.is-favorite {
+  border-left: 2px solid #4C64E2;
+  background: rgba(255, 255, 255, 0.95);
 }
 
-.item-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.item-query {
-  font-size: 13.5px;
-  font-weight: 600;
-  color: #1e293b;
-  margin-bottom: 4px;
+/* Card Typography */
+.card-query {
+  position: relative;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #334155;
+  line-height: 1.5;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  line-height: 1.4;
 }
 
-.item-summary {
+.card-summary {
+  position: relative;
   font-size: 11px;
+  font-weight: 500;
   color: #64748b;
-  margin-bottom: 6px;
-  font-style: italic;
-  display: -webkit-box;
-  -webkit-line-clamp: 1;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.item-meta {
   display: flex;
   align-items: center;
+  background: rgba(0, 0, 0, 0.02);
+  padding: 4px 8px;
+  border-radius: 6px;
+  width: fit-content;
 }
 
-.item-date {
-  font-size: 10px;
-  font-weight: 500;
+.card-footer {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -4px;
+}
+
+.card-date {
+  font-size: 9px;
+  font-weight: 600;
   color: #94a3b8;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
-.item-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-left: 12px;
-  opacity: 0;
-  transform: translateX(10px);
-  transition: all 0.25s ease;
-}
-
-.history-item:hover .item-actions {
-  opacity: 1;
-  transform: translateX(0);
-}
-
-.action-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  border: none;
-  background: #f8fafc;
-  color: #64748b;
-  cursor: pointer;
+/* Card Actions Row */
+.card-actions {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
+  gap: 4px;
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(0, 0, 0, 0.03);
 }
 
-.action-btn:hover {
-  background: #e2e8f0;
+.card-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(0, 0, 0, 0.02);
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.card-btn span {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.card-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
   color: #1e293b;
 }
 
-.fav-btn.active {
-  color: #f59e0b;
-  background: #fffbeb;
+.btn-divider {
+  width: 1px;
+  height: 12px;
+  background: rgba(0, 0, 0, 0.06);
+  margin: 0 4px;
 }
 
-.fav-btn.active:hover {
-  background: #fef3c7;
+.fav-btn.active {
+  color: #4C64E2;
+  background: rgba(76, 100, 226, 0.08);
 }
 
 .exec-btn:hover {
-  background: #4C64E2;
-  color: white;
+  background: rgba(76, 100, 226, 0.08);
+  color: #4C64E2;
 }
 
-.loading-state, .empty-state {
+/* Empty/Loading States */
+.empty-state, .loading-state {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 20px;
-  color: #94a3b8;
   text-align: center;
+  color: #94a3b8;
 }
 
-.loading-state p, .empty-state p {
-  margin-top: 12px;
+.empty-icon-bg {
+  width: 56px;
+  height: 56px;
+  background: rgba(0, 0, 0, 0.02);
+  border-radius: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.empty-state p {
   font-size: 13px;
   font-weight: 500;
 }
 
+/* Shimmer */
+.loading-shimmer {
+  width: 100%;
+  padding: 0 10px;
+}
+.shimmer-bar {
+  height: 12px;
+  background: linear-gradient(90deg, rgba(0,0,0,0.02) 0%, rgba(0,0,0,0.05) 50%, rgba(0,0,0,0.02) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+.shimmer-bar.short { width: 60%; }
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Collapsed State Icons */
 .collapsed-icons {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding-top: 10px;
+  padding-top: 16px;
+  cursor: pointer;
 }
 
-.fav-count {
-  font-size: 10px;
-  font-weight: 800;
-  background: #f59e0b;
+.collapsed-icon-wrapper {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  transition: background 0.2s;
+}
+
+.collapsed-icon-wrapper:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.icon-dim { opacity: 0.4; }
+
+.mini-fav-badge {
+  position: absolute;
+  top: 4px; right: 4px;
+  font-size: 8px;
+  font-weight: 900;
+  background: #4C64E2;
   color: white;
-  padding: 2px 6px;
-  border-radius: 10px;
-  margin-top: -10px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(76, 100, 226, 0.4);
 }
 </style>

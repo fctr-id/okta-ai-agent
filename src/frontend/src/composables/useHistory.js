@@ -10,9 +10,11 @@ export function useHistory() {
         loading.value = true
         error.value = null
         try {
-            const response = await fetch('/api/history/')
+            // Add timestamp to prevent browser caching
+            const response = await fetch(`/api/history/?_t=${Date.now()}`)
             if (!response.ok) throw new Error('Failed to fetch history')
             history.value = await response.json()
+            console.log(`[useHistory] Fetched ${history.value.length} items`)
         } catch (err) {
             error.value = err.message
         } finally {

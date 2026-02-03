@@ -71,6 +71,12 @@ export function useReactStream() {
     const startProcess = async (query) => {
         console.log('[useReactStream] startProcess called with query:', query)
         
+        // CRITICAL: Close any existing EventSource before starting new query
+        if (eventSource) {
+            console.log('[useReactStream] Closing previous EventSource before new query')
+            closeStream()
+        }
+        
         isLoading.value = true
         error.value = null
         discoverySteps.value = []
@@ -183,22 +189,19 @@ export function useReactStream() {
         }
         
         // PRE-FLIGHT AUTH CHECK: Verify session before establishing SSE connection
+        // EventSource doesn't expose HTTP status codes, so we check proactively
         try {
-            const controller = new AbortController()
             const authCheck = await fetch(`${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`, {
-                method: 'GET',
-                credentials: 'include',
-                signal: controller.signal
+                method: 'HEAD',
+                credentials: 'include'
             })
-            controller.abort() // Immediately abort, we just wanted the status code
             
             if (await handleAuthError(authCheck.status)) {
                 return
             }
         } catch (err) {
-            if (err.name !== 'AbortError') {
-                console.warn('[useReactStream] Pre-flight check failed, proceeding with SSE:', err)
-            }
+            // If HEAD fails, try to proceed with SSE anyway (might be unsupported)
+            console.warn('[useReactStream] Pre-flight check failed, proceeding with SSE:', err)
         }
         
         isProcessing.value = true
@@ -212,20 +215,8 @@ export function useReactStream() {
         // Handle explicit close event from server
         eventSource.addEventListener('close', () => {
             console.log('[useReactStream] Server requested connection close')
-            if (eventSource) {
-                eventSource.close()
-                eventSource = null
-            }
-        })
-        
-        // Handle SSE connection errors
-        eventSource.onerror = (event) => {
-            console.error('[useReactStream] EventSource connection failed:', event)
-            error.value = 'Connection to server lost'
             closeStream()
-            isLoading.value = false
-            isProcessing.value = false
-        }
+        })
         
         // Handle all messages with unified JSON format {type: "...", ...data}
         eventSource.onmessage = (event) => {
@@ -261,6 +252,13 @@ export function useReactStream() {
                     case 'COMPLETE':
                         handleComplete(data)
                         break
+                    case 'DONE':
+                        console.log('[useReactStream] Received DONE signal - closing stream')
+                        isLoading.value = false
+                        isProcessing.value = false
+                        currentStep.value = ''
+                        closeStream()
+                        break
                     case 'ERROR':
                         handleError(data)
                         break
@@ -270,8 +268,14 @@ export function useReactStream() {
             }
         }
         
+        // Single unified error handler
         eventSource.onerror = (err) => {
             console.error('[useReactStream] SSE error:', err)
+            console.log('[useReactStream] ReadyState:', eventSource?.readyState)
+            console.log('[useReactStream] Processing:', isProcessing.value, 'Results:', !!results.value)
+            
+            // Always close the stream on error
+            closeStream()
             
             // Only treat as error if we haven't completed successfully
             if (isProcessing.value && !results.value) {
@@ -279,9 +283,6 @@ export function useReactStream() {
                 isLoading.value = false
                 isProcessing.value = false
             }
-            
-            // Close the stream (this is called when server closes connection normally too)
-            closeStream()
         }
     }
     
@@ -616,11 +617,11 @@ export function useReactStream() {
             }
         }
         
-        isLoading.value = false
-        isProcessing.value = false
-        currentStep.value = ''
-        
-        closeStream()
+        // Don't close stream yet - wait for DONE event which comes after history save
+        // isLoading.value = false
+        // isProcessing.value = false
+        // currentStep.value = ''
+        // closeStream()
     }
     
     /**
@@ -696,8 +697,10 @@ export function useReactStream() {
      */
     const closeStream = () => {
         if (eventSource) {
+            console.log('[useReactStream] Closing EventSource (readyState:', eventSource.readyState, ')')
             eventSource.close()
             eventSource = null
+            console.log('[useReactStream] EventSource closed and nulled')
         }
     }
     

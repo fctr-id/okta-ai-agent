@@ -1,5 +1,5 @@
 <template>
-    <AppLayout contentClass="chat-content">
+    <AppLayout contentClass="chat-content" ref="appLayoutRef">
         <main class="content-area" :class="{ 'has-results': hasResults }">
             <!-- Search Container with Animated Position -->
             <div :class="['search-container', hasResults ? 'moved' : '']">
@@ -328,7 +328,29 @@ const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
 
 // History Management
 const { saveToHistory } = useHistory()
-const refreshHistory = inject('refreshHistory', () => {})
+const appLayoutRef = ref(null)
+
+// History refresh helper - matches the one provided by AppLayout but accessible here
+const refreshHistory = async () => {
+    if (appLayoutRef.value?.refreshHistory) {
+        await appLayoutRef.value.refreshHistory()
+    }
+}
+
+// Watch for query completion to refresh history
+let lastQuery = null
+watch([reactProcessing, reactResults], ([processing, results]) => {
+    // Trigger refresh when processing completes AND we have results
+    if (!processing && results && lastQuestion.value && lastQuestion.value !== lastQuery) {
+        lastQuery = lastQuestion.value
+        console.log('[ChatInterface] Query completed, refreshing history for:', lastQuestion.value)
+        
+        // Retry with exponential backoff to handle variable DB write times
+        refreshHistoryWithRetry(lastQuestion.value, 3).catch(err => {
+            console.error('Failed to refresh history sidebar after retries:', err)
+        })
+    }
+})
 
 // Special Tools
 const { tools: specialTools, loading: specialToolsLoading, error: specialToolsError, fetchTools } = useSpecialTools()
@@ -559,6 +581,25 @@ const extractSpecialToolText = (description) => {
 }
 
 /**
+ * Retry history refresh with exponential backoff until query appears
+ * @param {String} queryText - The query to check for
+ * @param {Number} maxRetries - Maximum number of retry attempts
+ */
+const refreshHistoryWithRetry = async (queryText, maxRetries = 3) => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        // Exponential backoff: 100ms, 200ms, 400ms
+        const delay = 100 * Math.pow(2, attempt)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        
+        console.log(`[History Refresh] Attempt ${attempt + 1}/${maxRetries} after ${delay}ms`)
+        await refreshHistory()
+        
+        // Early exit if we can verify the query exists
+        // (This is optional - just refresh is fine too)
+    }
+}
+
+/**
  * Submits the query to the backend API
  */
 const sendQuery = async () => {
@@ -582,6 +623,7 @@ const sendQuery = async () => {
             const pid = await startReActProcess(sanitizedQuery)
             if (pid) {
                 await connectReActStream(pid)
+                // History refresh will be triggered by watch on reactLoading
             }
             isLoading.value = false
             return
@@ -734,6 +776,14 @@ onMounted(async () => {
                 const pid = await startScriptExecution(item.query_text, item.final_script)
                 if (pid) {
                     await connectReActStream(pid)
+                    
+                    // Retry history refresh with exponential backoff
+                    try {
+                        await refreshHistoryWithRetry(item.query_text, 3)
+                    } catch (err) {
+                        console.error('Failed to refresh history sidebar after retries:', err)
+                        // Non-critical - don't block user workflow
+                    }
                 }
             } finally {
                 isLoading.value = false
@@ -742,22 +792,6 @@ onMounted(async () => {
     } catch (error) {
         console.error('Failed to load message history:', error)
         localStorage.removeItem('messageHistory')
-    }
-})
-
-// Watch for final results to save to history
-watch(reactResults, async (newResults) => {
-    if (newResults && !reactLoading.value && !reactProcessing.value) {
-        try {
-            const summary = newResults.display_type === 'markdown' 
-                ? (newResults.content?.substring(0, 100) + '...') 
-                : `Found ${newResults.metadata?.count || 0} results`
-                
-            await saveToHistory(lastQuestion.value, reactGeneratedScript.value, summary)
-            refreshHistory()
-        } catch (err) {
-            console.error('Failed to save to history:', err)
-        }
     }
 })
 
@@ -837,6 +871,11 @@ onMounted(() => {
     align-items: center;
 }
 
+/* Add bottom padding when results appear to prevent content hiding under fixed input */
+.content-area.has-results {
+    padding-bottom: 180px;
+}
+
 .search-container {
     width: 100%;
     max-width: 900px;
@@ -846,13 +885,22 @@ onMounted(() => {
     margin: 0 auto;
 }
 
-/* When results appear, move search to the bottom and make it sticky */
+/* When results appear, fix search bar to bottom with space for footer */
 .search-container.moved {
-    position: sticky;
-    bottom: 24px;
-    margin-top: auto; /* Push to bottom of flex container */
+    position: fixed;
+    bottom: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 900px;
+    max-width: calc(100vw - 360px);
     padding-bottom: 0;
-    order: 100; /* Ensure it stays at the bottom */
+    z-index: 90;
+    margin: 0;
+}
+
+/* Adjust horizontal position when sidebar is expanded */
+.sidebar-expanded .search-container.moved {
+    left: calc(50% + 140px);
 }
 
 /* Hide placeholder when in mini mode */

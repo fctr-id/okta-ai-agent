@@ -483,15 +483,19 @@ class QueryHistory(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     tenant_id = Column(String, nullable=False, index=True)
+    user_id = Column(String(255), nullable=False, index=True)  # Future-proof for SSO/multi-user
     query_text = Column(Text, nullable=False)
     final_script = Column(Text, nullable=False)
     results_summary = Column(Text, nullable=True)
     is_favorite = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
+    last_run_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     
     __table_args__ = (
         Index('idx_query_history_tenant_fav', 'tenant_id', 'is_favorite'),
-        Index('idx_query_history_created', 'created_at'),
+        Index('idx_query_history_last_run', 'last_run_at'),
+        # Composite index for UPSERT duplicate detection per-user by query text only
+        Index('idx_query_upsert', 'tenant_id', 'user_id', 'query_text'),
     )
 
     def __repr__(self):
