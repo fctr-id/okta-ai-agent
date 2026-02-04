@@ -130,7 +130,7 @@ class OktaAPIClient:
         if settings:
             self.concurrent_limit = settings.OKTA_CONCURRENT_LIMIT
         else:
-            self.concurrent_limit = int(os.getenv('OKTA_CONCURRENT_LIMIT', '3'))
+            self.concurrent_limit = int(os.getenv('OKTA_CONCURRENT_LIMIT', '10'))
         
         # NEW: Check authentication method
         token_method = os.getenv('TOKEN_METHOD', 'API_TOKEN').upper()

@@ -215,6 +215,7 @@ docker compose up -d
 
 ## 📖 Featured Articles & Videos
 
+- [📚 Tako AI v2.0: The Swarm is Here](https://iamse.blog/2026/01/30/tako-ai-v2-0-the-swarm-is-here/)
 - [📚 Tako AI v1.5: Your New Okta Sidekick That Thinks, Codes, and Generates Results](docs/blog_post_v1.5.md)
 - [📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short](https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/)
 - [🎥 Installation and Demo Video](https://www.youtube.com/watch?v=PC8arYq5kZk)
