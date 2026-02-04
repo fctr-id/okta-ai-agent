@@ -32,7 +32,7 @@
         <!-- Content Surface (rounded top corners, gradient background) -->
         <div class="content-surface">
             <!-- Main Content -->
-            <main class="main-content" :class="[contentClass, { 'sidebar-expanded': !sidebarCollapsed }]">
+            <main class="main-content" :class="[contentClass, { 'sidebar-expanded': showLogout && !sidebarCollapsed }]">
                 <slot></slot>
             </main>
 
