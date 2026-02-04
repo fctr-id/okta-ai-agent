@@ -714,31 +714,26 @@ async def stream_react_updates(
                 process["status"] = "completed"
                 return
             
-            # Check for no script
+            # Check for no script - this is always an error
             if not result.script_code:
-                logger.info(f"[{process_id}] ⚡ No script generated - checking for direct answer")
+                logger.error(f"[{process_id}] ❌ Synthesis completed but no script generated")
                 
-                # Check if we have direct results (from special tool)
-                if result.success:
-                    # Send COMPLETE event with direct results
-                    complete_event = {
-                        "type": "COMPLETE",
-                        "display_type": "markdown",
-                        "content": result.error or "Query completed successfully",
-                        "timestamp": time.time(),
-                        "is_special_tool": True
-                    }
-                    yield f"data: {json.dumps(complete_event)}\n\n"
-                else:
-                    # No script and no results - error
-                    error_event = {
-                        "type": "ERROR",
-                        "error": result.error or "No script generated and no results available",
-                        "timestamp": time.time()
-                    }
-                    yield f"data: {json.dumps(error_event)}\n\n"
+                # No script means synthesis failed to produce code - treat as error
+                error_event = {
+                    "type": "ERROR",
+                    "error": result.error or "Synthesis agent completed but failed to generate executable code. Please try rephrasing your query or check the logs.",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
                 
-                process["status"] = "completed" if result.success else "error"
+                process["status"] = "error"
+                
+                # Send DONE event to close stream
+                done_event = {
+                    "type": "DONE",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
                 return
             
             # Phase 2: Validate generated script

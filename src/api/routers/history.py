@@ -100,7 +100,13 @@ async def save_history(
     session: AsyncSession = Depends(get_db_session),
     current_user: AuthUser = Depends(get_current_user)
 ):
-    """Save a new query execution to history"""
+    """
+    Save a new query execution to history.
+    
+    NOTE: This endpoint is rarely used - history is auto-saved by react_stream.py
+    using DatabaseOperations.save_query_history() which has full UPSERT logic.
+    This endpoint exists for manual saves or testing.
+    """
     await ensure_history_table()
     tenant_id = settings.tenant_id
     
