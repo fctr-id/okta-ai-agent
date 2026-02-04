@@ -165,13 +165,13 @@ async def route_query(user_query: str, correlation_id: str, progress_callback: c
     Returns:
         RouterDecision with phase and reasoning
     """
-    logger.info(f"[{correlation_id}] Routing query: {user_query}")
+    logger.info(f"Routing query: {user_query}")
     
     try:
         deps = RouterDeps(correlation_id=correlation_id, progress_callback=progress_callback, step_start_callback=step_start_callback)
         result = await router_agent.run(user_query, deps=deps)
         
-        logger.info(f"[{correlation_id}] Route decision: {result.output.phase} - {result.output.reasoning}")
+        logger.info(f"Route decision: {result.output.phase} - {result.output.reasoning}")
         
         # Log token usage
         if result.usage():
@@ -185,7 +185,7 @@ async def route_query(user_query: str, correlation_id: str, progress_callback: c
         return result.output, result.usage()
         
     except Exception as e:
-        logger.error(f"[{correlation_id}] Router failed: {e}", exc_info=True)
+        logger.error(f"Router failed: {e}", exc_info=True)
         # Default to PROCEED on error (safe fallback - let SQL handle it)
         return RouterDecision(
             phase="PROCEED",
