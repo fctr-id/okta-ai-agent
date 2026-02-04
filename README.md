@@ -6,7 +6,7 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
   <br/>
   
-  <h1>Tako AI Agent for Okta (v2.0.0-beta)</h1>
+  <h1>Tako AI Agent for Okta (v2.10.0-beta)</h1>
   
   <p><a href="VERSION.md">📋 Changelog →</a></p>
 </div>
@@ -15,7 +15,7 @@
 
 The world's first Autonomous AI Engineer for Okta. Built on the ReAct (Reason and Act) pattern, Tako doesn't just answer questions—it thinks, writes code, and self-heals errors in real-time to deliver deterministic, production-ready results.
 
-### New in v2.0: Multi-Agent Architecture
+### New in v2.10: Multi-Agent Architecture
 
 Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, API, Synthesis) that collaborate by sharing only validated results, cutting AI costs by 50-70% and reducing hallucinations. Your experience stays the same as prior version.
 
@@ -27,10 +27,11 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 
 - 🗣️ Natural language queries - Ask questions in plain English, get instant results
 - 🤖 Multi-agent committee - Specialized agents working in concert for accurate results
-- 📊 Redesigned user apps logic - Changed the API endpoint to pull from /apps/appid/users when writing to sql for accurate representation.
+- � Query history & favorites - Access last 10 queries and save up to 10 favorites for quick reuse
+- �🔧 CLI tools for automation - Tako CLI and sync CLI enable unattended runs, scheduled tasks, and script generation
+- 📊 Script & CSV export - Generate portable Python scripts and export results for reporting workflows
 - ⚡ 10x faster sync - Optimized API → DB sync operations with parallel processing
 - 🛡️ Multi-layer security - Security validation at every code generation point
-- 🔒 Read-only by default - Strict permissions ensuring safe exploration
 - 🐳 Easy deployment - Docker support for AMD64 and ARM64 platforms
 
 > **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected. 
@@ -39,6 +40,37 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 <video src="https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad" width="1024px" ></video>
 
 *Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download*
+
+### 🔧 CLI Tools for Automation
+
+Tako includes command-line tools designed for non-interactive scenarios:
+
+**Tako CLI (`tako-cli.py`)**
+```bash
+# Run queries from command line
+python scripts/tako-cli.py "list all users created in last 30 days"
+
+# Generate reusable scripts
+python scripts/tako-cli.py "show suspended users" --scriptonly
+
+# Export results as CSV
+python scripts/tako-cli.py "find users with MFA enabled" --csv
+```
+
+**Sync CLI (`sync_okta_to_db.py`)**
+```bash
+# Scheduled database sync for automation
+python scripts/sync_okta_to_db.py
+```
+
+**Use Cases:**
+- **Cron Jobs** - Schedule daily/weekly reports or data syncs
+- **Scheduled Tasks** - Automate compliance checks and audits
+- **Script Generation** - Generate portable Python scripts for recurring queries
+- **CI/CD Integration** - Embed Okta data validation in pipelines
+- **Batch Processing** - Process large datasets without UI interaction
+
+All generated scripts are self-contained and portable within the project structure.
 
 ## 🆕 What Makes Tako Different?
 
