@@ -53,6 +53,7 @@ class SynthesisDeps:
     step_end_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     tool_call_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     progress_callback: Optional[Callable[[dict], Awaitable[None]]] = None
+    cli_mode: bool = False
 
 
 # ============================================================================
@@ -163,6 +164,52 @@ Artifacts from Discovery Phases:
 
 Generate the final production Python script using the artifacts above.
 Follow all patterns from synthesis_prompt.txt."""
+        
+        # Dynamically inject CLI portability instructions (only when cli_mode=True)
+        if deps.cli_mode:
+            context += """
+
+─────────────────────────────────────────
+🔧 CLI EXECUTION CONTEXT (CRITICAL)
+─────────────────────────────────────────
+
+This script will be saved to: logs/tako-cli-scripts/
+Script MUST be self-locating and portable.
+
+MANDATORY: Add this helper immediately after imports (before async def main):
+
+```python
+# === CLI Script Portability Helper ===
+def find_project_root():
+    \"\"\"Find project root by walking up to requirements.txt or .env\"\"\"
+    path = Path(__file__).resolve().parent
+    while path != path.parent:
+        if (path / "requirements.txt").exists() or (path / ".env").exists():
+            return path
+        path = path.parent
+    raise RuntimeError("Project root not found - ensure script runs within Tako AI project")
+
+project_root = find_project_root()
+sys.path.insert(0, str(project_root / "src" / "core" / "okta" / "client"))
+# === End Portability Helper ===
+```
+
+CRITICAL PATH RULES:
+1. Database: Use `project_root / "sqlite_db" / "okta_sync.db"` (NOT script_dir.parent)
+2. Docker fallback: Keep `Path("/app/sqlite_db/okta_sync.db")` as first option
+3. Import: base_okta_api_client will work after sys.path.insert above
+
+EXAMPLE DATABASE CONNECTION:
+```python
+possible_paths = [
+    Path("/app/sqlite_db/okta_sync.db"),  # Docker
+    project_root / "sqlite_db" / "okta_sync.db"  # Local (use project_root!)
+]
+db_path = next((p for p in possible_paths if p.exists()), None)
+```
+─────────────────────────────────────────
+"""
+            logger.info(f"CLI mode active - injected portability instructions")
         
         # Run agent
         result = await synthesis_agent.run(context, deps=deps)
