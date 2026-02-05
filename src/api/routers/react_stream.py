@@ -376,7 +376,7 @@ async def start_react_process(
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
-            "user_id": current_user.id,
+            "user_id": current_user.username,
             "created_at": time.time(),
             "cancelled": False
         }
@@ -417,7 +417,7 @@ async def execute_script_directly(
             "status": "initializing",
             "query": request.query,
             "script_code": request.script_code,  # Pre-generated script
-            "user_id": current_user.id,
+            "user_id": current_user.username,
             "created_at": time.time(),
             "cancelled": False,
             "skip_discovery": True  # Flag to skip orchestrator
@@ -463,7 +463,7 @@ async def stream_react_updates(
     process = active_processes[process_id]
     
     # Verify user owns this process
-    if process["user_id"] != current_user.id:
+    if process["user_id"].lower() != current_user.username.lower():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this process"
@@ -930,12 +930,14 @@ async def stream_react_updates(
                     logger.error(f"[{process_id}] Error during orchestrator task cancellation: {e}")
 
             # Cleanup AFTER orchestrator is fully stopped to avoid race condition
-            # Only delete if the stream actually started (to avoid premature cleanup on connection failures)
-            if process_id in active_processes and stream_started:
-                logger.info(f"[{process_id}] Cleaning up process tracking")
+            # Always remove from active_processes to prevent stale entries
+            if process_id in active_processes:
+                process_status = active_processes[process_id].get("status", "unknown")
+                logger.info(f"[{process_id}] Cleaning up process tracking (status: {process_status}, stream_started: {stream_started})")
                 del active_processes[process_id]
-            elif process_id in active_processes and not stream_started:
-                logger.warning(f"[{process_id}] Stream failed to start properly - keeping process for retry")
+                logger.debug(f"[{process_id}] Remaining active processes: {list(active_processes.keys())}")
+            else:
+                logger.warning(f"[{process_id}] Process already removed from active_processes during cleanup")
             
             # Note: Do NOT yield in finally block - causes GeneratorExit issues
             # The stream closes naturally when generator exits
@@ -960,10 +962,15 @@ async def cancel_react_process(
     Cancel a running ReAct process.
     
     Sets the cancelled flag, which the executor checks between steps.
+    Returns 404 if process not found (may have already completed).
     """
     process_id = request.process_id
     
+    logger.info(f"[{process_id}] Cancel request received from user: {current_user.username}")
+    logger.debug(f"[{process_id}] Active processes: {list(active_processes.keys())}")
+    
     if process_id not in active_processes:
+        logger.warning(f"[{process_id}] Process ID not found in active_processes - may have already completed")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Process ID not found"
@@ -972,7 +979,8 @@ async def cancel_react_process(
     process = active_processes[process_id]
     
     # Verify user owns this process
-    if process["user_id"] != current_user.id:
+    if process["user_id"].lower() != current_user.username.lower():
+        logger.warning(f"[{process_id}] User {current_user.username} attempted to cancel process owned by {process['user_id']}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to cancel this process"
@@ -982,7 +990,7 @@ async def cancel_react_process(
     process["cancelled"] = True
     process["status"] = "cancelled"
     
-    logger.info(f"[{process_id}] Process cancellation requested")
+    logger.info(f"[{process_id}] Process cancellation flag set successfully")
     
     return JSONResponse(
         content={

@@ -491,6 +491,9 @@ class QueryHistory(Base):
     created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     last_run_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     
+    # Execution metrics
+    execution_count = Column(Integer, default=1, nullable=False)
+    
     __table_args__ = (
         Index('idx_query_history_tenant_fav', 'tenant_id', 'is_favorite'),
         Index('idx_query_history_last_run', 'last_run_at'),

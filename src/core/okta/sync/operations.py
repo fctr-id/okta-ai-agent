@@ -867,14 +867,15 @@ class DatabaseOperations:
                     # Update existing record
                     existing.last_run_at = datetime.now(timezone.utc)
                     existing.results_summary = results_summary
+                    existing.execution_count = existing.execution_count + 1  # Increment counter
                     
                     # If NOT favorited, update the script with new one
                     # If favorited, preserve the starred script
                     if not existing.is_favorite:
                         existing.final_script = final_script
-                        logger.debug(f"Updated query history (id={existing.id}) with new script")
+                        logger.debug(f"Updated query history (id={existing.id}) with new script, execution_count={existing.execution_count}")
                     else:
-                        logger.debug(f"Updated query history (id={existing.id}), preserved favorite script")
+                        logger.debug(f"Updated query history (id={existing.id}), preserved favorite script, execution_count={existing.execution_count}")
                     
                     await session.commit()
                     await session.refresh(existing)

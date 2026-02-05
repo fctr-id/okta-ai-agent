@@ -64,7 +64,7 @@ async def get_history(
     stmt = select(QueryHistory).where(
         and_(
             QueryHistory.tenant_id == tenant_id,
-            QueryHistory.user_id == current_user.id
+            func.lower(QueryHistory.user_id) == func.lower(current_user.username)
         )
     ).order_by(
         desc(QueryHistory.is_favorite),
@@ -86,7 +86,7 @@ async def get_favorites(
     stmt = select(QueryHistory).where(
         and_(
             QueryHistory.tenant_id == tenant_id,
-            QueryHistory.user_id == current_user.id,
+            func.lower(QueryHistory.user_id) == func.lower(current_user.username),
             QueryHistory.is_favorite == True
         )
     ).order_by(desc(QueryHistory.created_at))
@@ -112,7 +112,7 @@ async def save_history(
     
     new_history = QueryHistory(
         tenant_id=tenant_id,
-        user_id=current_user.id,
+        user_id=current_user.username,
         query_text=history_data.query_text,
         final_script=history_data.final_script,
         results_summary=history_data.results_summary,
@@ -141,7 +141,7 @@ async def toggle_favorite(
         stmt = select(func.count(QueryHistory.id)).where(
             and_(
                 QueryHistory.tenant_id == tenant_id,
-                QueryHistory.user_id == current_user.id,
+                func.lower(QueryHistory.user_id) == func.lower(current_user.username),
                 QueryHistory.is_favorite == True
             )
         ).with_for_update()
@@ -161,7 +161,7 @@ async def toggle_favorite(
         and_(
             QueryHistory.id == history_id,
             QueryHistory.tenant_id == tenant_id,
-            QueryHistory.user_id == current_user.id
+            func.lower(QueryHistory.user_id) == func.lower(current_user.username)
         )
     ).with_for_update()
     
@@ -194,7 +194,7 @@ async def execute_saved_script(
         and_(
             QueryHistory.id == history_id,
             QueryHistory.tenant_id == tenant_id,
-            QueryHistory.user_id == current_user.id
+            func.lower(QueryHistory.user_id) == func.lower(current_user.username)
         )
     )
     result = await session.execute(stmt)
