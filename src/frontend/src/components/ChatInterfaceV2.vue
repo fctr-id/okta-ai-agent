@@ -592,10 +592,19 @@ const refreshHistoryWithRetry = async (queryText, maxRetries = 3) => {
         await new Promise(resolve => setTimeout(resolve, delay))
         
         console.log(`[History Refresh] Attempt ${attempt + 1}/${maxRetries} after ${delay}ms`)
-        await refreshHistory()
         
-        // Early exit if we can verify the query exists
-        // (This is optional - just refresh is fine too)
+        try {
+            await refreshHistory()
+            // If refresh succeeds without error, assume history was updated and stop retrying
+            console.log(`[History Refresh] ✓ Refresh successful, stopping retries`)
+            return
+        } catch (err) {
+            console.warn(`[History Refresh] Attempt ${attempt + 1} failed:`, err)
+            // Only retry if we haven't exhausted all attempts
+            if (attempt === maxRetries - 1) {
+                console.error(`[History Refresh] All ${maxRetries} attempts failed`)
+            }
+        }
     }
 }
 
