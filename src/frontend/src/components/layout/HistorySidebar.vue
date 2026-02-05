@@ -332,11 +332,26 @@ defineExpose({ refresh: fetchHistory })
   gap: 6px;
   padding: 6px 10px;
   border-radius: 8px;
-  border: none;
-  background: rgba(0, 0, 0, 0.02);
-  color: #64748b;
+  border: 1px solid rgba(76, 100, 226, 0.12);
+  background: rgba(76, 100, 226, 0.03);
+  color: #5468d5;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.card-btn::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(135deg, rgba(76, 100, 226, 0.08), transparent);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.card-btn:hover::before {
+  opacity: 1;
 }
 
 .card-btn span {
@@ -344,28 +359,76 @@ defineExpose({ refresh: fetchHistory })
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  position: relative;
+  z-index: 1;
+}
+
+.card-btn :deep(.v-icon) {
+  position: relative;
+  z-index: 1;
+  color: #5468d5;
+  filter: drop-shadow(0 1px 2px rgba(76, 100, 226, 0.2));
 }
 
 .card-btn:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: #1e293b;
+  background: rgba(76, 100, 226, 0.1);
+  border-color: rgba(76, 100, 226, 0.3);
+  color: #4C64E2;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(76, 100, 226, 0.15);
+}
+
+.card-btn:hover :deep(.v-icon) {
+  color: #4C64E2;
+  filter: drop-shadow(0 2px 4px rgba(76, 100, 226, 0.3));
+}
+
+.card-btn:active {
+  transform: translateY(0);
 }
 
 .btn-divider {
   width: 1px;
   height: 12px;
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(76, 100, 226, 0.15);
   margin: 0 4px;
 }
 
 .fav-btn.active {
   color: #4C64E2;
-  background: rgba(76, 100, 226, 0.08);
+  background: rgba(76, 100, 226, 0.12);
+  border-color: rgba(76, 100, 226, 0.3);
+  box-shadow: 0 2px 6px rgba(76, 100, 226, 0.12);
+}
+
+.fav-btn.active :deep(.v-icon) {
+  color: #4C64E2;
+  filter: drop-shadow(0 2px 3px rgba(76, 100, 226, 0.4));
+  animation: starPulse 2s ease-in-out infinite;
+}
+
+@keyframes starPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+}
+
+.exec-btn :deep(.v-icon) {
+  color: #5468d5;
 }
 
 .exec-btn:hover {
-  background: rgba(76, 100, 226, 0.08);
+  background: rgba(76, 100, 226, 0.12);
+  border-color: rgba(76, 100, 226, 0.4);
   color: #4C64E2;
+}
+
+.exec-btn:hover :deep(.v-icon) {
+  animation: playBounce 0.6s ease-in-out;
+}
+
+@keyframes playBounce {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(2px); }
 }
 
 /* Empty/Loading States */
