@@ -2,6 +2,15 @@
   <a href="https://fctr.io">
     <img src="./media/fctr-wordmark.svg" alt="fctr.io" width="180" height="auto">
   </a>
+
+  <br />
+
+  [![Python](https://img.shields.io/badge/python-3.11+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
+  [![Docker](https://img.shields.io/badge/docker-ready-blue.svg?style=flat-square&logo=docker&logoColor=white)](docker-compose.yml)
+  [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
+  [![Stars](https://img.shields.io/github/stars/fctr-id/okta-ai-agent?style=social)](https://github.com/fctr-id/okta-ai-agent/stargazers)
+
+  <br />
   
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
   <br/>
@@ -25,11 +34,11 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 
 ### Key Features
 
-- 🗣️ Natural language queries - Ask questions in plain English, get instant results
-- 🤖 Multi-agent committee - Specialized agents working in concert for accurate results
-- � Query history & favorites - Access last 10 queries and save up to 10 favorites for quick reuse
-- �🔧 CLI tools for automation - Tako CLI and sync CLI enable unattended runs, scheduled tasks, and script generation
-- 📊 Script & CSV export - Generate portable Python scripts and export results for reporting workflows
+- 🗣️ **Natural Language Queries** - Ask questions in plain English, get instant results
+- 🤖 **Multi-Agent Committee** - Specialized agents working in concert for accurate results
+- 📜 **Query History & Favorites** - Access last 10 queries and save favorites for quick reuse
+- 🔧 **CLI Tools for Automation** - Enables unattended runs, cron jobs, and script generation
+- 📊 **Script & CSV Export** - Generate portable Python scripts and export results
 - ⚡ 10x faster sync - Optimized API → DB sync operations with parallel processing
 - 🛡️ Multi-layer security - Security validation at every code generation point
 - 🐳 Easy deployment - Docker support for AMD64 and ARM64 platforms
@@ -377,9 +386,20 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 - Have an enhancement in mind? [Open a feature request](https://github.com/fctr-id/okta-ai-agent/issues/new?labels=enhancement) and describe the use case.
 - Clearly state data entities & outcome expected—this shortens triage time.
 
+
 ## 💡 Contributing
 
 Interested in contributing? We'd love your help! Reach out to dan@fctr.io
+
+## 📈 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=fctr-id/okta-ai-agent&type=Date)](https://star-history.com/#fctr-id/okta-ai-agent&Date)
+
+## ✨ Contributors
+
+<a href="https://github.com/fctr-id/okta-ai-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=fctr-id/okta-ai-agent" />
+</a>
 
 ## ⚖️ License
 
