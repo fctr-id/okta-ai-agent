@@ -99,6 +99,10 @@ async def lifespan(app: FastAPI):
     else:
         logger.debug("Auth users table already exists. Do not have to create a new one")
     
+    # Note: query_history table is automatically created/migrated by init_db() above
+    # This handles upgrades from older versions without query_history table
+    logger.info("Database initialization complete")
+    
     # Modern Execution Manager handles process lifecycle automatically
     #logger.info("Using Modern Execution Manager - no background cleanup needed")
     
