@@ -258,6 +258,8 @@ export function useReactStream() {
                         isProcessing.value = false
                         currentStep.value = ''
                         closeStream()
+                        // Clear process ID to prevent stale cancel calls
+                        currentProcessId.value = null
                         break
                     case 'ERROR':
                         handleError(data)
@@ -283,6 +285,9 @@ export function useReactStream() {
                 isLoading.value = false
                 isProcessing.value = false
             }
+            
+            // Clear process ID to prevent stale cancel calls
+            currentProcessId.value = null
         }
     }
     
@@ -658,15 +663,28 @@ export function useReactStream() {
         }
         
         closeStream()
+        // Clear process ID to prevent stale cancel calls
+        currentProcessId.value = null
     }
     
     /**
      * Cancel process
      */
     const cancelProcess = async () => {
-        if (!currentProcessId.value) return
+        if (!currentProcessId.value) {
+            console.log('[useReactStream] cancelProcess called but no active process ID')
+            return
+        }
+        
+        // Don't cancel if already stopped processing
+        if (!isProcessing.value && !isLoading.value) {
+            console.log('[useReactStream] cancelProcess called but process already completed')
+            currentProcessId.value = null
+            return
+        }
         
         try {
+            console.log('[useReactStream] Sending cancel request for process:', currentProcessId.value)
             const response = await fetch(`${API_BASE_URL}/api/react/cancel`, {
                 method: 'POST',
                 headers: {
@@ -683,12 +701,32 @@ export function useReactStream() {
                 return
             }
             
+            // 404 is expected if process already completed - silently ignore
+            if (response.status === 404) {
+                console.log('[useReactStream] Process already completed (404), cleaning up gracefully')
+                closeStream()
+                isLoading.value = false
+                isProcessing.value = false
+                currentProcessId.value = null
+                return
+            }
+            
+            if (!response.ok) {
+                console.warn('[useReactStream] Cancel request failed with status:', response.status)
+            }
+            
             closeStream()
             isLoading.value = false
             isProcessing.value = false
+            currentProcessId.value = null
             
         } catch (err) {
-            console.error('Failed to cancel process:', err)
+            console.error('[useReactStream] Failed to cancel process:', err)
+            // Clean up local state even if cancel request fails
+            closeStream()
+            isLoading.value = false
+            isProcessing.value = false
+            currentProcessId.value = null
         }
     }
     
