@@ -1,5 +1,21 @@
 # Version History
 
+## v2.1.0-beta - "Terminal Velocity"
+
+**Release Date**: February 9, 2026
+
+**New Features:**
+- **Tako CLI (`scripts/tako-cli.py`)**: Full CLI support for the agentic swarm. Run queries directly from your terminal.
+- **Script Generation Mode**: Use `--scriptonly` flag to generate reusable Python scripts without executing them immediately. 
+- **Query History**: UI now tracks your recent 10 queries for quick re-execution.
+- **Favorites**: Pin your most used queries (⭐) to keep them accessible.
+- **Improved Identity Tracking**: Switched to username-based tracking (instead of internal IDs) for reliable history across sessions.
+
+**Improvements & Fixes:**
+- **Auto-managed Schema**: `query_history` table is automatically created and migrated.
+- **Execution Analytics**: Track how often favorites are run.
+- **Library Updates**: Updated core dependencies for better stability.
+
 ## Current latest: v2.0.5-beta - "Swarm Surge"
 
 **Release Date**: February 1, 2026

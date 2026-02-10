@@ -55,6 +55,8 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 Tako includes command-line tools designed for non-interactive scenarios:
 
 **Tako CLI (`tako-cli.py`)**
+
+**Local Installation:**
 ```bash
 # Run queries from command line
 python scripts/tako-cli.py "list all users created in last 30 days"
@@ -66,10 +68,29 @@ python scripts/tako-cli.py "show suspended users" --scriptonly
 python scripts/tako-cli.py "find users with MFA enabled" --csv
 ```
 
+**Docker Installation:**
+```bash
+# Run queries from command line
+docker exec okta-ai-agent python scripts/tako-cli.py "list all users created in last 30 days"
+
+# Generate reusable scripts
+docker exec okta-ai-agent python scripts/tako-cli.py "show suspended users" --scriptonly
+
+# Export results as CSV
+docker exec okta-ai-agent python scripts/tako-cli.py "find users with MFA enabled" --csv
+```
+
 **Sync CLI (`sync_okta_to_db.py`)**
+
+**Local Installation:**
 ```bash
 # Scheduled database sync for automation
 python scripts/sync_okta_to_db.py
+```
+
+**Docker Installation:**
+```bash
+docker exec okta-ai-agent python scripts/sync_okta_to_db.py
 ```
 
 **Use Cases:**
