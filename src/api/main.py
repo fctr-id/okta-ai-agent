@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
-from .routers import auth, sync, react_stream
+from .routers import auth, sync, react_stream, history
 from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import AuthUser
@@ -99,6 +99,10 @@ async def lifespan(app: FastAPI):
     else:
         logger.debug("Auth users table already exists. Do not have to create a new one")
     
+    # Note: query_history table is automatically created/migrated by init_db() above
+    # This handles upgrades from older versions without query_history table
+    logger.info("Database initialization complete")
+    
     # Modern Execution Manager handles process lifecycle automatically
     #logger.info("Using Modern Execution Manager - no background cleanup needed")
     
@@ -136,6 +140,7 @@ app.add_middleware(
 app.include_router(auth.router) 
 app.include_router(sync.router, prefix="/api")
 app.include_router(react_stream.router, prefix="/api")  # ReAct agent streaming
+app.include_router(history.router, prefix="/api")  # Query history and favorites
 
 # Mount static files
 app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")

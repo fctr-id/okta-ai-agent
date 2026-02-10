@@ -32,7 +32,7 @@
         <!-- Content Surface (rounded top corners, gradient background) -->
         <div class="content-surface">
             <!-- Main Content -->
-            <main class="main-content" :class="contentClass">
+            <main class="main-content" :class="[contentClass, { 'sidebar-expanded': showLogout && !sidebarCollapsed }]">
                 <slot></slot>
             </main>
 
@@ -48,14 +48,24 @@
             </div>
         </footer>
         </div>
+
+        <!-- Sidebar (Moved outside content-surface to avoid flex interference) -->
+        <HistorySidebar 
+            v-if="showLogout" 
+            ref="sidebarRef"
+            @select="handleSelectHistory"
+            @execute="handleExecuteHistory"
+            @collapse-change="handleCollapseChange"
+        />
     </div>
 </template>
 
 <script setup>
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
-import { computed } from 'vue'
+import { computed, ref, provide } from 'vue'
 import SyncStatusButton from '@/components/sync/SyncStatusButton.vue'
+import HistorySidebar from './HistorySidebar.vue'
 
 const props = defineProps({
     showHeader: {
@@ -74,6 +84,17 @@ const props = defineProps({
 
 const auth = useAuth()
 const router = useRouter()
+const sidebarRef = ref(null)
+const sidebarCollapsed = ref(false)
+
+// Provide sidebar refresh to children
+const refreshHistory = () => sidebarRef.value?.refresh()
+provide('refreshHistory', refreshHistory)
+
+// Expose for parent components (like ChatInterfaceV2)
+defineExpose({
+    refreshHistory
+})
 
 const appVersion = computed(() => {
     const version = import.meta.env.VITE_APP_VERSION
@@ -83,6 +104,20 @@ const appVersion = computed(() => {
 const handleLogout = async () => {
     await auth.logout()
     router.push('/login')
+}
+
+// Track sidebar collapse state
+const handleCollapseChange = (isCollapsed) => {
+    sidebarCollapsed.value = isCollapsed
+}
+
+// Global event bus for history interactions
+const handleSelectHistory = (item) => {
+    window.dispatchEvent(new CustomEvent('tako:select-history', { detail: item }))
+}
+
+const handleExecuteHistory = (item) => {
+    window.dispatchEvent(new CustomEvent('tako:execute-history', { detail: item }))
 }
 </script>
 
@@ -96,21 +131,6 @@ const handleLogout = async () => {
     display: flex;
     flex-direction: column;
 }
-
-/* Content surface below header with rounded top corners and gradient */
-.content-surface {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    margin: 0;
-    border-radius: 0;
-    /* Calm Slate - soft blue gradient */
-    background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
-    overflow: hidden;
-}
-
-
-
 
 /* Header */
 .floating-header {
@@ -228,6 +248,22 @@ const handleLogout = async () => {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
+.header-spacer {
+    flex: 1;
+}
+
+/* Content surface below header with rounded top corners and gradient */
+.content-surface {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    border-radius: 0;
+    /* Calm Slate - soft blue gradient */
+    background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
+    /* overflow: hidden; Removed to allow sticky positioning in children */
+}
+
 /* Main content area */
 .main-content {
     width: calc(100% - 40px);
@@ -238,6 +274,16 @@ const handleLogout = async () => {
     /* Reduced from 80px */
     flex-grow: 1;
     /* Add this to make it expand and fill space */
+    display: flex;
+    flex-direction: column;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Adjust content positioning when sidebar is expanded */
+/* Use padding instead of margin to maintain centering */
+.main-content.sidebar-expanded {
+    padding-left: 280px;
+    width: calc(100% - 40px);
 }
 
 
@@ -247,7 +293,8 @@ const handleLogout = async () => {
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    flex-grow: 1;
+    flex: 1;
+    width: 100%;
     padding: 20px 0;
 }
 

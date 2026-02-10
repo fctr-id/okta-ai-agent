@@ -1,5 +1,5 @@
 <template>
-    <AppLayout contentClass="chat-content">
+    <AppLayout contentClass="chat-content" ref="appLayoutRef">
         <main class="content-area" :class="{ 'has-results': hasResults }">
             <!-- Search Container with Animated Position -->
             <div :class="['search-container', hasResults ? 'moved' : '']">
@@ -255,11 +255,12 @@
  * user input, displays results, and manages the overall UI state.
  */
 
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, inject } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import { useSanitize } from '@/composables/useSanitize'
 import { useReactStream } from '@/composables/useReactStream'
 import { useSpecialTools } from '@/composables/useSpecialTools'
+import { useHistory } from '@/composables/useHistory'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
 import DiscoveryPanel from '@/components/messages/DiscoveryPanel.vue'
 import ExecutionPanel from '@/components/messages/ExecutionPanel.vue'
@@ -317,12 +318,39 @@ const {
     results: reactResults,
     tokenUsage: reactTokenUsage,
     startProcess: startReActProcess,
+    startScriptExecution,
     connectToStream: connectReActStream,
     cancelProcess: cancelReAct
 } = useReactStream()
 
 // Initialize sanitization utilities
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
+
+// History Management
+const { saveToHistory } = useHistory()
+const appLayoutRef = ref(null)
+
+// History refresh helper - matches the one provided by AppLayout but accessible here
+const refreshHistory = async () => {
+    if (appLayoutRef.value?.refreshHistory) {
+        await appLayoutRef.value.refreshHistory()
+    }
+}
+
+// Watch for query completion to refresh history
+let lastQuery = null
+watch([reactProcessing, reactResults], ([processing, results]) => {
+    // Trigger refresh when processing completes AND we have results
+    if (!processing && results && lastQuestion.value && lastQuestion.value !== lastQuery) {
+        lastQuery = lastQuestion.value
+        console.log('[ChatInterface] Query completed, refreshing history for:', lastQuestion.value)
+        
+        // Retry with exponential backoff to handle variable DB write times
+        refreshHistoryWithRetry(lastQuestion.value, 3).catch(err => {
+            console.error('Failed to refresh history sidebar after retries:', err)
+        })
+    }
+})
 
 // Special Tools
 const { tools: specialTools, loading: specialToolsLoading, error: specialToolsError, fetchTools } = useSpecialTools()
@@ -553,6 +581,34 @@ const extractSpecialToolText = (description) => {
 }
 
 /**
+ * Retry history refresh with exponential backoff until query appears
+ * @param {String} queryText - The query to check for
+ * @param {Number} maxRetries - Maximum number of retry attempts
+ */
+const refreshHistoryWithRetry = async (queryText, maxRetries = 3) => {
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        // Exponential backoff: 100ms, 200ms, 400ms
+        const delay = 100 * Math.pow(2, attempt)
+        await new Promise(resolve => setTimeout(resolve, delay))
+        
+        console.log(`[History Refresh] Attempt ${attempt + 1}/${maxRetries} after ${delay}ms`)
+        
+        try {
+            await refreshHistory()
+            // If refresh succeeds without error, assume history was updated and stop retrying
+            console.log(`[History Refresh] ✓ Refresh successful, stopping retries`)
+            return
+        } catch (err) {
+            console.warn(`[History Refresh] Attempt ${attempt + 1} failed:`, err)
+            // Only retry if we haven't exhausted all attempts
+            if (attempt === maxRetries - 1) {
+                console.error(`[History Refresh] All ${maxRetries} attempts failed`)
+            }
+        }
+    }
+}
+
+/**
  * Submits the query to the backend API
  */
 const sendQuery = async () => {
@@ -576,6 +632,7 @@ const sendQuery = async () => {
             const pid = await startReActProcess(sanitizedQuery)
             if (pid) {
                 await connectReActStream(pid)
+                // History refresh will be triggered by watch on reactLoading
             }
             isLoading.value = false
             return
@@ -711,6 +768,36 @@ onMounted(async () => {
         
         // Fetch special tools on mount
         await fetchTools()
+
+        // History Event Listeners
+        window.addEventListener('tako:select-history', (e) => {
+            userInput.value = e.detail.query_text
+            nextTick(autoResizeTextarea)
+        })
+
+        window.addEventListener('tako:execute-history', async (e) => {
+            const item = e.detail
+            lastQuestion.value = item.query_text
+            isLoading.value = true
+            hasResults.value = true
+            
+            try {
+                const pid = await startScriptExecution(item.query_text, item.final_script)
+                if (pid) {
+                    await connectReActStream(pid)
+                    
+                    // Retry history refresh with exponential backoff
+                    try {
+                        await refreshHistoryWithRetry(item.query_text, 3)
+                    } catch (err) {
+                        console.error('Failed to refresh history sidebar after retries:', err)
+                        // Non-critical - don't block user workflow
+                    }
+                }
+            } finally {
+                isLoading.value = false
+            }
+        })
     } catch (error) {
         console.error('Failed to load message history:', error)
         localStorage.removeItem('messageHistory')
@@ -772,28 +859,57 @@ onMounted(() => {
 /* Search container */
 .chat-content {
     background: transparent;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.content-area {
+    width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+/* Initially center the search container vertically and horizontally */
+.content-area:not(.has-results) {
+    justify-content: center;
+    align-items: center;
+}
+
+/* Add bottom padding when results appear to prevent content hiding under fixed input */
+.content-area.has-results {
+    padding-bottom: 180px;
 }
 
 .search-container {
-    position: fixed;
-    left: 50%;
-    top: 46%; /* Moved down from center */
-    transform: translate(-50%, -50%);
     width: 100%;
     max-width: 900px;
-    margin: 0 auto;
     padding-bottom: 40px;
-    transition: transform 0.3s ease-out;
+    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
     z-index: 50;
-    will-change: transform;
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
+    margin: 0 auto;
 }
 
+/* When results appear, fix search bar to bottom with space for footer */
 .search-container.moved {
-    top: auto;
-    bottom: 24px;
+    position: fixed;
+    bottom: 70px;
+    left: 50%;
     transform: translateX(-50%);
+    width: 900px;
+    max-width: calc(100vw - 360px);
+    padding-bottom: 0;
+    z-index: 90;
+    margin: 0;
+}
+
+/* Adjust horizontal position when sidebar is expanded */
+.sidebar-expanded .search-container.moved {
+    left: calc(50% + 140px);
 }
 
 /* Hide placeholder when in mini mode */
@@ -928,15 +1044,6 @@ onMounted(() => {
     color: #475569;
     margin: 6px 0 0 0;
     letter-spacing: -0.005em;
-}
-
-/* Main content area */
-.content-area {
-    width: calc(100% - 40px);
-    max-width: var(--max-width);
-    margin: 0 auto;
-    padding: 0;
-    transition: all 0.3s ease;
 }
 
 .content-area.has-results {

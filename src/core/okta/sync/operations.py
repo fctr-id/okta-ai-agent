@@ -10,40 +10,98 @@ Key features:
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, and_, not_, or_, update, func, text
+from sqlalchemy import select, and_, not_, or_, update, func, text, delete
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
-from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice
+from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice, QueryHistory
 from src.core.security.password_hasher import hash_password, verify_password, check_password_needs_rehash, calculate_lockout_time
 from src.config.settings import settings
 from src.utils.logging import logger
+import asyncio
 
 
 ModelType = TypeVar('ModelType', bound=Base)
 
 class DatabaseOperations:
+    """Singleton database operations class with shared engine and connection pool."""
+    _init_lock = asyncio.Lock()  # Class-level lock for thread-safe initialization
+    _initialized = False  # Class-level flag (shared across all instances)
+    _engine = None  # Shared engine (expensive resource)
+    _SessionLocal = None  # Shared session factory
+    
     def __init__(self):
-        """Initialize async database engine with WAL mode"""
-        self.engine = create_async_engine(
-            settings.DATABASE_URL,
-            connect_args={
-                "timeout": 30,
-                "check_same_thread": False,
-            },
-            pool_size=5,
-            max_overflow=10,
-            pool_pre_ping=True
-        )
-        self.SessionLocal = async_sessionmaker(
-            self.engine,
-            expire_on_commit=False
-        )
-        self._initialized = False
+        """Initialize async database engine with WAL mode (reuses existing engine if available)."""
+        if DatabaseOperations._engine is None:
+            DatabaseOperations._engine = create_async_engine(
+                settings.DATABASE_URL,
+                connect_args={
+                    "timeout": 30,
+                    "check_same_thread": False,
+                },
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True
+            )
+            DatabaseOperations._SessionLocal = async_sessionmaker(
+                DatabaseOperations._engine,
+                expire_on_commit=False
+            )
+        
+        # Use class-level attributes
+        self.engine = DatabaseOperations._engine
+        self.SessionLocal = DatabaseOperations._SessionLocal
+
+    def _discover_db_path(self) -> Optional[str]:
+        """Find the existing database file in common locations"""
+        try:
+            from pathlib import Path
+            import os
+            
+            # Project root is 4 levels up from this file
+            project_root = Path(__file__).parent.parent.parent.parent
+            
+            possible_paths = [
+                Path("/app/sqlite_db/okta_sync.db"),
+                project_root / "sqlite_db" / "okta_sync.db",
+                Path(os.getcwd()) / "sqlite_db" / "okta_sync.db",
+                Path(settings.SQLITE_PATH) if hasattr(settings, 'SQLITE_PATH') else None
+            ]
+            
+            # Filter None and duplicates
+            possible_paths = [p for p in possible_paths if p is not None]
+            
+            for p in possible_paths:
+                if p.exists():
+                    logger.debug(f"Discovered existing database at: {p}")
+                    return str(p)
+            return None
+        except Exception as e:
+            logger.error(f"Error during DB discovery: {e}")
+            return None
 
     async def init_db(self):
-        """Initialize database with WAL mode and optimized settings"""
-        if not self._initialized:
+        """Initialize database with WAL mode and optimized settings (thread-safe)"""
+        async with DatabaseOperations._init_lock:
+            if not DatabaseOperations._initialized:
+                # Try to discover existing DB before initializing
+                db_path = self._discover_db_path()
+                if db_path and settings.SQLITE_PATH != db_path:
+                    logger.info(f"Re-centering database to discovered path: {db_path}")
+                    settings.SQLITE_PATH = db_path
+                    settings.DATABASE_URL = f"sqlite+aiosqlite:///{db_path}"
+                    
+                    # Re-create engine if path changed
+                    await self.close()
+                    self.engine = create_async_engine(
+                        settings.DATABASE_URL,
+                        connect_args={"timeout": 30, "check_same_thread": False},
+                        pool_size=5,
+                        max_overflow=10,
+                        pool_pre_ping=True
+                    )
+                    self.SessionLocal = async_sessionmaker(self.engine, expire_on_commit=False)
+
             async with self.engine.begin() as conn:
                 # Enable WAL mode
                 await conn.execute(text("PRAGMA journal_mode=WAL"))
@@ -51,7 +109,39 @@ class DatabaseOperations:
                 await conn.execute(text("PRAGMA synchronous=NORMAL"))
                 # Create tables
                 await conn.run_sync(Base.metadata.create_all)
-            self._initialized = True
+                
+                # Ensure query_history table exists (for existing databases)
+                from sqlalchemy import inspect
+                def get_tables(connection):
+                    inspector = inspect(connection)
+                    return inspector.get_table_names()
+                
+                tables = await conn.run_sync(get_tables)
+                if 'query_history' not in tables:
+                    logger.info("Creating query_history table...")
+                    from sqlalchemy.schema import CreateTable
+                    await conn.execute(CreateTable(QueryHistory.__table__))
+                    logger.info("Query history table created successfully")
+                else:
+                    # Check for missing columns (migration)
+                    def get_columns(connection):
+                        inspector = inspect(connection)
+                        return [c['name'] for c in inspector.get_columns('query_history')]
+                    
+                    columns = await conn.run_sync(get_columns)
+                    if 'last_run_at' not in columns:
+                        logger.info("Migrating query_history: adding last_run_at column")
+                        await conn.execute(text("ALTER TABLE query_history ADD COLUMN last_run_at DATETIME"))
+                        # Set default for existing records
+                        await conn.execute(text("UPDATE query_history SET last_run_at = created_at"))
+                    
+                    if 'user_id' not in columns:
+                        logger.info("Migrating query_history: adding user_id column")
+                        await conn.execute(text("ALTER TABLE query_history ADD COLUMN user_id VARCHAR(255) NOT NULL DEFAULT 'localadmin'"))
+                        # Create index for user_id
+                        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_query_history_user_id ON query_history(user_id)"))
+                
+                DatabaseOperations._initialized = True
             
     async def close(self):
         """Close database connection"""
@@ -729,3 +819,122 @@ class DatabaseOperations:
             await session.commit()
             
             logger.info(f"Cleaned up sync history for tenant {tenant_id}, keeping records since {cutoff_date}")
+
+    async def save_query_history(
+        self,
+        tenant_id: str,
+        user_id: str,
+        query_text: str,
+        final_script: str,
+        results_summary: str = ""
+    ) -> Optional[QueryHistory]:
+        """
+        Save a successful query execution to history with rolling 15-entry limit per user.
+        
+        Limit Rules:
+        - Max 10 favorites (protected from deletion)
+        - Max 5 non-favorites (rolling window - oldest deleted when limit reached)
+        - Total max: 15 entries per user (not global)
+        
+        UPSERT Logic:
+        - If exact query + script exists for this user, updates timestamp (prevents duplicates)
+        - If new query, checks limit and deletes oldest non-favorite if needed
+        
+        NOTE: Creates its own database session for use in background tasks.
+        For synchronous operations within request context, use router endpoints.
+        """
+        try:
+            async with self.get_session() as session:
+                # Ensure table exists
+                await self.init_db()
+                
+                # Check for existing entry by normalized query text only (UPSERT per-user)
+                # Normalize: case-insensitive and trimmed
+                normalized_query = query_text.strip().lower()
+                
+                stmt = select(QueryHistory).where(
+                    and_(
+                        QueryHistory.tenant_id == tenant_id,
+                        QueryHistory.user_id == user_id,
+                        func.lower(func.trim(QueryHistory.query_text)) == normalized_query
+                    )
+                ).order_by(QueryHistory.last_run_at.desc())  # Get most recent if multiple exist
+                
+                result = await session.execute(stmt)
+                existing = result.scalars().first()  # Use first() instead of scalar_one_or_none() to handle duplicates
+
+                if existing:
+                    # Update existing record
+                    existing.last_run_at = datetime.now(timezone.utc)
+                    existing.results_summary = results_summary
+                    existing.execution_count = existing.execution_count + 1  # Increment counter
+                    
+                    # If NOT favorited, update the script with new one
+                    # If favorited, preserve the starred script
+                    if not existing.is_favorite:
+                        existing.final_script = final_script
+                        logger.debug(f"Updated query history (id={existing.id}) with new script, execution_count={existing.execution_count}")
+                    else:
+                        logger.debug(f"Updated query history (id={existing.id}), preserved favorite script, execution_count={existing.execution_count}")
+                    
+                    await session.commit()
+                    await session.refresh(existing)
+                    return existing
+                
+                # NEW ENTRY - Enforce rolling 15-entry limit per user
+                # Count non-favorites for this user
+                count_stmt = select(func.count(QueryHistory.id)).where(
+                    and_(
+                        QueryHistory.tenant_id == tenant_id,
+                        QueryHistory.user_id == user_id,
+                        QueryHistory.is_favorite == False
+                    )
+                )
+                count_result = await session.execute(count_stmt)
+                non_fav_count = count_result.scalar()
+                
+                # If we have 5+ non-favorites, delete the oldest one to make room
+                MAX_NON_FAVORITES = 5  # 15 total - 10 max favorites = 5 non-favorites
+                if non_fav_count >= MAX_NON_FAVORITES:
+                    # Find oldest non-favorite by last_run_at for this user
+                    oldest_stmt = select(QueryHistory).where(
+                        and_(
+                            QueryHistory.tenant_id == tenant_id,
+                            QueryHistory.user_id == user_id,
+                            QueryHistory.is_favorite == False
+                        )
+                    ).order_by(QueryHistory.last_run_at.asc()).limit(1)
+                    
+                    oldest_result = await session.execute(oldest_stmt)
+                    oldest = oldest_result.scalar_one_or_none()
+                    
+                    if oldest:
+                        await session.delete(oldest)
+                        logger.info(f"Deleted oldest non-favorite history (id={oldest.id}) to maintain 15-entry limit")
+                
+                # Create new entry
+                new_history = QueryHistory(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    query_text=query_text,
+                    final_script=final_script,
+                    results_summary=results_summary,
+                    is_favorite=False,
+                    last_run_at=datetime.now(timezone.utc)
+                )
+                
+                session.add(new_history)
+                await session.commit()
+                await session.refresh(new_history)
+                logger.debug(f"Created new query history (id={new_history.id})")
+                return new_history
+                
+        except Exception as e:
+            logger.error(f"Failed to save query history: {e}", exc_info=True)
+            return None
+            
+            
+            
+                
+            
+            

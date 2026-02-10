@@ -49,9 +49,9 @@ class Settings(BaseSettings):
     
     #Okta API concurrent limits setting
     # Actual Okta limits: Free/One App=35, Workforce/Customer Identity=75, DynamicScale=75+
-    # Users should set this to match their plan's actual concurrent limit
-    # The multipliers below (/2 for users, 0.4 for apps) provide safety margins
-    OKTA_CONCURRENT_LIMIT: int = int(os.environ.get("OKTA_CONCURRENT_LIMIT", "35"))
+    # Default is 18 (recommended for Free/Integrator accounts at 50% rate limit slider - the default)
+    # Users should adjust based on their plan and rate limit percentage (see README table)
+    OKTA_CONCURRENT_LIMIT: int = int(os.environ.get("OKTA_CONCURRENT_LIMIT", "18"))
 
     
     # AI Provider

@@ -2,11 +2,20 @@
   <a href="https://fctr.io">
     <img src="./media/fctr-wordmark.svg" alt="fctr.io" width="180" height="auto">
   </a>
+
+  <br />
+
+  [![Python](https://img.shields.io/badge/python-3.11+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
+  [![Docker](https://img.shields.io/badge/docker-ready-blue.svg?style=flat-square&logo=docker&logoColor=white)](docker-compose.yml)
+  [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
+  [![Stars](https://img.shields.io/github/stars/fctr-id/okta-ai-agent?style=social)](https://github.com/fctr-id/okta-ai-agent/stargazers)
+
+  <br />
   
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
   <br/>
   
-  <h1>Tako AI Agent for Okta (v2.0.0-beta)</h1>
+  <h1>Tako AI Agent for Okta (v2.10.0-beta)</h1>
   
   <p><a href="VERSION.md">📋 Changelog →</a></p>
 </div>
@@ -15,7 +24,7 @@
 
 The world's first Autonomous AI Engineer for Okta. Built on the ReAct (Reason and Act) pattern, Tako doesn't just answer questions—it thinks, writes code, and self-heals errors in real-time to deliver deterministic, production-ready results.
 
-### New in v2.0: Multi-Agent Architecture
+### New in v2.10: Multi-Agent Architecture
 
 Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, API, Synthesis) that collaborate by sharing only validated results, cutting AI costs by 50-70% and reducing hallucinations. Your experience stays the same as prior version.
 
@@ -25,12 +34,13 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 
 ### Key Features
 
-- 🗣️ Natural language queries - Ask questions in plain English, get instant results
-- 🤖 Multi-agent committee - Specialized agents working in concert for accurate results
-- 📊 Redesigned user apps logic - Changed the API endpoint to pull from /apps/appid/users when writing to sql for accurate representation.
+- 🗣️ **Natural Language Queries** - Ask questions in plain English, get instant results
+- 🤖 **Multi-Agent Committee** - Specialized agents working in concert for accurate results
+- 📜 **Query History & Favorites** - Access last 10 queries and save favorites for quick reuse
+- 🔧 **CLI Tools for Automation** - Enables unattended runs, cron jobs, and script generation
+- 📊 **Script & CSV Export** - Generate portable Python scripts and export results
 - ⚡ 10x faster sync - Optimized API → DB sync operations with parallel processing
 - 🛡️ Multi-layer security - Security validation at every code generation point
-- 🔒 Read-only by default - Strict permissions ensuring safe exploration
 - 🐳 Easy deployment - Docker support for AMD64 and ARM64 platforms
 
 > **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected. 
@@ -39,6 +49,58 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 <video src="https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad" width="1024px" ></video>
 
 *Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download*
+
+### 🔧 CLI Tools for Automation
+
+Tako includes command-line tools designed for non-interactive scenarios:
+
+**Tako CLI (`tako-cli.py`)**
+
+**Local Installation:**
+```bash
+# Run queries from command line
+python scripts/tako-cli.py "list all users created in last 30 days"
+
+# Generate reusable scripts
+python scripts/tako-cli.py "show suspended users" --scriptonly
+
+# Export results as CSV
+python scripts/tako-cli.py "find users with MFA enabled" --csv
+```
+
+**Docker Installation:**
+```bash
+# Run queries from command line
+docker exec okta-ai-agent python scripts/tako-cli.py "list all users created in last 30 days"
+
+# Generate reusable scripts
+docker exec okta-ai-agent python scripts/tako-cli.py "show suspended users" --scriptonly
+
+# Export results as CSV
+docker exec okta-ai-agent python scripts/tako-cli.py "find users with MFA enabled" --csv
+```
+
+**Sync CLI (`sync_okta_to_db.py`)**
+
+**Local Installation:**
+```bash
+# Scheduled database sync for automation
+python scripts/sync_okta_to_db.py
+```
+
+**Docker Installation:**
+```bash
+docker exec okta-ai-agent python scripts/sync_okta_to_db.py
+```
+
+**Use Cases:**
+- **Cron Jobs** - Schedule daily/weekly reports or data syncs
+- **Scheduled Tasks** - Automate compliance checks and audits
+- **Script Generation** - Generate portable Python scripts for recurring queries
+- **CI/CD Integration** - Embed Okta data validation in pipelines
+- **Batch Processing** - Process large datasets without UI interaction
+
+All generated scripts are self-contained and portable within the project structure.
 
 ## 🆕 What Makes Tako Different?
 
@@ -215,6 +277,7 @@ docker compose up -d
 
 ## 📖 Featured Articles & Videos
 
+- [📚 Tako AI v2.0: The Swarm is Here](https://iamse.blog/2026/01/30/tako-ai-v2-0-the-swarm-is-here/)
 - [📚 Tako AI v1.5: Your New Okta Sidekick That Thinks, Codes, and Generates Results](docs/blog_post_v1.5.md)
 - [📚 How Tako AI v1.1 Delivers Where Other Okta Tools Fall Short](https://iamse.blog/2025/08/07/tako-ai-v1-0-for-everyone-who-thought-ai-for-okta-was-just-hype/)
 - [🎥 Installation and Demo Video](https://www.youtube.com/watch?v=PC8arYq5kZk)
@@ -344,9 +407,20 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 - Have an enhancement in mind? [Open a feature request](https://github.com/fctr-id/okta-ai-agent/issues/new?labels=enhancement) and describe the use case.
 - Clearly state data entities & outcome expected—this shortens triage time.
 
+
 ## 💡 Contributing
 
 Interested in contributing? We'd love your help! Reach out to dan@fctr.io
+
+## 📈 Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=fctr-id/okta-ai-agent&type=Date)](https://star-history.com/#fctr-id/okta-ai-agent&Date)
+
+## ✨ Contributors
+
+<a href="https://github.com/fctr-id/okta-ai-agent/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=fctr-id/okta-ai-agent" />
+</a>
 
 ## ⚖️ License
 

@@ -37,9 +37,13 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.config.settings import Settings
 from src.core.security.dependencies import get_current_user
-from src.core.okta.sync.models import AuthUser
+from src.core.okta.sync.models import AuthUser, QueryHistory
+from src.core.okta.sync.operations import DatabaseOperations
 from src.core.agents.orchestrator import execute_multi_agent_query, OrchestratorResult
 from src.core.okta.client import OktaClient
+
+# Track background tasks to prevent memory leaks
+background_tasks: set = set()
 from src.utils.logging import get_logger, set_correlation_id
 from src.utils.security_config import validate_generated_code
 
@@ -65,6 +69,12 @@ active_processes: Dict[str, Any] = {}
 class QueryRequest(BaseModel):
     """Request body for ReAct query"""
     query: str
+
+
+class ScriptExecuteRequest(BaseModel):
+    """Request body for direct script execution"""
+    query: str
+    script_code: str
 
 
 class QueryResponse(BaseModel):
@@ -366,7 +376,7 @@ async def start_react_process(
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
-            "user_id": current_user.id,
+            "user_id": current_user.username,
             "created_at": time.time(),
             "cancelled": False
         }
@@ -381,6 +391,48 @@ async def start_react_process(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start ReAct process: {str(e)}"
+        )
+
+
+@router.post("/execute-script", response_model=QueryResponse)
+async def execute_script_directly(
+    request: ScriptExecuteRequest,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    Start execution of a pre-generated script.
+    
+    Returns process_id for connecting to SSE stream.
+    Skips the multi-agent discovery phase.
+    """
+    correlation_id = str(uuid.uuid4())
+    set_correlation_id(correlation_id)
+    
+    try:
+        username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
+        logger.info(f"[{correlation_id}] Starting direct script execution for user: {username}")
+        
+        # Create process tracking entry with pre-generated script
+        active_processes[correlation_id] = {
+            "status": "initializing",
+            "query": request.query,
+            "script_code": request.script_code,  # Pre-generated script
+            "user_id": current_user.username,
+            "created_at": time.time(),
+            "cancelled": False,
+            "skip_discovery": True  # Flag to skip orchestrator
+        }
+        
+        return QueryResponse(
+            process_id=correlation_id,
+            message="Script execution started. Connect to /stream-react-updates to receive events."
+        )
+        
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Failed to start direct execution: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to start direct execution: {str(e)}"
         )
 
 
@@ -411,7 +463,7 @@ async def stream_react_updates(
     process = active_processes[process_id]
     
     # Verify user owns this process
-    if process["user_id"] != current_user.id:
+    if process["user_id"].lower() != current_user.username.lower():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to access this process"
@@ -421,10 +473,13 @@ async def stream_react_updates(
         """Generate SSE events from Multi-Agent Orchestrator execution"""
         artifacts_file = None
         okta_client = None
+        orchestrator_task = None
+        stream_started = False  # Track if stream actually started
         
         try:
             # Update status
             process["status"] = "executing"
+            stream_started = True  # Mark that we successfully started streaming
             
             # Create artifacts file
             artifacts_file = await _create_artifacts_file(process_id)
@@ -497,43 +552,62 @@ async def stream_react_updates(
                     }
                     await event_queue.put(sse_event)
             
-            # Run orchestrator in background
-            async def run_orchestrator():
-                """Execute orchestrator and send sentinel when done"""
-                try:
-                    return await execute_multi_agent_query(
-                        user_query=process["query"],
-                        correlation_id=process_id,
-                        artifacts_file=artifacts_file,
-                        okta_client=okta_client,
-                        cancellation_check=check_cancelled,
-                        event_callback=event_callback
-                    )
-                finally:
-                    # Send sentinel to signal completion
-                    await event_queue.put(None)
-            
-            # Start orchestrator
-            logger.info(f"[{process_id}] Starting multi-agent orchestrator")
-            orchestrator_task = asyncio.create_task(run_orchestrator())
-            
-            # Stream events as they arrive (loop until sentinel)
-            while True:
-                # Check for cancellation
-                if check_cancelled():
-                    orchestrator_task.cancel()
-                    break
+            # Check if we should skip discovery and use pre-generated script
+            if process.get("skip_discovery") and process.get("script_code"):
+                logger.info(f"[{process_id}] Skipping discovery phase, using pre-generated script")
                 
-                try:
-                    event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                    if event is None:  # Sentinel - orchestrator done
+                # Create a minimal OrchestratorResult
+                from src.core.agents.orchestrator import OrchestratorResult
+                result = OrchestratorResult()
+                result.success = True
+                result.script_code = process["script_code"]
+                result.data_source_type = "hybrid" # Default for re-execution
+                
+                # Send a notification that we are starting from a saved script
+                await event_callback("progress", {"message": "🚀 Starting execution from saved script..."})
+                
+            else:
+                # Run orchestrator in background
+                async def run_orchestrator():
+                    """Execute orchestrator and send sentinel when done"""
+                    try:
+                        return await execute_multi_agent_query(
+                            user_query=process["query"],
+                            correlation_id=process_id,
+                            artifacts_file=artifacts_file,
+                            okta_client=okta_client,
+                            cancellation_check=check_cancelled,
+                            event_callback=event_callback
+                        )
+                    finally:
+                        # Send sentinel to signal completion
+                        await event_queue.put(None)
+                
+                # Start orchestrator
+                logger.info(f"[{process_id}] Starting multi-agent orchestrator")
+                orchestrator_task = asyncio.create_task(run_orchestrator())
+                
+                # Stream events as they arrive (loop until sentinel)
+                while True:
+                    # Check for cancellation
+                    if check_cancelled():
+                        orchestrator_task.cancel()
                         break
-                    yield f"data: {json.dumps(event)}\n\n"
-                except asyncio.TimeoutError:
-                    continue
-            
-            # Get orchestrator result
-            result = await orchestrator_task
+                    
+                    try:
+                        event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                        if event is None:  # Sentinel - orchestrator done
+                            break
+                        yield f"data: {json.dumps(event)}\n\n"
+                    except asyncio.TimeoutError:
+                        continue
+                
+                # Get orchestrator result (handle cancellation)
+                try:
+                    result = await orchestrator_task
+                except asyncio.CancelledError:
+                    logger.info(f"[{process_id}] Orchestrator task was cancelled")
+                    raise  # Re-raise to exit generator
             
             # Orchestrator already logged completion and phases
             
@@ -608,34 +682,58 @@ async def stream_react_updates(
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
                 
+                # CRITICAL: Save history BEFORE DONE
+                # Shield from cancellation
+                try:
+                    logger.debug(f"[{process_id}] Starting special tool history save...")
+                    db_ops = DatabaseOperations()
+                    summary = (result.script_code[:100] + "...") if result.script_code else "Special tool result"
+                    
+                    await asyncio.shield(
+                        db_ops.save_query_history(
+                            tenant_id=settings.tenant_id,
+                            user_id=process.get("user_id", "localadmin"),
+                            query_text=process["query"],
+                            final_script="",  # Special tools don't have a script
+                            results_summary=summary
+                        )
+                    )
+                    logger.info(f"[{process_id}] ✅ Special tool history saved")
+                except asyncio.CancelledError:
+                    logger.warning(f"[{process_id}] Special tool history save cancelled")
+                except Exception as e:
+                    logger.error(f"[{process_id}] Failed to save special tool history: {e}", exc_info=True)
+                
+                # Send DONE after save completes
+                done_event = {
+                    "type": "DONE",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
+                
                 process["status"] = "completed"
                 return
             
-            # Check for no script
+            # Check for no script - this is always an error
             if not result.script_code:
-                logger.info(f"[{process_id}] ⚡ No script generated - checking for direct answer")
+                logger.error(f"[{process_id}] ❌ Synthesis completed but no script generated")
                 
-                # Check if we have direct results (from special tool)
-                if result.success:
-                    # Send COMPLETE event with direct results
-                    complete_event = {
-                        "type": "COMPLETE",
-                        "display_type": "markdown",
-                        "content": result.error or "Query completed successfully",
-                        "timestamp": time.time(),
-                        "is_special_tool": True
-                    }
-                    yield f"data: {json.dumps(complete_event)}\n\n"
-                else:
-                    # No script and no results - error
-                    error_event = {
-                        "type": "ERROR",
-                        "error": result.error or "No script generated and no results available",
-                        "timestamp": time.time()
-                    }
-                    yield f"data: {json.dumps(error_event)}\n\n"
+                # No script means synthesis failed to produce code - treat as error
+                error_event = {
+                    "type": "ERROR",
+                    "error": result.error or "Synthesis agent completed but failed to generate executable code. Please try rephrasing your query or check the logs.",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
                 
-                process["status"] = "completed" if result.success else "error"
+                process["status"] = "error"
+                
+                # Send DONE event to close stream
+                done_event = {
+                    "type": "DONE",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
                 return
             
             # Phase 2: Validate generated script
@@ -712,11 +810,17 @@ async def stream_react_updates(
             # _write_temp_script already logged the path
             
             # Execute and stream results
-            # COMMENTED: Reduces log noise (subprocess execution is implicit)
-            # logger.info(f"[{process_id}] Starting subprocess execution")
+            execution_succeeded = False
+            final_execution_event = None
+            
             async for execution_event in _execute_script(process_id, script_path, check_cancelled, result):
                 yield f"data: {json.dumps(execution_event)}\n\n"
-            
+                
+                # Track final completion event for history save
+                if execution_event.get("type") == "COMPLETE" and execution_event.get("success"):
+                    execution_succeeded = True
+                    final_execution_event = execution_event
+
             # Note: Cleanup disabled - scripts kept in generated_scripts/ for debugging
             logger.debug(f"[{process_id}] Script retained for debugging: {script_path}")
             
@@ -731,6 +835,47 @@ async def stream_react_updates(
             yield f"data: {json.dumps(execution_success)}\n\n"
             
             logger.info(f"[{process_id}] Phase 3 complete: Script executed successfully")
+            
+            # CRITICAL: Save history BEFORE DONE event
+            # Shield from cancellation - we want this to complete even if client disconnects
+            logger.debug(f"[{process_id}] History save check: execution_succeeded={execution_succeeded}, has_event={final_execution_event is not None}")
+            if execution_succeeded and final_execution_event:
+                try:
+                    logger.debug(f"[{process_id}] Starting history save...")
+                    db_ops = DatabaseOperations()
+                    summary = ""
+                    if final_execution_event.get("display_type") == "markdown":
+                        summary = (final_execution_event.get("content", "")[:100] + "...")
+                    else:
+                        summary = f"Found {final_execution_event.get('count', 0)} results"
+                    
+                    # Shield from cancellation
+                    await asyncio.shield(
+                        db_ops.save_query_history(
+                            tenant_id=settings.tenant_id,
+                            user_id=process.get("user_id", "localadmin"),  # From active_processes
+                            query_text=process["query"],
+                            final_script=result.script_code,
+                            results_summary=summary
+                        )
+                    )
+                    logger.info(f"[{process_id}] ✅ Query history saved to database")
+                except asyncio.CancelledError:
+                    logger.warning(f"[{process_id}] History save cancelled - attempting to complete anyway")
+                    # Try one more time without shield
+                    try:
+                        await db_ops.save_query_history(
+                            tenant_id=settings.tenant_id,
+                            user_id=process.get("user_id", "localadmin"),
+                            query_text=process["query"],
+                            final_script=result.script_code,
+                            results_summary=summary
+                        )
+                        logger.info(f"[{process_id}] ✅ Query history saved on retry")
+                    except Exception as retry_err:
+                        logger.error(f"[{process_id}] Failed to save history on retry: {retry_err}", exc_info=True)
+                except Exception as e:
+                    logger.error(f"[{process_id}] Failed to save query history: {e}", exc_info=True)
             
             # Log token usage summary at end for visibility
             if result.total_tokens > 0:
@@ -773,16 +918,29 @@ async def stream_react_updates(
             yield f"data: {json.dumps(error_data)}\n\n"
         
         finally:
-            # Cleanup (OktaAPIClient uses async context managers, no manual close needed)
+            # Cancel orchestrator task if it's still running (e.g. client disconnect)
+            if orchestrator_task and not orchestrator_task.done():
+                logger.warning(f"[{process_id}] Stream disconnected - cancelling background orchestrator task")
+                orchestrator_task.cancel()
+                try:
+                    await orchestrator_task
+                except asyncio.CancelledError:
+                    logger.debug(f"[{process_id}] Orchestrator task cancelled successfully")
+                except Exception as e:
+                    logger.error(f"[{process_id}] Error during orchestrator task cancellation: {e}")
+
+            # Cleanup AFTER orchestrator is fully stopped to avoid race condition
+            # Always remove from active_processes to prevent stale entries
             if process_id in active_processes:
-                logger.info(f"[{process_id}] Cleaning up process tracking")
+                process_status = active_processes[process_id].get("status", "unknown")
+                logger.info(f"[{process_id}] Cleaning up process tracking (status: {process_status}, stream_started: {stream_started})")
                 del active_processes[process_id]
+                logger.debug(f"[{process_id}] Remaining active processes: {list(active_processes.keys())}")
+            else:
+                logger.warning(f"[{process_id}] Process already removed from active_processes during cleanup")
             
-            # Send explicit close event
-            try:
-                yield "event: close\ndata: Stream ended\n\n"
-            except:
-                pass
+            # Note: Do NOT yield in finally block - causes GeneratorExit issues
+            # The stream closes naturally when generator exits
     
     return StreamingResponse(
         event_generator(),
@@ -804,10 +962,15 @@ async def cancel_react_process(
     Cancel a running ReAct process.
     
     Sets the cancelled flag, which the executor checks between steps.
+    Returns 404 if process not found (may have already completed).
     """
     process_id = request.process_id
     
+    logger.info(f"[{process_id}] Cancel request received from user: {current_user.username}")
+    logger.debug(f"[{process_id}] Active processes: {list(active_processes.keys())}")
+    
     if process_id not in active_processes:
+        logger.warning(f"[{process_id}] Process ID not found in active_processes - may have already completed")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Process ID not found"
@@ -816,7 +979,8 @@ async def cancel_react_process(
     process = active_processes[process_id]
     
     # Verify user owns this process
-    if process["user_id"] != current_user.id:
+    if process["user_id"].lower() != current_user.username.lower():
+        logger.warning(f"[{process_id}] User {current_user.username} attempted to cancel process owned by {process['user_id']}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not authorized to cancel this process"
@@ -826,7 +990,7 @@ async def cancel_react_process(
     process["cancelled"] = True
     process["status"] = "cancelled"
     
-    logger.info(f"[{process_id}] Process cancellation requested")
+    logger.info(f"[{process_id}] Process cancellation flag set successfully")
     
     return JSONResponse(
         content={

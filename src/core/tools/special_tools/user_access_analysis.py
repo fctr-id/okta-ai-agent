@@ -235,7 +235,8 @@ async def can_user_access_application(
         error_result = {
             "status": "error", 
             "error": "app_identifier must be provided",
-            "tool": "access_analysis"
+            "tool": "access_analysis",
+            "llm_summary": "## Missing Required Parameter\n\n❌ **Application identifier is required** for access analysis.\n\nPlease specify which application you want to check access for."
         }
         logger.error("Validation failed - no app_identifier")
         return error_result
@@ -244,7 +245,8 @@ async def can_user_access_application(
         error_result = {
             "status": "error", 
             "error": "Either user_identifier or group_identifier must be provided",
-            "tool": "access_analysis"
+            "tool": "access_analysis",
+            "llm_summary": "## Missing Required Parameter\n\n❌ **Either a user or group identifier is required** for access analysis.\n\nPlease specify which user or group you want to check access for."
         }
         logger.error("Validation failed - no user or group identifier")
         return error_result
@@ -268,6 +270,8 @@ async def can_user_access_application(
         logger.info(f"Calling find_application with '{app_identifier}'")
         app = await find_application(client, app_identifier)
         if not app:
+            error_message = f"## Application Not Found\n\n**Application:** `{app_identifier}`\n\n❌ The application '{app_identifier}' could not be found in your Okta organization.\n\n### Possible Reasons:\n- The application name must match **exactly** (case-sensitive) as shown in the Okta Admin Portal\n- It may be a privileged system application (like 'Okta Admin Console') that cannot be queried via API\n- The application may have been deleted or renamed\n\n### What to try:\n1. Verify the exact application name in your Okta Admin Portal\n2. Check for typos or case differences\n3. Try using the application label instead of the technical name"
+            
             error_result = {
                 "status": "success",
                 "result_type": "application_not_found",
@@ -279,7 +283,8 @@ async def can_user_access_application(
                 "debug_info": f"Searched for app with identifier: '{app_identifier}' - no matches found in applications list",
                 "search_attempted": ["direct_id_lookup", "query_search", "full_list_search"],
                 "can_access": False,
-                "reason": "Application not found - name must match exactly (case sensitive) or may be privileged app"
+                "reason": "Application not found - name must match exactly (case sensitive) or may be privileged app",
+                "llm_summary": error_message
             }
             logger.error(f"Application not found: {app_identifier}")
             return error_result
@@ -326,7 +331,8 @@ async def can_user_access_application(
                     "message": f"User '{user_identifier}' not found. Please verify the email address or username is correct.",
                     "error": f"User '{user_identifier}' not found in Okta org",
                     "can_access": False,
-                    "reason": "User not found - verify email address or username is correct"
+                    "reason": "User not found - verify email address or username is correct",
+                    "llm_summary": f"## User Not Found\n\n**User:** `{user_identifier}`\n\n❌ The user '{user_identifier}' could not be found in your Okta organization.\n\n### What to try:\n1. Verify the email address or username is spelled correctly\n2. Check if the user account exists in your Okta Admin Portal\n3. The user may have been deprovisioned or deleted"
                 }
                 logger.debug(f"User not found: {user_identifier}")
                 return error_result

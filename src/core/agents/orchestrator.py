@@ -254,7 +254,8 @@ async def execute_multi_agent_query(
     artifacts_file: Path,
     okta_client: Any,  # OktaClient instance
     cancellation_check: callable,
-    event_callback: Optional[callable] = None
+    event_callback: Optional[callable] = None,
+    cli_mode: bool = False
 ) -> OrchestratorResult:
     """
     Execute multi-agent query workflow.
@@ -281,15 +282,15 @@ async def execute_multi_agent_query(
     Returns:
         OrchestratorResult with script code and metadata
     """
-    logger.info(f"[{correlation_id}] Starting multi-agent orchestrator")
-    logger.info(f"[{correlation_id}] Query: {user_query}")
+    logger.info("Starting multi-agent orchestrator")
+    logger.info(f"Query: {user_query}")
     
     result = OrchestratorResult()
     
     # Initialize global tool call limits from environment
     max_tool_calls = int(os.getenv('MAX_TOOL_CALLS', '30'))
     global_tool_calls_counter = 0  # Shared across all agents
-    logger.info(f"[{correlation_id}] Tool call limits: {max_tool_calls} total, 3 per tool type")
+    logger.info(f"Tool call limits: {max_tool_calls} total, 3 per tool type")
     
     # Load API endpoints data (needed for API discovery agent)
     endpoints_file = Path("src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json")
@@ -298,9 +299,9 @@ async def execute_multi_agent_query(
         with open(endpoints_file, 'r', encoding='utf-8') as f:
             endpoints_data = json.load(f)
             endpoints_list = endpoints_data.get('endpoints', [])
-            logger.debug(f"[{correlation_id}] Loaded {len(endpoints_list)} API endpoints")
+            logger.debug(f"Loaded {len(endpoints_list)} API endpoints")
     except Exception as e:
-        logger.warning(f"[{correlation_id}] Failed to load endpoints file: {e}")
+        logger.warning(f"Failed to load endpoints file: {e}")
     
     # Event aggregator for streaming
     aggregator = EventAggregator(event_callback)
@@ -317,7 +318,7 @@ async def execute_multi_agent_query(
         # ====================================================================
         # PHASE 0: Route Query (LLM Classification)
         # ====================================================================
-        logger.info(f"[{correlation_id}] Running Router Agent")
+        logger.info(f"Running Router Agent")
         result.router_decision, router_usage = await route_query(
             user_query, 
             correlation_id, 
@@ -335,8 +336,8 @@ async def execute_multi_agent_query(
         phase = result.router_decision.phase
         reasoning = result.router_decision.reasoning
         
-        logger.info(f"[{correlation_id}] Router decision: {phase}")
-        logger.info(f"[{correlation_id}] Router reasoning: {reasoning}")
+        logger.info(f"Router decision: {phase}")
+        logger.info(f"Router reasoning: {reasoning}")
         
         # Handle special cases
         if phase == "NOT_RELEVANT":
@@ -345,7 +346,7 @@ async def execute_multi_agent_query(
         
         if phase == "SPECIAL":
             # Execute special tools
-            logger.info(f"[{correlation_id}] Executing special tool handler")
+            logger.info(f"Executing special tool handler")
             result.phases_executed.append('special')
             
             # Send initial status to frontend
@@ -368,10 +369,10 @@ async def execute_multi_agent_query(
                 result.script_code = result_text  # The llm_summary text
                 result.display_type = display_type or "markdown"
                 result.is_special_tool = True  # Flag to skip validation
-                logger.info(f"[{correlation_id}] Special tool execution successful")
+                logger.info(f"Special tool execution successful")
             else:
                 result.error = error or "Special tool execution failed"
-                logger.error(f"[{correlation_id}] Special tool failed: {result.error}")
+                logger.error(f"Special tool failed: {result.error}")
             
             return result
         
@@ -384,7 +385,7 @@ async def execute_multi_agent_query(
             try:
                 artifacts_file.resolve().relative_to(Path("logs").resolve())
             except ValueError:
-                logger.error(f"[{correlation_id}] Unsafe artifacts file path: {artifacts_file}")
+                logger.error(f"Unsafe artifacts file path: {artifacts_file}")
                 return None
             
             # Only proceed if the artifacts path points to an actual file
@@ -396,7 +397,7 @@ async def execute_multi_agent_query(
                 contents = [a.get('content', '') for a in artifacts if a.get('category') == category]
                 return '\n'.join(contents) if contents else None
             except Exception as e:
-                logger.warning(f"[{correlation_id}] Failed to load {category} artifacts: {e}")
+                logger.warning(f"Failed to load {category} artifacts: {e}")
                 return None
         
         # ====================================================================
@@ -408,13 +409,13 @@ async def execute_multi_agent_query(
         if should_run_sql:
             db_healthy = check_database_health()
             if not db_healthy:
-                logger.info(f"[{correlation_id}] Database unavailable or empty - Falling back to API")
+                logger.info(f"Database unavailable or empty - Falling back to API")
                 should_run_sql = False
                 # Force API mode since DB is unavailable
                 phase = "API"
         
         if should_run_sql:
-            logger.info(f"[{correlation_id}] Running SQL Discovery Agent")
+            logger.info(f"Running SQL Discovery Agent")
             aggregator.set_phase('sql')
             result.phases_executed.append('sql')
             
@@ -443,7 +444,7 @@ async def execute_multi_agent_query(
             
             # Update global counter after SQL phase
             global_tool_calls_counter = sql_deps.global_tool_calls
-            logger.info(f"[{correlation_id}] Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
+            logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
             
             # Track token usage
             if sql_usage:
@@ -454,7 +455,7 @@ async def execute_multi_agent_query(
             
             if not result.sql_result.success:
                 error_msg = result.sql_result.error or "SQL phase failed"
-                logger.error(f"[{correlation_id}] SQL phase failed: {error_msg}")
+                logger.error(f"SQL phase failed: {error_msg}")
                 
                 # Check if it's a hard limit error
                 if "limit exceeded" in error_msg.lower():
@@ -468,9 +469,9 @@ async def execute_multi_agent_query(
                     return result
                 
                 # Other SQL errors - continue anyway, API might still work
-                logger.info(f"[{correlation_id}] Continuing to API phase despite SQL error")
+                logger.info(f"Continuing to API phase despite SQL error")
         else:
-            logger.info(f"[{correlation_id}] Skipped SQL Discovery (Router decision: {phase})")
+            logger.info(f"Skipped SQL Discovery (Router decision: {phase})")
         
         # ====================================================================
         # PHASE 2 & 2.5: Multi-Step Discovery Loop (API ↔ SQL)
@@ -487,9 +488,9 @@ async def execute_multi_agent_query(
         # CRITICAL: Capture initial SQL phase handoff request (if any)
         if result.sql_result and result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
             pending_api_request = result.sql_result.needs_api
-            logger.info(f"[{correlation_id}] SQL agent requests API data: {pending_api_request}")
+            logger.info(f"SQL agent requests API data: {pending_api_request}")
         
-        logger.info(f"[{correlation_id}] Starting multi-step discovery loop (max {max_iterations} phases)")
+        logger.info(f"Starting multi-step discovery loop (max {max_iterations} phases)")
         
         while iteration_count < max_iterations:
             # Check if we need to run API phase
@@ -505,7 +506,7 @@ async def execute_multi_agent_query(
             
             # Exit loop if no more phases needed
             if not should_run_api and not should_run_sql:
-                logger.info(f"[{correlation_id}] Discovery loop complete: No more phases needed (iterations: {iteration_count})")
+                logger.info(f"Discovery loop complete: No more phases needed (iterations: {iteration_count})")
                 break
             
             # Clear pending requests before this iteration
@@ -517,7 +518,7 @@ async def execute_multi_agent_query(
             # ================================================================
             if should_run_api:
                 iteration_count += 1
-                logger.info(f"[{correlation_id}] Running API Discovery Agent (iteration {iteration_count}/{max_iterations})")
+                logger.info(f"Running API Discovery Agent (iteration {iteration_count}/{max_iterations})")
                 aggregator.set_phase('api')
                 result.phases_executed.append('api')
                 
@@ -533,7 +534,7 @@ async def execute_multi_agent_query(
                     sql_found_data = result.sql_result.found_data
                     sql_discovered_data = load_artifacts_by_category('sql_results')
                     if sql_discovered_data:
-                        logger.info(f"[{correlation_id}] Passing SQL discovered data to API agent ({len(sql_discovered_data)} chars)")
+                        logger.info(f"Passing SQL discovered data to API agent ({len(sql_discovered_data)} chars)")
                 elif result.sql_result:
                     sql_reasoning = f"SQL phase failed: {result.sql_result.error}"
                 
@@ -567,7 +568,7 @@ async def execute_multi_agent_query(
                 
                 # Update global counter after API phase
                 global_tool_calls_counter = api_deps.global_tool_calls
-                logger.info(f"[{correlation_id}] Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
+                logger.info(f"Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
                 
                 # Track token usage
                 if api_usage:
@@ -579,7 +580,7 @@ async def execute_multi_agent_query(
                 # Check for API limit errors and stop execution
                 if not result.api_result.success:
                     error_msg = result.api_result.error or "API phase failed"
-                    logger.error(f"[{correlation_id}] API phase failed: {error_msg}")
+                    logger.error(f"API phase failed: {error_msg}")
                     
                     # Check if it's a hard limit error
                     if "limit exceeded" in error_msg.lower():
@@ -593,9 +594,9 @@ async def execute_multi_agent_query(
                     
                     # Check if agent is requesting SQL help (handoff)
                     if result.api_result.needs_sql and len(result.api_result.needs_sql) > 0:
-                        logger.info(f"[{correlation_id}] API needs SQL help: {result.api_result.needs_sql} - continuing to SQL phase")
+                        logger.info(f"API needs SQL help: {result.api_result.needs_sql} - continuing to SQL phase")
                     else:
-                        logger.info(f"[{correlation_id}] Exiting discovery loop due to API error (no handoff requested)")
+                        logger.info(f"Exiting discovery loop due to API error (no handoff requested)")
                         break
                 
                 # Reset phase flag after first iteration
@@ -605,20 +606,20 @@ async def execute_multi_agent_query(
                 # Capture this iteration's SQL request (if any)
                 if result.api_result.needs_sql and len(result.api_result.needs_sql) > 0:
                     pending_sql_request = result.api_result.needs_sql
-                    logger.info(f"[{correlation_id}] API requests SQL for next iteration: {pending_sql_request}")
+                    logger.info(f"API requests SQL for next iteration: {pending_sql_request}")
             
             # ================================================================
             # Run SQL Discovery (if pending request exists)
             # ================================================================
             if pending_sql_request is not None:
                 iteration_count += 1
-                logger.info(f"[{correlation_id}] API agent requests SQL data: {pending_sql_request}")
-                logger.info(f"[{correlation_id}] Running SQL Discovery Agent (iteration {iteration_count}/{max_iterations})")
+                logger.info(f"API agent requests SQL data: {pending_sql_request}")
+                logger.info(f"Running SQL Discovery Agent (iteration {iteration_count}/{max_iterations})")
                 
                 # Check DB health using same method as Phase 1
                 db_healthy = check_database_health()
                 if not db_healthy:
-                    logger.warning(f"[{correlation_id}] API needs SQL but DB is unavailable - exiting discovery loop")
+                    logger.warning(f"API needs SQL but DB is unavailable - exiting discovery loop")
                     break
                 
                 aggregator.set_phase('sql')
@@ -643,7 +644,7 @@ async def execute_multi_agent_query(
                 # Load API artifacts
                 api_discovered_data = load_artifacts_by_category('api_results')
                 if api_discovered_data:
-                    logger.info(f"[{correlation_id}] Passing API discovered data to SQL agent ({len(api_discovered_data)} chars)")
+                    logger.info(f"Passing API discovered data to SQL agent ({len(api_discovered_data)} chars)")
                 
                 sql_deps = SQLDiscoveryDeps(
                     correlation_id=correlation_id,
@@ -665,7 +666,7 @@ async def execute_multi_agent_query(
                 result.sql_result, sql_usage = await execute_sql_discovery(user_query, sql_deps)
                 
                 global_tool_calls_counter = sql_deps.global_tool_calls
-                logger.info(f"[{correlation_id}] Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
+                logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
                 
                 if sql_usage:
                     result.total_input_tokens += sql_usage.input_tokens
@@ -686,15 +687,15 @@ async def execute_multi_agent_query(
                         return result
                     # Check if agent is requesting API help (handoff)
                     if result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
-                        logger.info(f"[{correlation_id}] SQL needs API help: {result.sql_result.needs_api} - continuing to API phase")
+                        logger.info(f"SQL needs API help: {result.sql_result.needs_api} - continuing to API phase")
                     else:
-                        logger.info(f"[{correlation_id}] Exiting discovery loop due to SQL error (no handoff requested)")
+                        logger.info(f"Exiting discovery loop due to SQL error (no handoff requested)")
                         break
                 
                 # Capture this iteration's API request (if any)
                 if result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
                     pending_api_request = result.sql_result.needs_api
-                    logger.info(f"[{correlation_id}] SQL requests API for next iteration: {pending_api_request}")
+                    logger.info(f"SQL requests API for next iteration: {pending_api_request}")
                 
                 await aggregator.step_end({
                     "title": "SQL Discovery Complete",
@@ -704,7 +705,7 @@ async def execute_multi_agent_query(
         
         # Check if we hit max iterations
         if iteration_count >= max_iterations:
-            logger.warning(f"[{correlation_id}] Discovery loop hit maximum iterations ({max_iterations})")
+            logger.warning(f"Discovery loop hit maximum iterations ({max_iterations})")
             await aggregator.progress({
                 "message": f"⚠️ Reached maximum discovery phases ({max_iterations}), proceeding with available data"
             })
@@ -725,7 +726,7 @@ async def execute_multi_agent_query(
                 error_details.append(f"API: {result.api_result.error}")
             
             error_msg = "Discovery failed - no data retrieved. " + " | ".join(error_details) if error_details else "No discovery phases succeeded"
-            logger.error(f"[{correlation_id}] {error_msg}")
+            logger.error(f"{error_msg}")
             
             await aggregator.step_end({
                 "title": "Discovery Failed",
@@ -736,7 +737,7 @@ async def execute_multi_agent_query(
             result.error = error_msg
             return result
         
-        logger.info(f"[{correlation_id}] Discovery validation passed (SQL: {sql_succeeded}, API: {api_succeeded})")
+        logger.info(f"Discovery validation passed (SQL: {sql_succeeded}, API: {api_succeeded})")
         
         # Check if discovery succeeded but found no data (0 artifacts)
         try:
@@ -745,18 +746,18 @@ async def execute_multi_agent_query(
             artifact_count = len(artifacts) if isinstance(artifacts, list) else 0
             
             if artifact_count == 0:
-                logger.info(f"[{correlation_id}] Discovery succeeded but found no data (0 artifacts)")
+                logger.info(f"Discovery succeeded but found no data (0 artifacts)")
                 result.no_data_found = True
                 result.success = True
                 return result
         except Exception as e:
-            logger.warning(f"[{correlation_id}] Failed to check artifact count: {e}")
+            logger.warning(f"Failed to check artifact count: {e}")
             # Continue to synthesis anyway
         
         # ====================================================================
         # PHASE 3: Synthesis
         # ====================================================================
-        logger.info(f"[{correlation_id}] Running Synthesis Agent")
+        logger.info(f"Running Synthesis Agent")
         aggregator.set_phase('synthesis')
         
         # Notify user synthesis is starting
@@ -773,7 +774,8 @@ async def execute_multi_agent_query(
             step_start_callback=aggregator.step_start,
             step_end_callback=aggregator.step_end,
             tool_call_callback=aggregator.tool_call,
-            progress_callback=aggregator.progress
+            progress_callback=aggregator.progress,
+            cli_mode=cli_mode
         )
         
         result.synthesis_result, synthesis_usage = await execute_synthesis(user_query, synthesis_deps)
@@ -786,7 +788,7 @@ async def execute_multi_agent_query(
             result.total_requests += synthesis_usage.requests
         
         if not result.synthesis_result.success:
-            logger.error(f"[{correlation_id}] Synthesis failed: {result.synthesis_result.error}")
+            logger.error(f"Synthesis failed: {result.synthesis_result.error}")
             result.error = result.synthesis_result.error
             return result
         
@@ -812,9 +814,9 @@ async def execute_multi_agent_query(
         if result.data_source_type in ["sql", "hybrid"]:
             result.last_sync_time = get_last_sync_timestamp()
         
-        logger.info(f"[{correlation_id}] Multi-agent workflow complete")
-        logger.info(f"[{correlation_id}] Phases executed: {', '.join(result.phases_executed)}")
-        logger.info(f"[{correlation_id}] Data source: {result.data_source_type}")
+        logger.info(f"Multi-agent workflow complete")
+        logger.info(f"Phases executed: {', '.join(result.phases_executed)}")
+        logger.info(f"Data source: {result.data_source_type}")
         
         # Log cumulative token usage
         if result.total_tokens > 0:
@@ -829,7 +831,7 @@ async def execute_multi_agent_query(
         return result
         
     except asyncio.CancelledError:
-        logger.warning(f"[{correlation_id}] Multi-agent workflow cancelled by user")
+        logger.warning(f"Multi-agent workflow cancelled by user")
         result.error = "Cancelled by user"
         # Notify frontend of cancellation
         await aggregator.step_end({
@@ -842,7 +844,7 @@ async def execute_multi_agent_query(
     except RuntimeError as e:
         # Tool call limit exceeded or other hard stop
         error_msg = str(e)
-        logger.error(f"[{correlation_id}] Hard stop triggered: {error_msg}")
+        logger.error(f"Hard stop triggered: {error_msg}")
         result.error = error_msg
         # Notify frontend with proper error format
         await aggregator.step_end({
@@ -853,7 +855,7 @@ async def execute_multi_agent_query(
         return result
         
     except Exception as e:
-        logger.error(f"[{correlation_id}] Orchestrator error: {e}", exc_info=True)
+        logger.error(f"Orchestrator error: {e}", exc_info=True)
         result.error = str(e)
         # Notify frontend of unexpected error
         await aggregator.step_end({

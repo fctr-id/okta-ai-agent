@@ -93,7 +93,7 @@ Response:
         model = ModelConfig.get_model(ModelType.REASONING)
         agent = Agent(model)
         
-        logger.info(f"[{correlation_id}] Extracting parameters from query")
+        logger.info(f"Extracting parameters from query")
         result = await agent.run(prompt)
         
         # Parse JSON response
@@ -108,14 +108,14 @@ Response:
         tool_operation = extraction.get("tool_operation")
         parameters = extraction.get("parameters", {})
         
-        logger.info(f"[{correlation_id}] Extracted tool: {tool_operation}")
-        logger.info(f"[{correlation_id}] Extracted parameters: {parameters}")
+        logger.info(f"Extracted tool: {tool_operation}")
+        logger.info(f"Extracted parameters: {parameters}")
         
         return tool_operation, parameters, None
         
     except Exception as e:
         error_msg = f"Failed to extract tool parameters: {str(e)}"
-        logger.error(f"[{correlation_id}] {error_msg}")
+        logger.error(f"{error_msg}")
         return None, None, error_msg
 
 
@@ -162,7 +162,7 @@ async def execute_special_tool(
             return False, None, f"Special tool operation '{tool_operation}' not found"
         
         tool_name = tool_info['module_name']
-        logger.info(f"[{correlation_id}] Found special tool: {tool_name}")
+        logger.info(f"Found special tool: {tool_name}")
         
         # Send simple progress with tool name
         if progress_callback:
@@ -185,24 +185,24 @@ async def execute_special_tool(
             **parameters
         }
         
-        logger.info(f"[{correlation_id}] Executing tool with parameters: {list(parameters.keys())}")
+        logger.info(f"Executing tool with parameters: {list(parameters.keys())}")
         
         # Execute the tool function
         result = await tool_function(**execution_params)
         
         # Check if execution was successful
         if result.get("status") == "success":
-            logger.info(f"[{correlation_id}] Special tool execution successful")
+            logger.info(f"Special tool execution successful")
             # Note: Progress completion message sent by caller after extracting tool name
             return True, result, None
         else:
             error = result.get("error", "Unknown error")
-            logger.error(f"[{correlation_id}] Special tool execution failed: {error}")
+            logger.error(f"Special tool execution failed: {error}")
             return False, None, error
             
     except Exception as e:
         error_msg = f"Exception during special tool execution: {str(e)}"
-        logger.error(f"[{correlation_id}] {error_msg}", exc_info=True)
+        logger.error(f"{error_msg}", exc_info=True)
         return False, None, error_msg
 
 
@@ -228,11 +228,11 @@ async def handle_special_query(
         - result_text: The formatted result to show to user (typically llm_summary)
         - display_type: "markdown" or "table"
     """
-    logger.info(f"[{correlation_id}] Handling special tool query")
+    logger.info(f"Handling special tool query")
     
     try:
         # Step 1: Extract tool operation and parameters
-        logger.info(f"[{correlation_id}] Extracting parameters from query")
+        logger.info(f"Extracting parameters from query")
         
         tool_operation, parameters, error = await extract_tool_parameters(
             user_query, 
@@ -259,14 +259,14 @@ async def handle_special_query(
         
         if llm_summary:
             # Success! Return the pre-formatted summary
-            logger.info(f"[{correlation_id}] Returning LLM-generated summary")
+            logger.info(f"Returning LLM-generated summary")
             return True, llm_summary, "markdown", None
         else:
             # Fallback: return raw data as JSON if no summary available
-            logger.warning(f"[{correlation_id}] No llm_summary found, returning raw data")
+            logger.warning(f"No llm_summary found, returning raw data")
             return True, json.dumps(result_data, indent=2), "markdown", None
             
     except Exception as e:
         error_msg = f"Exception in special tools handler: {str(e)}"
-        logger.error(f"[{correlation_id}] {error_msg}", exc_info=True)
+        logger.error(f"{error_msg}", exc_info=True)
         return False, None, None, error_msg

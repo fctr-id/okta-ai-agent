@@ -71,6 +71,12 @@ export function useReactStream() {
     const startProcess = async (query) => {
         console.log('[useReactStream] startProcess called with query:', query)
         
+        // CRITICAL: Close any existing EventSource before starting new query
+        if (eventSource) {
+            console.log('[useReactStream] Closing previous EventSource before new query')
+            closeStream()
+        }
+        
         isLoading.value = true
         error.value = null
         discoverySteps.value = []
@@ -121,6 +127,57 @@ export function useReactStream() {
     }
     
     /**
+     * Start execution from saved script
+     */
+    const startScriptExecution = async (query, scriptCode) => {
+        console.log('[useReactStream] startScriptExecution called')
+        
+        isLoading.value = true
+        error.value = null
+        discoverySteps.value = []
+        isDiscoveryComplete.value = true // Skip discovery
+        validationStep.value = null
+        executionStarted.value = false
+        isExecuting.value = false
+        executionMessage.value = ''
+        executionProgress.value = 0
+        subprocessProgress.value = []
+        rateLimitWarning.value = 0
+        generatedScript.value = scriptCode
+        results.value = null
+        tokenUsage.value = null
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/react/execute-script`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'include',
+                body: JSON.stringify({ query, script_code: scriptCode })
+            })
+            
+            if (await handleAuthError(response.status)) {
+                return null
+            }
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`)
+            }
+            
+            const data = await response.json()
+            currentProcessId.value = data.process_id
+            return data.process_id
+            
+        } catch (err) {
+            console.error('[useReactStream] Failed to start script execution:', err)
+            error.value = err.message
+            isLoading.value = false
+            return null
+        }
+    }
+    
+    /**
      * Connect to SSE stream
      */
     const connectToStream = async (processId) => {
@@ -158,20 +215,8 @@ export function useReactStream() {
         // Handle explicit close event from server
         eventSource.addEventListener('close', () => {
             console.log('[useReactStream] Server requested connection close')
-            if (eventSource) {
-                eventSource.close()
-                eventSource = null
-            }
-        })
-        
-        // Handle SSE connection errors
-        eventSource.onerror = (event) => {
-            console.error('[useReactStream] EventSource connection failed:', event)
-            error.value = 'Connection to server lost'
             closeStream()
-            isLoading.value = false
-            isProcessing.value = false
-        }
+        })
         
         // Handle all messages with unified JSON format {type: "...", ...data}
         eventSource.onmessage = (event) => {
@@ -207,6 +252,15 @@ export function useReactStream() {
                     case 'COMPLETE':
                         handleComplete(data)
                         break
+                    case 'DONE':
+                        console.log('[useReactStream] Received DONE signal - closing stream')
+                        isLoading.value = false
+                        isProcessing.value = false
+                        currentStep.value = ''
+                        closeStream()
+                        // Clear process ID to prevent stale cancel calls
+                        currentProcessId.value = null
+                        break
                     case 'ERROR':
                         handleError(data)
                         break
@@ -216,8 +270,14 @@ export function useReactStream() {
             }
         }
         
+        // Single unified error handler
         eventSource.onerror = (err) => {
             console.error('[useReactStream] SSE error:', err)
+            console.log('[useReactStream] ReadyState:', eventSource?.readyState)
+            console.log('[useReactStream] Processing:', isProcessing.value, 'Results:', !!results.value)
+            
+            // Always close the stream on error
+            closeStream()
             
             // Only treat as error if we haven't completed successfully
             if (isProcessing.value && !results.value) {
@@ -226,8 +286,8 @@ export function useReactStream() {
                 isProcessing.value = false
             }
             
-            // Close the stream (this is called when server closes connection normally too)
-            closeStream()
+            // Clear process ID to prevent stale cancel calls
+            currentProcessId.value = null
         }
     }
     
@@ -562,11 +622,11 @@ export function useReactStream() {
             }
         }
         
-        isLoading.value = false
-        isProcessing.value = false
-        currentStep.value = ''
-        
-        closeStream()
+        // Don't close stream yet - wait for DONE event which comes after history save
+        // isLoading.value = false
+        // isProcessing.value = false
+        // currentStep.value = ''
+        // closeStream()
     }
     
     /**
@@ -603,15 +663,28 @@ export function useReactStream() {
         }
         
         closeStream()
+        // Clear process ID to prevent stale cancel calls
+        currentProcessId.value = null
     }
     
     /**
      * Cancel process
      */
     const cancelProcess = async () => {
-        if (!currentProcessId.value) return
+        if (!currentProcessId.value) {
+            console.log('[useReactStream] cancelProcess called but no active process ID')
+            return
+        }
+        
+        // Don't cancel if already stopped processing
+        if (!isProcessing.value && !isLoading.value) {
+            console.log('[useReactStream] cancelProcess called but process already completed')
+            currentProcessId.value = null
+            return
+        }
         
         try {
+            console.log('[useReactStream] Sending cancel request for process:', currentProcessId.value)
             const response = await fetch(`${API_BASE_URL}/api/react/cancel`, {
                 method: 'POST',
                 headers: {
@@ -628,12 +701,32 @@ export function useReactStream() {
                 return
             }
             
+            // 404 is expected if process already completed - silently ignore
+            if (response.status === 404) {
+                console.log('[useReactStream] Process already completed (404), cleaning up gracefully')
+                closeStream()
+                isLoading.value = false
+                isProcessing.value = false
+                currentProcessId.value = null
+                return
+            }
+            
+            if (!response.ok) {
+                console.warn('[useReactStream] Cancel request failed with status:', response.status)
+            }
+            
             closeStream()
             isLoading.value = false
             isProcessing.value = false
+            currentProcessId.value = null
             
         } catch (err) {
-            console.error('Failed to cancel process:', err)
+            console.error('[useReactStream] Failed to cancel process:', err)
+            // Clean up local state even if cancel request fails
+            closeStream()
+            isLoading.value = false
+            isProcessing.value = false
+            currentProcessId.value = null
         }
     }
     
@@ -642,8 +735,10 @@ export function useReactStream() {
      */
     const closeStream = () => {
         if (eventSource) {
+            console.log('[useReactStream] Closing EventSource (readyState:', eventSource.readyState, ')')
             eventSource.close()
             eventSource = null
+            console.log('[useReactStream] EventSource closed and nulled')
         }
     }
     
@@ -674,6 +769,7 @@ export function useReactStream() {
         
         // Methods
         startProcess,
+        startScriptExecution,
         connectToStream,
         cancelProcess
     }

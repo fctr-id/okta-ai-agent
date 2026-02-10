@@ -143,3 +143,4 @@ docs/*.md
 docs/MCP_Migration_Strategy.md
 docs/Tako_Architecture_Deep_Analysis.md
 _backup_before_restore_20260108_165423/*
+conductor/*

@@ -218,7 +218,8 @@ async def analyze_user_login_risk(
         error_result = {
             "status": "error", 
             "error": "user_identifier must be provided",
-            "tool": "login_risk_analysis"
+            "tool": "login_risk_analysis",
+            "llm_summary": "## Missing Required Parameter\n\n❌ **User identifier is required** for login risk analysis.\n\nPlease specify which user you want to analyze login risk for."
         }
         logger.error("Validation failed - no user_identifier")
         return error_result
@@ -246,7 +247,8 @@ async def analyze_user_login_risk(
                 "id": user_identifier,
                 "tool": "login_risk_analysis",
                 "message": f"User '{user_identifier}' not found. Please verify the email address or username is correct.",
-                "error": f"User '{user_identifier}' not found in Okta org"
+                "error": f"User '{user_identifier}' not found in Okta org",
+                "llm_summary": f"## User Not Found\n\n**User:** `{user_identifier}`\n\n❌ The user '{user_identifier}' could not be found in your Okta organization.\n\n### What to try:\n1. Verify the email address or username is spelled correctly\n2. Check if the user account exists in your Okta Admin Portal\n3. The user may have been deprovisioned or deleted"
             }
         
         logger.info(f"User found: {user.get('id')} - {user.get('profile', {}).get('email')}")
@@ -475,7 +477,8 @@ async def analyze_user_login_risk(
         error_result = {
             "status": "error",
             "error": f"Failed to analyze login risk: {str(e)}",
-            "tool": "login_risk_analysis"
+            "tool": "login_risk_analysis",
+            "llm_summary": f"## Analysis Failed\\n\\n❌ An error occurred while analyzing login risk.\\n\\n**Error:** {str(e)}\\n\\nPlease try again or check the logs for more details."
         }
         logger.error(f"Exception in main analysis: {str(e)}")
         return error_result
