@@ -33,7 +33,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy Python requirements and install dependencies with UV (10-100x faster)
 COPY requirements.txt .
-RUN uv pip install --system --no-cache -r requirements.txt
+# Pin setuptools <70 and install wheel to avoid flatdict pkg_resources issue
+RUN uv pip install --system --no-cache 'setuptools<70.0.0' wheel && \
+    uv pip install --system --no-cache --no-build-isolation -r requirements.txt
 
 # Copy main entry point
 COPY main.py /app/
@@ -45,6 +47,9 @@ COPY src/config /app/src/config
 COPY src/core /app/src/core
 COPY src/data /app/src/data
 COPY src/utils /app/src/utils
+
+# Copy scripts directory for CLI tools
+COPY scripts /app/scripts
 
 # Copy built frontend assets from the frontend builder stage
 # Frontend builds to ../api/static relative to the frontend directory
