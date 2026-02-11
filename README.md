@@ -15,7 +15,7 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
   <br/>
   
-  <h1>Tako AI Agent for Okta (v2.10.0-beta)</h1>
+  <h1>Tako AI Agent for Okta (v2.1-beta)</h1>
   
   <p><a href="VERSION.md">📋 Changelog →</a></p>
 </div>
