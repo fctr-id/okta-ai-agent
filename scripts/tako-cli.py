@@ -10,6 +10,7 @@ import os
 import json
 import argparse
 import csv
+import shutil
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -83,19 +84,15 @@ def parse_script_output(stdout: str) -> Optional[Dict[str, Any]]:
     
     return None
 
-def save_results_to_csv(results_data: Dict[str, Any], query: str, correlation_id: str) -> Optional[Path]:
-    """Save results to CSV file in logs/cli-results/"""
+def save_results_to_csv(results_data: Dict[str, Any], date_str: str) -> Optional[Path]:
+    """Save results to CSV file in logs/tako-cli-results/"""
     try:
         # Create output directory
         output_dir = project_root / "logs" / "tako-cli-results"
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Generate filename with timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        # Sanitize query for filename (max 50 chars, remove special chars)
-        safe_query = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in query)
-        safe_query = safe_query[:50].strip().replace(' ', '_')
-        filename = f"{safe_query}_{timestamp}.csv"
+        # Generate standardized filename
+        filename = f"tako-csv-results-{date_str}.csv"
         output_path = output_dir / filename
         
         # Extract data array
@@ -123,18 +120,36 @@ def save_results_to_csv(results_data: Dict[str, Any], query: str, correlation_id
         logger.error(f"Failed to save CSV: {e}")
         return None
 
-async def execute_generated_script(script_code: str, correlation_id: str) -> Optional[Dict[str, Any]]:
+async def execute_generated_script(script_code: str, date_str: str, query: str) -> Optional[Dict[str, Any]]:
     """Execute the generated Python script and return parsed results"""
     try:
         # Save script to tako-cli-scripts folder
         script_dir = project_root / "logs" / "tako-cli-scripts"
         script_dir.mkdir(parents=True, exist_ok=True)
-        script_path = script_dir / f"cli_execution_{correlation_id}.py"
+        script_path = script_dir / f"tako-cli-script-{date_str}.py"
+        
+        # Add query as comment at the top of the script
+        commented_query = f"# Query: {query}\n# Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}\n\n"
         
         with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(script_code)
+            f.write(commented_query + script_code)
         
         logger.info(f"Saved script to {script_path}")
+        
+        # Copy base_okta_api_client.py if the script imports it and it's not already present
+        base_client_dest = script_dir / "base_okta_api_client.py"
+        if "from base_okta_api_client import" in script_code or "import base_okta_api_client" in script_code:
+            # Try to copy from generated_scripts folder first (standalone version)
+            base_client_src = project_root / "generated_scripts" / "base_okta_api_client.py"
+            if not base_client_src.exists():
+                # Fallback to source location
+                base_client_src = project_root / "src" / "core" / "okta" / "client" / "base_okta_api_client.py"
+            
+            if base_client_src.exists():
+                shutil.copy(base_client_src, base_client_dest)
+                logger.info(f"Copied base_okta_api_client.py to {script_dir}")
+            else:
+                logger.warning("base_okta_api_client.py not found in expected locations")
         
         # Detect Python executable (prefer venv)
         venv_python = project_root / "venv" / "Scripts" / "python.exe"
@@ -193,6 +208,10 @@ async def run_query(query: str, script_only: bool = False):
     correlation_id = generate_correlation_id()
     set_correlation_id(correlation_id)
     
+    # Generate standardized filename with date and time (no query, no random number)
+    # Format: tako-cli-script-MM-DD-YYYY-HH-MM or tako-csv-results-MM-DD-YYYY-HH-MM
+    date_str = datetime.now().strftime("%m-%d-%Y-%H-%M")
+    
     artifacts_dir = project_root / "logs"
     artifacts_dir.mkdir(exist_ok=True)
     artifacts_file = artifacts_dir / f"cli_artifacts_{correlation_id}.json"
@@ -236,14 +255,29 @@ async def run_query(query: str, script_only: bool = False):
         script_dir = project_root / "logs" / "tako-cli-scripts"
         script_dir.mkdir(parents=True, exist_ok=True)
         
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        safe_query = "".join(c if c.isalnum() or c in (' ', '-', '_') else '_' for c in query)
-        safe_query = safe_query[:50].strip().replace(' ', '_')
-        script_filename = f"{safe_query}_{timestamp}.py"
+        script_filename = f"tako-cli-script-{date_str}.py"
         script_path = script_dir / script_filename
         
+        # Add query as comment at the top of the script
+        commented_query = f"# Query: {query}\n# Generated: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}\n\n"
+        
         with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(result.script_code)
+            f.write(commented_query + result.script_code)
+        
+        # Copy base_okta_api_client.py if the script imports it and it's not already present
+        base_client_dest = script_dir / "base_okta_api_client.py"
+        if "from base_okta_api_client import" in result.script_code or "import base_okta_api_client" in result.script_code:
+            # Try to copy from generated_scripts folder first (standalone version)
+            base_client_src = project_root / "generated_scripts" / "base_okta_api_client.py"
+            if not base_client_src.exists():
+                # Fallback to source location
+                base_client_src = project_root / "src" / "core" / "okta" / "client" / "base_okta_api_client.py"
+            
+            if base_client_src.exists():
+                shutil.copy(base_client_src, base_client_dest)
+                logger.info(f"Copied base_okta_api_client.py to {script_dir}")
+            else:
+                logger.warning("base_okta_api_client.py not found in expected locations")
         
         print(f"\n{Colors.OKGREEN}Script saved to:{Colors.ENDC} {script_path}")
         logger.info(f"Script generated for query: {query}")
@@ -252,7 +286,7 @@ async def run_query(query: str, script_only: bool = False):
     # Full mode: execute the script and save results
     print(f"\n{Colors.OKGREEN}Discovery complete. Executing script...{Colors.ENDC}")
     
-    results_data = await execute_generated_script(result.script_code, correlation_id)
+    results_data = await execute_generated_script(result.script_code, date_str, query)
     
     if not results_data:
         print(f"\n{Colors.WARNING}No results returned from script execution{Colors.ENDC}")
@@ -266,7 +300,7 @@ async def run_query(query: str, script_only: bool = False):
     print(f"  Display type: {display_type}")
     
     # Save to CSV
-    csv_path = save_results_to_csv(results_data, query, correlation_id)
+    csv_path = save_results_to_csv(results_data, date_str)
     if csv_path:
         print(f"\n{Colors.BOLD}Results saved to:{Colors.ENDC} {csv_path}")
     
