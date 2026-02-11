@@ -79,7 +79,7 @@ docker exec okta-ai-agent python scripts/tako-cli.py "show suspended users" --sc
 # Export results as CSV
 docker exec okta-ai-agent python scripts/tako-cli.py "find users with MFA enabled" --csv
 ```
-
+> **Note:** The ".env file not found" warning when using `docker exec` is harmless - environment variables are already loaded by docker-compose.
 **Sync CLI (`sync_okta_to_db.py`)**
 
 **Local Installation:**
