@@ -44,9 +44,9 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 - 🐳 Easy deployment - Docker support for AMD64 and ARM64 platforms
 
 > **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected. 
-### See Tako in Action (play video below)
+### See Tako in Action
 
-<video src="https://github.com/user-attachments/assets/e501a6ad-b05e-4735-9257-ffa50a4db2ad" width="1024px" ></video>
+[![Tako AI Agent Demo](https://img.youtube.com/vi/TCzJEAvLYpM/0.jpg)](https://www.youtube.com/watch?v=TCzJEAvLYpM)
 
 *Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download*
 
