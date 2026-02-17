@@ -19,3 +19,7 @@ python-multipart~=0.0.20
 #polars~=1.31.0
 #polars-lts-cpu~=1.32.2
 authlib~=1.6.3
+
+# Slack Bot Integration (optional, needed if ENABLE_SLACK_BOT=true)
+slack-bolt~=1.22.0
+slack-sdk~=3.34.0

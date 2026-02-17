@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     # AI Provider
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "openai_compatible")
     USE_PRE_REASONING: bool = os.getenv("USE_PRE_REASONING", "true").lower() == "true"
+
+    # Slack Bot Configuration
+    ENABLE_SLACK_BOT: bool = os.getenv("ENABLE_SLACK_BOT", "false").lower() == "true"
+    SLACK_BOT_TOKEN: str = os.getenv("SLACK_BOT_TOKEN", "")
+    SLACK_SIGNING_SECRET: str = os.getenv("SLACK_SIGNING_SECRET", "")
+    SLACK_APP_TOKEN: str = os.getenv("SLACK_APP_TOKEN", "")
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

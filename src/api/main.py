@@ -142,6 +142,16 @@ app.include_router(sync.router, prefix="/api")
 app.include_router(react_stream.router, prefix="/api")  # ReAct agent streaming
 app.include_router(history.router, prefix="/api")  # Query history and favorites
 
+# Conditionally mount Slack bot routes
+if os.environ.get("ENABLE_SLACK_BOT", "false").lower() == "true":
+    try:
+        from src.api.routers.slack import router as slack_router, mount_slack_routes
+        mount_slack_routes(slack_router)
+        app.include_router(slack_router)
+        logger.info("Slack bot routes enabled")
+    except Exception as e:
+        logger.warning(f"Failed to enable Slack bot: {e}")
+
 # Mount static files
 app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")
 
