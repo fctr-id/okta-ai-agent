@@ -157,6 +157,112 @@ def format_complete_response(
     return blocks[:MAX_BLOCKS]
 
 
+def format_sync_status_message(
+    db_healthy: bool,
+    last_sync: Optional[str],
+    active_sync: Optional[Dict[str, Any]] = None,
+    entity_counts: Optional[Dict[str, int]] = None,
+) -> List[Dict[str, Any]]:
+    """Format database/sync status as Slack blocks (ephemeral response)."""
+    blocks: List[Dict[str, Any]] = []
+
+    # Database health line
+    if db_healthy:
+        user_count = (entity_counts or {}).get("users", 0)
+        db_text = f":white_check_mark: *Database:* Healthy ({user_count:,} users)"
+    else:
+        db_text = ":x: *Database:* No data synced"
+
+    # Last sync line
+    if last_sync:
+        sync_text = f"*Last sync:* {last_sync}"
+    else:
+        sync_text = "*Last sync:* Never"
+
+    # Status line
+    if active_sync:
+        progress = active_sync.get("progress", 0)
+        status_text = f"*Status:* Syncing ({progress}%)"
+    else:
+        status_text = "*Status:* Idle"
+
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": f"{db_text}\n{sync_text}\n{status_text}",
+        }
+    })
+
+    if not db_healthy and not active_sync:
+        blocks.append({
+            "type": "context",
+            "elements": [{
+                "type": "mrkdwn",
+                "text": "Run `/tako sync` to sync your Okta data.",
+            }]
+        })
+
+    return blocks
+
+
+def format_sync_progress_message(
+    stage: str,
+    progress: Optional[int] = None,
+) -> str:
+    """Return a single-line Slack text string for sync progress updates."""
+    if progress is not None:
+        return f":arrows_counterclockwise: *Okta Sync* — {stage} ({progress}%)"
+    return f":arrows_counterclockwise: *Okta Sync* — {stage}"
+
+
+def format_sync_complete_message(
+    entity_counts: Dict[str, int],
+) -> List[Dict[str, Any]]:
+    """Format sync completion summary as Slack blocks."""
+    users = entity_counts.get("users", 0)
+    groups = entity_counts.get("groups", 0)
+    apps = entity_counts.get("applications", 0)
+
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    ":white_check_mark: *Okta Sync Complete*\n"
+                    f"• Users: {users:,}\n"
+                    f"• Groups: {groups:,}\n"
+                    f"• Applications: {apps:,}"
+                ),
+            }
+        }
+    ]
+
+
+def format_help_message() -> List[Dict[str, Any]]:
+    """Format /tako help output as Slack blocks."""
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    ":robot_face: *Tako AI — Slack Commands*\n\n"
+                    "`/tako <query>` — Ask anything about your Okta data\n"
+                    "`/tako sync` — Sync Okta data to the local database\n"
+                    "`/tako status` — Check database health & last sync time\n"
+                    "`/tako help` — Show this help message\n\n"
+                    "_Examples:_\n"
+                    "• `/tako list all active users`\n"
+                    "• `/tako show groups with more than 50 members`\n"
+                    "• `/tako which apps use SAML?`"
+                ),
+            }
+        }
+    ]
+
+
 def results_to_csv_string(results: List[Dict[str, Any]], headers: List[str]) -> str:
     """Convert results to CSV string for file upload."""
     output = io.StringIO()

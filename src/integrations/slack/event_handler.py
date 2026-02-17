@@ -5,7 +5,6 @@ Receives streaming events from the multi-agent orchestrator and posts
 progress updates and final results to a Slack thread.
 """
 
-import asyncio
 import time
 from typing import Dict, Any, Optional, List
 
@@ -70,8 +69,7 @@ class SlackEventHandler:
         Post the initial "Processing..." message to Slack.
         Returns the thread timestamp for follow-up messages.
         """
-        response = await asyncio.to_thread(
-            self.client.chat_postMessage,
+        response = await self.client.chat_postMessage(
             channel=self.channel_id,
             thread_ts=self.thread_ts,
             text=f":hourglass_flowing_sand: Processing your query...\n> {query}",
@@ -88,8 +86,7 @@ class SlackEventHandler:
         )
 
         # Post as a new message in the thread
-        await asyncio.to_thread(
-            self.client.chat_postMessage,
+        await self.client.chat_postMessage(
             channel=self.channel_id,
             thread_ts=self.thread_ts,
             text="Query results",
@@ -103,8 +100,7 @@ class SlackEventHandler:
 
         # Update the progress message to show completion
         if self._progress_message_ts:
-            await asyncio.to_thread(
-                self.client.chat_update,
+            await self.client.chat_update(
                 channel=self.channel_id,
                 ts=self._progress_message_ts,
                 text=f":white_check_mark: Query completed.\n> {query}",
@@ -113,8 +109,7 @@ class SlackEventHandler:
     async def post_error(self, error: str):
         """Post an error message to the Slack thread."""
         blocks = format_error_message(error)
-        await asyncio.to_thread(
-            self.client.chat_postMessage,
+        await self.client.chat_postMessage(
             channel=self.channel_id,
             thread_ts=self.thread_ts,
             text=f"Error: {error}",
@@ -123,8 +118,7 @@ class SlackEventHandler:
 
         # Update progress message
         if self._progress_message_ts:
-            await asyncio.to_thread(
-                self.client.chat_update,
+            await self.client.chat_update(
                 channel=self.channel_id,
                 ts=self._progress_message_ts,
                 text=":x: Query failed.",
@@ -147,8 +141,7 @@ class SlackEventHandler:
         self._last_update_time = now
 
         if self._progress_message_ts:
-            await asyncio.to_thread(
-                self.client.chat_update,
+            await self.client.chat_update(
                 channel=self.channel_id,
                 ts=self._progress_message_ts,
                 text=f":arrows_counterclockwise: *{title}*: {text}",
@@ -171,8 +164,7 @@ class SlackEventHandler:
         self._last_update_time = now
 
         if self._progress_message_ts:
-            await asyncio.to_thread(
-                self.client.chat_update,
+            await self.client.chat_update(
                 channel=self.channel_id,
                 ts=self._progress_message_ts,
                 text=f":arrows_counterclockwise: {message}",
@@ -192,8 +184,7 @@ class SlackEventHandler:
         """Upload full results as a CSV file snippet to the thread."""
         try:
             csv_content = results_to_csv_string(results, headers)
-            await asyncio.to_thread(
-                self.client.files_upload_v2,
+            await self.client.files_upload_v2(
                 channel=self.channel_id,
                 thread_ts=self.thread_ts,
                 content=csv_content,

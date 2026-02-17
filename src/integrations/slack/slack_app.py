@@ -19,11 +19,23 @@ from slack_bolt.async_app import AsyncApp
 from slack_sdk.web.async_client import AsyncWebClient
 
 from src.config.settings import settings
-from src.core.agents.orchestrator import execute_multi_agent_query, OrchestratorResult
+from src.core.agents.orchestrator import (
+    execute_multi_agent_query,
+    OrchestratorResult,
+    check_database_health,
+    get_last_sync_timestamp,
+)
 from src.core.okta.client import OktaClient
 from src.core.okta.sync.operations import DatabaseOperations
+from src.api.routers.sync import run_sync_operation
 from src.integrations.slack.event_handler import SlackEventHandler
-from src.integrations.slack.formatters import format_error_message
+from src.integrations.slack.formatters import (
+    format_error_message,
+    format_sync_status_message,
+    format_sync_complete_message,
+    format_sync_progress_message,
+    format_help_message,
+)
 from src.utils.logging import get_logger, set_correlation_id
 from src.utils.security_config import validate_generated_code
 
@@ -55,9 +67,11 @@ def create_slack_app() -> Optional[AsyncApp]:
     # ------------------------------------------------------------------
     # Slash command: /tako
     # ------------------------------------------------------------------
+    _SUBCOMMANDS = {"sync", "status", "help"}
+
     @app.command("/tako")
     async def handle_tako_command(ack, command, client: AsyncWebClient):
-        """Handle /tako slash command."""
+        """Handle /tako slash command with subcommand routing."""
         await ack()
 
         query = (command.get("text") or "").strip()
@@ -65,14 +79,45 @@ def create_slack_app() -> Optional[AsyncApp]:
         user_id = command["user_id"]
 
         if not query:
+            blocks = format_help_message()
             await client.chat_postEphemeral(
                 channel=channel_id,
                 user=user_id,
-                text="Usage: `/tako <your query>`\nExample: `/tako list all active users`",
+                text="Tako AI — Slack Commands",
+                blocks=blocks,
             )
             return
 
-        # Start query processing in background
+        # Route subcommands
+        first_word = query.split()[0].lower()
+        if first_word in _SUBCOMMANDS:
+            if first_word == "help":
+                blocks = format_help_message()
+                await client.chat_postEphemeral(
+                    channel=channel_id,
+                    user=user_id,
+                    text="Tako AI — Slack Commands",
+                    blocks=blocks,
+                )
+                return
+
+            if first_word == "status":
+                task = asyncio.create_task(
+                    _handle_status(client=client, channel_id=channel_id, user_id=user_id)
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+                return
+
+            if first_word == "sync":
+                task = asyncio.create_task(
+                    _handle_sync(client=client, channel_id=channel_id, user_id=user_id)
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+                return
+
+        # Default: treat as a query
         task = asyncio.create_task(
             _process_query(
                 client=client,
@@ -164,6 +209,18 @@ async def _process_query(
     slack_handler._progress_message_ts = initial_response["ts"]
 
     try:
+        # Pre-query database health check — warn but don't block
+        db_healthy = check_database_health()
+        if not db_healthy:
+            await client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=message_thread_ts,
+                text=(
+                    ":warning: No synced Okta data found. Queries may return incomplete results.\n"
+                    "Run `/tako sync` to sync your Okta data."
+                ),
+            )
+
         # Create artifacts file (same pattern as react_stream.py)
         artifacts_dir = Path("logs").resolve()
         artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -215,9 +272,12 @@ async def _process_query(
 
         # Handle no data found
         if result.no_data_found:
+            no_data_content = "## No Results Found\n\nYour query completed successfully, but no matching data was found."
+            if not db_healthy:
+                no_data_content += "\n\n:bulb: *Tip:* Your local database has no synced data. Run `/tako sync` to populate it."
             await slack_handler.post_final_results(query, {
                 "display_type": "markdown",
-                "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                "content": no_data_content,
             })
             return
 
@@ -261,6 +321,200 @@ async def _process_query(
     except Exception as e:
         logger.error(f"[{correlation_id}] Slack query processing error: {e}", exc_info=True)
         await slack_handler.post_error("An internal error occurred. Please try again later.")
+
+
+# ============================================================================
+# Subcommand Handlers
+# ============================================================================
+
+async def _handle_status(
+    client: AsyncWebClient,
+    channel_id: str,
+    user_id: str,
+):
+    """Handle /tako status — show DB health and last sync info."""
+    try:
+        db_healthy = check_database_health()
+        last_sync = get_last_sync_timestamp()
+
+        # Check for active sync and get entity counts
+        db_ops = DatabaseOperations()
+        tenant_id = settings.tenant_id
+        active_sync_info = None
+        entity_counts = None
+
+        try:
+            await db_ops.init_db()
+            async with db_ops.get_session() as session:
+                active_sync = await db_ops.get_active_sync(session, tenant_id)
+                if active_sync:
+                    active_sync_info = {"progress": active_sync.progress_percentage or 0}
+
+                # Get entity counts from last completed sync
+                last_completed = await db_ops.get_last_completed_sync(session, tenant_id)
+                if last_completed:
+                    entity_counts = {
+                        "users": last_completed.users_count or 0,
+                        "groups": last_completed.groups_count or 0,
+                        "applications": last_completed.apps_count or 0,
+                    }
+        except Exception as e:
+            logger.debug(f"Could not query sync details for status: {e}")
+
+        blocks = format_sync_status_message(
+            db_healthy=db_healthy,
+            last_sync=last_sync,
+            active_sync=active_sync_info,
+            entity_counts=entity_counts,
+        )
+        await client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text="Tako AI — Status",
+            blocks=blocks,
+        )
+    except Exception as e:
+        logger.error(f"Error handling /tako status: {e}", exc_info=True)
+        await client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=":x: Failed to retrieve status. Check server logs.",
+        )
+
+
+async def _handle_sync(
+    client: AsyncWebClient,
+    channel_id: str,
+    user_id: str,
+):
+    """Handle /tako sync — trigger an Okta data sync from Slack."""
+    db_ops = DatabaseOperations()
+    tenant_id = settings.tenant_id
+
+    try:
+        # Ensure tables exist (critical for first-ever sync)
+        await db_ops.init_db()
+
+        async with db_ops.get_session() as session:
+            # Guard against concurrent syncs
+            active_sync = await db_ops.get_active_sync(session, tenant_id)
+            if active_sync:
+                progress = active_sync.progress_percentage or 0
+                await client.chat_postEphemeral(
+                    channel=channel_id,
+                    user=user_id,
+                    text=f":arrows_counterclockwise: A sync is already running ({progress}% complete).",
+                )
+                return
+
+            # Create sync history record
+            sync_history = await db_ops.create_sync_history(session, tenant_id)
+            sync_id = sync_history.id
+
+        # Post visible "starting" message to channel
+        msg_response = await client.chat_postMessage(
+            channel=channel_id,
+            text=format_sync_progress_message("Starting Okta sync..."),
+        )
+        progress_ts = msg_response["ts"]
+
+        # Launch the sync operation as a background task.
+        # run_sync_operation expects an AsyncSession factory — open a fresh one.
+        sync_session = db_ops.SessionLocal()
+        sync_task = asyncio.create_task(
+            run_sync_operation(sync_id, sync_session)
+        )
+        _background_tasks.add(sync_task)
+        sync_task.add_done_callback(_background_tasks.discard)
+
+        # Poll for completion and update the Slack message
+        await _poll_sync_progress(
+            client=client,
+            channel_id=channel_id,
+            progress_ts=progress_ts,
+            sync_id=sync_id,
+            db_ops=db_ops,
+            tenant_id=tenant_id,
+            sync_task=sync_task,
+        )
+
+    except Exception as e:
+        logger.error(f"Error handling /tako sync: {e}", exc_info=True)
+        await client.chat_postMessage(
+            channel=channel_id,
+            text=f":x: Failed to start sync: {e}",
+        )
+
+
+async def _poll_sync_progress(
+    client: AsyncWebClient,
+    channel_id: str,
+    progress_ts: str,
+    sync_id: int,
+    db_ops: DatabaseOperations,
+    tenant_id: str,
+    sync_task: asyncio.Task,
+):
+    """Poll sync progress and update a Slack message until complete."""
+    last_progress = -1
+
+    while not sync_task.done():
+        await asyncio.sleep(10)
+
+        try:
+            async with db_ops.get_session() as session:
+                active = await db_ops.get_active_sync(session, tenant_id)
+                if active and active.id == sync_id:
+                    progress = active.progress_percentage or 0
+                    if progress != last_progress:
+                        last_progress = progress
+                        await client.chat_update(
+                            channel=channel_id,
+                            ts=progress_ts,
+                            text=format_sync_progress_message("Syncing", progress),
+                        )
+        except Exception as e:
+            logger.debug(f"Error polling sync progress: {e}")
+
+    # Sync task is done — get final results
+    try:
+        async with db_ops.get_session() as session:
+            last_sync = await db_ops.get_last_completed_sync(session, tenant_id)
+            if last_sync and last_sync.success:
+                entity_counts = {
+                    "users": last_sync.users_count or 0,
+                    "groups": last_sync.groups_count or 0,
+                    "applications": last_sync.apps_count or 0,
+                }
+                # Update progress message to complete
+                await client.chat_update(
+                    channel=channel_id,
+                    ts=progress_ts,
+                    text=":white_check_mark: Okta sync completed.",
+                )
+                # Post summary
+                blocks = format_sync_complete_message(entity_counts)
+                await client.chat_postMessage(
+                    channel=channel_id,
+                    text="Okta Sync Complete",
+                    blocks=blocks,
+                )
+            else:
+                error_detail = ""
+                if last_sync and last_sync.error_details:
+                    error_detail = f"\n{last_sync.error_details}"
+                await client.chat_update(
+                    channel=channel_id,
+                    ts=progress_ts,
+                    text=f":x: Okta sync failed.{error_detail}",
+                )
+    except Exception as e:
+        logger.error(f"Error posting sync results: {e}", exc_info=True)
+        await client.chat_update(
+            channel=channel_id,
+            ts=progress_ts,
+            text=":x: Sync finished but failed to retrieve results.",
+        )
 
 
 async def _execute_script_for_slack(
