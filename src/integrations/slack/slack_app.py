@@ -327,6 +327,32 @@ async def _process_query(
 # Subcommand Handlers
 # ============================================================================
 
+class _ReusableSessionFactory:
+    """
+    Wraps an async_sessionmaker so that each ``async with instance as session:``
+    creates a **new** AsyncSession.
+
+    ``run_sync_operation`` re-enters ``async with db_session as session:``
+    multiple times (for RUNNING, COMPLETED, FAILED updates).  A bare
+    AsyncSession closes after the first exit, silently breaking subsequent
+    entries.  This wrapper delegates each entry to a fresh session.
+    """
+
+    def __init__(self, session_factory):
+        self._factory = session_factory
+        self._current = None
+
+    async def __aenter__(self):
+        self._current = self._factory()
+        return await self._current.__aenter__()
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self._current is not None:
+            result = await self._current.__aexit__(exc_type, exc_val, exc_tb)
+            self._current = None
+            return result
+
+
 async def _handle_status(
     client: AsyncWebClient,
     channel_id: str,
@@ -419,8 +445,11 @@ async def _handle_sync(
         progress_ts = msg_response["ts"]
 
         # Launch the sync operation as a background task.
-        # run_sync_operation expects an AsyncSession factory — open a fresh one.
-        sync_session = db_ops.SessionLocal()
+        # run_sync_operation uses `async with db_session as session:` multiple
+        # times, so it needs a wrapper that creates a fresh AsyncSession on
+        # each context-manager entry (a bare AsyncSession closes after the
+        # first exit and subsequent entries silently fail).
+        sync_session = _ReusableSessionFactory(db_ops.SessionLocal)
         sync_task = asyncio.create_task(
             run_sync_operation(sync_id, sync_session)
         )
