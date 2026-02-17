@@ -263,13 +263,19 @@ def format_help_message() -> List[Dict[str, Any]]:
     ]
 
 
-def results_to_csv_string(results: List[Dict[str, Any]], headers: List[str]) -> str:
+def results_to_csv_string(results: List[Dict[str, Any]], headers: list) -> str:
     """Convert results to CSV string for file upload."""
     output = io.StringIO()
     if not headers and results:
         headers = list(results[0].keys())
-    writer = csv.DictWriter(output, fieldnames=headers)
-    writer.writeheader()
+
+    # Normalise Vuetify-style dict headers to plain key strings
+    norm = _normalize_headers(headers)
+    fieldnames = [key for _, key in norm]
+
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    # Write display labels as the header row
+    writer.writerow({key: label for label, key in norm})
     for row in results:
         writer.writerow(row)
     return output.getvalue()
@@ -307,37 +313,60 @@ def _markdown_to_slack(md: str) -> str:
     return "\n".join(converted)
 
 
+def _normalize_headers(headers: list) -> List[tuple]:
+    """
+    Normalise a headers list into (display_label, row_key) tuples.
+
+    Generated scripts may emit Vuetify-style dicts
+    (``{"text": "Display Name", "value": "column_key"}``) or plain strings.
+    """
+    out: List[tuple] = []
+    for h in headers:
+        if isinstance(h, dict):
+            label = str(h.get("text") or h.get("value") or h.get("title") or "")
+            key = str(h.get("value") or h.get("key") or label)
+            out.append((label, key))
+        else:
+            out.append((str(h), str(h)))
+    return out
+
+
 def _build_table_text(
     results: List[Dict[str, Any]],
-    headers: List[str],
+    headers: list,
     max_rows: int = 10
 ) -> str:
     """Build a fixed-width text table for display in Slack code blocks."""
     if not results:
         return ""
 
-    # Determine headers
+    # Determine headers — normalise dicts to (label, key) pairs
     if not headers:
-        headers = list(results[0].keys())
+        keys = list(results[0].keys())
+        norm = [(k, k) for k in keys]
+    else:
+        norm = _normalize_headers(headers)
 
     # Calculate column widths (cap at 30 chars per column)
     col_widths = {}
-    for h in headers:
-        col_widths[h] = min(30, max(
-            len(str(h)),
-            *(len(str(row.get(h, ""))) for row in results[:max_rows])
+    for label, key in norm:
+        col_widths[key] = min(30, max(
+            len(label),
+            *(len(str(row.get(key, ""))) for row in results[:max_rows])
         ))
 
     # Build header row
-    header_line = " | ".join(str(h).ljust(col_widths[h])[:col_widths[h]] for h in headers)
-    separator = "-+-".join("-" * col_widths[h] for h in headers)
+    header_line = " | ".join(
+        label.ljust(col_widths[key])[:col_widths[key]] for label, key in norm
+    )
+    separator = "-+-".join("-" * col_widths[key] for _, key in norm)
 
     # Build data rows
     data_lines = []
     for row in results[:max_rows]:
         line = " | ".join(
-            str(row.get(h, "")).ljust(col_widths[h])[:col_widths[h]]
-            for h in headers
+            str(row.get(key, "")).ljust(col_widths[key])[:col_widths[key]]
+            for _, key in norm
         )
         data_lines.append(line)
 
