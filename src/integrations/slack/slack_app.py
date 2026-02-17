@@ -312,6 +312,7 @@ async def _process_query(
 
         if script_results:
             await slack_handler.post_final_results(query, script_results)
+            await slack_handler.post_script(result.script_code)
             await _save_history(
                 correlation_id, query, result.script_code, user_id
             )

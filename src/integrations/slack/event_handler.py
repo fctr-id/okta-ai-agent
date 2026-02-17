@@ -106,6 +106,22 @@ class SlackEventHandler:
                 text=f":white_check_mark: Query completed.\n> {query}",
             )
 
+    async def post_script(self, script_code: str):
+        """Upload the generated Python script as a file snippet in the thread."""
+        try:
+            await self.client.files_upload_v2(
+                channel=self.channel_id,
+                thread_ts=self.thread_ts,
+                content=script_code,
+                filename=f"tako_script_{self.correlation_id[:8]}.py",
+                title="Generated Script",
+                initial_comment=":page_facing_up: Generated script",
+            )
+        except Exception as e:
+            logger.warning(
+                f"[{self.correlation_id}] Failed to upload script to Slack: {e}"
+            )
+
     async def post_error(self, error: str):
         """Post an error message to the Slack thread."""
         blocks = format_error_message(error)
