@@ -60,9 +60,16 @@ class Settings(BaseSettings):
 
     # Slack Bot Configuration
     ENABLE_SLACK_BOT: bool = os.getenv("ENABLE_SLACK_BOT", "false").lower() == "true"
+    # SLACK_OPERATION_MODE: "socket" (local/private server, no public URL) or "http" (public server with URL)
+    SLACK_OPERATION_MODE: str = os.getenv("SLACK_OPERATION_MODE", "socket").lower()
     SLACK_BOT_TOKEN: str = os.getenv("SLACK_BOT_TOKEN", "")
     SLACK_SIGNING_SECRET: str = os.getenv("SLACK_SIGNING_SECRET", "")
-    SLACK_APP_TOKEN: str = os.getenv("SLACK_APP_TOKEN", "")
+    SLACK_APP_TOKEN: str = os.getenv("SLACK_APP_TOKEN", "")  # Required when SLACK_OPERATION_MODE=socket
+    
+    # Slack Access Control (deny-by-default)
+    SLACK_ALLOWED_EMAILS: str = os.getenv("SLACK_ALLOWED_EMAILS", "")
+    SLACK_ALLOWED_GROUPS: str = os.getenv("SLACK_ALLOWED_GROUPS", "")
+    SLACK_ALLOW_ALL_USERS: bool = os.getenv("SLACK_ALLOW_ALL_USERS", "false").lower() == "true"
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

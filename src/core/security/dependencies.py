@@ -84,47 +84,6 @@ async def get_current_user(
     
     return user
 
-async def get_current_bot(
-    request: Request,
-    session: AsyncSession = Depends(get_db_session),
-) -> AuthUser:
-    """
-    Dependency for bot-authenticated routes (e.g. Slack integration).
-
-    Validates a Bearer token from the Authorization header
-    against a known bot user in the database.
-    """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or invalid Authorization header",
-        )
-
-    token = auth_header[len("Bearer "):]
-    token_data = decode_access_token(token)
-    if not token_data:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid bot token",
-        )
-
-    username = token_data.get("sub")
-    if not username:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-        )
-
-    user = await db_operations.get_auth_user(session, username)
-    if not user or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Bot user not found or disabled",
-        )
-
-    return user
-
 
 async def get_current_active_admin(
     current_user: AuthUser = Depends(get_current_user),

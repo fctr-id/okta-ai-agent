@@ -105,10 +105,27 @@ async def lifespan(app: FastAPI):
     
     # Modern Execution Manager handles process lifecycle automatically
     #logger.info("Using Modern Execution Manager - no background cleanup needed")
+
+    # Start Slack Socket Mode if SLACK_OPERATION_MODE=socket (outbound WebSocket — no public URL needed)
+    _socket_task = None
+    if os.environ.get("ENABLE_SLACK_BOT", "false").lower() == "true":
+        slack_mode = os.environ.get("SLACK_OPERATION_MODE", "socket").lower()
+        if slack_mode == "socket":
+            try:
+                from src.integrations.slack.slack_app import start_socket_mode
+                _socket_task = asyncio.create_task(start_socket_mode())
+                logger.info("Slack Socket Mode task started (SLACK_OPERATION_MODE=socket)")
+            except Exception as e:
+                logger.warning(f"Failed to start Slack Socket Mode: {e}")
+        else:
+            logger.info("Slack running in HTTP mode (SLACK_OPERATION_MODE=http) — ensure server has a public URL")
     
     yield
     
     # Shutdown code
+    if _socket_task and not _socket_task.done():
+        _socket_task.cancel()
+        logger.info("Slack Socket Mode task cancelled")
     logger.info("Shutting down Okta AI Agent API")
 
 # Create FastAPI app with lifespan manager

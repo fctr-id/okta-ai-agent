@@ -42,6 +42,7 @@ COPY main.py /app/
 
 # Copy Python source code (excluding legacy folder)
 COPY src/api /app/src/api
+COPY src/backend /app/src/backend
 COPY src/config /app/src/config
 COPY src/core /app/src/core
 COPY src/data /app/src/data

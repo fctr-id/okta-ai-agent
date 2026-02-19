@@ -35,6 +35,7 @@ from src.integrations.slack.formatters import (
     format_sync_complete_message,
     format_sync_progress_message,
     format_help_message,
+    format_history_message,
 )
 from src.utils.logging import get_logger, set_correlation_id
 from src.utils.security_config import validate_generated_code
@@ -43,6 +44,67 @@ logger = get_logger("slack_bot")
 
 # Track background tasks to prevent GC
 _background_tasks: set = set()
+
+
+# ============================================================================
+# Access Control — Deny by Default
+# ============================================================================
+
+async def _check_user_allowed(client: AsyncWebClient, user_id: str) -> bool:
+    """
+    Check if a Slack user is authorized to use Tako commands.
+    
+    Returns True if allowed, False if denied.
+    
+    Strategy:
+    1. If no allowlists configured AND SLACK_ALLOW_ALL_USERS is not true → DENY (fail-closed)
+    2. Check email allowlist (via users.info API)
+    3. Check Slack User Group membership (via usergroups.list + usergroups.users.list)
+    4. If no check passes → DENY
+    """
+    allowed_emails_raw = settings.SLACK_ALLOWED_EMAILS.strip()
+    allowed_groups_raw = settings.SLACK_ALLOWED_GROUPS.strip()
+
+    # Deny-by-default: if no allowlists AND no explicit allow-all, reject
+    if not allowed_emails_raw and not allowed_groups_raw:
+        if settings.SLACK_ALLOW_ALL_USERS:
+            return True
+        logger.warning(
+            f"Slack access denied for {user_id}: no allowlists configured and SLACK_ALLOW_ALL_USERS is not true"
+        )
+        return False
+
+    # --- Email check ---
+    if allowed_emails_raw:
+        allowed_emails = {e.strip().lower() for e in allowed_emails_raw.split(",") if e.strip()}
+        try:
+            user_info = await client.users_info(user=user_id)
+            user_email = (user_info["user"].get("profile", {}).get("email") or "").lower()
+            if user_email in allowed_emails:
+                return True
+        except Exception as e:
+            logger.warning(f"Failed to fetch user email for {user_id}: {e}")
+
+    # --- Slack User Group check ---
+    if allowed_groups_raw:
+        allowed_group_names = {g.strip().lower() for g in allowed_groups_raw.split(",") if g.strip()}
+        try:
+            # Resolve group names to IDs
+            groups_response = await client.usergroups_list()
+            target_group_ids = []
+            for group in groups_response.get("usergroups", []):
+                if group.get("handle", "").lower() in allowed_group_names:
+                    target_group_ids.append(group["id"])
+
+            # Check membership in each matching group
+            for group_id in target_group_ids:
+                members_response = await client.usergroups_users_list(usergroup=group_id)
+                if user_id in members_response.get("users", []):
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to check user group membership for {user_id}: {e}")
+
+    return False
 
 
 def create_slack_app() -> Optional[AsyncApp]:
@@ -67,7 +129,7 @@ def create_slack_app() -> Optional[AsyncApp]:
     # ------------------------------------------------------------------
     # Slash command: /tako
     # ------------------------------------------------------------------
-    _SUBCOMMANDS = {"sync", "status", "help"}
+    _SUBCOMMANDS = {"sync", "status", "help", "history", "favorites"}
 
     @app.command("/tako")
     async def handle_tako_command(ack, command, client: AsyncWebClient):
@@ -77,6 +139,15 @@ def create_slack_app() -> Optional[AsyncApp]:
         query = (command.get("text") or "").strip()
         channel_id = command["channel_id"]
         user_id = command["user_id"]
+
+        # Access control gate
+        if not await _check_user_allowed(client, user_id):
+            await client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=":lock: You are not authorized to use Tako. Contact your admin.",
+            )
+            return
 
         if not query:
             blocks = format_help_message()
@@ -117,6 +188,22 @@ def create_slack_app() -> Optional[AsyncApp]:
                 task.add_done_callback(_background_tasks.discard)
                 return
 
+            if first_word == "history":
+                task = asyncio.create_task(
+                    _handle_history(client=client, channel_id=channel_id, user_id=user_id)
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+                return
+
+            if first_word == "favorites":
+                task = asyncio.create_task(
+                    _handle_favorites(client=client, channel_id=channel_id, user_id=user_id)
+                )
+                _background_tasks.add(task)
+                task.add_done_callback(_background_tasks.discard)
+                return
+
         # Default: treat as a query
         task = asyncio.create_task(
             _process_query(
@@ -140,6 +227,14 @@ def create_slack_app() -> Optional[AsyncApp]:
         channel_id = event.get("channel")
         user_id = event.get("user")
         thread_ts = event.get("thread_ts") or event.get("ts")
+
+        # Access control gate
+        if not await _check_user_allowed(client, user_id):
+            try:
+                await client.reactions_add(channel=channel_id, name="lock", timestamp=event["ts"])
+            except Exception:
+                pass
+            return
 
         # Strip the bot mention from the text
         # Mentions look like: <@U12345> query text
@@ -166,13 +261,239 @@ def create_slack_app() -> Optional[AsyncApp]:
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
+    # ------------------------------------------------------------------
+    # Button interactions: Star, Unstar, Run from /tako history
+    # ------------------------------------------------------------------
+
+    @app.action("tako_star_query")
+    async def handle_star_query(ack, action, client: AsyncWebClient, body):
+        """Star a query from the history list."""
+        await ack()
+        user_id = body["user"]["id"]
+        channel_id = body["channel"]["id"]
+
+        # Re-check access control (user may have been removed since buttons were shown)
+        if not await _check_user_allowed(client, user_id):
+            await client.chat_postEphemeral(
+                channel=channel_id, user=user_id,
+                text=":lock: You are no longer authorized to use Tako.",
+            )
+            return
+
+        try:
+            history_id = int(action["value"])
+        except (ValueError, TypeError):
+            return
+
+        db_ops = DatabaseOperations()
+        result = await db_ops.toggle_slack_query_favorite(history_id, user_id, is_favorite=True)
+        if result:
+            await client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=":star: Query starred! Use `/tako favorites` to see all starred queries.",
+            )
+        else:
+            await client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=":x: Could not star query \u2014 maximum 10 favorites reached, or query not found.",
+            )
+
+    @app.action("tako_unstar_query")
+    async def handle_unstar_query(ack, action, client: AsyncWebClient, body):
+        """Unstar a query from the history or favorites list."""
+        await ack()
+        user_id = body["user"]["id"]
+        channel_id = body["channel"]["id"]
+
+        if not await _check_user_allowed(client, user_id):
+            await client.chat_postEphemeral(
+                channel=channel_id, user=user_id,
+                text=":lock: You are no longer authorized to use Tako.",
+            )
+            return
+
+        try:
+            history_id = int(action["value"])
+        except (ValueError, TypeError):
+            return
+
+        db_ops = DatabaseOperations()
+        result = await db_ops.toggle_slack_query_favorite(history_id, user_id, is_favorite=False)
+        if result:
+            await client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=":white_check_mark: Query unstarred.",
+            )
+        else:
+            await client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=":x: Could not unstar query \u2014 query not found.",
+            )
+
+    @app.action("tako_run_query")
+    async def handle_run_query(ack, action, client: AsyncWebClient, body):
+        """Re-run a saved query by executing the stored script directly — skips the AI pipeline."""
+        await ack()
+        user_id = body["user"]["id"]
+        channel_id = body["channel"]["id"]
+
+        if not await _check_user_allowed(client, user_id):
+            await client.chat_postEphemeral(
+                channel=channel_id, user=user_id,
+                text=":lock: You are no longer authorized to use Tako.",
+            )
+            return
+
+        try:
+            history_id = int(action["value"])
+        except (ValueError, TypeError):
+            return
+
+        db_ops = DatabaseOperations()
+        item = await db_ops.get_slack_history_item(history_id, user_id)
+        if not item:
+            await client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=":x: Query not found.",
+            )
+            return
+        task = asyncio.create_task(
+            _replay_saved_script(
+                client=client,
+                channel_id=channel_id,
+                user_id=user_id,
+                query=item.query_text,
+                script_code=item.final_script,
+            )
+        )
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
     logger.info("Slack Bolt app created successfully")
     return app
+
+
+# Module-level cache so the same app instance is reused by socket mode
+_slack_app_instance: Optional[AsyncApp] = None
+
+
+def get_or_create_slack_app() -> Optional[AsyncApp]:
+    """Return the cached Slack app, creating it on first call."""
+    global _slack_app_instance
+    if _slack_app_instance is None:
+        _slack_app_instance = create_slack_app()
+    return _slack_app_instance
+
+
+async def start_socket_mode() -> None:
+    """
+    Start the Slack Socket Mode handler.
+
+    Creates an outbound WebSocket connection to Slack's servers — no public
+    URL required. Runs until the process exits.
+
+    Called from the FastAPI lifespan when SLACK_OPERATION_MODE=socket.
+    """
+    if settings.SLACK_OPERATION_MODE != "socket":
+        logger.warning("start_socket_mode() called but SLACK_OPERATION_MODE is not 'socket' — skipping")
+        return
+
+    app = get_or_create_slack_app()
+    if app is None:
+        logger.warning("Cannot start Socket Mode: Slack app could not be created")
+        return
+
+    app_token = settings.SLACK_APP_TOKEN
+    if not app_token or not app_token.startswith("xapp-"):
+        logger.error(
+            "SLACK_OPERATION_MODE=socket requires SLACK_APP_TOKEN (starts with xapp-). "
+            "Generate one at https://api.slack.com/apps → Socket Mode."
+        )
+        return
+
+    try:
+        from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+        handler = AsyncSocketModeHandler(app, app_token)
+        logger.info("Starting Slack Socket Mode (outbound WebSocket to Slack)")
+        await handler.start_async()
+    except ImportError:
+        logger.error(
+            "Failed to import AsyncSocketModeHandler. "
+            "Install with: pip install slack-bolt[async]"
+        )
+    except Exception as e:
+        logger.error(f"Slack Socket Mode error: {e}", exc_info=True)
 
 
 # ============================================================================
 # Query Processing
 # ============================================================================
+
+async def _replay_saved_script(
+    client: AsyncWebClient,
+    channel_id: str,
+    user_id: str,
+    query: str,
+    script_code: str,
+):
+    """
+    Execute a saved script directly — no AI orchestration. Used by the ▶ Run
+    button in /tako history and /tako favorites.
+
+    Skips discovery, planning and code-generation phases entirely.
+    """
+    correlation_id = str(uuid.uuid4())
+    set_correlation_id(correlation_id)
+    logger.info(f"[{correlation_id}] Replaying saved script for user {user_id}: {query}")
+
+    initial_response = await client.chat_postMessage(
+        channel=channel_id,
+        text=f":arrows_counterclockwise: Running saved query...\n> {query}",
+    )
+    message_ts = initial_response["ts"]
+
+    slack_handler = SlackEventHandler(
+        slack_client=client,
+        channel_id=channel_id,
+        thread_ts=message_ts,
+        correlation_id=correlation_id,
+    )
+    slack_handler._progress_message_ts = message_ts
+
+    try:
+        # Security validation on the stored script before execution
+        validation_result = validate_generated_code(script_code)
+        if not validation_result.is_valid:
+            violations = ", ".join(validation_result.violations)
+            await slack_handler.post_error(f"Security validation failed: {violations}")
+            return
+
+        # Execute the script directly — no OrchestratorResult metadata needed
+        # Build a minimal result object the same way orchestrator.py does
+        minimal_result = OrchestratorResult()
+        minimal_result.success = True
+        minimal_result.script_code = script_code
+        script_results = await _execute_script_for_slack(
+            correlation_id, script_code, minimal_result
+        )
+
+        if script_results:
+            await slack_handler.post_final_results(query, script_results)
+            await slack_handler.post_script(script_code)
+        else:
+            await slack_handler.post_error(
+                "Script execution failed. The saved script may reference data that has changed. "
+                "Try running the query fresh with `/tako <query>`."
+            )
+    except Exception as e:
+        logger.error(f"[{correlation_id}] Error replaying saved script: {e}", exc_info=True)
+        await slack_handler.post_error("An internal error occurred. Please try again.")
+
 
 async def _process_query(
     client: AsyncWebClient,
@@ -287,7 +608,7 @@ async def _process_query(
                 "display_type": result.display_type or "markdown",
                 "content": result.script_code,
             })
-            await _save_history(correlation_id, query, "", user_id)
+            await _save_history(correlation_id, query, "", user_id, channel_id=channel_id, thread_ts=message_thread_ts)
             return
 
         # No script generated
@@ -314,7 +635,8 @@ async def _process_query(
             await slack_handler.post_final_results(query, script_results)
             await slack_handler.post_script(result.script_code)
             await _save_history(
-                correlation_id, query, result.script_code, user_id
+                correlation_id, query, result.script_code, user_id,
+                channel_id=channel_id, thread_ts=message_thread_ts
             )
         else:
             await slack_handler.post_error("Script execution failed. Check logs for details.")
@@ -406,6 +728,58 @@ async def _handle_status(
             channel=channel_id,
             user=user_id,
             text=":x: Failed to retrieve status. Check server logs.",
+        )
+
+
+async def _handle_history(
+    client: AsyncWebClient,
+    channel_id: str,
+    user_id: str,
+):
+    """Handle /tako history \u2014 show last 5 queries with Run & Star buttons."""
+    try:
+        db_ops = DatabaseOperations()
+        items = await db_ops.get_slack_query_history(slack_user_id=user_id, limit=5)
+        blocks = format_history_message(items, title="Recent Queries (last 5)")
+        await client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text="Tako AI \u2014 History",
+            blocks=blocks,
+        )
+    except Exception as e:
+        logger.error(f"Error handling /tako history: {e}", exc_info=True)
+        await client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=":x: Failed to retrieve history. Check server logs.",
+        )
+
+
+async def _handle_favorites(
+    client: AsyncWebClient,
+    channel_id: str,
+    user_id: str,
+):
+    """Handle /tako favorites \u2014 show starred queries with Run & Unstar buttons."""
+    try:
+        db_ops = DatabaseOperations()
+        items = await db_ops.get_slack_query_history(
+            slack_user_id=user_id, limit=10, favorites_only=True
+        )
+        blocks = format_history_message(items, title="Favorite Queries")
+        await client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text="Tako AI \u2014 Favorites",
+            blocks=blocks,
+        )
+    except Exception as e:
+        logger.error(f"Error handling /tako favorites: {e}", exc_info=True)
+        await client.chat_postEphemeral(
+            channel=channel_id,
+            user=user_id,
+            text=":x: Failed to retrieve favorites. Check server logs.",
         )
 
 
@@ -558,12 +932,20 @@ async def _execute_script_for_slack(
     """
     import shutil
 
+    script_path = None
     try:
         project_root = Path(__file__).parent.parent.parent.parent
         temp_dir = project_root / "generated_scripts"
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         script_path = temp_dir / f"slack_execution_{correlation_id}.py"
+
+        # Security check — prevent path traversal
+        import os
+        normalized_script = os.path.normpath(str(script_path))
+        normalized_temp = os.path.normpath(str(temp_dir))
+        if not normalized_script.startswith(normalized_temp + os.sep):
+            raise ValueError("Invalid script path - potential path traversal")
 
         # Copy API client helper if needed
         if "base_okta_api_client" in script_code or "OktaAPIClient" in script_code:
@@ -649,6 +1031,14 @@ async def _execute_script_for_slack(
     except Exception as e:
         logger.error(f"[{correlation_id}] Script execution error: {e}", exc_info=True)
         return None
+    finally:
+        # Clean up temp script — it's already uploaded to Slack thread by post_script()
+        try:
+            if script_path and script_path.exists():
+                script_path.unlink()
+                logger.debug(f"[{correlation_id}] Cleaned up temp script: {script_path}")
+        except Exception:
+            pass
 
 
 def _parse_script_output(stdout: str) -> Optional[Dict[str, Any]]:
@@ -692,6 +1082,8 @@ async def _save_history(
     query: str,
     script_code: str,
     user_id: str,
+    channel_id: str = "",
+    thread_ts: str = "",
 ):
     """Save query to history database."""
     try:
@@ -703,6 +1095,10 @@ async def _save_history(
             query_text=query,
             final_script=script_code,
             results_summary=summary,
+            source="slack",
+            slack_user_id=user_id,
+            slack_channel_id=channel_id,
+            slack_thread_ts=thread_ts,
         )
         logger.info(f"[{correlation_id}] Slack query history saved")
     except Exception as e:

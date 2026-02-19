@@ -25,9 +25,9 @@ def mount_slack_routes(router_instance: APIRouter):
     """
     try:
         from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
-        from src.integrations.slack.slack_app import create_slack_app
+        from src.integrations.slack.slack_app import get_or_create_slack_app
 
-        slack_app = create_slack_app()
+        slack_app = get_or_create_slack_app()
         if slack_app is None:
             logger.warning("Slack app creation returned None - bot disabled")
             return

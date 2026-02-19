@@ -252,6 +252,8 @@ def format_help_message() -> List[Dict[str, Any]]:
                     "`/tako <query>` — Ask anything about your Okta data\n"
                     "`/tako sync` — Sync Okta data to the local database\n"
                     "`/tako status` — Check database health & last sync time\n"
+                    "`/tako history` — Your last 5 queries with Run & Star buttons\n"
+                    "`/tako favorites` — Your starred queries with Run button\n"
                     "`/tako help` — Show this help message\n\n"
                     "_Examples:_\n"
                     "• `/tako list all active users`\n"
@@ -261,6 +263,65 @@ def format_help_message() -> List[Dict[str, Any]]:
             }
         }
     ]
+
+
+def format_history_message(
+    items: list,
+    title: str = "Recent Queries",
+) -> List[Dict[str, Any]]:
+    """
+    Format query history items as Slack Block Kit blocks.
+
+    Each item gets a ▶ Run button (primary) and a ☆/★ Star/Unstar button.
+    Sent as ephemeral so only the requesting user sees the results.
+    """
+    blocks: List[Dict[str, Any]] = [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f":scroll: *{title}*"},
+        }
+    ]
+
+    if not items:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "_No queries found._"},
+        })
+        return blocks
+
+    for item in items:
+        star_label = "★ Unstar" if item.is_favorite else "☆ Star"
+        star_action = "tako_unstar_query" if item.is_favorite else "tako_star_query"
+        query_preview = _truncate(item.query_text, 120)
+
+        blocks.append({"type": "divider"})
+        blocks.append({
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"{'★ ' if item.is_favorite else ''}_{query_preview}_",
+            },
+        })
+        blocks.append({
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "▶ Run", "emoji": True},
+                    "style": "primary",
+                    "action_id": "tako_run_query",
+                    "value": str(item.id),
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": star_label, "emoji": True},
+                    "action_id": star_action,
+                    "value": str(item.id),
+                },
+            ],
+        })
+
+    return blocks[:MAX_BLOCKS]
 
 
 def results_to_csv_string(results: List[Dict[str, Any]], headers: list) -> str:
