@@ -105,10 +105,27 @@ async def lifespan(app: FastAPI):
     
     # Modern Execution Manager handles process lifecycle automatically
     #logger.info("Using Modern Execution Manager - no background cleanup needed")
+
+    # Start Slack Socket Mode if SLACK_OPERATION_MODE=socket (outbound WebSocket — no public URL needed)
+    _socket_task = None
+    if os.environ.get("ENABLE_SLACK_BOT", "false").lower() == "true":
+        slack_mode = os.environ.get("SLACK_OPERATION_MODE", "socket").lower()
+        if slack_mode == "socket":
+            try:
+                from src.integrations.slack.slack_app import start_socket_mode
+                _socket_task = asyncio.create_task(start_socket_mode())
+                logger.info("Slack Socket Mode task started (SLACK_OPERATION_MODE=socket)")
+            except Exception as e:
+                logger.warning(f"Failed to start Slack Socket Mode: {e}")
+        else:
+            logger.info("Slack running in HTTP mode (SLACK_OPERATION_MODE=http) — ensure server has a public URL")
     
     yield
     
     # Shutdown code
+    if _socket_task and not _socket_task.done():
+        _socket_task.cancel()
+        logger.info("Slack Socket Mode task cancelled")
     logger.info("Shutting down Okta AI Agent API")
 
 # Create FastAPI app with lifespan manager
@@ -141,6 +158,16 @@ app.include_router(auth.router)
 app.include_router(sync.router, prefix="/api")
 app.include_router(react_stream.router, prefix="/api")  # ReAct agent streaming
 app.include_router(history.router, prefix="/api")  # Query history and favorites
+
+# Conditionally mount Slack bot routes
+if os.environ.get("ENABLE_SLACK_BOT", "false").lower() == "true":
+    try:
+        from src.api.routers.slack import router as slack_router, mount_slack_routes
+        mount_slack_routes(slack_router)
+        app.include_router(slack_router)
+        logger.info("Slack bot routes enabled")
+    except Exception as e:
+        logger.warning(f"Failed to enable Slack bot: {e}")
 
 # Mount static files
 app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")

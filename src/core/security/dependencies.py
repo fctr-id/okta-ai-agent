@@ -84,6 +84,7 @@ async def get_current_user(
     
     return user
 
+
 async def get_current_active_admin(
     current_user: AuthUser = Depends(get_current_user),
 ) -> AuthUser:

@@ -47,6 +47,7 @@ COPY src/config /app/src/config
 COPY src/core /app/src/core
 COPY src/data /app/src/data
 COPY src/utils /app/src/utils
+COPY src/integrations /app/src/integrations
 
 # Copy scripts directory for CLI tools
 COPY scripts /app/scripts

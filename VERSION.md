@@ -1,5 +1,23 @@
 # Version History
 
+## v2.2.0-beta - "Channel Surfer"
+
+**Release Date**: February 19, 2026
+
+**New Features:**
+- **Slack Bot Integration**: Query Okta directly from Slack using `/tako` commands with Socket Mode — no public URL or inbound ports required
+- **Deny-by-Default Access Control**: Only explicitly allowlisted users can invoke Tako from Slack — no accidental access
+- **Interactive Query History in Slack**: Re-run any of your last 10 queries directly from the Slack interface
+- **Per-Action Re-authentication**: Every Slack action re-validates against the allowlist for defense-in-depth security
+
+**Setup:**
+- [Slack Bot Setup & Testing Guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide)
+
+**Contributors:**
+- Huge thanks to [@LcTrKiD](https://github.com/LcTrKiD) for the original Slack bot contribution that made this release possible.
+
+---
+
 ## v2.1.0-beta - "Terminal Velocity"
 
 **Release Date**: February 9, 2026

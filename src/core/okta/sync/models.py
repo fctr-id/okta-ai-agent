@@ -480,7 +480,7 @@ class AuthUser(Base):
 class QueryHistory(Base):
     """Table to store rolling history of queries and their results"""
     __tablename__ = "query_history"
-    
+
     id = Column(Integer, primary_key=True, autoincrement=True)
     tenant_id = Column(String, nullable=False, index=True)
     user_id = Column(String(255), nullable=False, index=True)  # Future-proof for SSO/multi-user
@@ -490,15 +490,22 @@ class QueryHistory(Base):
     is_favorite = Column(Boolean, default=False, index=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
     last_run_at = Column(DateTime(timezone=True), default=get_utc_now, index=True)
-    
+
     # Execution metrics
     execution_count = Column(Integer, default=1, nullable=False)
-    
+
+    # Query source tracking
+    source = Column(String(20), default="web", nullable=False)  # "web", "cli", or "slack"
+    slack_user_id = Column(String(255), nullable=True)
+    slack_channel_id = Column(String(255), nullable=True)
+    slack_thread_ts = Column(String(255), nullable=True)
+
     __table_args__ = (
         Index('idx_query_history_tenant_fav', 'tenant_id', 'is_favorite'),
         Index('idx_query_history_last_run', 'last_run_at'),
         # Composite index for UPSERT duplicate detection per-user by query text only
         Index('idx_query_upsert', 'tenant_id', 'user_id', 'query_text'),
+        Index('idx_query_history_source', 'source'),
     )
 
     def __repr__(self):

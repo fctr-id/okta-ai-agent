@@ -10,7 +10,7 @@ Key features:
 """
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, and_, not_, or_, update, func, text, delete
+from sqlalchemy import select, and_, not_, or_, update, func, text, delete, desc
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
@@ -140,6 +140,24 @@ class DatabaseOperations:
                         await conn.execute(text("ALTER TABLE query_history ADD COLUMN user_id VARCHAR(255) NOT NULL DEFAULT 'localadmin'"))
                         # Create index for user_id
                         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_query_history_user_id ON query_history(user_id)"))
+                    
+                    # Slack integration columns (added in PR #17)
+                    if 'source' not in columns:
+                        logger.info("Migrating query_history: adding source column")
+                        await conn.execute(text("ALTER TABLE query_history ADD COLUMN source VARCHAR(20) NOT NULL DEFAULT 'web'"))
+                        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_query_history_source ON query_history(source)"))
+                    
+                    if 'slack_user_id' not in columns:
+                        logger.info("Migrating query_history: adding slack_user_id column")
+                        await conn.execute(text("ALTER TABLE query_history ADD COLUMN slack_user_id VARCHAR(255)"))
+                    
+                    if 'slack_channel_id' not in columns:
+                        logger.info("Migrating query_history: adding slack_channel_id column")
+                        await conn.execute(text("ALTER TABLE query_history ADD COLUMN slack_channel_id VARCHAR(255)"))
+                    
+                    if 'slack_thread_ts' not in columns:
+                        logger.info("Migrating query_history: adding slack_thread_ts column")
+                        await conn.execute(text("ALTER TABLE query_history ADD COLUMN slack_thread_ts VARCHAR(255)"))
                 
                 DatabaseOperations._initialized = True
             
@@ -826,7 +844,11 @@ class DatabaseOperations:
         user_id: str,
         query_text: str,
         final_script: str,
-        results_summary: str = ""
+        results_summary: str = "",
+        source: str = "web",
+        slack_user_id: Optional[str] = None,
+        slack_channel_id: Optional[str] = None,
+        slack_thread_ts: Optional[str] = None,
     ) -> Optional[QueryHistory]:
         """
         Save a successful query execution to history with rolling 15-entry limit per user.
@@ -868,7 +890,14 @@ class DatabaseOperations:
                     existing.last_run_at = datetime.now(timezone.utc)
                     existing.results_summary = results_summary
                     existing.execution_count = existing.execution_count + 1  # Increment counter
-                    
+                    existing.source = source
+                    if slack_user_id:
+                        existing.slack_user_id = slack_user_id
+                    if slack_channel_id:
+                        existing.slack_channel_id = slack_channel_id
+                    if slack_thread_ts:
+                        existing.slack_thread_ts = slack_thread_ts
+
                     # If NOT favorited, update the script with new one
                     # If favorited, preserve the starred script
                     if not existing.is_favorite:
@@ -920,7 +949,11 @@ class DatabaseOperations:
                     final_script=final_script,
                     results_summary=results_summary,
                     is_favorite=False,
-                    last_run_at=datetime.now(timezone.utc)
+                    last_run_at=datetime.now(timezone.utc),
+                    source=source,
+                    slack_user_id=slack_user_id,
+                    slack_channel_id=slack_channel_id,
+                    slack_thread_ts=slack_thread_ts,
                 )
                 
                 session.add(new_history)
@@ -932,9 +965,98 @@ class DatabaseOperations:
         except Exception as e:
             logger.error(f"Failed to save query history: {e}", exc_info=True)
             return None
-            
-            
-            
-                
-            
-            
+
+    async def get_slack_query_history(
+        self,
+        slack_user_id: str,
+        limit: int = 5,
+        favorites_only: bool = False,
+    ) -> List[QueryHistory]:
+        """Get recent query history for a Slack user."""
+        try:
+            async with self.get_session() as session:
+                db_user_id = f"slack:{slack_user_id}"
+                conditions = [
+                    QueryHistory.tenant_id == settings.tenant_id,
+                    QueryHistory.user_id == db_user_id,
+                ]
+                if favorites_only:
+                    conditions.append(QueryHistory.is_favorite == True)
+                stmt = (
+                    select(QueryHistory)
+                    .where(and_(*conditions))
+                    .order_by(desc(QueryHistory.last_run_at))
+                    .limit(limit)
+                )
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+        except Exception as e:
+            logger.error(f"Failed to get Slack query history for {slack_user_id}: {e}")
+            return []
+
+    async def get_slack_history_item(
+        self,
+        history_id: int,
+        slack_user_id: str,
+    ) -> Optional[QueryHistory]:
+        """Fetch a single history item owned by a Slack user."""
+        try:
+            async with self.get_session() as session:
+                db_user_id = f"slack:{slack_user_id}"
+                stmt = select(QueryHistory).where(
+                    and_(
+                        QueryHistory.id == history_id,
+                        QueryHistory.tenant_id == settings.tenant_id,
+                        QueryHistory.user_id == db_user_id,
+                    )
+                )
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Failed to get Slack history item {history_id}: {e}")
+            return None
+
+    async def toggle_slack_query_favorite(
+        self,
+        history_id: int,
+        slack_user_id: str,
+        is_favorite: bool,
+    ) -> Optional[QueryHistory]:
+        """Toggle favorite status for a history item owned by a Slack user."""
+        try:
+            async with self.get_session() as session:
+                db_user_id = f"slack:{slack_user_id}"
+
+                if is_favorite:
+                    # Enforce max 10 favorites per user
+                    count_stmt = select(func.count(QueryHistory.id)).where(
+                        and_(
+                            QueryHistory.tenant_id == settings.tenant_id,
+                            QueryHistory.user_id == db_user_id,
+                            QueryHistory.is_favorite == True,
+                        )
+                    )
+                    count_result = await session.execute(count_stmt)
+                    if (count_result.scalar() or 0) >= 10:
+                        logger.warning(f"Slack user {slack_user_id} hit 10-favorite limit")
+                        return None
+
+                stmt = select(QueryHistory).where(
+                    and_(
+                        QueryHistory.id == history_id,
+                        QueryHistory.tenant_id == settings.tenant_id,
+                        QueryHistory.user_id == db_user_id,
+                    )
+                )
+                result = await session.execute(stmt)
+                item = result.scalar_one_or_none()
+                if not item:
+                    return None
+
+                item.is_favorite = is_favorite
+                await session.commit()
+                await session.refresh(item)
+                return item
+        except Exception as e:
+            logger.error(f"Failed to toggle favorite for history {history_id}: {e}")
+            return None

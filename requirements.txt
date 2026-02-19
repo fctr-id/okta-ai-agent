@@ -1,6 +1,6 @@
 # Core dependencies
-pydantic~=2.11.7
-pydantic-ai-slim[openai,anthropic,google,bedrock]~=1.56.0
+pydantic~=2.12.0
+pydantic-ai-slim[openai,anthropic,google,bedrock]~=1.62.0
 # Note: pydantic-ai-slim 1.17.0 requires openai>=1.107.2
 python-dotenv~=1.1.1
 okta~=2.9.13
@@ -19,3 +19,7 @@ python-multipart~=0.0.20
 #polars~=1.31.0
 #polars-lts-cpu~=1.32.2
 authlib~=1.6.3
+
+# Slack Bot Integration (optional, needed if ENABLE_SLACK_BOT=true)
+slack-bolt[async]~=1.27.0
+slack-sdk~=3.40.1
