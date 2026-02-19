@@ -15,20 +15,21 @@
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
   <br/>
   
-  <h1>Tako AI Agent for Okta (v2.1-beta)</h1>
+  <h1>Tako AI Agent for Okta (v2.2-beta)</h1>
   
   <p><a href="VERSION.md">📋 Changelog →</a></p>
+
+  <br/>
+
+  <a href="https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide">
+    <img src="https://img.shields.io/badge/%F0%9F%92%AC%20NEW%20in%20v2.2-Slack%20Bot%20Integration-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="New: Slack Bot Integration" />
+  </a>
+
 </div>
 
 ## What is Tako?
 
 The world's first Autonomous AI Engineer for Okta. Built on the ReAct (Reason and Act) pattern, Tako doesn't just answer questions—it thinks, writes code, and self-heals errors in real-time to deliver deterministic, production-ready results.
-
-### New in v2.10: Multi-Agent Architecture
-
-Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, API, Synthesis) that collaborate by sharing only validated results, cutting AI costs by 50-70% and reducing hallucinations. Your experience stays the same as prior version.
-
-> ⚠️ **BREAKING CHANGE:** v2.0 requires deleting existing SQLite database and resyncing.
 
 ---
 
@@ -36,15 +37,15 @@ Tako v2.0 replaces the single ReAct agent with specialized agents (Router, SQL, 
 
 - 🗣️ **Natural Language Queries** - Ask questions in plain English, get instant results
 - 🤖 **Multi-Agent Committee** - Specialized agents working in concert for accurate results
+- 💬 **Slack Bot Integration** - Query Okta from any Slack channel via `/tako`. Opt-in — disabled by default. ([Setup guide →](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide))
 - 📜 **Query History & Favorites** - Access last 10 queries and save favorites for quick reuse
 - 🔧 **CLI Tools for Automation** - Enables unattended runs, cron jobs, and script generation
 - 📊 **Script & CSV Export** - Generate portable Python scripts and export results
-- ⚡ 10x faster sync - Optimized API → DB sync operations with parallel processing
 - 🛡️ Multi-layer security - Security validation at every code generation point
 - 🐳 Easy deployment - Docker support for AMD64 and ARM64 platforms
 
 > **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected. 
-### See Tako in Action
+### See Tako in Action (click image below)
 
 [![Tako AI Agent Demo](https://img.youtube.com/vi/TCzJEAvLYpM/0.jpg)](https://www.youtube.com/watch?v=TCzJEAvLYpM)
 
@@ -240,6 +241,42 @@ docker compose logs -f
 https://localhost:8001
 ```
 
+## 💬 Slack Bot Integration
+
+Tako v2.2 brings your Okta AI agent directly into Slack. Query your entire Okta tenant in plain English from any channel — no context switching, no extra tabs.
+
+> **Opt-in feature** — disabled by default. Set `ENABLE_SLACK_BOT=true` in your `.env` to activate.
+
+### Available Commands
+
+```
+/tako [question]   → ask anything about your Okta tenant in plain English
+/tako sync         → trigger a full Okta data sync
+/tako status       → check database health and last sync time
+/tako history      → your last 5 queries with ▶ Run and ☆ Star buttons
+/tako favorites    → your starred queries, always one click away
+/tako help         → full command reference
+```
+
+**Example queries:**
+```
+/tako list active users in Engineering with no MFA enrolled
+/tako which apps use SAML and have more than 100 assigned users?
+/tako show contractors who haven't logged in for 60 days
+```
+
+### Security Highlights
+
+- **Deny-by-default** — bot is completely locked down on install. Nobody gets access until you explicitly allowlist them via `SLACK_ALLOWED_EMAILS` or `SLACK_ALLOWED_GROUPS`
+- **Socket Mode** — opens an outbound WebSocket to Slack, no public URL or port-forwarding required
+- **Per-action re-auth** — access is re-checked on every button click, not just the initial slash command
+
+### Setup
+
+📖 [Slack Bot Setup & Testing Guide →](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide)
+
+---
+
 ## 🔄 Migration from v1.x
 
 **v2.0.0 includes complete architecture rewrite and schema changes that require database recreation:**
@@ -377,6 +414,7 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 ### Documentation
 - 📖 [Installation Guide](https://github.com/fctr-id/okta-ai-agent/wiki/Installation)
 - 🔐 [Authentication Setup](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens)
+- 💬 [Slack Bot Setup Guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide)
 - 🔍 [Supported API Endpoints](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints)
 - 📋 [Version History](VERSION.md)
 
