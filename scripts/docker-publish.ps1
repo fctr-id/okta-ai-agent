@@ -60,7 +60,7 @@ if ($latestTag) {
 
 # Build multi-architecture images using buildx
 if ($latestTag) {
-    docker buildx build --pull --rm `
+    docker buildx build --pull --rm --no-cache `
         --platform linux/amd64,linux/arm64 `
         --build-arg APP_VERSION=$Version `
         --file "../Dockerfile" `
@@ -69,7 +69,7 @@ if ($latestTag) {
         --push `
         $contextPath
 } else {
-    docker buildx build --pull --rm `
+    docker buildx build --pull --rm --no-cache `
         --platform linux/amd64,linux/arm64 `
         --build-arg APP_VERSION=$Version `
         --file "../Dockerfile" `
