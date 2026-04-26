@@ -166,6 +166,9 @@ class OrchestratorResult:
         self.error: Optional[str] = None
         self.is_special_tool: bool = False  # Flag to skip validation for special tools
         self.no_data_found: bool = False  # Flag when discovery succeeds but finds no data (0 artifacts)
+        self.special_tool_data: Optional[Dict[str, Any]] = None
+        self.special_tool_operation: Optional[str] = None
+        self.special_tool_response_mode: Optional[str] = None
         
         # Phase results
         self.router_decision: Optional[RouterDecision] = None
@@ -262,12 +265,12 @@ async def execute_multi_agent_query(
     
     Workflow:
     0. Route query using Router Agent (LLM classification)
-    1. Execute based on router decision:
-       - SQL: Run SQL Discovery only
-       - API: Run API Discovery only
-       - SQL+API: Run both (SQL then API)
-       - SPECIAL: Return error (not yet implemented)
-       - NOT_RELEVANT: Return error
+     1. Execute based on router control decision:
+         - delegate + SQL: Start in SQL Discovery
+         - delegate + API: Start in API Discovery
+         - delegate + SPECIAL: Run special tool handling
+         - clarify: Return a clarification message
+         - fail: Return an error message
     2. Run Synthesis Agent (always, for any data workflow)
     3. Return final script
     
@@ -333,15 +336,21 @@ async def execute_multi_agent_query(
             result.total_tokens += router_usage.total_tokens
             result.total_requests += router_usage.requests
         
-        phase = result.router_decision.phase
+        decision_mode = result.router_decision.mode
+        phase = result.router_decision.target
         reasoning = result.router_decision.reasoning
         
-        logger.info(f"Router decision: {phase}")
+        logger.info(f"Router decision mode: {decision_mode}")
+        logger.info(f"Router decision target: {phase}")
         logger.info(f"Router reasoning: {reasoning}")
         
         # Handle special cases
-        if phase == "NOT_RELEVANT":
-            result.error = "NOT-OKTA-RELATED"
+        if decision_mode == "fail":
+            result.error = result.router_decision.user_message or "NOT-OKTA-RELATED"
+            return result
+
+        if decision_mode == "clarify":
+            result.error = result.router_decision.user_message or "Clarification required before routing"
             return result
         
         if phase == "SPECIAL":
@@ -356,22 +365,26 @@ async def execute_multi_agent_query(
                 "timestamp": time.time()
             })
             
-            success, result_text, display_type, error = await handle_special_query(
+            special_result = await handle_special_query(
                 user_query=user_query,
                 okta_client=okta_client,
                 correlation_id=correlation_id,
                 progress_callback=aggregator.progress
             )
-            
-            if success:
+
+            result.special_tool_data = special_result.raw_result
+            result.special_tool_operation = special_result.tool_operation
+            result.special_tool_response_mode = special_result.response_mode
+
+            if special_result.success:
                 # Special tools return pre-formatted results
                 result.success = True
-                result.script_code = result_text  # The llm_summary text
-                result.display_type = display_type or "markdown"
+                result.script_code = special_result.response_text
+                result.display_type = special_result.display_type or "markdown"
                 result.is_special_tool = True  # Flag to skip validation
                 logger.info(f"Special tool execution successful")
             else:
-                result.error = error or "Special tool execution failed"
+                result.error = special_result.error or "Special tool execution failed"
                 logger.error(f"Special tool failed: {result.error}")
             
             return result
@@ -462,7 +475,7 @@ async def execute_multi_agent_query(
                     # Hard stop - notify frontend and return
                     await aggregator.step_end({
                         "title": "Execution Stopped",
-                        "text": f"❌ {error_msg}",
+                        "text": f"Error: {error_msg}",
                         "timestamp": time.time()
                     })
                     result.error = error_msg
@@ -586,7 +599,7 @@ async def execute_multi_agent_query(
                     if "limit exceeded" in error_msg.lower():
                         await aggregator.step_end({
                             "title": "Execution Stopped",
-                            "text": f"❌ {error_msg}",
+                            "text": f"Error: {error_msg}",
                             "timestamp": time.time()
                         })
                         result.error = error_msg
@@ -680,7 +693,7 @@ async def execute_multi_agent_query(
                     if "limit exceeded" in error_msg.lower():
                         await aggregator.step_end({
                             "title": "Execution Stopped",
-                            "text": f"❌ {error_msg}",
+                            "text": f"Error: {error_msg}",
                             "timestamp": time.time()
                         })
                         result.error = error_msg
@@ -707,7 +720,7 @@ async def execute_multi_agent_query(
         if iteration_count >= max_iterations:
             logger.warning(f"Discovery loop hit maximum iterations ({max_iterations})")
             await aggregator.progress({
-                "message": f"⚠️ Reached maximum discovery phases ({max_iterations}), proceeding with available data"
+                "message": f"Reached maximum discovery phases ({max_iterations}), proceeding with available data"
             })
         
         # ====================================================================
@@ -730,7 +743,7 @@ async def execute_multi_agent_query(
             
             await aggregator.step_end({
                 "title": "Discovery Failed",
-                "text": f"❌ {error_msg}",
+                "text": f"Error: {error_msg}",
                 "timestamp": time.time()
             })
             
@@ -822,7 +835,7 @@ async def execute_multi_agent_query(
         if result.total_tokens > 0:
             avg_per_call = result.total_input_tokens / result.total_requests if result.total_requests > 0 else 0
             logger.info(
-                f"[{correlation_id}] 📊 TOTAL Token Usage: "
+                f"[{correlation_id}] TOTAL Token Usage: "
                 f"{result.total_input_tokens:,} input, {result.total_output_tokens:,} output, "
                 f"{result.total_tokens:,} total (across {result.total_requests} API calls, "
                 f"avg {avg_per_call:,.0f} input/call)"
@@ -836,7 +849,7 @@ async def execute_multi_agent_query(
         # Notify frontend of cancellation
         await aggregator.step_end({
             "title": "Workflow Cancelled",
-            "text": "❌ Execution cancelled by user",
+            "text": "Execution cancelled by user",
             "timestamp": time.time()
         })
         return result
@@ -849,7 +862,7 @@ async def execute_multi_agent_query(
         # Notify frontend with proper error format
         await aggregator.step_end({
             "title": "Execution Stopped",
-            "text": f"❌ {error_msg}",
+            "text": f"Error: {error_msg}",
             "timestamp": time.time()
         })
         return result
@@ -860,7 +873,7 @@ async def execute_multi_agent_query(
         # Notify frontend of unexpected error
         await aggregator.step_end({
             "title": "Unexpected Error",
-            "text": f"❌ An error occurred: {str(e)}",
+            "text": f"Error: {str(e)}",
             "timestamp": time.time()
         })
         return result

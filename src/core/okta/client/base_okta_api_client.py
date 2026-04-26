@@ -473,7 +473,7 @@ class OktaAPIClient:
                 params = {}
             params['limit'] = 3
             max_results = 3
-            self.logger.info(f"🧪 TEST MODE: Enforcing limit=3 for {endpoint}")
+            self.logger.info(f"TEST MODE: Enforcing limit=3 for {endpoint}")
         
         # Emit structured progress events - only for max_results limit
         if max_results:

@@ -11,6 +11,7 @@ import json
 import argparse
 import csv
 import shutil
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
@@ -194,14 +195,30 @@ async def execute_generated_script(script_code: str, date_str: str, query: str) 
         return None
 
 
+def clean_cli_text(value: Any) -> str:
+    """Remove emoji and other non-ASCII display glyphs from CLI output."""
+    if value is None:
+        return ""
+
+    text = str(value)
+    text = re.sub(r'[\U0001F300-\U0001F9FF\u2600-\u26FF\u2700-\u27BF]', '', text)
+    text = text.encode('ascii', errors='ignore').decode('ascii')
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
 async def event_callback(event_type: str, event_data: Dict[str, Any]):
     """Handle events from the orchestrator"""
     if event_type == "step_start":
-        print(f"{Colors.OKBLUE}[{event_data.get('title', 'Step')}] {event_data.get('text', '')}{Colors.ENDC}")
+        title = clean_cli_text(event_data.get('title', 'Step')) or 'Step'
+        text = clean_cli_text(event_data.get('text', ''))
+        print(f"{Colors.OKBLUE}[{title}] {text}{Colors.ENDC}")
     elif event_type == "progress":
-        print(f"  {Colors.OKCYAN}â†ª {event_data.get('message', '')}{Colors.ENDC}")
+        message = clean_cli_text(event_data.get('message', ''))
+        print(f"  {Colors.OKCYAN}-> {message}{Colors.ENDC}")
     elif event_type == "tool_call":
-        print(f"  {Colors.OKGREEN}ðŸ›  Using tool: {event_data.get('tool_name')}{Colors.ENDC}")
+        tool_name = clean_cli_text(event_data.get('tool_name') or event_data.get('name') or 'unknown_tool')
+        print(f"  {Colors.OKGREEN}Using tool: {tool_name}{Colors.ENDC}")
 
 async def run_query(query: str, script_only: bool = False):
     """Execute a single query through the orchestrator"""
@@ -242,11 +259,21 @@ async def run_query(query: str, script_only: bool = False):
         print(f"\n{Colors.FAIL}Error: {result.error}{Colors.ENDC}")
         return
 
+    if result.no_data_found:
+        print(f"\n{Colors.WARNING}No results found.{Colors.ENDC}")
+        print("Your query completed successfully, but no matching data was found.")
+        return
+
     # Handle special tools (summaries, modifications, etc.)
     if result.is_special_tool:
         print(f"\n{Colors.BOLD}Result:{Colors.ENDC}\n")
         print(result.script_code)  # Contains the summary/result
         logger.info(f"Special tool result returned for query: {query}")
+        return
+
+    if not result.script_code:
+        print(f"\n{Colors.FAIL}Error: No executable script was generated for this query.{Colors.ENDC}")
+        logger.error(f"No script generated for query: {query}")
         return
 
     # Script-only mode: save script to file

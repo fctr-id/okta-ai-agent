@@ -10,7 +10,7 @@ Input: All artifacts from previous phases
 Output: SynthesisResult with script code
 """
 
-from pydantic_ai import Agent, RunContext, FunctionToolset
+from pydantic_ai import RunContext, FunctionToolset, ModelRetry, UsageLimits
 from pydantic import BaseModel
 from typing import Optional, Callable, Awaitable
 from dataclasses import dataclass, field
@@ -24,8 +24,14 @@ from src.core.agents.agent_callbacks import (
     notify_step_start_to_user,
     notify_step_end_to_user
 )
+from src.core.agents import build_agent
+from src.core.models.model_picker import ModelType
 
 logger = get_logger("okta_ai_agent")
+
+SYNTHESIS_USAGE_LIMITS = UsageLimits(
+    request_limit=4,
+)
 
 # ============================================================================
 # Output Models
@@ -71,24 +77,40 @@ except FileNotFoundError:
 Read artifacts, generate production code using OktaAPIClient patterns."""
 
 
-# Model selection
-try:
-    from src.core.models.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.CODING)
-except ImportError:
-    import os
-    model = os.getenv('LLM_MODEL', 'openai:gpt-4o-mini')
-
-
 # Create agent (NO TOOLS - synthesis doesn't need progress reporting during generation)
 # Progress is reported by OktaAPIClient when the generated script EXECUTES
-synthesis_agent = Agent(
-    model,
+synthesis_agent = build_agent(
+    ModelType.CODING,
+    name="synthesis_agent",
     instructions=BASE_SYSTEM_PROMPT,
     output_type=SynthesisResult,
     deps_type=SynthesisDeps,
-    retries=0
 )
+
+
+@synthesis_agent.output_validator
+def validate_synthesis_output(result: SynthesisResult) -> SynthesisResult:
+    """Ensure synthesis returns executable code for success cases and honest failures otherwise."""
+    script_code = (result.script_code or "").strip()
+
+    if result.success:
+        if result.error:
+            raise ModelRetry("Successful synthesis output cannot include an error")
+        if not script_code:
+            raise ModelRetry("Successful synthesis output must include executable script_code")
+        if "```" in script_code:
+            raise ModelRetry("Synthesis output must return raw Python code without markdown fences")
+        if result.display_type not in {"table", "markdown"}:
+            raise ModelRetry("display_type must be 'table' or 'markdown'")
+        return result
+
+    if not result.error:
+        raise ModelRetry("Failed synthesis output must include an error message")
+
+    if script_code:
+        raise ModelRetry("Failed synthesis output cannot include script_code")
+
+    return result
 
 
 # ============================================================================
@@ -212,7 +234,11 @@ db_path = next((p for p in possible_paths if p.exists()), None)
             logger.info(f"CLI mode active - injected portability instructions")
         
         # Run agent
-        result = await synthesis_agent.run(context, deps=deps)
+        result = await synthesis_agent.run(
+            context,
+            deps=deps,
+            usage_limits=SYNTHESIS_USAGE_LIMITS,
+        )
         
         logger.info(f"[{deps.correlation_id}] Synthesis complete: success={result.output.success}")
         
@@ -226,21 +252,21 @@ db_path = next((p for p in possible_paths if p.exists()), None)
             script_length = len(result.output.script_code)
             script_lines = result.output.script_code.split('\n')
             total_lines = len(script_lines)
-            logger.info(f"[{deps.correlation_id}] ✅ SYNTHESIS COMPLETE: Generated final production code ({script_length} chars, {total_lines} lines)")
+            logger.info(f"[{deps.correlation_id}] SYNTHESIS COMPLETE: Generated final production code ({script_length} chars, {total_lines} lines)")
             
             # Log script preview (first 10 and last 10 lines)
             if total_lines > 20:
                 preview_lines = script_lines[:10] + ['...'] + script_lines[-10:]
-                logger.debug(f"[{deps.correlation_id}] 📝 Script preview:\n" + '\n'.join(preview_lines))
+                logger.debug(f"[{deps.correlation_id}] Script preview:\n" + '\n'.join(preview_lines))
             else:
-                logger.debug(f"[{deps.correlation_id}] 📝 Complete script:\n{result.output.script_code}")
+                logger.debug(f"[{deps.correlation_id}] Complete script:\n{result.output.script_code}")
         
         # Log token usage
         if result.usage():
             usage = result.usage()
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
-                f"[{deps.correlation_id}] 📊 Synthesis Agent Token Usage: "
+                f"[{deps.correlation_id}] Synthesis Agent Token Usage: "
                 f"{usage.input_tokens:,} input, {usage.output_tokens:,} output, "
                 f"{usage.total_tokens:,} total (across {usage.requests} API calls, "
                 f"avg {avg_per_call:,.0f} input/call)"

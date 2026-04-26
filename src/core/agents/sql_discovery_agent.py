@@ -10,7 +10,7 @@ Responsibilities:
 Output: SQLDiscoveryResult with found_data, needs_api, reasoning
 """
 
-from pydantic_ai import Agent, RunContext, FunctionToolset, ToolReturn
+from pydantic_ai import RunContext, FunctionToolset, ModelRetry, ToolReturn, UsageLimits
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Any, Dict
 from dataclasses import dataclass
@@ -22,8 +22,15 @@ import asyncio
 
 from src.utils.logging import get_logger
 from src.core.security.sql_security_validator import validate_user_sql
+from src.core.agents import DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS, build_agent
+from src.core.models.model_picker import ModelType
 
 logger = get_logger("okta_ai_agent")
+
+SQL_USAGE_LIMITS = UsageLimits(
+    request_limit=10,
+    tool_calls_limit=8,
+)
 
 # ============================================================================
 # Output Models
@@ -142,23 +149,46 @@ except FileNotFoundError:
 Generate queries to find data in the database, test them, and report findings."""
 
 
-# Model selection (use coding model)
-try:
-    from src.core.models.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.CODING)
-except ImportError:
-    import os
-    model = os.getenv('LLM_MODEL', 'openai:gpt-4o-mini')
-
-
 # Create agent
-sql_discovery_agent = Agent(
-    model,
+sql_discovery_agent = build_agent(
+    ModelType.CODING,
+    name="sql_discovery_agent",
     instructions=BASE_SYSTEM_PROMPT,
     output_type=SQLDiscoveryResult,
     deps_type=SQLDiscoveryDeps,
-    retries=0
 )
+
+
+@sql_discovery_agent.output_validator
+def validate_sql_discovery_output(
+    ctx: RunContext[SQLDiscoveryDeps],
+    result: SQLDiscoveryResult,
+) -> SQLDiscoveryResult:
+    """Reject contradictory outputs and require saved artifacts for successful discovery."""
+    artifacts = getattr(ctx.deps, "artifacts", []) or []
+
+    if result.needs_api == []:
+        result.needs_api = None
+
+    if result.success:
+        if result.error:
+            raise ModelRetry("Successful SQL discovery output cannot include an error")
+        if not artifacts:
+            raise ModelRetry(
+                "Successful SQL discovery must save at least one artifact with save_artifact before finishing"
+            )
+        return result
+
+    if not result.error:
+        raise ModelRetry("Failed SQL discovery output must include an error message")
+
+    if result.found_data:
+        raise ModelRetry("Failed SQL discovery output cannot claim found_data")
+
+    if result.needs_api:
+        raise ModelRetry("Failed SQL discovery output cannot request API handoff")
+
+    return result
 
 
 # ============================================================================
@@ -342,7 +372,7 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         
         # Log the generated SQL query
         sql_query = code.strip()
-        logger.info(f"[{deps.correlation_id}] 📝 Generated SQL:\n{sql_query}")
+        logger.info(f"[{deps.correlation_id}] Generated SQL:\n{sql_query}")
         
         # Security validation
         is_valid, error_msg = validate_user_sql(sql_query, deps.correlation_id)
@@ -494,9 +524,19 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         )
     
     # Register tools
-    toolset.tool(get_sql_context)
-    toolset.tool(execute_test_query)
-    toolset.tool(save_artifact)
+    toolset.add_function(
+        get_sql_context,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
+    toolset.add_function(
+        execute_test_query,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
+    toolset.add_function(
+        save_artifact,
+        retries=1,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
     
     return toolset
 
@@ -590,7 +630,8 @@ Entities Found via API:
         result = await sql_discovery_agent.run(
             full_prompt,
             deps=deps,
-            toolsets=[toolset]
+            toolsets=[toolset],
+            usage_limits=SQL_USAGE_LIMITS,
         )
         
         logger.info(f"[{deps.correlation_id}] SQL discovery complete: found={result.output.found_data}, needs_api={result.output.needs_api}")
@@ -607,7 +648,7 @@ Entities Found via API:
             usage = result.usage()
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
-                f"[{deps.correlation_id}] 📊 SQL Agent Token Usage: "
+                f"[{deps.correlation_id}] SQL Agent Token Usage: "
                 f"{usage.input_tokens:,} input, {usage.output_tokens:,} output, "
                 f"{usage.total_tokens:,} total (across {usage.requests} API calls, "
                 f"avg {avg_per_call:,.0f} input/call)"
