@@ -27,7 +27,7 @@ import time
 import uuid
 import shutil
 from pathlib import Path
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator, Optional
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, status
@@ -41,6 +41,13 @@ from src.core.okta.sync.models import AuthUser, QueryHistory
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.agents.orchestrator import execute_multi_agent_query, OrchestratorResult
 from src.core.okta.client import OktaClient
+from src.data.schemas.runtime_storage import (
+    RuntimeTurnPaths,
+    create_runtime_turn_paths,
+    prepare_runtime_script_code,
+    update_turn_metadata,
+    write_turn_summary,
+)
 
 # Track background tasks to prevent memory leaks
 background_tasks: set = set()
@@ -69,12 +76,14 @@ active_processes: Dict[str, Any] = {}
 class QueryRequest(BaseModel):
     """Request body for ReAct query"""
     query: str
+    session_id: Optional[str] = None
 
 
 class ScriptExecuteRequest(BaseModel):
     """Request body for direct script execution"""
     query: str
     script_code: str
+    session_id: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
@@ -95,7 +104,7 @@ class CancelRequest(BaseModel):
 def _write_temp_script(process_id: str, code: str) -> str:
     """Write code to temporary Python file"""
     project_root = Path(__file__).parent.parent.parent.parent
-    temp_dir = project_root / "generated_scripts"
+    temp_dir = (project_root / "generated_scripts").resolve()
     temp_dir.mkdir(parents=True, exist_ok=True)
     
     script_path = temp_dir / f"react_execution_{process_id}.py"
@@ -120,11 +129,7 @@ def _write_temp_script(process_id: str, code: str) -> str:
     else:
         logger.debug(f"[{process_id}] Script is SQL-only, skipping API client copy")
     
-    # Modify code to use local import
-    modified_code = code.replace(
-        "from src.core.okta.client.base_okta_api_client import OktaAPIClient",
-        "from base_okta_api_client import OktaAPIClient"
-    )
+    modified_code = prepare_runtime_script_code(code)
     
     # Write script directly without repr() to avoid escaping quotes
     with open(normalized_script, "w", encoding="utf-8", newline='\n') as f:
@@ -134,15 +139,19 @@ def _write_temp_script(process_id: str, code: str) -> str:
     return normalized_script
 
 
-async def _execute_script(process_id: str, script_path: str, check_cancelled: callable, orchestrator_result: 'OrchestratorResult' = None) -> AsyncGenerator[Dict[str, Any], None]:
+async def _execute_script(
+    process_id: str,
+    script_path: str,
+    check_cancelled: callable,
+    orchestrator_result: 'OrchestratorResult' = None,
+) -> AsyncGenerator[Dict[str, Any], None]:
     """Execute script and stream results"""
     # Get Python executable
     venv_python = Path("venv/Scripts/python.exe")
     python_exe = str(venv_python) if venv_python.exists() else "python"
     
-    script_path_obj = Path(script_path)
-    script_dir = script_path_obj.parent
-    script_filename = script_path_obj.name
+    project_root = Path(__file__).parent.parent.parent.parent
+    script_path_obj = Path(script_path).resolve()
     
     # Create subprocess
     # COMMENTED: Reduces log noise during script execution
@@ -151,10 +160,10 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
     proc = await asyncio.create_subprocess_exec(
         python_exe,
         "-u",
-        script_filename,
+        str(script_path_obj),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=str(script_dir),
+        cwd=str(project_root),
         limit=1024*1024
     )
     # logger.debug(f"[{process_id}] Subprocess created with PID: {proc.pid}")
@@ -295,6 +304,11 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
         # Ensure process is terminated
         if proc.returncode is None:
             proc.kill()
+        try:
+            if script_path_obj.exists():
+                script_path_obj.unlink()
+        except Exception:
+            logger.debug(f"[{process_id}] Failed to clean up temp script: {script_path_obj}")
 
 
 def _parse_script_output(stdout: str) -> Dict[str, Any]:
@@ -376,6 +390,7 @@ async def start_react_process(
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
+            "session_id": request.session_id or correlation_id,
             "user_id": current_user.username,
             "created_at": time.time(),
             "cancelled": False
@@ -417,6 +432,7 @@ async def execute_script_directly(
             "status": "initializing",
             "query": request.query,
             "script_code": request.script_code,  # Pre-generated script
+            "session_id": request.session_id or correlation_id,
             "user_id": current_user.username,
             "created_at": time.time(),
             "cancelled": False,
@@ -472,6 +488,7 @@ async def stream_react_updates(
     async def event_generator() -> AsyncGenerator[str, None]:
         """Generate SSE events from Multi-Agent Orchestrator execution"""
         artifacts_file = None
+        runtime_paths = None
         okta_client = None
         orchestrator_task = None
         stream_started = False  # Track if stream actually started
@@ -481,8 +498,15 @@ async def stream_react_updates(
             process["status"] = "executing"
             stream_started = True  # Mark that we successfully started streaming
             
-            # Create artifacts file
-            artifacts_file = await _create_artifacts_file(process_id)
+            # Create session/turn runtime folder and artifacts file
+            runtime_paths = await _create_runtime_turn_paths(process_id, process)
+            process["runtime_paths"] = runtime_paths
+            artifacts_file = runtime_paths.artifacts_file
+            update_turn_metadata(
+                runtime_paths,
+                status="executing",
+                user_query=process["query"],
+            )
             
             # Create Okta client
             okta_client = OktaClient()
@@ -622,6 +646,14 @@ async def stream_react_updates(
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
+                write_turn_summary(runtime_paths, {
+                    "status": "completed",
+                    "user_query": process["query"],
+                    "final_response_summary": "No matching data was found.",
+                    "display_type": "markdown",
+                    "artifact_file": artifacts_file.as_posix(),
+                })
+                update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
                 process["status"] = "completed"
                 return
             
@@ -633,6 +665,7 @@ async def stream_react_updates(
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"
                 logger.error(f"[{process_id}] Multi-agent orchestrator failed: {result.error}")
+                update_turn_metadata(runtime_paths, status="error", error=result.error, completed_at=time.time())
                 process["status"] = "error"
                 return
             
@@ -681,6 +714,15 @@ async def stream_react_updates(
                     "is_special_tool": True
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
+                write_turn_summary(runtime_paths, {
+                    "status": "completed",
+                    "user_query": process["query"],
+                    "final_response_summary": result.script_code or "Special tool result",
+                    "display_type": result.display_type or "markdown",
+                    "artifact_file": artifacts_file.as_posix(),
+                    "is_special_tool": True,
+                })
+                update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
                 
                 # CRITICAL: Save history BEFORE DONE
                 # Shield from cancellation
@@ -727,6 +769,12 @@ async def stream_react_updates(
                 yield f"data: {json.dumps(error_event)}\n\n"
                 
                 process["status"] = "error"
+                update_turn_metadata(
+                    runtime_paths,
+                    status="error",
+                    error=error_event["error"],
+                    completed_at=time.time(),
+                )
                 
                 # Send DONE event to close stream
                 done_event = {
@@ -768,6 +816,12 @@ async def stream_react_updates(
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"
+                update_turn_metadata(
+                    runtime_paths,
+                    status="error",
+                    error=error_event["error"],
+                    completed_at=time.time(),
+                )
                 process["status"] = "error"
                 return
             
@@ -833,6 +887,21 @@ async def stream_react_updates(
                 "timestamp": time.time()
             }
             yield f"data: {json.dumps(execution_success)}\n\n"
+            write_turn_summary(runtime_paths, {
+                "status": "completed",
+                "user_query": process["query"],
+                "final_response_summary": "Script executed successfully",
+                "display_type": final_execution_event.get("display_type") if final_execution_event else result.display_type,
+                "result_count": final_execution_event.get("count") if final_execution_event else None,
+                "artifact_file": artifacts_file.as_posix(),
+                "token_usage": {
+                    "input_tokens": result.total_input_tokens,
+                    "output_tokens": result.total_output_tokens,
+                    "total_tokens": result.total_tokens,
+                    "requests": result.total_requests,
+                },
+            })
+            update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
             
             logger.info(f"[{process_id}] Phase 3 complete: Script executed successfully")
             
@@ -899,6 +968,8 @@ async def stream_react_updates(
             
         except asyncio.CancelledError:
             logger.info(f"[{process_id}] Process cancelled by user")
+            if runtime_paths:
+                update_turn_metadata(runtime_paths, status="cancelled", completed_at=time.time())
             error_data = {
                 "type": "ERROR",
                 "error": "Process cancelled by user",
@@ -909,6 +980,8 @@ async def stream_react_updates(
         except Exception as e:
             logger.error(f"[{process_id}] Stream error: {e}", exc_info=True)
             process["status"] = "error"
+            if runtime_paths:
+                update_turn_metadata(runtime_paths, status="error", error=str(e), completed_at=time.time())
             
             error_data = {
                 "type": "ERROR",
@@ -1004,34 +1077,21 @@ async def cancel_react_process(
 # Helper Functions
 # ============================================================================
 
-async def _create_artifacts_file(correlation_id: str) -> Path:
-    """
-    Create artifacts file for multi-agent orchestrator.
-    
-    Returns path to artifacts file.
-    """
-    # Validate correlation_id is a valid UUID to prevent path traversal attacks
+async def _create_runtime_turn_paths(correlation_id: str, process: Dict[str, Any]) -> RuntimeTurnPaths:
+    """Create runtime session/turn folders for one web request."""
     try:
         uuid.UUID(correlation_id, version=4)
     except ValueError as exc:
         raise ValueError(f"Invalid correlation_id format; expected UUID v4, got: {correlation_id}") from exc
-    
-    artifacts_dir = Path("logs").resolve()
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    artifacts_file = (artifacts_dir / f"artifacts_{correlation_id}.json").resolve()
-    
-    # Ensure the resolved artifacts_file is contained within the logs directory
-    try:
-        artifacts_file.relative_to(artifacts_dir)
-    except ValueError as exc:
-        raise ValueError(f"Unsafe artifacts file path derived from correlation_id: {correlation_id}") from exc
-    
-    # Initialize empty artifacts file as flat array
-    with open(artifacts_file, 'w', encoding='utf-8') as f:
-        json.dump([], f)
-    
-    logger.info(f"[{correlation_id}] Created artifacts file: {artifacts_file}")
-    return artifacts_file
+
+    runtime_paths = create_runtime_turn_paths(
+        user_id=process.get("user_id", "localadmin"),
+        session_id=process.get("session_id") or correlation_id,
+        run_id=correlation_id,
+    )
+    logger.info(f"[{correlation_id}] Created runtime turn folder: {runtime_paths.turn_dir}")
+    logger.info(f"[{correlation_id}] Created artifacts file: {runtime_paths.artifacts_file}")
+    return runtime_paths
 
 
 # ============================================================================

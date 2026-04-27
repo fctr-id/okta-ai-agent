@@ -28,6 +28,12 @@ from src.core.agents.orchestrator import (
 from src.core.okta.client import OktaClient
 from src.core.okta.sync.operations import DatabaseOperations
 from src.api.routers.sync import run_sync_operation
+from src.data.schemas.runtime_storage import (
+    create_runtime_turn_paths,
+    prepare_runtime_script_code,
+    update_turn_metadata,
+    write_turn_summary,
+)
 from src.integrations.slack.event_handler import SlackEventHandler
 from src.integrations.slack.formatters import (
     format_error_message,
@@ -542,12 +548,19 @@ async def _process_query(
                 ),
             )
 
-        # Create artifacts file (same pattern as react_stream.py)
-        artifacts_dir = Path("logs").resolve()
-        artifacts_dir.mkdir(parents=True, exist_ok=True)
-        artifacts_file = artifacts_dir / f"artifacts_{correlation_id}.json"
-        with open(artifacts_file, "w", encoding="utf-8") as f:
-            json.dump([], f)
+        runtime_paths = create_runtime_turn_paths(
+            user_id=f"slack-{user_id}",
+            session_id=message_thread_ts,
+            run_id=correlation_id,
+        )
+        artifacts_file = runtime_paths.artifacts_file
+        update_turn_metadata(
+            runtime_paths,
+            status="executing",
+            user_query=query,
+            channel_id=channel_id,
+            thread_ts=message_thread_ts,
+        )
 
         # Create Okta client
         okta_client = OktaClient()
@@ -589,6 +602,7 @@ async def _process_query(
                 )
 
             await slack_handler.post_error(error_msg)
+            update_turn_metadata(runtime_paths, status="error", error=error_msg, completed_at=time.time())
             return
 
         # Handle no data found
@@ -600,6 +614,14 @@ async def _process_query(
                 "display_type": "markdown",
                 "content": no_data_content,
             })
+            write_turn_summary(runtime_paths, {
+                "status": "completed",
+                "user_query": query,
+                "final_response_summary": no_data_content,
+                "display_type": "markdown",
+                "artifact_file": artifacts_file.as_posix(),
+            })
+            update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
             return
 
         # Handle special tools (summaries, modifications)
@@ -608,6 +630,15 @@ async def _process_query(
                 "display_type": result.display_type or "markdown",
                 "content": result.script_code,
             })
+            write_turn_summary(runtime_paths, {
+                "status": "completed",
+                "user_query": query,
+                "final_response_summary": result.script_code or "Special tool result",
+                "display_type": result.display_type or "markdown",
+                "artifact_file": artifacts_file.as_posix(),
+                "is_special_tool": True,
+            })
+            update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
             await _save_history(correlation_id, query, "", user_id, channel_id=channel_id, thread_ts=message_thread_ts)
             return
 
@@ -617,6 +648,7 @@ async def _process_query(
                 "Synthesis agent completed but failed to generate executable code. "
                 "Please try rephrasing your query."
             )
+            update_turn_metadata(runtime_paths, status="error", error="No script generated", completed_at=time.time())
             return
 
         # Validate generated code
@@ -624,6 +656,7 @@ async def _process_query(
         if not validation_result.is_valid:
             violations = ", ".join(validation_result.violations)
             await slack_handler.post_error(f"Security validation failed: {violations}")
+            update_turn_metadata(runtime_paths, status="error", error=f"Security validation failed: {violations}", completed_at=time.time())
             return
 
         # Execute the generated script
@@ -638,8 +671,24 @@ async def _process_query(
                 correlation_id, query, result.script_code, user_id,
                 channel_id=channel_id, thread_ts=message_thread_ts
             )
+            write_turn_summary(runtime_paths, {
+                "status": "completed",
+                "user_query": query,
+                "final_response_summary": "Script executed successfully",
+                "display_type": script_results.get("display_type"),
+                "result_count": script_results.get("count"),
+                "artifact_file": artifacts_file.as_posix(),
+                "token_usage": {
+                    "input_tokens": result.total_input_tokens,
+                    "output_tokens": result.total_output_tokens,
+                    "total_tokens": result.total_tokens,
+                    "requests": result.total_requests,
+                },
+            })
+            update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
         else:
             await slack_handler.post_error("Script execution failed. Check logs for details.")
+            update_turn_metadata(runtime_paths, status="error", error="Script execution failed", completed_at=time.time())
 
     except Exception as e:
         logger.error(f"[{correlation_id}] Slack query processing error: {e}", exc_info=True)
@@ -935,7 +984,7 @@ async def _execute_script_for_slack(
     script_path = None
     try:
         project_root = Path(__file__).parent.parent.parent.parent
-        temp_dir = project_root / "generated_scripts"
+        temp_dir = (project_root / "generated_scripts").resolve()
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         script_path = temp_dir / f"slack_execution_{correlation_id}.py"
@@ -956,11 +1005,7 @@ async def _execute_script_for_slack(
             if api_client_source.exists():
                 shutil.copy2(api_client_source, api_client_dest)
 
-        # Rewrite imports for standalone execution
-        modified_code = script_code.replace(
-            "from src.core.okta.client.base_okta_api_client import OktaAPIClient",
-            "from base_okta_api_client import OktaAPIClient",
-        )
+        modified_code = prepare_runtime_script_code(script_code)
 
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(modified_code)
@@ -972,23 +1017,24 @@ async def _execute_script_for_slack(
         proc = await asyncio.create_subprocess_exec(
             python_exe,
             "-u",
-            script_path.name,
+            str(script_path.resolve()),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(temp_dir),
+            cwd=str(project_root),
             limit=1024 * 1024,
         )
 
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(), timeout=120
         )
+        stdout_str = stdout_bytes.decode("utf-8", errors="replace")
+        stderr_str = stderr_bytes.decode("utf-8", errors="replace")
 
         if proc.returncode != 0:
-            error_msg = stderr_bytes.decode("utf-8", errors="replace")[-500:]
+            error_msg = stderr_str[-500:]
             logger.error(f"[{correlation_id}] Slack script execution failed: {error_msg}")
             return None
 
-        stdout_str = stdout_bytes.decode("utf-8", errors="replace")
         results_data = _parse_script_output(stdout_str)
 
         if not results_data:
@@ -1032,7 +1078,7 @@ async def _execute_script_for_slack(
         logger.error(f"[{correlation_id}] Script execution error: {e}", exc_info=True)
         return None
     finally:
-        # Clean up temp script — it's already uploaded to Slack thread by post_script()
+        # Generated scripts are execution staging, not durable conversation memory.
         try:
             if script_path and script_path.exists():
                 script_path.unlink()
