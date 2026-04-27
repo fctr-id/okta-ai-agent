@@ -12,6 +12,7 @@ from src.utils.logging import get_logger
 from src.core.agents import build_agent
 from src.core.tools.special_tools import discover_special_tools, get_special_tool_endpoints
 from src.core.models.model_picker import ModelType
+from src.data.schemas.artifact_manifest import DelegationResult
 
 logger = get_logger("okta_ai_agent")
 
@@ -37,6 +38,7 @@ class SpecialToolResult(BaseModel):
     response_text: Optional[str] = None
     display_type: Literal["markdown", "table"] = "markdown"
     response_mode: Literal["direct", "synthesis_ready"] = "direct"
+    delegation_result: Optional[DelegationResult] = None
     error: Optional[str] = None
 
 
@@ -151,6 +153,36 @@ def find_special_tool(tool_operation: str) -> Tuple[Optional[str], Optional[Dict
                 return tool_data["module_name"], tool_data
 
     return None, None
+
+
+def build_special_tool_delegation_result(result: SpecialToolResult) -> DelegationResult:
+    """Map the special-tool result into the shared lightweight contract."""
+    if result.success:
+        return DelegationResult(
+            success=True,
+            source_specialist="special",
+            result_mode="direct_answer" if result.response_mode == "direct" else "synthesis_ready",
+            summary=result.response_text or "Special tool completed successfully.",
+            direct_answer=result.response_text if result.response_mode == "direct" else None,
+            metadata={
+                "tool_operation": result.tool_operation,
+                "tool_name": result.tool_name,
+                "parameters": result.parameters,
+            },
+        )
+
+    return DelegationResult(
+        success=False,
+        source_specialist="special",
+        result_mode="failed",
+        summary=result.error or "Special tool failed.",
+        error=result.error,
+        metadata={
+            "tool_operation": result.tool_operation,
+            "tool_name": result.tool_name,
+            "parameters": result.parameters,
+        },
+    )
 
 
 async def extract_tool_parameters(
@@ -339,10 +371,12 @@ async def handle_special_query(
         )
         
         if error or not tool_operation:
-            return SpecialToolResult(
+            special_result = SpecialToolResult(
                 success=False,
                 error=error or "Failed to identify special tool",
             )
+            special_result.delegation_result = build_special_tool_delegation_result(special_result)
+            return special_result
         
         # Step 2: Execute the tool
         special_result = await execute_special_tool(
@@ -358,12 +392,16 @@ async def handle_special_query(
         else:
             logger.error(f"Special tool execution failed: {special_result.error}")
 
+        special_result.delegation_result = build_special_tool_delegation_result(special_result)
+
         return special_result
             
     except Exception as e:
         error_msg = f"Exception in special tools handler: {str(e)}"
         logger.error(f"{error_msg}", exc_info=True)
-        return SpecialToolResult(
+        special_result = SpecialToolResult(
             success=False,
             error=error_msg,
         )
+        special_result.delegation_result = build_special_tool_delegation_result(special_result)
+        return special_result

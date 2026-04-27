@@ -24,6 +24,7 @@ from src.utils.logging import get_logger
 from src.core.security.sql_security_validator import validate_user_sql
 from src.core.agents import DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS, build_agent
 from src.core.models.model_picker import ModelType
+from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 
 logger = get_logger("okta_ai_agent")
 
@@ -105,30 +106,84 @@ def get_sqlite_schema_description() -> str:
     return get_okta_database_schema()
 
 
+def find_sqlite_db_path() -> Optional[Path]:
+    """Return the first available Okta SQLite database path."""
+    for db_path in (
+        Path("sqlite_db/okta_sync.db"),
+        Path("okta_sync.db"),
+        Path("../sqlite_db/okta_sync.db"),
+        Path("/app/sqlite_db/okta_sync.db"),
+    ):
+        if db_path.exists():
+            return db_path
+    return None
+
+
+def get_last_sync_timestamp() -> Optional[str]:
+    """Get the last successful sync timestamp from the SQL database."""
+    try:
+        db_path = find_sqlite_db_path()
+        if not db_path:
+            return None
+
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_history'")
+            if not cursor.fetchone():
+                return None
+
+            cursor.execute("""
+                SELECT end_time
+                FROM sync_history
+                WHERE success = 1 AND end_time IS NOT NULL
+                ORDER BY end_time DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return None
+
+            timestamp_str = row[0]
+            if "T" not in timestamp_str:
+                timestamp_str = timestamp_str.replace(" ", "T") + "Z"
+            return timestamp_str
+    except Exception as e:
+        logger.debug(f"Could not retrieve last sync timestamp: {e}")
+        return None
+
+
+def check_database_health() -> bool:
+    """Return True when the local SQL database is usable for discovery."""
+    try:
+        db_path = find_sqlite_db_path()
+        if not db_path:
+            logger.warning("Database file not found in any expected location - Skipping SQL phase")
+            return False
+
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cursor.fetchone():
+                logger.warning("Users table not found in database - Skipping SQL phase")
+                return False
+
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+            if user_count < 1:
+                logger.warning("Database has no users - Skipping SQL phase")
+                return False
+
+            logger.info(f"Database health check passed: Found {user_count} users")
+            return True
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e} - Skipping SQL phase")
+        return False
+
+
 async def dump_artifacts_to_file(artifacts_file: Path, artifacts: List[dict]):
     """Append artifacts to JSON file (not overwrite)"""
     try:
-        # Load existing artifacts
-        existing = []
-        if artifacts_file.exists():
-            try:
-                with open(artifacts_file, 'r', encoding='utf-8') as f:
-                    existing = json.load(f)
-                    # Handle case where file contains dict instead of list
-                    if isinstance(existing, dict):
-                        existing = [existing]
-                    elif not isinstance(existing, list):
-                        existing = []
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse existing artifacts, starting fresh")
-                existing = []
-        
-        # Append new artifacts
-        existing.extend(artifacts)
-        
-        # Save combined list
-        with open(artifacts_file, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, indent=2, default=str)
+        append_artifacts_with_result_sets(artifacts_file, artifacts, source_specialist="sql")
         logger.debug(f"Artifacts appended to {artifacts_file}")
     except Exception as e:
         logger.error(f"Failed to save artifacts: {e}")
@@ -399,12 +454,8 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
             import sqlite3
             from pathlib import Path
             
-            db_paths = [
-                Path("/app/sqlite_db/okta_sync.db"),
-                Path("sqlite_db/okta_sync.db")
-            ]
-            db_path = next((p for p in db_paths if p.exists()), None)
-            
+            db_path = find_sqlite_db_path()
+
             if not db_path:
                 return ToolReturn(
                     return_value="❌ Database not found",
@@ -513,7 +564,7 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
             artifact["sql_query"] = sql_query
         
         deps.artifacts.append(artifact)
-        await dump_artifacts_to_file(deps.artifacts_file, deps.artifacts)
+        await dump_artifacts_to_file(deps.artifacts_file, [artifact])
         
         logger.info(f"[{deps.correlation_id}] Saved artifact: {key} ({len(content)} chars)")
         
@@ -613,7 +664,7 @@ async def execute_sql_discovery(
 API Agent Analysis:
 {deps.api_reasoning}
 
-Entities Found via API:
+Compact API Artifact Context (manifests, result refs, tiny samples):
 ```json
 {deps.api_discovered_data}
 ```

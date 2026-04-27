@@ -31,6 +31,7 @@ from src.core.agents.agent_callbacks import (
 )
 from src.core.agents import DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS, build_agent
 from src.core.models.model_picker import ModelType
+from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 
 # Import schema function for database context
 from src.data.schemas.shared_schema import get_okta_database_schema
@@ -234,25 +235,7 @@ def prepare_api_tools(ctx: RunContext[APIDiscoveryDeps], tool_defs: list[Any]) -
 async def dump_artifacts_to_file(artifacts_file: Path, artifacts: List[dict]):
     """Append to existing artifacts file"""
     try:
-        # Load existing
-        if artifacts_file.exists():
-            with open(artifacts_file, 'r', encoding='utf-8') as f:
-                existing = json.load(f)
-                # Handle both list and dict formats (SQL agent might save dict)
-                if isinstance(existing, dict):
-                    existing = [existing]
-                elif not isinstance(existing, list):
-                    existing = []
-        else:
-            existing = []
-        
-        # Append new
-        existing.extend(artifacts)
-        
-        # Save (pretty-printed for human readability)
-        with open(artifacts_file, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, indent=2, default=str)
-        
+        append_artifacts_with_result_sets(artifacts_file, artifacts, source_specialist="api")
         logger.debug(f"Artifacts updated: {artifacts_file}")
     except Exception as e:
         logger.error(f"Failed to update artifacts: {e}")
@@ -599,16 +582,21 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             # LLM will explicitly call save_artifact() tool when results are validated
             # This allows LLM to test multiple times and only save final validated code+results
             
-            result_summary = f"API call successful, returned data"
+            empty_result = result == [] or result == {} or result is None
+            result_summary = "API call successful, returned no data" if empty_result else "API call successful, returned data"
             await notify_step_end(
                 f"API Test #{deps.api_tests_executed} Complete",
                 result_summary
             )
             
             return ToolReturn(
-                return_value=f"✅ API executed successfully",
+                return_value=(
+                    "✅ API executed successfully but returned no data"
+                    if empty_result else
+                    "✅ API executed successfully"
+                ),
                 content=json.dumps(result, separators=(',', ':'), default=str)[:4000],
-                metadata={'success': True}
+                metadata={'success': True, 'empty_result': empty_result}
             )
             
         except Exception as e:
@@ -823,14 +811,14 @@ async def execute_api_discovery(
 SQL Agent Analysis:
 {deps.sql_reasoning}
 
-Entities Found in Database (with IDs):
+Compact SQL Artifact Context (manifests, result refs, tiny samples):
 ```json
 {deps.sql_discovered_data}
 ```
 
 🚨 CRITICAL RULES:
 1. **ONLY fetch entities listed in YOUR SCOPE** - If it says ['roles'], fetch ONLY roles
-2. **EXTRACT IDs from JSON** - Check "okta_id" fields in the JSON above
+2. **USE RESULT REFS AND SAMPLES** - Check `result_set_refs`, `key_columns`, and sample `okta_id` fields in the JSON above
 3. **DO NOT search for anything in ALREADY FOUND list** - No /api/v1/users?q=..., no /api/v1/groups?q=...
 4. **USE path parameter endpoints** - Example: /api/v1/users/{{user_id}}/roles (not search endpoints)
 5. **One test per entity type** - If scope says ['roles'], make 1 test for roles, that's it

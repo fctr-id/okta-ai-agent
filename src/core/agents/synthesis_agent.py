@@ -11,11 +11,10 @@ Output: SynthesisResult with script code
 """
 
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, UsageLimits
-from pydantic import BaseModel
-from typing import Optional, Callable, Awaitable
+from pydantic import BaseModel, Field
+from typing import Optional, Callable, Awaitable, List
 from dataclasses import dataclass, field
 from pathlib import Path
-import json
 import time
 
 from src.utils.logging import get_logger
@@ -26,6 +25,7 @@ from src.core.agents.agent_callbacks import (
 )
 from src.core.agents import build_agent
 from src.core.models.model_picker import ModelType
+from src.data.schemas.artifact_manifest import build_artifact_prompt_context, load_artifacts_file
 
 logger = get_logger("okta_ai_agent")
 
@@ -42,6 +42,9 @@ class SynthesisResult(BaseModel):
     success: bool
     script_code: Optional[str] = None
     display_type: str = "table"  # "table" or "markdown"
+    summary: Optional[str] = None
+    artifact_keys: List[str] = Field(default_factory=list)
+    result_set_refs: List[str] = Field(default_factory=list)
     error: Optional[str] = None
 
 
@@ -173,16 +176,20 @@ async def execute_synthesis(
                 "timestamp": time.time()
             })
         
-        with open(deps.artifacts_file, 'r', encoding='utf-8') as f:
-            artifacts = json.load(f)
-        
+        artifacts = load_artifacts_file(deps.artifacts_file)
+        artifact_context = build_artifact_prompt_context(deps.artifacts_file)
+
         logger.info(f"[{deps.correlation_id}] Loaded {len(artifacts)} artifacts")
         
         # Build context for agent
         context = f"""Original Query: {user_query}
 
-Artifacts from Discovery Phases:
-{json.dumps(artifacts, indent=2, default=str)}
+    Artifact manifests and result-set pointers from discovery phases:
+    {artifact_context}
+
+    Use exact sql_query and api_code values from the artifact entries when generating code.
+    Use result_set_refs, result_set_inspection, and artifact_manifest for row counts, key columns, field names, and tiny samples.
+    Full row payloads stay off-context in result-set sidecar files.
 
 Generate the final production Python script using the artifacts above.
 Follow all patterns from synthesis_prompt.txt."""

@@ -80,6 +80,7 @@ You should strictly prefer **SQL (needs_sql)** for bulk entity searches (Users, 
 3. **Select** only 5-10 MOST RELEVANT event types from the returned array (categories have 20-50+ events)
 4. **Build filter**: Use selected event types in your `/api/v1/logs` filter query
 5. **Example**: For "users who logged in", from "user-authentication-session" (40+ events), pick only "user.session.start", "user.authentication.sso", "user.authentication.authenticate"
+6. **If the relevant filtered log query returns an empty array, STOP and report no matching data. Do NOT broaden to unfiltered `/api/v1/logs` or unrelated event types just to find any logs.**
 
 **Available Event Categories**: Common ones include:
 - `user-authentication-session`: Login/SSO/MFA events (40+ event types)
@@ -117,7 +118,7 @@ Test each endpoint ONCE. Only retry if there's an API ERROR (404/403/500), not e
 
 2.  Analyze results:
     -   **API Error** (404/403/500): Fix endpoint and retry ONCE
-    -   **Empty results** ([]): Valid outcome if SQL already has the data
+    -   **Empty results** ([]): If the user asked for that API-only/log data, stop and report no matching data. Do not save an empty artifact as successful data.
     -   **Success with data**: Proceed to save artifact
     -   *Common Error*: `'list' object has no attribute 'get'` -> Check if `data` is a list vs dict
     -   *Common Error*: `KeyError 'id'` -> Use `.get('id')` safely

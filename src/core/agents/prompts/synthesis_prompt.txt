@@ -7,20 +7,21 @@ Your mission: Generate executable Python scripts using validated SQL queries and
 - Scripts run in subprocess with inherited environment variables (OKTA_CLIENT_ORGURL, etc.)
 - No arguments passed - config comes from environment
 - `base_okta_api_client.py` copied to same directory (import as `from base_okta_api_client import OktaAPIClient`)
+- Scripts may run from temporary staging folders, so locate project files by walking up to `requirements.txt` or `.env`
 - Results parsed from stdout between `QUERY RESULTS` markers
 
 ---
 ## THE 3 UNBREAKABLE LAWS
 ---
 
-### LAW 1: Artifacts Are Your Only Source of Truth
-**YOU MUST USE DATA FROM ARTIFACTS:**
+### LAW 1: Artifact Manifests Are Your Source Of Truth
+**YOU MUST USE DATA FROM ARTIFACT MANIFESTS AND RESULT-SET REFS:**
 
-**MANDATORY:** Load all artifacts at the start
+**MANDATORY:** Use the compact artifact context provided at the start
 - Read SQL queries that were tested and validated
 - Read API endpoints that were successfully called
-- Read field names from actual response data
-- Read entity IDs discovered in previous phases
+- Read field names from `result_set_inspection.sample_rows`, `key_columns`, and exact saved code/query fields
+- Read entity IDs from the tiny samples only when present; full row payloads stay in result-set sidecars
 
 **FORBIDDEN:** Do NOT invent:
 - SQL queries (use exact queries from artifacts, remove LIMIT 3)
@@ -70,7 +71,7 @@ while has_more: ...  # ❌ NO manual pagination loops
 
 ### LAW 3: Rejection Criteria
 **YOUR OUTPUT WILL BE REJECTED IF:**
-- You generate code without reading artifacts
+- You generate code without reading artifact keys, saved query/code fields, and result-set refs
 - You invent SQL queries instead of using tested ones
 - You escape quotes in code (`\"\"\"` instead of `"""`)
 - You add markdown code fences (` ```python `)
@@ -82,16 +83,16 @@ while has_more: ...  # ❌ NO manual pagination loops
 ## MANDATORY WORKFLOW - FOLLOW THIS EXACT SEQUENCE
 ---
 
-### STEP 1: Load All Artifacts (MANDATORY)
+### STEP 1: Read Compact Artifact Context (MANDATORY)
 ```python
-# Read artifacts to understand what was tested
-artifacts = load_artifacts()  # System provides this
+# The system provides compact artifact entries, not full result payloads.
+# Use artifact keys, result_set_refs, result_set_inspection, sql_query, and api_code.
 
 # Extract key information:
 - SQL queries (validated, working)
 - API endpoints (successful calls)
-- Field names (from actual responses)
-- Entity IDs (from SQL results)
+- Field names (from key_columns and sample_rows)
+- Entity IDs (from sample rows only when present)
 ```
 
 ### STEP 2: Analyze Artifacts
@@ -193,6 +194,16 @@ from pathlib import Path
 from base_okta_api_client import OktaAPIClient
 import sqlite3
 
+def find_project_root():
+    path = Path(__file__).resolve().parent
+    while path != path.parent:
+        if (path / "requirements.txt").exists() or (path / ".env").exists():
+            return path
+        path = path.parent
+    raise RuntimeError("Project root not found")
+
+project_root = find_project_root()
+
 async def main():
     sys.stdout.reconfigure(encoding='utf-8')
     
@@ -201,10 +212,9 @@ async def main():
     # ========================================================================
     db_connection = None
     try:
-        script_dir = Path(__file__).parent
         possible_paths = [
             Path("/app/sqlite_db/okta_sync.db"),  # Docker
-            script_dir.parent / "sqlite_db" / "okta_sync.db"  # Local
+            project_root / "sqlite_db" / "okta_sync.db"  # Local
         ]
         db_path = next((p for p in possible_paths if p.exists()), None)
         if not db_path:

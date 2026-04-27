@@ -16,7 +16,6 @@ import asyncio
 import time
 import json
 import os
-import sqlite3
 
 from src.utils.logging import get_logger
 
@@ -25,7 +24,9 @@ from src.core.agents.router_agent import route_query, RouterDecision
 from src.core.agents.sql_discovery_agent import (
     execute_sql_discovery,
     SQLDiscoveryDeps,
-    SQLDiscoveryResult
+    SQLDiscoveryResult,
+    check_database_health,
+    get_last_sync_timestamp,
 )
 from src.core.agents.api_discovery_agent import (
     execute_api_discovery,
@@ -38,119 +39,10 @@ from src.core.agents.synthesis_agent import (
     SynthesisResult
 )
 from src.core.agents.special_tools_handler import handle_special_query
+from src.data.schemas.artifact_manifest import build_artifact_prompt_context, load_artifacts_file
+from src.data.schemas.runtime_storage import RUNTIME_ROOT
 
 logger = get_logger("okta_ai_agent")
-
-
-# ============================================================================
-# Database Health Check
-# ============================================================================
-
-def get_last_sync_timestamp() -> Optional[str]:
-    """
-    Get the last successful sync timestamp from the database.
-    Returns ISO 8601 timestamp string or None if unavailable.
-    """
-    try:
-        # Check multiple possible database locations
-        possible_paths = [
-            Path("sqlite_db/okta_sync.db"),
-            Path("okta_sync.db"),
-            Path("../sqlite_db/okta_sync.db")
-        ]
-        
-        db_path = None
-        for path in possible_paths:
-            if path.exists():
-                db_path = path
-                break
-        
-        if not db_path:
-            return None
-        
-        with sqlite3.connect(db_path, timeout=5) as conn:
-            cursor = conn.cursor()
-            
-            # Check if sync_history table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_history'")
-            if not cursor.fetchone():
-                return None
-            
-            # Get most recent SUCCESSFUL sync time
-            cursor.execute("""
-                SELECT end_time 
-                FROM sync_history 
-                WHERE success = 1 AND end_time IS NOT NULL 
-                ORDER BY end_time DESC 
-                LIMIT 1
-            """)
-            row = cursor.fetchone()
-            
-            if not row or not row[0]:
-                return None
-            
-            # Convert to ISO 8601 format for JavaScript Date parsing
-            # Database stores: '2026-01-22 14:51:57.424133'
-            # Return: '2026-01-22T14:51:57.424133Z' (assume UTC)
-            timestamp_str = row[0]
-            if 'T' not in timestamp_str:
-                # Replace space with T for ISO format
-                timestamp_str = timestamp_str.replace(' ', 'T') + 'Z'
-            
-            return timestamp_str
-            
-    except Exception as e:
-        logger.debug(f"Could not retrieve last sync timestamp: {e}")
-        return None
-
-
-def check_database_health() -> bool:
-    """
-    Check if database exists and has data.
-    Returns False if database is unavailable or empty (no users).
-    """
-    try:
-        # Check multiple possible database locations
-        possible_paths = [
-            Path("sqlite_db/okta_sync.db"),
-            Path("okta_sync.db"),
-            Path("../sqlite_db/okta_sync.db")
-        ]
-        
-        db_path = None
-        for path in possible_paths:
-            if path.exists():
-                db_path = path
-                break
-        
-        if not db_path:
-            logger.warning("Database file not found in any expected location - Skipping SQL phase")
-            return False
-        
-        # Check if database is accessible and has users
-        with sqlite3.connect(db_path, timeout=5) as conn:
-            cursor = conn.cursor()
-            
-            # Check if users table exists
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-            if not cursor.fetchone():
-                logger.warning("Users table not found in database - Skipping SQL phase")
-                return False
-            
-            # Check if users table has at least 1 record
-            cursor.execute("SELECT COUNT(*) FROM users")
-            user_count = cursor.fetchone()[0]
-            
-            if user_count < 1:
-                logger.warning("Database has no users - Skipping SQL phase")
-                return False
-            
-            logger.info(f"Database health check passed: Found {user_count} users")
-            return True
-            
-    except Exception as e:
-        logger.warning(f"Database health check failed: {e} - Skipping SQL phase")
-        return False
 
 
 # ============================================================================
@@ -169,6 +61,7 @@ class OrchestratorResult:
         self.special_tool_data: Optional[Dict[str, Any]] = None
         self.special_tool_operation: Optional[str] = None
         self.special_tool_response_mode: Optional[str] = None
+        self.delegation_results: List[Dict[str, Any]] = []
         
         # Phase results
         self.router_decision: Optional[RouterDecision] = None
@@ -188,6 +81,66 @@ class OrchestratorResult:
         self.total_output_tokens: int = 0
         self.total_tokens: int = 0
         self.total_requests: int = 0
+
+
+NO_DATA_FAILURE_HINTS = (
+    "no data",
+    "no matching data",
+    "no matching",
+    "no results",
+    "no result",
+    "no records",
+    "no events",
+    "0 results",
+    "0 records",
+    "0 items",
+    "zero results",
+    "zero records",
+    "could not find any",
+    "returned no data",
+    "returned no results",
+    "empty result",
+)
+
+HARD_FAILURE_HINTS = (
+    "limit exceeded",
+    "timeout",
+    "timed out",
+    "unauthorized",
+    "forbidden",
+    "permission",
+    "authentication failed",
+    "invalid token",
+    "security",
+    "syntax error",
+    "network error",
+    "connection error",
+    "rate limit",
+)
+
+
+def _is_no_data_discovery_failure(discovery_result: Any) -> bool:
+    """Return True when a failed specialist result really means no matching rows/events."""
+    if not discovery_result or getattr(discovery_result, "success", False):
+        return False
+    if getattr(discovery_result, "needs_sql", None) or getattr(discovery_result, "needs_api", None):
+        return False
+
+    message = " ".join(
+        str(value)
+        for value in (
+            getattr(discovery_result, "error", None),
+            getattr(discovery_result, "reasoning", None),
+        )
+        if value
+    ).lower()
+    if not message:
+        return False
+
+    if any(hint in message for hint in HARD_FAILURE_HINTS):
+        return False
+
+    return any(hint in message for hint in NO_DATA_FAILURE_HINTS)
 
 
 # ============================================================================
@@ -375,6 +328,8 @@ async def execute_multi_agent_query(
             result.special_tool_data = special_result.raw_result
             result.special_tool_operation = special_result.tool_operation
             result.special_tool_response_mode = special_result.response_mode
+            if special_result.delegation_result:
+                result.delegation_results.append(special_result.delegation_result.model_dump())
 
             if special_result.success:
                 # Special tools return pre-formatted results
@@ -393,10 +348,13 @@ async def execute_multi_agent_query(
         # Helper: Load artifacts from file (DRY principle)
         # ====================================================================
         def load_artifacts_by_category(category: str) -> Optional[str]:
-            """Load and combine artifacts of specified category"""
-            # Validate artifacts_file is within logs directory to prevent path traversal
+            """Load compact artifact context for a category without full payloads."""
+            # Validate artifacts_file is within a known runtime output directory.
             try:
-                artifacts_file.resolve().relative_to(Path("logs").resolve())
+                resolved_artifacts_file = artifacts_file.resolve()
+                allowed_roots = [Path("logs").resolve(), RUNTIME_ROOT.resolve()]
+                if not any(resolved_artifacts_file.is_relative_to(root) for root in allowed_roots):
+                    raise ValueError
             except ValueError:
                 logger.error(f"Unsafe artifacts file path: {artifacts_file}")
                 return None
@@ -405,10 +363,8 @@ async def execute_multi_agent_query(
             if not artifacts_file.is_file():
                 return None
             try:
-                with open(artifacts_file, 'r', encoding='utf-8') as f:
-                    artifacts = json.load(f)
-                contents = [a.get('content', '') for a in artifacts if a.get('category') == category]
-                return '\n'.join(contents) if contents else None
+                context = build_artifact_prompt_context(artifacts_file, categories=[category])
+                return context if context != "[]" else None
             except Exception as e:
                 logger.warning(f"Failed to load {category} artifacts: {e}")
                 return None
@@ -594,6 +550,18 @@ async def execute_multi_agent_query(
                 if not result.api_result.success:
                     error_msg = result.api_result.error or "API phase failed"
                     logger.error(f"API phase failed: {error_msg}")
+                    sql_succeeded_before_api = bool(result.sql_result and result.sql_result.success)
+
+                    if _is_no_data_discovery_failure(result.api_result) and not sql_succeeded_before_api:
+                        logger.info("API discovery completed with no matching data")
+                        await aggregator.step_end({
+                            "title": "No Data Found",
+                            "text": "No matching data was found for this request.",
+                            "timestamp": time.time()
+                        })
+                        result.no_data_found = True
+                        result.success = True
+                        return result
                     
                     # Check if it's a hard limit error
                     if "limit exceeded" in error_msg.lower():
@@ -731,6 +699,12 @@ async def execute_multi_agent_query(
         api_succeeded = result.api_result and result.api_result.success
         
         if not sql_succeeded and not api_succeeded:
+            if _is_no_data_discovery_failure(result.sql_result) or _is_no_data_discovery_failure(result.api_result):
+                logger.info("Discovery completed with no matching data")
+                result.no_data_found = True
+                result.success = True
+                return result
+
             # Both phases failed or didn't run - cannot proceed
             error_details = []
             if result.sql_result and not result.sql_result.success:
@@ -754,8 +728,7 @@ async def execute_multi_agent_query(
         
         # Check if discovery succeeded but found no data (0 artifacts)
         try:
-            with open(artifacts_file, 'r', encoding='utf-8') as f:
-                artifacts = json.load(f)
+            artifacts = load_artifacts_file(artifacts_file)
             artifact_count = len(artifacts) if isinstance(artifacts, list) else 0
             
             if artifact_count == 0:
