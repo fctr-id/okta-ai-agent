@@ -13,13 +13,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 SourceSpecialist = Literal["sql", "api", "special", "processor", "synthesis", "unknown"]
 DerivationKind = Literal["initial", "filter", "enrichment", "join", "aggregation", "subset", "unknown"]
 ResultSetStatus = Literal["available", "empty", "partial", "error"]
-DelegationResultMode = Literal["continue", "synthesis_ready", "direct_answer", "failed", "needs_clarification"]
+DelegationResultMode = Literal[
+    "continue",
+    "synthesis_ready",
+    "direct_answer",
+    "empty",
+    "degraded_success",
+    "failed",
+    "needs_clarification",
+]
+DelegationStatus = Literal["success", "empty", "partial", "error", "unsafe", "clarify_needed"]
 
 
 @dataclass
@@ -100,16 +109,39 @@ class DelegationResult(BaseModel):
 
     success: bool
     source_specialist: SourceSpecialist
+    status: Optional[DelegationStatus] = None
     result_mode: DelegationResultMode = "continue"
     summary: str
     artifact_keys: List[str] = Field(default_factory=list)
     result_set_refs: List[str] = Field(default_factory=list)
     needs_specialists: List[SourceSpecialist] = Field(default_factory=list)
     unresolved_requirements: List[str] = Field(default_factory=list)
+    evidence_found: List[str] = Field(default_factory=list)
+    capability_gaps: List[str] = Field(default_factory=list)
     direct_answer: Optional[str] = None
     error: Optional[str] = None
     token_usage: Dict[str, int] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def normalize_status(self) -> "DelegationResult":
+        if self.status:
+            return self
+
+        if self.result_mode == "empty":
+            self.status = "empty"
+        elif self.result_mode == "needs_clarification":
+            self.status = "clarify_needed"
+        elif self.result_mode == "degraded_success":
+            self.status = "partial"
+        elif not self.success:
+            self.status = "error"
+        elif self.needs_specialists or self.unresolved_requirements or self.result_mode == "continue":
+            self.status = "partial"
+        else:
+            self.status = "success"
+
+        return self
 
 
 def inspect_records(

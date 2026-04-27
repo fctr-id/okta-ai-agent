@@ -2,8 +2,8 @@
 Multi-Agent Orchestrator - Coordinates SQL, API, and Synthesis Agents
 
 Responsibilities:
-- Determine which agents to run (skip logic)
-- Route between agents with programmatic handoff
+- Execute supervisor decisions with runtime guardrails
+- Hand off between agents programmatically
 - Aggregate event streams from all agents
 - Return final script to executor
 
@@ -20,12 +20,16 @@ import os
 from src.utils.logging import get_logger
 
 # Import agents
-from src.core.agents.router_agent import route_query, RouterDecision
+from src.core.agents.supervisor_agent import (
+    supervise_next_step,
+    supervise_query,
+    SupervisorDecision,
+)
 from src.core.agents.sql_discovery_agent import (
     execute_sql_discovery,
     SQLDiscoveryDeps,
     SQLDiscoveryResult,
-    check_database_health,
+    get_database_runtime_summary,
     get_last_sync_timestamp,
 )
 from src.core.agents.api_discovery_agent import (
@@ -38,8 +42,15 @@ from src.core.agents.synthesis_agent import (
     SynthesisDeps,
     SynthesisResult
 )
-from src.core.agents.special_tools_handler import handle_special_query
-from src.data.schemas.artifact_manifest import build_artifact_prompt_context, load_artifacts_file
+from src.core.agents.special_tools_handler import (
+    get_special_tool_capability_summary,
+    handle_special_query,
+)
+from src.data.schemas.artifact_manifest import (
+    DelegationResult,
+    build_artifact_prompt_context,
+    load_artifacts_file,
+)
 from src.data.schemas.runtime_storage import RUNTIME_ROOT
 
 logger = get_logger("okta_ai_agent")
@@ -64,7 +75,8 @@ class OrchestratorResult:
         self.delegation_results: List[Dict[str, Any]] = []
         
         # Phase results
-        self.router_decision: Optional[RouterDecision] = None
+        self.initial_supervisor_decision: Optional[SupervisorDecision] = None
+        self.supervisor_decisions: List[Dict[str, Any]] = []
         self.sql_result: Optional[SQLDiscoveryResult] = None
         self.api_result: Optional[APIDiscoveryResult] = None
         self.synthesis_result: Optional[SynthesisResult] = None
@@ -143,11 +155,121 @@ def _is_no_data_discovery_failure(discovery_result: Any) -> bool:
     return any(hint in message for hint in NO_DATA_FAILURE_HINTS)
 
 
+def _add_usage_to_result(result: OrchestratorResult, usage: Any) -> None:
+    """Roll Pydantic AI usage into the orchestrator total counters."""
+    if not usage:
+        return
+    result.total_input_tokens += usage.input_tokens
+    result.total_output_tokens += usage.output_tokens
+    result.total_tokens += usage.total_tokens
+    result.total_requests += usage.requests
+
+
+def _usage_token_dict(usage: Any) -> Dict[str, int]:
+    if not usage:
+        return {}
+    return {
+        "input_tokens": usage.input_tokens,
+        "output_tokens": usage.output_tokens,
+        "total_tokens": usage.total_tokens,
+        "requests": usage.requests,
+    }
+
+
+def _artifact_refs_for_category(artifacts_file: Path, category: str) -> tuple[List[str], List[str]]:
+    artifact_keys: List[str] = []
+    result_set_refs: List[str] = []
+    for artifact in load_artifacts_file(artifacts_file):
+        if artifact.get("category") != category:
+            continue
+        artifact_key = artifact.get("key") or artifact.get("artifact_key")
+        if artifact_key:
+            artifact_keys.append(str(artifact_key))
+        for result_set_ref in artifact.get("result_set_refs") or []:
+            result_set_refs.append(str(result_set_ref))
+    return artifact_keys, result_set_refs
+
+
+def _sql_delegation_result(
+    sql_result: SQLDiscoveryResult,
+    artifacts_file: Path,
+    usage: Any,
+) -> DelegationResult:
+    artifact_keys, result_set_refs = _artifact_refs_for_category(artifacts_file, "sql_results")
+    needs_api = list(sql_result.needs_api or [])
+    found_data = list(sql_result.found_data or [])
+    if sql_result.success and not needs_api and not found_data and not artifact_keys and not result_set_refs:
+        result_mode = "empty"
+    elif sql_result.success and needs_api:
+        result_mode = "continue"
+    elif sql_result.success:
+        result_mode = "synthesis_ready"
+    else:
+        result_mode = "failed"
+
+    return DelegationResult(
+        success=sql_result.success,
+        source_specialist="sql",
+        result_mode=result_mode,
+        summary=sql_result.reasoning or sql_result.error or "SQL specialist completed.",
+        artifact_keys=artifact_keys,
+        result_set_refs=result_set_refs,
+        needs_specialists=["api"] if needs_api else [],
+        unresolved_requirements=needs_api,
+        evidence_found=found_data,
+        capability_gaps=needs_api,
+        error=sql_result.error,
+        token_usage=_usage_token_dict(usage),
+        metadata={
+            "found_data": found_data,
+            "needs_api": needs_api,
+        },
+    )
+
+
+def _api_delegation_result(
+    api_result: APIDiscoveryResult,
+    artifacts_file: Path,
+    usage: Any,
+) -> DelegationResult:
+    artifact_keys, result_set_refs = _artifact_refs_for_category(artifacts_file, "api_results")
+    needs_sql = list(api_result.needs_sql or [])
+    found_data = list(api_result.found_data or [])
+    if api_result.success and not needs_sql and not found_data and not artifact_keys and not result_set_refs:
+        result_mode = "empty"
+    elif api_result.success and needs_sql:
+        result_mode = "continue"
+    elif api_result.success:
+        result_mode = "synthesis_ready"
+    else:
+        result_mode = "failed"
+
+    return DelegationResult(
+        success=api_result.success,
+        source_specialist="api",
+        result_mode=result_mode,
+        summary=api_result.reasoning or api_result.error or "API specialist completed.",
+        artifact_keys=artifact_keys,
+        result_set_refs=result_set_refs,
+        needs_specialists=["sql"] if needs_sql else [],
+        unresolved_requirements=needs_sql,
+        evidence_found=found_data,
+        capability_gaps=needs_sql,
+        error=api_result.error,
+        token_usage=_usage_token_dict(usage),
+        metadata={
+            "found_data": found_data,
+            "needs_sql": needs_sql,
+            "api_data_retrieved": api_result.api_data_retrieved,
+        },
+    )
+
+
 # ============================================================================
-# Decision Functions (REMOVED - Now using Router Agent LLM)
+# Decision Functions (REMOVED - Now using Supervisor Agent)
 # ============================================================================
 
-# Old keyword-based functions removed - replaced with LLM classification
+# Old keyword-based functions removed - replaced with supervisor control-plane decisions.
 
 
 # ============================================================================
@@ -217,8 +339,8 @@ async def execute_multi_agent_query(
     Execute multi-agent query workflow.
     
     Workflow:
-    0. Route query using Router Agent (LLM classification)
-     1. Execute based on router control decision:
+    0. Ask the Supervisor Agent for the initial control-plane decision.
+    1. Execute based on the supervisor decision:
          - delegate + SQL: Start in SQL Discovery
          - delegate + API: Start in API Discovery
          - delegate + SPECIAL: Run special tool handling
@@ -258,6 +380,9 @@ async def execute_multi_agent_query(
             logger.debug(f"Loaded {len(endpoints_list)} API endpoints")
     except Exception as e:
         logger.warning(f"Failed to load endpoints file: {e}")
+
+    db_runtime_summary = get_database_runtime_summary()
+    special_tool_capabilities = get_special_tool_capability_summary()
     
     # Event aggregator for streaming
     aggregator = EventAggregator(event_callback)
@@ -272,38 +397,48 @@ async def execute_multi_agent_query(
     
     try:
         # ====================================================================
-        # PHASE 0: Route Query (LLM Classification)
+        # PHASE 0: Supervisor Decision (Control Plane)
         # ====================================================================
-        logger.info(f"Running Router Agent")
-        result.router_decision, router_usage = await route_query(
-            user_query, 
-            correlation_id, 
-            progress_callback=aggregator.progress,
-            step_start_callback=aggregator.step_start
+        logger.info("Running Supervisor Agent")
+        result.initial_supervisor_decision, supervisor_usage = await supervise_query(
+            user_query,
+            correlation_id=correlation_id,
+            artifacts_file=artifacts_file,
+            db_runtime_summary=db_runtime_summary,
+            special_tool_capabilities=special_tool_capabilities,
+            step_start_callback=aggregator.step_start,
         )
+        result.supervisor_decisions.append(result.initial_supervisor_decision.model_dump())
+        _add_usage_to_result(result, supervisor_usage)
         
-        # Track token usage
-        if router_usage:
-            result.total_input_tokens += router_usage.input_tokens
-            result.total_output_tokens += router_usage.output_tokens
-            result.total_tokens += router_usage.total_tokens
-            result.total_requests += router_usage.requests
+        decision_mode = result.initial_supervisor_decision.mode
+        phase = result.initial_supervisor_decision.target
+        reasoning = result.initial_supervisor_decision.reasoning
         
-        decision_mode = result.router_decision.mode
-        phase = result.router_decision.target
-        reasoning = result.router_decision.reasoning
-        
-        logger.info(f"Router decision mode: {decision_mode}")
-        logger.info(f"Router decision target: {phase}")
-        logger.info(f"Router reasoning: {reasoning}")
+        logger.info(f"Supervisor decision mode: {decision_mode}")
+        logger.info(f"Supervisor decision target: {phase}")
+        logger.info(f"Supervisor reasoning: {reasoning}")
         
         # Handle special cases
         if decision_mode == "fail":
-            result.error = result.router_decision.user_message or "NOT-OKTA-RELATED"
+            result.error = result.initial_supervisor_decision.user_message or "NOT-OKTA-RELATED"
             return result
 
         if decision_mode == "clarify":
-            result.error = result.router_decision.user_message or "Clarification required before routing"
+            result.error = result.initial_supervisor_decision.user_message or "Clarification required before routing"
+            return result
+
+        if decision_mode == "complete":
+            result.error = result.initial_supervisor_decision.user_message or "Supervisor completed before any data specialist ran"
+            return result
+
+        if decision_mode == "empty":
+            result.no_data_found = True
+            result.success = True
+            return result
+
+        if decision_mode == "degraded_success":
+            result.error = result.initial_supervisor_decision.user_message or "Supervisor reported degraded success before any data specialist ran"
             return result
         
         if phase == "SPECIAL":
@@ -368,17 +503,51 @@ async def execute_multi_agent_query(
             except Exception as e:
                 logger.warning(f"Failed to load {category} artifacts: {e}")
                 return None
+
+        async def supervisor_next_target(latest_delegation: DelegationResult) -> Optional[str]:
+            """Ask the supervisor whether to continue with SQL/API or finish."""
+            supervisor_decision, supervisor_usage = await supervise_next_step(
+                user_query,
+                correlation_id=correlation_id,
+                artifacts_file=artifacts_file,
+                delegation_results=result.delegation_results,
+                latest_delegation_result=latest_delegation,
+                db_runtime_summary=db_runtime_summary,
+                special_tool_capabilities=special_tool_capabilities,
+                step_start_callback=aggregator.step_start,
+            )
+            result.supervisor_decisions.append(supervisor_decision.model_dump())
+            _add_usage_to_result(result, supervisor_usage)
+
+            if supervisor_decision.mode == "delegate":
+                return supervisor_decision.target
+
+            if supervisor_decision.mode == "complete":
+                return None
+
+            if supervisor_decision.mode == "empty":
+                result.no_data_found = True
+                result.success = True
+                return "STOP"
+
+            if supervisor_decision.mode == "degraded_success":
+                return None
+
+            result.error = supervisor_decision.user_message or supervisor_decision.reasoning
+            return "STOP"
         
         # ====================================================================
-        # PHASE 1: SQL Discovery (if Router → SQL AND DB is healthy)
+        # PHASE 1: SQL Discovery (if Supervisor → SQL AND DB is healthy)
         # ====================================================================
         should_run_sql = phase == "SQL"
         
         # Check database health before attempting SQL phase
+        initial_sql_usage = None
+
         if should_run_sql:
-            db_healthy = check_database_health()
+            db_healthy = bool(db_runtime_summary.get("usable_for_sql"))
             if not db_healthy:
-                logger.info(f"Database unavailable or empty - Falling back to API")
+                logger.info("Supervisor chose SQL, but database is unavailable or empty - using runtime-safe API fallback")
                 should_run_sql = False
                 # Force API mode since DB is unavailable
                 phase = "API"
@@ -409,18 +578,14 @@ async def execute_multi_agent_query(
                 max_global_tool_calls=max_tool_calls
             )
             
-            result.sql_result, sql_usage = await execute_sql_discovery(user_query, sql_deps)
+            result.sql_result, initial_sql_usage = await execute_sql_discovery(user_query, sql_deps)
             
             # Update global counter after SQL phase
             global_tool_calls_counter = sql_deps.global_tool_calls
             logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
             
             # Track token usage
-            if sql_usage:
-                result.total_input_tokens += sql_usage.input_tokens
-                result.total_output_tokens += sql_usage.output_tokens
-                result.total_tokens += sql_usage.total_tokens
-                result.total_requests += sql_usage.requests
+            _add_usage_to_result(result, initial_sql_usage)
             
             if not result.sql_result.success:
                 error_msg = result.sql_result.error or "SQL phase failed"
@@ -440,7 +605,7 @@ async def execute_multi_agent_query(
                 # Other SQL errors - continue anyway, API might still work
                 logger.info(f"Continuing to API phase despite SQL error")
         else:
-            logger.info(f"Skipped SQL Discovery (Router decision: {phase})")
+            logger.info(f"Skipped SQL Discovery (Supervisor decision: {phase})")
         
         # ====================================================================
         # PHASE 2 & 2.5: Multi-Step Discovery Loop (API ↔ SQL)
@@ -454,17 +619,26 @@ async def execute_multi_agent_query(
         pending_api_request = None  # Set when SQL requests API
         pending_sql_request = None  # Set when API requests SQL
         
-        # CRITICAL: Capture initial SQL phase handoff request (if any)
-        if result.sql_result and result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
-            pending_api_request = result.sql_result.needs_api
-            logger.info(f"SQL agent requests API data: {pending_api_request}")
+        # Let the supervisor decide whether the initial SQL result needs another specialist.
+        if result.sql_result:
+            sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, initial_sql_usage)
+            result.delegation_results.append(sql_delegation.model_dump())
+            next_target = await supervisor_next_target(sql_delegation)
+            if next_target == "API":
+                pending_api_request = sql_delegation.unresolved_requirements or result.sql_result.needs_api or ["api"]
+                logger.info(f"Supervisor delegates from SQL to API: {pending_api_request}")
+            elif next_target == "SQL":
+                pending_sql_request = sql_delegation.unresolved_requirements or ["sql"]
+                logger.info(f"Supervisor delegates from SQL back to SQL: {pending_sql_request}")
+            elif next_target == "STOP":
+                return result
         
         logger.info(f"Starting multi-step discovery loop (max {max_iterations} phases)")
         
         while iteration_count < max_iterations:
             # Check if we need to run API phase
             should_run_api = (
-                phase == "API"  # Router decided API (first iteration only)
+                phase == "API"  # Supervisor decided API (first iteration only)
                 or pending_api_request is not None  # SQL requested API in previous iteration
             )
             
@@ -539,12 +713,7 @@ async def execute_multi_agent_query(
                 global_tool_calls_counter = api_deps.global_tool_calls
                 logger.info(f"Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
                 
-                # Track token usage
-                if api_usage:
-                    result.total_input_tokens += api_usage.input_tokens
-                    result.total_output_tokens += api_usage.output_tokens
-                    result.total_tokens += api_usage.total_tokens
-                    result.total_requests += api_usage.requests
+                _add_usage_to_result(result, api_usage)
                 
                 # Check for API limit errors and stop execution
                 if not result.api_result.success:
@@ -584,10 +753,17 @@ async def execute_multi_agent_query(
                 if phase == "API":
                     phase = None
                 
-                # Capture this iteration's SQL request (if any)
-                if result.api_result.needs_sql and len(result.api_result.needs_sql) > 0:
-                    pending_sql_request = result.api_result.needs_sql
-                    logger.info(f"API requests SQL for next iteration: {pending_sql_request}")
+                api_delegation = _api_delegation_result(result.api_result, artifacts_file, api_usage)
+                result.delegation_results.append(api_delegation.model_dump())
+                next_target = await supervisor_next_target(api_delegation)
+                if next_target == "SQL":
+                    pending_sql_request = api_delegation.unresolved_requirements or result.api_result.needs_sql or ["sql"]
+                    logger.info(f"Supervisor delegates from API to SQL: {pending_sql_request}")
+                elif next_target == "API":
+                    pending_api_request = api_delegation.unresolved_requirements or ["api"]
+                    logger.info(f"Supervisor delegates from API back to API: {pending_api_request}")
+                elif next_target == "STOP":
+                    return result
             
             # ================================================================
             # Run SQL Discovery (if pending request exists)
@@ -597,8 +773,8 @@ async def execute_multi_agent_query(
                 logger.info(f"API agent requests SQL data: {pending_sql_request}")
                 logger.info(f"Running SQL Discovery Agent (iteration {iteration_count}/{max_iterations})")
                 
-                # Check DB health using same method as Phase 1
-                db_healthy = check_database_health()
+                # Reuse the initial runtime DB summary for supervisor-consistent safety checks.
+                db_healthy = bool(db_runtime_summary.get("usable_for_sql"))
                 if not db_healthy:
                     logger.warning(f"API needs SQL but DB is unavailable - exiting discovery loop")
                     break
@@ -649,11 +825,7 @@ async def execute_multi_agent_query(
                 global_tool_calls_counter = sql_deps.global_tool_calls
                 logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
                 
-                if sql_usage:
-                    result.total_input_tokens += sql_usage.input_tokens
-                    result.total_output_tokens += sql_usage.output_tokens
-                    result.total_tokens += sql_usage.total_tokens
-                    result.total_requests += sql_usage.requests
+                _add_usage_to_result(result, sql_usage)
                 
                 # Check for SQL limit errors
                 if not result.sql_result.success:
@@ -673,10 +845,17 @@ async def execute_multi_agent_query(
                         logger.info(f"Exiting discovery loop due to SQL error (no handoff requested)")
                         break
                 
-                # Capture this iteration's API request (if any)
-                if result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
-                    pending_api_request = result.sql_result.needs_api
-                    logger.info(f"SQL requests API for next iteration: {pending_api_request}")
+                sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, sql_usage)
+                result.delegation_results.append(sql_delegation.model_dump())
+                next_target = await supervisor_next_target(sql_delegation)
+                if next_target == "API":
+                    pending_api_request = sql_delegation.unresolved_requirements or result.sql_result.needs_api or ["api"]
+                    logger.info(f"Supervisor delegates from SQL to API: {pending_api_request}")
+                elif next_target == "SQL":
+                    pending_sql_request = sql_delegation.unresolved_requirements or ["sql"]
+                    logger.info(f"Supervisor delegates from SQL back to SQL: {pending_sql_request}")
+                elif next_target == "STOP":
+                    return result
                 
                 await aggregator.step_end({
                     "title": "SQL Discovery Complete",
@@ -766,12 +945,7 @@ async def execute_multi_agent_query(
         
         result.synthesis_result, synthesis_usage = await execute_synthesis(user_query, synthesis_deps)
         
-        # Track token usage
-        if synthesis_usage:
-            result.total_input_tokens += synthesis_usage.input_tokens
-            result.total_output_tokens += synthesis_usage.output_tokens
-            result.total_tokens += synthesis_usage.total_tokens
-            result.total_requests += synthesis_usage.requests
+        _add_usage_to_result(result, synthesis_usage)
         
         if not result.synthesis_result.success:
             logger.error(f"Synthesis failed: {result.synthesis_result.error}")

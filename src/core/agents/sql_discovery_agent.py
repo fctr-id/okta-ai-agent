@@ -152,6 +152,64 @@ def get_last_sync_timestamp() -> Optional[str]:
         return None
 
 
+def get_database_runtime_summary() -> Dict[str, Any]:
+    """Return compact DB availability and population details for supervisor routing."""
+    summary: Dict[str, Any] = {
+        "available": False,
+        "usable_for_sql": False,
+        "db_path": None,
+        "table_counts": {},
+        "missing_key_tables": [],
+        "last_sync_time": None,
+        "reason": None,
+    }
+
+    key_tables = (
+        "users",
+        "groups",
+        "applications",
+        "user_group_memberships",
+        "user_application_assignments",
+        "group_application_assignments",
+    )
+
+    try:
+        db_path = find_sqlite_db_path()
+        if not db_path:
+            summary["reason"] = "Database file not found in expected locations."
+            return summary
+
+        summary["available"] = True
+        summary["db_path"] = str(db_path)
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            existing_tables = {row[0] for row in cursor.fetchall()}
+
+            table_counts: Dict[str, int] = {}
+            missing_tables: List[str] = []
+            for table_name in key_tables:
+                if table_name not in existing_tables:
+                    missing_tables.append(table_name)
+                    continue
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                table_counts[table_name] = int(cursor.fetchone()[0])
+
+            summary["table_counts"] = table_counts
+            summary["missing_key_tables"] = missing_tables
+            summary["usable_for_sql"] = table_counts.get("users", 0) > 0
+            summary["last_sync_time"] = get_last_sync_timestamp()
+            if not summary["usable_for_sql"]:
+                summary["reason"] = "Users table is missing or empty."
+            else:
+                summary["reason"] = "Database has populated local Okta entities."
+
+            return summary
+    except Exception as e:
+        summary["reason"] = f"Database summary failed: {e}"
+        return summary
+
+
 def check_database_health() -> bool:
     """Return True when the local SQL database is usable for discovery."""
     try:

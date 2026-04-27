@@ -141,6 +141,32 @@ def build_special_tool_catalog() -> Tuple[str, tuple[str, ...], Dict[str, tuple[
     return "\n\n".join(endpoint_descriptions), tuple(sorted(set(available_operations))), operation_parameters, None
 
 
+def get_special_tool_capability_summary() -> Dict[str, Any]:
+    """Return compact special-tool capabilities for supervisor routing."""
+    endpoints = get_special_tool_endpoints()
+    operations = []
+    for endpoint in endpoints:
+        required_parameters = []
+        optional_parameters = []
+        for param_name, param_info in endpoint.get("parameters", {}).items():
+            if param_info.get("required", False):
+                required_parameters.append(param_name)
+            else:
+                optional_parameters.append(param_name)
+
+        operations.append({
+            "operation": endpoint.get("operation"),
+            "description": endpoint.get("description"),
+            "required_parameters": required_parameters,
+            "optional_parameters": optional_parameters,
+        })
+
+    return {
+        "available": bool(operations),
+        "operations": operations,
+    }
+
+
 def find_special_tool(tool_operation: str) -> Tuple[Optional[str], Optional[Dict[str, Any]]]:
     """Resolve a special-tool operation to the registered module metadata."""
     tools_registry = discover_special_tools()
@@ -163,6 +189,7 @@ def build_special_tool_delegation_result(result: SpecialToolResult) -> Delegatio
             source_specialist="special",
             result_mode="direct_answer" if result.response_mode == "direct" else "synthesis_ready",
             summary=result.response_text or "Special tool completed successfully.",
+            evidence_found=[result.tool_operation] if result.tool_operation else [],
             direct_answer=result.response_text if result.response_mode == "direct" else None,
             metadata={
                 "tool_operation": result.tool_operation,
@@ -176,6 +203,7 @@ def build_special_tool_delegation_result(result: SpecialToolResult) -> Delegatio
         source_specialist="special",
         result_mode="failed",
         summary=result.error or "Special tool failed.",
+        capability_gaps=[result.error] if result.error else [],
         error=result.error,
         metadata={
             "tool_operation": result.tool_operation,
