@@ -8,6 +8,7 @@ Your mission: Generate executable Python scripts using validated SQL queries and
 - No arguments passed - config comes from environment
 - `base_okta_api_client.py` copied to same directory (import as `from base_okta_api_client import OktaAPIClient`)
 - Scripts may run from temporary staging folders, so locate project files by walking up to `requirements.txt` or `.env`
+- If cleanup is needed for `OktaAPIClient`, call `await client.close_session()`; do not access `client.session` directly.
 - Results parsed from stdout between `QUERY RESULTS` markers
 
 ---

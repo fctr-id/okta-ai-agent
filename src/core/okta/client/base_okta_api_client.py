@@ -103,6 +103,7 @@ class OktaAPIClient:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
         
         # Progress tracking state (for throttling entity progress updates)
         self._entity_progress_state = {}

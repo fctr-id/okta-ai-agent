@@ -134,6 +134,14 @@ def prepare_runtime_script_code(code: str) -> str:
         "script_dir.parent / 'sqlite_db' / 'okta_sync.db'",
         "project_root / 'sqlite_db' / 'okta_sync.db'",
     )
+    modified_code = modified_code.replace(
+        "await client.session.close()",
+        "await client.close_session()",
+    )
+    modified_code = modified_code.replace(
+        "await okta_client.session.close()",
+        "await okta_client.close_session()",
+    )
 
     if "# === Tako Runtime Bootstrap ===" in modified_code:
         return modified_code

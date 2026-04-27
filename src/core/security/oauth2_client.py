@@ -54,6 +54,7 @@ class OktaOAuth2Manager:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
+            self.logger.propagate = False
     
     async def initialize_from_config(self, okta_domain: str) -> bool:
         """
