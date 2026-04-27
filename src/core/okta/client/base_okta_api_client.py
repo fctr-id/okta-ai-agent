@@ -210,6 +210,11 @@ class OktaAPIClient:
         else:
             # Return static headers for API token method
             return self.headers
+
+    async def close_session(self) -> None:
+        """Release any persistent authentication client state used by generated scripts."""
+        if self.oauth2_manager:
+            await self.oauth2_manager.close()
     
     def _calculate_rate_limit_wait_time(self, rate_limit_reset: Optional[str], is_concurrent: bool = False) -> int:
         """

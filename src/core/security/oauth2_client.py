@@ -247,6 +247,18 @@ class OktaOAuth2Manager:
             self._cached_token = "0" * len(self._cached_token)
             self._cached_token = None
         self._token_expires_at = None
+
+    async def close(self) -> None:
+        """Release the underlying HTTP client and clear cached auth state."""
+        if self.oauth2_client is not None:
+            try:
+                await self.oauth2_client.aclose()
+            except Exception as exc:
+                self.logger.warning(f"Failed to close OAuth2 client cleanly: {exc}")
+            finally:
+                self.oauth2_client = None
+
+        self.clear_cached_token()
     
     def is_configured(self) -> bool:
         """Check if OAuth2 client is properly configured."""
