@@ -21,16 +21,23 @@ from src.core.agents.orchestrator import (
     _api_delegation_result,
     _apply_followup_supervisor_decision,
     _apply_initial_terminal_decision,
+    _build_workflow_state,
     _delegation_requirements,
     _discovery_degraded_reasons,
+    _has_successful_delegation,
+    _next_target_transition,
     _record_requirement_step,
     _run_initial_sql_discovery,
     _set_result_outcome,
     _sql_context_for_api,
     _sql_delegation_result,
+    _validate_discovery_before_synthesis,
 )
 from src.core.agents.special_tools_handler import (
     SpecialToolResult,
+    _deterministic_special_tool_fallback,
+    _resolve_special_tool_response_text,
+    _resolve_special_tool_summary,
     build_special_tool_delegation_result,
 )
 from src.core.agents.sql_discovery_agent import SQLDiscoveryResult
@@ -38,7 +45,7 @@ from src.core.agents.supervisor_agent import (
     SupervisorDecision,
     _normalize_after_delegation_decision,
 )
-from src.data.schemas.artifact_manifest import DelegationResult
+from src.data.schemas.artifact_manifest import DelegationResult, append_artifacts_to_file
 
 
 _TEMP_DIRS: list[TemporaryDirectory[str]] = []
@@ -171,22 +178,154 @@ def test_zero_result_outcome() -> None:
     assert orchestrator_result.outcome_metadata()["outcome"] == "empty"
 
 
-def test_special_tool_direct_answer_outcome() -> None:
+def test_special_tool_flow_outcome() -> None:
     special_result = SpecialToolResult(
         success=True,
         tool_operation="explain_assignment",
         tool_name="assignment_explainer",
-        response_text="Assignment summary",
-        response_mode="direct",
+        summary_text="Assignment evidence collected for synthesis.",
+        response_mode="synthesis_ready",
+        artifact_keys=["special_assignment"],
+        result_set_refs=["rs_special_assignment"],
     )
 
     delegation = build_special_tool_delegation_result(special_result)
 
     assert delegation.success is True
     assert delegation.source_specialist == "special"
-    assert delegation.result_mode == "direct_answer"
+    assert delegation.result_mode == "synthesis_ready"
     assert delegation.status == "success"
-    assert delegation.direct_answer == "Assignment summary"
+    assert delegation.direct_answer is None
+    assert delegation.summary == "Assignment evidence collected for synthesis."
+    assert delegation.artifact_keys == ["special_assignment"]
+    assert delegation.result_set_refs == ["rs_special_assignment"]
+
+
+def test_special_tool_response_text_skips_inline_summary_for_synthesis() -> None:
+    tool_result = {
+        "status": "success",
+        "message": "Collected login evidence.",
+        "llm_summary": "## Inline Summary\n\nThis should not be used in synthesis mode.",
+    }
+
+    response_text = _resolve_special_tool_response_text(
+        tool_result,
+        success=True,
+        response_mode="synthesis_ready",
+    )
+    summary_text = _resolve_special_tool_summary(
+        "special_tool_analyze_login_risk",
+        "login_risk_analysis",
+        tool_result,
+        success=True,
+        response_mode="synthesis_ready",
+    )
+
+    assert response_text is None
+    assert summary_text == "Collected login evidence."
+
+
+def test_special_tool_response_text_keeps_inline_summary_for_direct_mode() -> None:
+    tool_result = {
+        "status": "success",
+        "message": "Collected login evidence.",
+        "llm_summary": "## Inline Summary\n\nUse this for direct answers.",
+    }
+
+    response_text = _resolve_special_tool_response_text(
+        tool_result,
+        success=True,
+        response_mode="direct",
+    )
+
+    assert response_text == "## Inline Summary\n\nUse this for direct answers."
+
+
+def test_special_tool_validation_path() -> None:
+    artifacts_file = _artifacts_file()
+    append_artifacts_to_file(
+        artifacts_file,
+        [
+            {
+                "key": "special_assignment",
+                "category": "special_results",
+                "content": '{"response_text": "Assignment summary"}',
+                "notes": "Assignment summary",
+            }
+        ],
+    )
+    orchestrator_result = OrchestratorResult()
+    special_delegation = DelegationResult(
+        success=True,
+        source_specialist="special",
+        result_mode="synthesis_ready",
+        summary="Assignment summary",
+        artifact_keys=["special_assignment"],
+    )
+    orchestrator_result.delegation_results.append(special_delegation.model_dump())
+
+    validation = asyncio.run(
+        _validate_discovery_before_synthesis(
+            result=orchestrator_result,
+            artifacts_file=artifacts_file,
+            latest_processor_delegation=None,
+            aggregator=_DummyAggregator(),
+        )
+    )
+
+    assert validation.should_stop is False
+    assert _has_successful_delegation(orchestrator_result, "special") is True
+
+
+def test_special_tool_fallback_selection_for_login_risk_query() -> None:
+    operation_parameters = {
+        "special_tool_analyze_login_risk": ("user_identifier",),
+        "special_tool_analyze_user_app_access": ("user_identifier", "group_identifier", "app_identifier"),
+    }
+
+    operation, parameters, reason = _deterministic_special_tool_fallback(
+        "Analyse riks for the user dan@fctr.io and fecth their enrolled factors using API calls only",
+        tuple(operation_parameters.keys()),
+        operation_parameters,
+    )
+
+    assert operation == "special_tool_analyze_login_risk"
+    assert parameters == {"user_identifier": "dan@fctr.io"}
+    assert reason is not None
+
+
+def test_special_tool_fallback_selection_for_access_query() -> None:
+    operation_parameters = {
+        "special_tool_analyze_login_risk": ("user_identifier",),
+        "special_tool_analyze_user_app_access": ("user_identifier", "group_identifier", "app_identifier"),
+    }
+
+    operation, parameters, reason = _deterministic_special_tool_fallback(
+        "Can user dan@fctr.io access application 'Slack'?",
+        tuple(operation_parameters.keys()),
+        operation_parameters,
+    )
+
+    assert operation == "special_tool_analyze_user_app_access"
+    assert parameters == {"user_identifier": "dan@fctr.io", "app_identifier": "Slack"}
+    assert reason is not None
+
+
+def test_special_tool_fallback_stays_out_without_required_params() -> None:
+    operation_parameters = {
+        "special_tool_analyze_login_risk": ("user_identifier",),
+        "special_tool_analyze_user_app_access": ("user_identifier", "group_identifier", "app_identifier"),
+    }
+
+    operation, parameters, reason = _deterministic_special_tool_fallback(
+        "Analyze something",
+        tuple(operation_parameters.keys()),
+        operation_parameters,
+    )
+
+    assert operation is None
+    assert parameters == {}
+    assert reason is None
 
 
 def test_clarify_and_failure_decisions() -> None:
@@ -332,6 +471,107 @@ def test_specialist_context_helpers() -> None:
     assert api_context["api_discovered_data"] is None
 
 
+def test_next_target_transition_helper() -> None:
+    delegation = DelegationResult(
+        success=True,
+        source_specialist="sql",
+        result_mode="continue",
+        summary="Need API enrichment.",
+        unresolved_requirements=["roles"],
+        result_set_refs=["rs_sql_0001_users"],
+    )
+    seen_steps: set[tuple[str, tuple[str, ...]]] = set()
+
+    api_transition = _next_target_transition(
+        next_target="API",
+        source_label="SQL",
+        source_delegation=delegation,
+        seen_requirement_steps=seen_steps,
+    )
+    repeated_api_transition = _next_target_transition(
+        next_target="API",
+        source_label="SQL",
+        source_delegation=delegation,
+        seen_requirement_steps=seen_steps,
+    )
+    processor_transition = _next_target_transition(
+        next_target="PROCESSOR",
+        source_label="SQL",
+        source_delegation=delegation,
+        seen_requirement_steps=set(),
+    )
+    special_transition = _next_target_transition(
+        next_target="SPECIAL",
+        source_label="SQL",
+        source_delegation=delegation,
+        seen_requirement_steps=set(),
+    )
+    stop_transition = _next_target_transition(
+        next_target="STOP",
+        source_label="SQL",
+        source_delegation=delegation,
+        seen_requirement_steps=set(),
+    )
+
+    assert api_transition.pending_api_request == ["roles"]
+    assert api_transition.repeated is False
+    assert repeated_api_transition.repeated is True
+    assert processor_transition.pending_processor_source is delegation
+    assert processor_transition.repeated is False
+    assert special_transition.pending_special_request is True
+    assert special_transition.repeated is False
+    assert stop_transition.should_stop is True
+
+
+def test_workflow_state_summary_helper() -> None:
+    orchestrator_result = OrchestratorResult()
+    orchestrator_result.phases_executed = ["sql", "api"]
+    successful_delegation = DelegationResult(
+        success=True,
+        source_specialist="sql",
+        result_mode="continue",
+        summary="Found users and needs roles.",
+        artifact_keys=["sql_users"],
+        result_set_refs=["rs_sql_users"],
+        unresolved_requirements=["roles"],
+        capability_gaps=["roles"],
+    )
+    failed_delegation = DelegationResult(
+        success=False,
+        source_specialist="api",
+        result_mode="failed",
+        summary="Roles endpoint failed.",
+        error="Roles endpoint unavailable.",
+    )
+    orchestrator_result.delegation_results = [
+        successful_delegation.model_dump(),
+        failed_delegation.model_dump(),
+    ]
+    seen_steps: set[tuple[str, tuple[str, ...]]] = set()
+    _record_requirement_step(seen_steps, "api", ["roles"])
+
+    workflow_state = _build_workflow_state(
+        result=orchestrator_result,
+        latest_delegation=failed_delegation,
+        seen_requirement_steps=seen_steps,
+        iteration_count=2,
+        max_iterations=6,
+        global_tool_calls_counter=7,
+        max_tool_calls=30,
+    )
+
+    assert workflow_state["completed_steps"] == ["sql", "api"]
+    assert workflow_state["latest_specialist"] == "api"
+    assert workflow_state["latest_status"] == "error"
+    assert workflow_state["evidence_artifact_keys"] == ["sql_users"]
+    assert workflow_state["evidence_result_set_refs"] == ["rs_sql_users"]
+    assert workflow_state["unresolved_requirements"] == ["roles"]
+    assert workflow_state["failed_specialists"] == ["api"]
+    assert workflow_state["remaining_hops"] == 4
+    assert workflow_state["remaining_tool_calls"] == 23
+    assert workflow_state["seen_requirement_signatures"] == ["api:roles"]
+
+
 def test_degraded_completion_outcome() -> None:
     latest_delegation = DelegationResult(
         success=True,
@@ -406,12 +646,20 @@ def main() -> None:
         test_sql_to_api_outcome,
         test_api_to_sql_outcome,
         test_zero_result_outcome,
-        test_special_tool_direct_answer_outcome,
+        test_special_tool_flow_outcome,
+        test_special_tool_response_text_skips_inline_summary_for_synthesis,
+        test_special_tool_response_text_keeps_inline_summary_for_direct_mode,
+        test_special_tool_validation_path,
+        test_special_tool_fallback_selection_for_login_risk_query,
+        test_special_tool_fallback_selection_for_access_query,
+        test_special_tool_fallback_stays_out_without_required_params,
         test_clarify_and_failure_decisions,
         test_initial_terminal_decision_helper,
         test_followup_supervisor_decision_helper,
         test_initial_sql_fallback_helper,
         test_specialist_context_helpers,
+        test_next_target_transition_helper,
+        test_workflow_state_summary_helper,
         test_degraded_completion_outcome,
         test_failure_outcome_and_loop_guard,
         test_runtime_degraded_reason_detection,
