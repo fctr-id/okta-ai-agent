@@ -91,6 +91,15 @@ def parse_script_output(stdout: str) -> Optional[Dict[str, Any]]:
     
     return None
 
+
+def extract_markdown_content(results_data: Dict[str, Any]) -> str:
+    """Return markdown/text content from parsed script results."""
+    for key in ("content", "markdown", "message", "response_text", "text"):
+        value = results_data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
 def save_results_to_csv(results_data: Dict[str, Any], date_str: str, output_dir: Optional[Path] = None) -> Optional[Path]:
     """Save results to CSV file in logs/tako-cli-results/"""
     try:
@@ -386,23 +395,36 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     print(f"\n{Colors.OKGREEN}Execution complete!{Colors.ENDC}")
     print(f"  Records returned: {record_count}")
     print(f"  Display type: {display_type}")
-    
-    # Save to CSV
-    csv_path = save_results_to_csv(results_data, date_str, output_dir=runtime_paths.results_dir)
-    if csv_path:
-        print(f"\n{Colors.BOLD}Results saved to:{Colors.ENDC} {csv_path}")
-    
-    # Show first few rows as preview
-    data = results_data.get("data", [])
-    if data and isinstance(data, list) and len(data) > 0:
-        print(f"\n{Colors.BOLD}Preview (first 3 rows):{Colors.ENDC}")
-        for i, row in enumerate(data[:3]):
-            print(f"  {i+1}. {row}")
+
+    csv_path = None
+    markdown_content = ""
+
+    if display_type == "markdown":
+        markdown_content = extract_markdown_content(results_data)
+        if markdown_content:
+            print(f"\n{Colors.BOLD}Response:{Colors.ENDC}\n")
+            print(markdown_content)
+        else:
+            print(f"\n{Colors.WARNING}Warning: Markdown response had no content field.{Colors.ENDC}")
+    else:
+        # Save to CSV for tabular outputs only
+        csv_path = save_results_to_csv(results_data, date_str, output_dir=runtime_paths.results_dir)
+        if csv_path:
+            print(f"\n{Colors.BOLD}Results saved to:{Colors.ENDC} {csv_path}")
+
+        # Show first few rows as preview
+        data = results_data.get("data", [])
+        if data and isinstance(data, list) and len(data) > 0:
+            print(f"\n{Colors.BOLD}Preview (first 3 rows):{Colors.ENDC}")
+            for i, row in enumerate(data[:3]):
+                print(f"  {i+1}. {row}")
+
+    final_response_summary = markdown_content or f"Found {record_count} results"
 
     write_turn_summary(runtime_paths, {
         "status": "completed",
         "user_query": query,
-        "final_response_summary": f"Found {record_count} results",
+        "final_response_summary": final_response_summary,
         "display_type": display_type,
         "result_count": record_count,
         "artifact_file": artifacts_file.as_posix(),

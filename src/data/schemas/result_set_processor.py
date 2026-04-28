@@ -221,8 +221,11 @@ def _write_json(path: Path, payload: Any) -> None:
 
 
 def _safe_id_part(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
-    return cleaned.strip("._-")[:64] or "result"
+    import hashlib
+
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip()).strip("._-") or "result"
+    digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
+    return f"{cleaned[:24]}_{digest}"
 
 
 __all__ = [
