@@ -191,51 +191,29 @@ class SupervisorDeps:
     artifacts_file: Optional[Path] = None
     db_runtime_summary: Dict[str, Any] = field(default_factory=dict)
     special_tool_capabilities: Dict[str, Any] = field(default_factory=dict)
+    workflow_state: Dict[str, Any] = field(default_factory=dict)
     delegation_results: List[Dict[str, Any]] = field(default_factory=list)
     latest_delegation_result: Optional[Dict[str, Any]] = None
     step_start_callback: Optional[callable] = None
 
 
 BASE_SUPERVISOR_PROMPT = """
-You are the Tako supervisor and control plane for Okta data requests.
-
-Your job is to decide the next control-plane step. You do not fetch data and you
-do not execute SQL, API calls, or generated scripts. Specialists and the runtime
-shell own execution and validation.
-
-Decision modes:
-- delegate: choose exactly one next specialist target: SQL, API, SPECIAL, or PROCESSOR.
-- complete: enough validated evidence exists; use target SYNTHESIS for normal script answers.
-- empty: validated evidence proves there are no matching results and that fully answers the request.
-- degraded_success: usable evidence exists, but one or more non-critical gaps remain.
-- clarify: the request cannot be routed safely without more user detail.
-- fail: the request is unrelated to Okta or outside supported capabilities.
-
-Routing rules:
-- Start with SQL when the base entity set can be filtered locally: users, groups,
-  apps, memberships, assignments, profile fields, and local status.
-- Before choosing SQL, consider the DB runtime summary. If the database is not
-    usable for SQL, prefer API unless the request is a strict special-tool match.
-- Start with API for system logs, login events, roles, real-time data, device trust,
-  or explicit API-only requests.
-- Use SPECIAL only for strict matches against the injected special-tool capabilities.
-- Use PROCESSOR only after a specialist has produced result-set refs and the request can be answered by deterministic count or inspection of those saved refs.
-- If the user explicitly asks to process, inspect, or count a saved result set and the latest specialist result has result-set refs, delegate PROCESSOR before completion.
-- Treat specialist DelegationResult.needs_specialists as evidence of unresolved gaps,
-    not as an automatic route. You own the next routing decision.
-- If the latest successful specialist has no unresolved requirements or needed
-  specialists, complete with SYNTHESIS.
-- Use empty only for validated zero-result outcomes that answer the user's request.
-- Use degraded_success only when available evidence can answer partially with clear caveats.
-- Reason over summaries, artifact keys, result-set refs, statuses, and tiny samples.
-  Do not require full raw payloads in context.
-- Keep runtime concerns outside your decision. The runtime shell owns SSE,
-  validation, subprocess execution, and transport formatting.
 """
 
 
+# Load system prompt
+PROMPT_FILE = Path(__file__).parent / "prompts" / "supervisor_prompt.txt"
+try:
+        with open(PROMPT_FILE, 'r', encoding='utf-8') as f:
+                BASE_SUPERVISOR_PROMPT = f.read()
+except FileNotFoundError:
+        logger.error(f"Supervisor prompt not found: {PROMPT_FILE}")
+        BASE_SUPERVISOR_PROMPT = """You are the Tako supervisor and control plane for Okta data requests.
+Decide the next routing step between SQL, API, SPECIAL, PROCESSOR, or SYNTHESIS."""
+
+
 supervisor_agent = build_agent(
-    ModelType.CODING,
+    ModelType.REASONING,
     name="supervisor_agent",
     instructions=BASE_SUPERVISOR_PROMPT,
     output_type=SupervisorDecision,
@@ -289,6 +267,9 @@ DB RUNTIME SUMMARY:
 SPECIAL TOOL CAPABILITIES:
 {json.dumps(deps.special_tool_capabilities or {}, indent=2, default=str)}
 
+WORKFLOW STATE:
+{json.dumps(deps.workflow_state or {}, indent=2, default=str)}
+
 LATEST SPECIALIST RESULT:
 {json.dumps(deps.latest_delegation_result or {}, indent=2, default=str)}
 
@@ -307,6 +288,7 @@ async def supervise_query(
     artifacts_file: Optional[Path] = None,
     db_runtime_summary: Optional[Dict[str, Any]] = None,
     special_tool_capabilities: Optional[Dict[str, Any]] = None,
+    workflow_state: Optional[Dict[str, Any]] = None,
     step_start_callback: Optional[callable] = None,
 ) -> tuple[SupervisorDecision, Any]:
     """Choose the first specialist or completion mode for a user request."""
@@ -317,6 +299,7 @@ async def supervise_query(
         artifacts_file=artifacts_file,
         db_runtime_summary=db_runtime_summary or {},
         special_tool_capabilities=special_tool_capabilities or {},
+        workflow_state=workflow_state or {},
         step_start_callback=step_start_callback,
     )
     try:
@@ -348,6 +331,7 @@ async def supervise_next_step(
     latest_delegation_result: DelegationResult,
     db_runtime_summary: Optional[Dict[str, Any]] = None,
     special_tool_capabilities: Optional[Dict[str, Any]] = None,
+    workflow_state: Optional[Dict[str, Any]] = None,
     step_start_callback: Optional[callable] = None,
 ) -> tuple[SupervisorDecision, Any]:
     """Choose the next step after a specialist returns a DelegationResult."""
@@ -358,6 +342,7 @@ async def supervise_next_step(
         artifacts_file=artifacts_file,
         db_runtime_summary=db_runtime_summary or {},
         special_tool_capabilities=special_tool_capabilities or {},
+        workflow_state=workflow_state or {},
         delegation_results=delegation_results,
         latest_delegation_result=latest,
         step_start_callback=step_start_callback,
@@ -474,6 +459,8 @@ def _normalize_after_delegation_decision(
         )
 
     if latest_delegation_result.success and not latest_delegation_result.needs_specialists:
+        latest_target = _specialist_to_target(latest_delegation_result.source_specialist)
+
         if latest_delegation_result.result_mode == "empty" and decision.mode == "delegate":
             return SupervisorDecision(
                 mode="empty",
@@ -485,14 +472,18 @@ def _normalize_after_delegation_decision(
             )
 
         if decision.mode == "delegate" and decision.target in _DELEGATE_TARGETS and decision.target != "PROCESSOR":
-            return SupervisorDecision(
-                mode="complete",
-                target="SYNTHESIS",
-                result_mode="synthesis_ready",
-                reasoning="Latest specialist produced sufficient evidence with no further specialist needs.",
-                evidence_artifact_keys=latest_delegation_result.artifact_keys,
-                evidence_result_set_refs=latest_delegation_result.result_set_refs,
-            )
+            # Allow valid cross-specialist follow-up work like SPECIAL -> SQL or SQL -> API.
+            # Only collapse the decision when the supervisor is replaying the same specialist
+            # without explicit unresolved specialist needs from the latest result.
+            if decision.target == latest_target:
+                return SupervisorDecision(
+                    mode="complete",
+                    target="SYNTHESIS",
+                    result_mode="synthesis_ready",
+                    reasoning="Latest specialist produced sufficient evidence with no further specialist needs.",
+                    evidence_artifact_keys=latest_delegation_result.artifact_keys,
+                    evidence_result_set_refs=latest_delegation_result.result_set_refs,
+                )
 
     return decision
 
