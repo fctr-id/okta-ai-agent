@@ -48,8 +48,14 @@ from src.core.agents.special_tools_handler import (
 )
 from src.data.schemas.artifact_manifest import (
     DelegationResult,
+    append_artifacts_to_file,
     build_artifact_prompt_context,
     load_artifacts_file,
+)
+from src.data.schemas.result_set_processor import (
+    ResultSetOperation,
+    ResultSetProcessingRequest,
+    process_result_set_ref,
 )
 from src.data.schemas.runtime_storage import RUNTIME_ROOT
 
@@ -67,6 +73,11 @@ class OrchestratorResult:
         self.script_code: Optional[str] = None
         self.display_type: str = "table"
         self.error: Optional[str] = None
+        self.outcome: str = "pending"
+        self.result_mode: str = "continue"
+        self.outcome_reason: Optional[str] = None
+        self.user_message: Optional[str] = None
+        self.is_degraded_success: bool = False
         self.is_special_tool: bool = False  # Flag to skip validation for special tools
         self.no_data_found: bool = False  # Flag when discovery succeeds but finds no data (0 artifacts)
         self.special_tool_data: Optional[Dict[str, Any]] = None
@@ -93,6 +104,18 @@ class OrchestratorResult:
         self.total_output_tokens: int = 0
         self.total_tokens: int = 0
         self.total_requests: int = 0
+
+    def outcome_metadata(self) -> Dict[str, Any]:
+        metadata: Dict[str, Any] = {
+            "outcome": self.outcome,
+            "result_mode": self.result_mode,
+            "is_degraded_success": self.is_degraded_success,
+        }
+        if self.outcome_reason:
+            metadata["outcome_reason"] = self.outcome_reason
+        if self.user_message:
+            metadata["user_message"] = self.user_message
+        return metadata
 
 
 NO_DATA_FAILURE_HINTS = (
@@ -176,6 +199,52 @@ def _usage_token_dict(usage: Any) -> Dict[str, int]:
     }
 
 
+def _set_result_outcome(
+    result: OrchestratorResult,
+    outcome: str,
+    *,
+    result_mode: Optional[str] = None,
+    reason: Optional[str] = None,
+    user_message: Optional[str] = None,
+) -> None:
+    result.outcome = outcome
+    result.result_mode = result_mode or {
+        "success": "synthesis_ready",
+        "direct_answer": "direct_answer",
+        "empty": "empty",
+        "degraded_success": "degraded_success",
+        "clarify": "needs_clarification",
+        "fail": "failed",
+    }.get(outcome, result.result_mode)
+    result.outcome_reason = reason or result.outcome_reason
+    result.user_message = user_message or result.user_message
+    if outcome == "empty":
+        result.no_data_found = True
+    result.is_degraded_success = outcome == "degraded_success"
+
+
+def _discovery_degraded_reasons(
+    result: OrchestratorResult,
+    processor_delegation: Optional[DelegationResult],
+) -> List[str]:
+    has_success = bool(
+        (result.sql_result and result.sql_result.success)
+        or (result.api_result and result.api_result.success)
+        or (processor_delegation and processor_delegation.success)
+    )
+    if not has_success:
+        return []
+
+    reasons: List[str] = []
+    if result.sql_result and not result.sql_result.success:
+        reasons.append(f"SQL: {result.sql_result.error or result.sql_result.reasoning or 'failed'}")
+    if result.api_result and not result.api_result.success:
+        reasons.append(f"API: {result.api_result.error or result.api_result.reasoning or 'failed'}")
+    if processor_delegation and not processor_delegation.success:
+        reasons.append(f"PROCESSOR: {processor_delegation.error or processor_delegation.summary}")
+    return reasons
+
+
 def _artifact_refs_for_category(artifacts_file: Path, category: str) -> tuple[List[str], List[str]]:
     artifact_keys: List[str] = []
     result_set_refs: List[str] = []
@@ -188,6 +257,108 @@ def _artifact_refs_for_category(artifacts_file: Path, category: str) -> tuple[Li
         for result_set_ref in artifact.get("result_set_refs") or []:
             result_set_refs.append(str(result_set_ref))
     return artifact_keys, result_set_refs
+
+
+def _delegation_requirements(delegation: DelegationResult, fallback: str) -> List[str]:
+    """Return neutral unresolved requirements for the next specialist run."""
+    return list(delegation.unresolved_requirements or [fallback])
+
+
+def _delegation_evidence(delegation: Optional[DelegationResult], fallback: Optional[List[str]]) -> List[str]:
+    """Return neutral evidence labels, preserving legacy specialist compatibility."""
+    if delegation and delegation.evidence_found:
+        return list(delegation.evidence_found)
+    return list(fallback or [])
+
+
+def _requirement_signature(target: str, requirements: Optional[List[str]]) -> tuple[str, tuple[str, ...]]:
+    normalized_requirements = tuple(
+        sorted(
+            str(requirement).strip().lower()
+            for requirement in (requirements or [target])
+            if str(requirement).strip()
+        )
+    )
+    return target.lower(), normalized_requirements
+
+
+def _record_requirement_step(
+    seen_steps: set[tuple[str, tuple[str, ...]]],
+    target: str,
+    requirements: List[str],
+) -> bool:
+    signature = _requirement_signature(target, requirements)
+    if signature in seen_steps:
+        return False
+    seen_steps.add(signature)
+    return True
+
+
+def _processor_requirements(delegation: DelegationResult) -> List[str]:
+    return list(delegation.result_set_refs or delegation.artifact_keys or ["processor"])
+
+
+def _infer_result_set_operation(user_query: str) -> ResultSetOperation:
+    query = user_query.lower()
+    if any(term in query for term in ("how many", "count", "number of", "total")):
+        return "count"
+    return "inspect"
+
+
+def _processor_delegation_result(
+    user_query: str,
+    artifacts_file: Path,
+    source_delegation: Optional[DelegationResult],
+) -> DelegationResult:
+    if not source_delegation or not source_delegation.result_set_refs:
+        return DelegationResult(
+            success=False,
+            source_specialist="processor",
+            result_mode="failed",
+            summary="Result-set processor needs a saved result-set ref before it can run.",
+            capability_gaps=["result_set_refs"],
+            error="No result-set refs were available for deterministic processing.",
+        )
+
+    operation = _infer_result_set_operation(user_query)
+    request = ResultSetProcessingRequest(
+        result_set_id=source_delegation.result_set_refs[0],
+        operation=operation,
+        persist_result=False,
+    )
+    processor_result = process_result_set_ref(artifacts_file, request)
+    if processor_result.success:
+        artifact_key = f"processor_{operation}_{request.result_set_id}"
+        append_artifacts_to_file(
+            artifacts_file,
+            [
+                {
+                    "key": artifact_key,
+                    "category": "processor_results",
+                    "content": json.dumps(
+                        {
+                            "summary": processor_result.summary,
+                            "metadata": processor_result.metadata,
+                        },
+                        indent=2,
+                        default=str,
+                    ),
+                    "notes": processor_result.summary,
+                    "result_set_refs": processor_result.result_set_refs,
+                }
+            ],
+        )
+        processor_result.artifact_keys = list(processor_result.artifact_keys or source_delegation.artifact_keys)
+        if artifact_key not in processor_result.artifact_keys:
+            processor_result.artifact_keys.append(artifact_key)
+        processor_result.evidence_found = processor_result.evidence_found or [
+            f"{operation}:{request.result_set_id}"
+        ]
+        processor_result.metadata = {
+            **processor_result.metadata,
+            "requested_operation": operation,
+        }
+    return processor_result
 
 
 def _sql_delegation_result(
@@ -284,6 +455,7 @@ class EventAggregator:
         self.phase_offsets = {
             'sql': 0,     # Steps 1-5
             'api': 5,     # Steps 6-10
+            'processor': 10,
             'synthesis': 10  # Steps 11-12
         }
         self.current_phase = None
@@ -344,6 +516,7 @@ async def execute_multi_agent_query(
          - delegate + SQL: Start in SQL Discovery
          - delegate + API: Start in API Discovery
          - delegate + SPECIAL: Run special tool handling
+            - delegate + PROCESSOR: Process an existing result-set ref deterministically
          - clarify: Return a clarification message
          - fail: Return an error message
     2. Run Synthesis Agent (always, for any data workflow)
@@ -422,23 +595,52 @@ async def execute_multi_agent_query(
         # Handle special cases
         if decision_mode == "fail":
             result.error = result.initial_supervisor_decision.user_message or "NOT-OKTA-RELATED"
+            _set_result_outcome(
+                result,
+                "fail",
+                reason=reasoning,
+                user_message=result.error,
+            )
             return result
 
         if decision_mode == "clarify":
             result.error = result.initial_supervisor_decision.user_message or "Clarification required before routing"
+            _set_result_outcome(
+                result,
+                "clarify",
+                reason=reasoning,
+                user_message=result.error,
+            )
             return result
 
         if decision_mode == "complete":
             result.error = result.initial_supervisor_decision.user_message or "Supervisor completed before any data specialist ran"
+            _set_result_outcome(
+                result,
+                "fail",
+                reason=reasoning,
+                user_message=result.error,
+            )
             return result
 
         if decision_mode == "empty":
-            result.no_data_found = True
             result.success = True
+            _set_result_outcome(
+                result,
+                "empty",
+                reason=reasoning,
+                user_message=result.initial_supervisor_decision.user_message,
+            )
             return result
 
         if decision_mode == "degraded_success":
             result.error = result.initial_supervisor_decision.user_message or "Supervisor reported degraded success before any data specialist ran"
+            _set_result_outcome(
+                result,
+                "fail",
+                reason=reasoning,
+                user_message=result.error,
+            )
             return result
         
         if phase == "SPECIAL":
@@ -472,9 +674,23 @@ async def execute_multi_agent_query(
                 result.script_code = special_result.response_text
                 result.display_type = special_result.display_type or "markdown"
                 result.is_special_tool = True  # Flag to skip validation
+                special_mode = special_result.delegation_result.result_mode if special_result.delegation_result else "direct_answer"
+                _set_result_outcome(
+                    result,
+                    "direct_answer" if special_mode == "direct_answer" else "success",
+                    result_mode=special_mode,
+                    reason="Special tool returned a direct response.",
+                    user_message=special_result.response_text,
+                )
                 logger.info(f"Special tool execution successful")
             else:
                 result.error = special_result.error or "Special tool execution failed"
+                _set_result_outcome(
+                    result,
+                    "fail",
+                    reason="Special tool execution failed.",
+                    user_message=result.error,
+                )
                 logger.error(f"Special tool failed: {result.error}")
             
             return result
@@ -526,14 +742,32 @@ async def execute_multi_agent_query(
                 return None
 
             if supervisor_decision.mode == "empty":
-                result.no_data_found = True
                 result.success = True
+                _set_result_outcome(
+                    result,
+                    "empty",
+                    reason=supervisor_decision.reasoning,
+                    user_message=supervisor_decision.user_message,
+                )
                 return "STOP"
 
             if supervisor_decision.mode == "degraded_success":
+                _set_result_outcome(
+                    result,
+                    "degraded_success",
+                    reason=supervisor_decision.reasoning,
+                    user_message=supervisor_decision.user_message,
+                )
                 return None
 
             result.error = supervisor_decision.user_message or supervisor_decision.reasoning
+            _set_result_outcome(
+                result,
+                "clarify" if supervisor_decision.mode == "clarify" else "fail",
+                result_mode=supervisor_decision.result_mode,
+                reason=supervisor_decision.reasoning,
+                user_message=result.error,
+            )
             return "STOP"
         
         # ====================================================================
@@ -600,6 +834,12 @@ async def execute_multi_agent_query(
                         "timestamp": time.time()
                     })
                     result.error = error_msg
+                    _set_result_outcome(
+                        result,
+                        "fail",
+                        reason="SQL discovery stopped after a deterministic runtime limit.",
+                        user_message=error_msg,
+                    )
                     return result
                 
                 # Other SQL errors - continue anyway, API might still work
@@ -615,21 +855,41 @@ async def execute_multi_agent_query(
         max_iterations = 6
         iteration_count = 0
         
-        # Track handoff requests per iteration (cleared after acting on them)
-        pending_api_request = None  # Set when SQL requests API
-        pending_sql_request = None  # Set when API requests SQL
+        # Track unresolved requirements per iteration (cleared after acting on them).
+        pending_api_request = None
+        pending_sql_request = None
+        pending_processor_source: Optional[DelegationResult] = None
+        latest_sql_delegation: Optional[DelegationResult] = None
+        latest_api_delegation: Optional[DelegationResult] = None
+        latest_processor_delegation: Optional[DelegationResult] = None
+        seen_requirement_steps: set[tuple[str, tuple[str, ...]]] = set()
         
         # Let the supervisor decide whether the initial SQL result needs another specialist.
         if result.sql_result:
-            sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, initial_sql_usage)
-            result.delegation_results.append(sql_delegation.model_dump())
-            next_target = await supervisor_next_target(sql_delegation)
+            latest_sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, initial_sql_usage)
+            result.delegation_results.append(latest_sql_delegation.model_dump())
+            next_target = await supervisor_next_target(latest_sql_delegation)
             if next_target == "API":
-                pending_api_request = sql_delegation.unresolved_requirements or result.sql_result.needs_api or ["api"]
+                candidate_request = _delegation_requirements(latest_sql_delegation, "api")
+                if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
+                    logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
+                    return result
+                pending_api_request = candidate_request
                 logger.info(f"Supervisor delegates from SQL to API: {pending_api_request}")
             elif next_target == "SQL":
-                pending_sql_request = sql_delegation.unresolved_requirements or ["sql"]
+                candidate_request = _delegation_requirements(latest_sql_delegation, "sql")
+                if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
+                    logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
+                    return result
+                pending_sql_request = candidate_request
                 logger.info(f"Supervisor delegates from SQL back to SQL: {pending_sql_request}")
+            elif next_target == "PROCESSOR":
+                candidate_request = _processor_requirements(latest_sql_delegation)
+                if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
+                    logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
+                    return result
+                pending_processor_source = latest_sql_delegation
+                logger.info(f"Supervisor delegates from SQL to result-set processor: {candidate_request}")
             elif next_target == "STOP":
                 return result
         
@@ -646,15 +906,79 @@ async def execute_multi_agent_query(
             should_run_sql = (
                 pending_sql_request is not None  # API requested SQL in previous iteration
             )
+
+            should_run_processor = (
+                phase == "PROCESSOR"
+                or pending_processor_source is not None
+            )
             
             # Exit loop if no more phases needed
-            if not should_run_api and not should_run_sql:
+            if not should_run_api and not should_run_sql and not should_run_processor:
                 logger.info(f"Discovery loop complete: No more phases needed (iterations: {iteration_count})")
                 break
             
             # Clear pending requests before this iteration
+            processor_source = pending_processor_source
             pending_api_request = None
             pending_sql_request = None
+            pending_processor_source = None
+
+            # ================================================================
+            # Run Result-Set Processor (if needed)
+            # ================================================================
+            if should_run_processor:
+                iteration_count += 1
+                source_delegation = processor_source or latest_api_delegation or latest_sql_delegation
+                logger.info(f"Running Result-Set Processor (iteration {iteration_count}/{max_iterations})")
+                aggregator.set_phase('processor')
+                result.phases_executed.append('processor')
+
+                await aggregator.step_start({
+                    "title": "Result Processing",
+                    "text": "Processing saved result-set references",
+                    "timestamp": time.time()
+                })
+
+                latest_processor_delegation = _processor_delegation_result(
+                    user_query,
+                    artifacts_file,
+                    source_delegation,
+                )
+                result.delegation_results.append(latest_processor_delegation.model_dump())
+                next_target = await supervisor_next_target(latest_processor_delegation)
+
+                if phase == "PROCESSOR":
+                    phase = None
+
+                if next_target == "SQL":
+                    candidate_request = _delegation_requirements(latest_processor_delegation, "sql")
+                    if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
+                        logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
+                        break
+                    pending_sql_request = candidate_request
+                    logger.info(f"Supervisor delegates from processor to SQL: {pending_sql_request}")
+                elif next_target == "API":
+                    candidate_request = _delegation_requirements(latest_processor_delegation, "api")
+                    if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
+                        logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
+                        break
+                    pending_api_request = candidate_request
+                    logger.info(f"Supervisor delegates from processor to API: {pending_api_request}")
+                elif next_target == "PROCESSOR":
+                    candidate_request = _processor_requirements(latest_processor_delegation)
+                    if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
+                        logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
+                        break
+                    pending_processor_source = latest_processor_delegation
+                    logger.info(f"Supervisor delegates from processor back to processor: {candidate_request}")
+                elif next_target == "STOP":
+                    return result
+
+                await aggregator.step_end({
+                    "title": "Result Processing Complete",
+                    "text": latest_processor_delegation.summary,
+                    "timestamp": time.time()
+                })
             
             # ================================================================
             # Run API Discovery (if needed)
@@ -673,8 +997,8 @@ async def execute_multi_agent_query(
                 
                 if result.sql_result and result.sql_result.success:
                     sql_reasoning = result.sql_result.reasoning
-                    sql_needs_api = result.sql_result.needs_api
-                    sql_found_data = result.sql_result.found_data
+                    sql_needs_api = _delegation_requirements(latest_sql_delegation, "api") if latest_sql_delegation else result.sql_result.needs_api
+                    sql_found_data = _delegation_evidence(latest_sql_delegation, result.sql_result.found_data)
                     sql_discovered_data = load_artifacts_by_category('sql_results')
                     if sql_discovered_data:
                         logger.info(f"Passing SQL discovered data to API agent ({len(sql_discovered_data)} chars)")
@@ -714,6 +1038,7 @@ async def execute_multi_agent_query(
                 logger.info(f"Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
                 
                 _add_usage_to_result(result, api_usage)
+                latest_api_delegation = _api_delegation_result(result.api_result, artifacts_file, api_usage)
                 
                 # Check for API limit errors and stop execution
                 if not result.api_result.success:
@@ -728,8 +1053,13 @@ async def execute_multi_agent_query(
                             "text": "No matching data was found for this request.",
                             "timestamp": time.time()
                         })
-                        result.no_data_found = True
                         result.success = True
+                        _set_result_outcome(
+                            result,
+                            "empty",
+                            reason=result.api_result.reasoning or result.api_result.error,
+                            user_message="No matching data was found for this request.",
+                        )
                         return result
                     
                     # Check if it's a hard limit error
@@ -740,28 +1070,47 @@ async def execute_multi_agent_query(
                             "timestamp": time.time()
                         })
                         result.error = error_msg
+                        _set_result_outcome(
+                            result,
+                            "fail",
+                            reason="API discovery stopped after a deterministic runtime limit.",
+                            user_message=error_msg,
+                        )
                         return result
                     
-                    # Check if agent is requesting SQL help (handoff)
-                    if result.api_result.needs_sql and len(result.api_result.needs_sql) > 0:
-                        logger.info(f"API needs SQL help: {result.api_result.needs_sql} - continuing to SQL phase")
+                    if latest_api_delegation.unresolved_requirements:
+                        logger.info(f"API has unresolved requirements for SQL: {latest_api_delegation.unresolved_requirements}")
                     else:
-                        logger.info(f"Exiting discovery loop due to API error (no handoff requested)")
+                        logger.info(f"Exiting discovery loop due to API error (no unresolved requirements)")
                         break
                 
                 # Reset phase flag after first iteration
                 if phase == "API":
                     phase = None
                 
-                api_delegation = _api_delegation_result(result.api_result, artifacts_file, api_usage)
-                result.delegation_results.append(api_delegation.model_dump())
-                next_target = await supervisor_next_target(api_delegation)
+                result.delegation_results.append(latest_api_delegation.model_dump())
+                next_target = await supervisor_next_target(latest_api_delegation)
                 if next_target == "SQL":
-                    pending_sql_request = api_delegation.unresolved_requirements or result.api_result.needs_sql or ["sql"]
+                    candidate_request = _delegation_requirements(latest_api_delegation, "sql")
+                    if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
+                        logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
+                        break
+                    pending_sql_request = candidate_request
                     logger.info(f"Supervisor delegates from API to SQL: {pending_sql_request}")
                 elif next_target == "API":
-                    pending_api_request = api_delegation.unresolved_requirements or ["api"]
+                    candidate_request = _delegation_requirements(latest_api_delegation, "api")
+                    if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
+                        logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
+                        break
+                    pending_api_request = candidate_request
                     logger.info(f"Supervisor delegates from API back to API: {pending_api_request}")
+                elif next_target == "PROCESSOR":
+                    candidate_request = _processor_requirements(latest_api_delegation)
+                    if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
+                        logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
+                        break
+                    pending_processor_source = latest_api_delegation
+                    logger.info(f"Supervisor delegates from API to result-set processor: {candidate_request}")
                 elif next_target == "STOP":
                     return result
             
@@ -790,7 +1139,7 @@ async def execute_multi_agent_query(
                 
                 # Get API reasoning and data for SQL agent
                 api_needs_sql = pending_sql_request
-                api_found_data = result.api_result.found_data if result.api_result.found_data else []
+                api_found_data = _delegation_evidence(latest_api_delegation, result.api_result.found_data)
                 
                 # Use API agent's reasoning output or provide default
                 if result.api_result.success and result.api_result.reasoning:
@@ -826,6 +1175,7 @@ async def execute_multi_agent_query(
                 logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
                 
                 _add_usage_to_result(result, sql_usage)
+                latest_sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, sql_usage)
                 
                 # Check for SQL limit errors
                 if not result.sql_result.success:
@@ -837,23 +1187,42 @@ async def execute_multi_agent_query(
                             "timestamp": time.time()
                         })
                         result.error = error_msg
+                        _set_result_outcome(
+                            result,
+                            "fail",
+                            reason="SQL discovery stopped after a deterministic runtime limit.",
+                            user_message=error_msg,
+                        )
                         return result
-                    # Check if agent is requesting API help (handoff)
-                    if result.sql_result.needs_api and len(result.sql_result.needs_api) > 0:
-                        logger.info(f"SQL needs API help: {result.sql_result.needs_api} - continuing to API phase")
+                    if latest_sql_delegation.unresolved_requirements:
+                        logger.info(f"SQL has unresolved requirements for API: {latest_sql_delegation.unresolved_requirements}")
                     else:
-                        logger.info(f"Exiting discovery loop due to SQL error (no handoff requested)")
+                        logger.info(f"Exiting discovery loop due to SQL error (no unresolved requirements)")
                         break
                 
-                sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, sql_usage)
-                result.delegation_results.append(sql_delegation.model_dump())
-                next_target = await supervisor_next_target(sql_delegation)
+                result.delegation_results.append(latest_sql_delegation.model_dump())
+                next_target = await supervisor_next_target(latest_sql_delegation)
                 if next_target == "API":
-                    pending_api_request = sql_delegation.unresolved_requirements or result.sql_result.needs_api or ["api"]
+                    candidate_request = _delegation_requirements(latest_sql_delegation, "api")
+                    if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
+                        logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
+                        break
+                    pending_api_request = candidate_request
                     logger.info(f"Supervisor delegates from SQL to API: {pending_api_request}")
                 elif next_target == "SQL":
-                    pending_sql_request = sql_delegation.unresolved_requirements or ["sql"]
+                    candidate_request = _delegation_requirements(latest_sql_delegation, "sql")
+                    if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
+                        logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
+                        break
+                    pending_sql_request = candidate_request
                     logger.info(f"Supervisor delegates from SQL back to SQL: {pending_sql_request}")
+                elif next_target == "PROCESSOR":
+                    candidate_request = _processor_requirements(latest_sql_delegation)
+                    if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
+                        logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
+                        break
+                    pending_processor_source = latest_sql_delegation
+                    logger.info(f"Supervisor delegates from SQL to result-set processor: {candidate_request}")
                 elif next_target == "STOP":
                     return result
                 
@@ -869,6 +1238,12 @@ async def execute_multi_agent_query(
             await aggregator.progress({
                 "message": f"Reached maximum discovery phases ({max_iterations}), proceeding with available data"
             })
+            _set_result_outcome(
+                result,
+                "degraded_success",
+                reason=f"Reached maximum discovery phases ({max_iterations}) and continued with available evidence.",
+                user_message="The answer uses available evidence because the discovery loop reached its runtime limit.",
+            )
         
         # ====================================================================
         # Validate Discovery Results Before Synthesis
@@ -876,12 +1251,19 @@ async def execute_multi_agent_query(
         # Check if any discovery phase actually succeeded
         sql_succeeded = result.sql_result and result.sql_result.success
         api_succeeded = result.api_result and result.api_result.success
+        processor_succeeded = latest_processor_delegation and latest_processor_delegation.success
         
-        if not sql_succeeded and not api_succeeded:
+        if not sql_succeeded and not api_succeeded and not processor_succeeded:
             if _is_no_data_discovery_failure(result.sql_result) or _is_no_data_discovery_failure(result.api_result):
                 logger.info("Discovery completed with no matching data")
-                result.no_data_found = True
                 result.success = True
+                no_data_result = result.sql_result if _is_no_data_discovery_failure(result.sql_result) else result.api_result
+                _set_result_outcome(
+                    result,
+                    "empty",
+                    reason=getattr(no_data_result, "reasoning", None) or getattr(no_data_result, "error", None),
+                    user_message="No matching data was found for this request.",
+                )
                 return result
 
             # Both phases failed or didn't run - cannot proceed
@@ -901,6 +1283,12 @@ async def execute_multi_agent_query(
             })
             
             result.error = error_msg
+            _set_result_outcome(
+                result,
+                "fail",
+                reason="Discovery failed before any usable evidence was produced.",
+                user_message=error_msg,
+            )
             return result
         
         logger.info(f"Discovery validation passed (SQL: {sql_succeeded}, API: {api_succeeded})")
@@ -912,8 +1300,13 @@ async def execute_multi_agent_query(
             
             if artifact_count == 0:
                 logger.info(f"Discovery succeeded but found no data (0 artifacts)")
-                result.no_data_found = True
                 result.success = True
+                _set_result_outcome(
+                    result,
+                    "empty",
+                    reason="Discovery completed with zero artifacts.",
+                    user_message="No matching data was found for this request.",
+                )
                 return result
         except Exception as e:
             logger.warning(f"Failed to check artifact count: {e}")
@@ -950,6 +1343,12 @@ async def execute_multi_agent_query(
         if not result.synthesis_result.success:
             logger.error(f"Synthesis failed: {result.synthesis_result.error}")
             result.error = result.synthesis_result.error
+            _set_result_outcome(
+                result,
+                "fail",
+                reason="Synthesis failed after discovery.",
+                user_message=result.error,
+            )
             return result
         
         # ====================================================================
@@ -958,6 +1357,20 @@ async def execute_multi_agent_query(
         result.success = True
         result.script_code = result.synthesis_result.script_code
         result.display_type = result.synthesis_result.display_type
+        degraded_reasons = _discovery_degraded_reasons(result, latest_processor_delegation)
+        if degraded_reasons and result.outcome != "degraded_success":
+            _set_result_outcome(
+                result,
+                "degraded_success",
+                reason="; ".join(degraded_reasons),
+                user_message="The answer uses available evidence, but one or more requested parts could not be fully retrieved.",
+            )
+        elif result.outcome == "pending":
+            _set_result_outcome(
+                result,
+                "success",
+                reason="Synthesis completed with available evidence.",
+            )
         
         # Determine data source type based on which agents ran successfully
         sql_succeeded = result.sql_result and result.sql_result.success
@@ -969,6 +1382,8 @@ async def execute_multi_agent_query(
             result.data_source_type = "sql"
         elif api_succeeded:
             result.data_source_type = "api"
+        elif processor_succeeded:
+            result.data_source_type = "processor"
         
         # Get last sync timestamp if SQL was used
         if result.data_source_type in ["sql", "hybrid"]:
@@ -977,6 +1392,7 @@ async def execute_multi_agent_query(
         logger.info(f"Multi-agent workflow complete")
         logger.info(f"Phases executed: {', '.join(result.phases_executed)}")
         logger.info(f"Data source: {result.data_source_type}")
+        logger.info(f"Outcome: {result.outcome} ({result.result_mode})")
         
         # Log cumulative token usage
         if result.total_tokens > 0:
@@ -993,6 +1409,12 @@ async def execute_multi_agent_query(
     except asyncio.CancelledError:
         logger.warning(f"Multi-agent workflow cancelled by user")
         result.error = "Cancelled by user"
+        _set_result_outcome(
+            result,
+            "fail",
+            reason="Workflow was cancelled.",
+            user_message=result.error,
+        )
         # Notify frontend of cancellation
         await aggregator.step_end({
             "title": "Workflow Cancelled",
@@ -1006,6 +1428,12 @@ async def execute_multi_agent_query(
         error_msg = str(e)
         logger.error(f"Hard stop triggered: {error_msg}")
         result.error = error_msg
+        _set_result_outcome(
+            result,
+            "fail",
+            reason="Runtime hard stop triggered.",
+            user_message=error_msg,
+        )
         # Notify frontend with proper error format
         await aggregator.step_end({
             "title": "Execution Stopped",
@@ -1017,6 +1445,12 @@ async def execute_multi_agent_query(
     except Exception as e:
         logger.error(f"Orchestrator error: {e}", exc_info=True)
         result.error = str(e)
+        _set_result_outcome(
+            result,
+            "fail",
+            reason="Unexpected orchestrator error.",
+            user_message=result.error,
+        )
         # Notify frontend of unexpected error
         await aggregator.step_end({
             "title": "Unexpected Error",

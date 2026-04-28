@@ -783,7 +783,7 @@ async def execute_api_discovery(
 - If you need base entities (users, groups, apps) → check schema → if in schema, set needs_sql: ["users", "groups"]
 - Example: Query asks for "roles for all users" but you have no user IDs → needs_sql: ["users"]
 - Example: You have user IDs, need groups → check schema → groups in okta_groups → needs_sql: ["user_group_memberships"]
-- This provides a safety net if Router made the wrong routing decision
+- This provides a safety net if the supervisor delegated API first but SQL base entities are still required
 ─────────────────────────────────────────
 """
         
