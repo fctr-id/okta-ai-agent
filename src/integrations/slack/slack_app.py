@@ -22,9 +22,8 @@ from src.config.settings import settings
 from src.core.agents.orchestrator import (
     execute_multi_agent_query,
     OrchestratorResult,
-    check_database_health,
-    get_last_sync_timestamp,
 )
+from src.core.agents.sql_discovery_agent import check_database_health, get_last_sync_timestamp
 from src.core.okta.client import OktaClient
 from src.core.okta.sync.operations import DatabaseOperations
 from src.api.routers.sync import run_sync_operation
@@ -607,12 +606,14 @@ async def _process_query(
 
         # Handle no data found
         if result.no_data_found:
-            no_data_content = "## No Results Found\n\nYour query completed successfully, but no matching data was found."
+            no_data_message = result.user_message or "Your query completed successfully, but no matching data was found."
+            no_data_content = f"## No Results Found\n\n{no_data_message}"
             if not db_healthy:
                 no_data_content += "\n\n:bulb: *Tip:* Your local database has no synced data. Run `/tako sync` to populate it."
             await slack_handler.post_final_results(query, {
                 "display_type": "markdown",
                 "content": no_data_content,
+                "metadata": result.outcome_metadata(),
             })
             write_turn_summary(runtime_paths, {
                 "status": "completed",
@@ -620,6 +621,7 @@ async def _process_query(
                 "final_response_summary": no_data_content,
                 "display_type": "markdown",
                 "artifact_file": artifacts_file.as_posix(),
+                "outcome": result.outcome_metadata(),
             })
             update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
             return
@@ -629,6 +631,7 @@ async def _process_query(
             await slack_handler.post_final_results(query, {
                 "display_type": result.display_type or "markdown",
                 "content": result.script_code,
+                "metadata": result.outcome_metadata(),
             })
             write_turn_summary(runtime_paths, {
                 "status": "completed",
@@ -637,6 +640,7 @@ async def _process_query(
                 "display_type": result.display_type or "markdown",
                 "artifact_file": artifacts_file.as_posix(),
                 "is_special_tool": True,
+                "outcome": result.outcome_metadata(),
             })
             update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
             await _save_history(correlation_id, query, "", user_id, channel_id=channel_id, thread_ts=message_thread_ts)
@@ -665,6 +669,11 @@ async def _process_query(
         )
 
         if script_results:
+            metadata = script_results.get("metadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata.update(result.outcome_metadata())
+            script_results["metadata"] = metadata
             await slack_handler.post_final_results(query, script_results)
             await slack_handler.post_script(result.script_code)
             await _save_history(
@@ -678,6 +687,7 @@ async def _process_query(
                 "display_type": script_results.get("display_type"),
                 "result_count": script_results.get("count"),
                 "artifact_file": artifacts_file.as_posix(),
+                "outcome": result.outcome_metadata(),
                 "token_usage": {
                     "input_tokens": result.total_input_tokens,
                     "output_tokens": result.total_output_tokens,

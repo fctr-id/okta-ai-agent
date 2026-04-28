@@ -301,16 +301,20 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
 
     if result.no_data_found:
         print(f"\n{Colors.WARNING}No results found.{Colors.ENDC}")
-        print("Your query completed successfully, but no matching data was found.")
+        print(result.user_message or "Your query completed successfully, but no matching data was found.")
         write_turn_summary(runtime_paths, {
             "status": "completed",
             "user_query": query,
-            "final_response_summary": "No matching data was found.",
+            "final_response_summary": result.user_message or "No matching data was found.",
             "display_type": "markdown",
             "artifact_file": artifacts_file.as_posix(),
+            "outcome": result.outcome_metadata(),
         })
         update_turn_metadata(runtime_paths, status="completed", completed_at=datetime.now().isoformat())
         return
+
+    if result.is_degraded_success:
+        print(f"\n{Colors.WARNING}Partial result:{Colors.ENDC} {result.user_message or result.outcome_reason}")
 
     # Handle special tools (summaries, modifications, etc.)
     if result.is_special_tool:
@@ -324,6 +328,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
             "display_type": result.display_type or "markdown",
             "artifact_file": artifacts_file.as_posix(),
             "is_special_tool": True,
+            "outcome": result.outcome_metadata(),
         })
         update_turn_metadata(runtime_paths, status="completed", completed_at=datetime.now().isoformat())
         return
@@ -360,6 +365,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
             "final_response_summary": "Script generated without execution.",
             "artifact_file": artifacts_file.as_posix(),
             "script_path": script_path.as_posix(),
+            "outcome": result.outcome_metadata(),
         })
         update_turn_metadata(runtime_paths, status="script_generated", completed_at=datetime.now().isoformat())
         return
@@ -401,6 +407,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         "result_count": record_count,
         "artifact_file": artifacts_file.as_posix(),
         "csv_path": csv_path.as_posix() if csv_path else None,
+        "outcome": result.outcome_metadata(),
         "token_usage": {
             "input_tokens": result.total_input_tokens,
             "output_tokens": result.total_output_tokens,

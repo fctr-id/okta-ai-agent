@@ -250,6 +250,7 @@ async def _execute_script(
         
         results_data = _parse_script_output(stdout)
         logger.debug(f"[{process_id}] Parse result: {results_data is not None}")
+        outcome_payload = orchestrator_result.outcome_metadata() if orchestrator_result else {}
         
         if results_data:
             # Check if script returned markdown format (for summaries/special responses)
@@ -260,17 +261,20 @@ async def _execute_script(
                     "success": True,
                     "display_type": "markdown",
                     "content": results_data.get("content", ""),
+                    **outcome_payload,
                     "timestamp": time.time()
                 }
             # Check if results are empty (no data found)
             elif results_data.get("count", 0) == 0:
                 logger.info(f"[{process_id}] Script returned zero results - sending empty results message")
+                script_empty_payload = {**outcome_payload, "outcome": "empty", "result_mode": "empty"}
                 # Send markdown message instead of empty table
                 yield {
                     "type": "COMPLETE",
                     "success": True,
                     "display_type": "markdown",
                     "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                    **script_empty_payload,
                     "timestamp": time.time()
                 }
             else:
@@ -288,6 +292,7 @@ async def _execute_script(
                             metadata["last_sync"] = {"last_sync": orchestrator_result.last_sync_time}
                         
                         logger.info(f"[{process_id}] Metadata: {metadata}")
+                    metadata.update(outcome_payload)
                 
                 yield {
                     "type": "COMPLETE",
@@ -638,20 +643,23 @@ async def stream_react_updates(
             # Check if discovery succeeded but found no data (0 artifacts)
             if result.no_data_found:
                 logger.info(f"[{process_id}] Discovery succeeded but found no data")
+                no_data_message = result.user_message or "Your query completed successfully, but no matching data was found."
                 complete_event = {
                     "type": "COMPLETE",
                     "success": True,
                     "display_type": "markdown",
-                    "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                    "content": f"## No Results Found\n\n{no_data_message}",
+                    **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
                 write_turn_summary(runtime_paths, {
                     "status": "completed",
                     "user_query": process["query"],
-                    "final_response_summary": "No matching data was found.",
+                    "final_response_summary": no_data_message,
                     "display_type": "markdown",
                     "artifact_file": artifacts_file.as_posix(),
+                    "outcome": result.outcome_metadata(),
                 })
                 update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
                 process["status"] = "completed"
@@ -661,6 +669,7 @@ async def stream_react_updates(
                 error_event = {
                     "type": "ERROR",
                     "error": result.error or "Orchestrator failed",
+                    **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"
@@ -695,6 +704,7 @@ async def stream_react_updates(
                     "type": "SCRIPT-GENERATED",
                     "script_code": result.script_code,
                     "script_length": script_length,
+                    **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(script_event)}\n\n"
@@ -711,7 +721,8 @@ async def stream_react_updates(
                     "display_type": result.display_type or "markdown",
                     "content": result.script_code,  # Contains the llm_summary
                     "timestamp": time.time(),
-                    "is_special_tool": True
+                    "is_special_tool": True,
+                    **result.outcome_metadata(),
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
                 write_turn_summary(runtime_paths, {
@@ -721,6 +732,7 @@ async def stream_react_updates(
                     "display_type": result.display_type or "markdown",
                     "artifact_file": artifacts_file.as_posix(),
                     "is_special_tool": True,
+                    "outcome": result.outcome_metadata(),
                 })
                 update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
                 
@@ -894,6 +906,7 @@ async def stream_react_updates(
                 "display_type": final_execution_event.get("display_type") if final_execution_event else result.display_type,
                 "result_count": final_execution_event.get("count") if final_execution_event else None,
                 "artifact_file": artifacts_file.as_posix(),
+                "outcome": result.outcome_metadata(),
                 "token_usage": {
                     "input_tokens": result.total_input_tokens,
                     "output_tokens": result.total_output_tokens,
