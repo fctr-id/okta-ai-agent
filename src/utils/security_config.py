@@ -207,17 +207,20 @@ class EnhancedSecurityValidator:
         violations = []
         blocked_patterns = []
         risk_level = 'LOW'
-        
-        # Preprocess code to fix common LLM formatting mistakes
-        code = preprocess_llm_generated_code(code)
+
+        parsed_code = code
         
         try:
-            # Parse AST to validate structure
-            tree = ast.parse(code)
+            # Parse the original code first. Only fall back to preprocessing if it is not already valid.
+            try:
+                tree = ast.parse(parsed_code)
+            except SyntaxError:
+                parsed_code = preprocess_llm_generated_code(code)
+                tree = ast.parse(parsed_code)
             
             # Check for dangerous patterns
             for pattern in self.blocked_patterns:
-                if pattern.search(code):
+                if pattern.search(parsed_code):
                     violations.append(f"Blocked pattern detected: {pattern.pattern}")
                     blocked_patterns.append(pattern.pattern)
                     risk_level = 'HIGH'
