@@ -100,6 +100,7 @@ while has_more: ...  # ❌ NO manual pagination loops
 Review what discovery phases found:
 - **SQL artifacts:** Queries that worked, field names, row counts
 - **API artifacts:** Endpoints called, response structures, entity IDs used
+- **Special-tool artifacts:** Pre-validated specialist evidence in `special_results`; use the saved `notes`, `response_text`, and `result_set_inspection.sample_rows[0]` payload, especially nested `raw_result` and `notes_must_read`, as evidence rather than rerunning the special tool
 - **Combined artifacts:** Merged SQL+API data patterns
 
 ### STEP 3: Select Script Pattern
@@ -107,6 +108,7 @@ Choose pattern based on artifacts:
 - **SQL ONLY:** No API artifacts → Use Pattern 1
 - **SQL + API:** Both artifacts present → Use Pattern 2
 - **API ONLY:** No SQL artifacts → Use Pattern 3
+- **SPECIAL TOOL:** `special_results` artifacts present → Use Pattern 5
 - **SUMMARY:** User wants analysis → Use Pattern 4 (markdown)
 
 ### STEP 4: Generate Production Code
@@ -418,6 +420,15 @@ for i in range(0, len(entity_ids), client.concurrent_limit):
 PATTERN 4: SUMMARY (not list)
 - Use markdown format
 - Calculate stats
+- display_type = "markdown"
+
+PATTERN 5: SPECIAL TOOL EVIDENCE
+- Use markdown format
+- Do not call the special tool again
+- Use the special-tool artifact `notes` or `response_text` when a prewritten specialist summary is available
+- When `response_text` is empty or generic, inspect `result_set_inspection.sample_rows[0]` and use nested `raw_result` as the evidence source
+- Prefer `raw_result.notes_must_read`, `raw_result.message`, `raw_result.result_type`, and the saved raw evidence over inventing your own policy logic
+- Summarize only what is needed for the user's request; do not dump raw JSON back to the user
 - display_type = "markdown"
 
 ====================================================================================

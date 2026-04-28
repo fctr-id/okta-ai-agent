@@ -11,7 +11,8 @@ Pattern: Pydantic AI "Programmatic agent hand-off"
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
+from dataclasses import dataclass
 import asyncio
 import time
 import json
@@ -116,6 +117,39 @@ class OrchestratorResult:
         if self.user_message:
             metadata["user_message"] = self.user_message
         return metadata
+
+
+@dataclass
+class _NextTargetTransition:
+    pending_api_request: Optional[List[str]] = None
+    pending_sql_request: Optional[List[str]] = None
+    pending_processor_source: Optional[DelegationResult] = None
+    pending_special_request: bool = False
+    should_stop: bool = False
+    repeated: bool = False
+
+    def pending_requests(self) -> tuple[Optional[List[str]], Optional[List[str]], Optional[DelegationResult], bool]:
+        return (
+            self.pending_api_request,
+            self.pending_sql_request,
+            self.pending_processor_source,
+            self.pending_special_request,
+        )
+
+
+@dataclass
+class _RuntimeStepResult:
+    delegation: Optional[DelegationResult] = None
+    next_target: Optional[str] = None
+    global_tool_calls_counter: int = 0
+    should_stop: bool = False
+    should_break: bool = False
+
+
+@dataclass
+class _DiscoveryValidationResult:
+    should_stop: bool
+    processor_succeeded: bool = False
 
 
 NO_DATA_FAILURE_HINTS = (
@@ -367,6 +401,7 @@ def _discovery_degraded_reasons(
         (result.sql_result and result.sql_result.success)
         or (result.api_result and result.api_result.success)
         or (processor_delegation and processor_delegation.success)
+        or _has_successful_delegation(result, "special")
     )
     if not has_success:
         return []
@@ -379,6 +414,13 @@ def _discovery_degraded_reasons(
     if processor_delegation and not processor_delegation.success:
         reasons.append(f"PROCESSOR: {processor_delegation.error or processor_delegation.summary}")
     return reasons
+
+
+def _has_successful_delegation(result: OrchestratorResult, source_specialist: str) -> bool:
+    return any(
+        delegation.get("source_specialist") == source_specialist and bool(delegation.get("success"))
+        for delegation in result.delegation_results
+    )
 
 
 def _artifact_refs_for_category(artifacts_file: Path, category: str) -> tuple[List[str], List[str]]:
@@ -428,6 +470,64 @@ def _record_requirement_step(
         return False
     seen_steps.add(signature)
     return True
+
+
+def _append_unique(target: List[str], values: Any) -> None:
+    for value in values or []:
+        text = str(value).strip()
+        if text and text not in target:
+            target.append(text)
+
+
+def _build_workflow_state(
+    *,
+    result: OrchestratorResult,
+    latest_delegation: Optional[DelegationResult],
+    seen_requirement_steps: set[tuple[str, tuple[str, ...]]],
+    iteration_count: int,
+    max_iterations: int,
+    global_tool_calls_counter: int,
+    max_tool_calls: int,
+) -> Dict[str, Any]:
+    evidence_artifact_keys: List[str] = []
+    evidence_result_set_refs: List[str] = []
+    unresolved_requirements: List[str] = []
+    capability_gaps: List[str] = []
+    failed_specialists: List[str] = []
+    status_counts: Dict[str, int] = {}
+
+    for delegation in result.delegation_results:
+        source = str(delegation.get("source_specialist") or "unknown")
+        status = str(delegation.get("status") or delegation.get("result_mode") or "unknown")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        _append_unique(evidence_artifact_keys, delegation.get("artifact_keys"))
+        _append_unique(evidence_result_set_refs, delegation.get("result_set_refs"))
+        _append_unique(unresolved_requirements, delegation.get("unresolved_requirements"))
+        _append_unique(capability_gaps, delegation.get("capability_gaps"))
+        if not delegation.get("success"):
+            _append_unique(failed_specialists, [source])
+
+    return {
+        "completed_steps": list(result.phases_executed),
+        "step_count": len(result.phases_executed),
+        "latest_specialist": latest_delegation.source_specialist if latest_delegation else None,
+        "latest_status": latest_delegation.status if latest_delegation else None,
+        "latest_result_mode": latest_delegation.result_mode if latest_delegation else None,
+        "evidence_artifact_keys": evidence_artifact_keys,
+        "evidence_result_set_refs": evidence_result_set_refs,
+        "unresolved_requirements": unresolved_requirements,
+        "capability_gaps": capability_gaps,
+        "failed_specialists": failed_specialists,
+        "status_counts": status_counts,
+        "remaining_hops": max(0, max_iterations - iteration_count),
+        "max_hops": max_iterations,
+        "remaining_tool_calls": max(0, max_tool_calls - global_tool_calls_counter),
+        "max_tool_calls": max_tool_calls,
+        "seen_requirement_signatures": [
+            f"{target}:{','.join(requirements)}"
+            for target, requirements in sorted(seen_requirement_steps)
+        ],
+    }
 
 
 def _processor_requirements(delegation: DelegationResult) -> List[str]:
@@ -628,6 +728,60 @@ def _api_context_for_sql(
     }
 
 
+def _next_target_transition(
+    *,
+    next_target: Optional[str],
+    source_label: str,
+    source_delegation: DelegationResult,
+    seen_requirement_steps: set[tuple[str, tuple[str, ...]]],
+) -> _NextTargetTransition:
+    transition = _NextTargetTransition()
+
+    if next_target == "STOP":
+        transition.should_stop = True
+        return transition
+
+    if next_target == "API":
+        candidate_request = _delegation_requirements(source_delegation, "api")
+        if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
+            logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
+            transition.repeated = True
+            return transition
+        transition.pending_api_request = candidate_request
+        logger.info(f"Supervisor delegates from {source_label} to API: {candidate_request}")
+        return transition
+
+    if next_target == "SQL":
+        candidate_request = _delegation_requirements(source_delegation, "sql")
+        if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
+            logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
+            transition.repeated = True
+            return transition
+        transition.pending_sql_request = candidate_request
+        logger.info(f"Supervisor delegates from {source_label} to SQL: {candidate_request}")
+        return transition
+
+    if next_target == "PROCESSOR":
+        candidate_request = _processor_requirements(source_delegation)
+        if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
+            logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
+            transition.repeated = True
+            return transition
+        transition.pending_processor_source = source_delegation
+        logger.info(f"Supervisor delegates from {source_label} to result-set processor: {candidate_request}")
+
+    if next_target == "SPECIAL":
+        candidate_request = _delegation_requirements(source_delegation, "special")
+        if not _record_requirement_step(seen_requirement_steps, "special", candidate_request):
+            logger.warning(f"Stopping repeated SPECIAL requirement loop: {candidate_request}")
+            transition.repeated = True
+            return transition
+        transition.pending_special_request = True
+        logger.info(f"Supervisor delegates from {source_label} to SPECIAL: {candidate_request}")
+
+    return transition
+
+
 # ============================================================================
 # Decision Functions (REMOVED - Now using Supervisor Agent)
 # ============================================================================
@@ -763,6 +917,736 @@ async def _run_initial_sql_discovery(
     return phase, global_tool_calls_counter, initial_sql_usage, False
 
 
+async def _ask_supervisor_after_delegation(
+    *,
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    result: OrchestratorResult,
+    latest_delegation: DelegationResult,
+    db_runtime_summary: Dict[str, Any],
+    special_tool_capabilities: Dict[str, Any],
+    workflow_state: Dict[str, Any],
+    aggregator: EventAggregator,
+) -> Optional[str]:
+    supervisor_decision, supervisor_usage = await supervise_next_step(
+        user_query,
+        correlation_id=correlation_id,
+        artifacts_file=artifacts_file,
+        delegation_results=result.delegation_results,
+        latest_delegation_result=latest_delegation,
+        db_runtime_summary=db_runtime_summary,
+        special_tool_capabilities=special_tool_capabilities,
+        workflow_state=workflow_state,
+        step_start_callback=aggregator.step_start,
+    )
+    result.supervisor_decisions.append(supervisor_decision.model_dump())
+    _add_usage_to_result(result, supervisor_usage)
+
+    return _apply_followup_supervisor_decision(result, supervisor_decision)
+
+
+async def _run_processor_loop_step(
+    *,
+    result: OrchestratorResult,
+    user_query: str,
+    artifacts_file: Path,
+    aggregator: EventAggregator,
+    source_delegation: Optional[DelegationResult],
+    iteration_count: int,
+    max_iterations: int,
+    supervisor_next_target: Callable[[DelegationResult], Any],
+) -> tuple[DelegationResult, Optional[str]]:
+    logger.info(f"Running Result-Set Processor (iteration {iteration_count}/{max_iterations})")
+    aggregator.set_phase('processor')
+    result.phases_executed.append('processor')
+
+    await aggregator.step_start({
+        "title": "Result Processing",
+        "text": "Processing saved result-set references",
+        "timestamp": time.time()
+    })
+
+    processor_delegation = _processor_delegation_result(
+        user_query,
+        artifacts_file,
+        source_delegation,
+    )
+    result.delegation_results.append(processor_delegation.model_dump())
+    next_target = await supervisor_next_target(processor_delegation)
+    return processor_delegation, next_target
+
+
+async def _run_special_loop_step(
+    *,
+    result: OrchestratorResult,
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    okta_client: Any,
+    aggregator: EventAggregator,
+    iteration_count: int,
+    max_iterations: int,
+    supervisor_next_target: Callable[[DelegationResult], Any],
+) -> _RuntimeStepResult:
+    logger.info(f"Running Special Tool specialist (iteration {iteration_count}/{max_iterations})")
+    aggregator.set_phase('special')
+    result.phases_executed.append('special')
+
+    await aggregator.step_start({
+        "title": "Special Tool",
+        "text": "Running specialized data collection",
+        "timestamp": time.time()
+    })
+
+    special_result = await handle_special_query(
+        user_query=user_query,
+        okta_client=okta_client,
+        correlation_id=correlation_id,
+        progress_callback=aggregator.progress,
+        artifacts_file=artifacts_file,
+        response_mode="synthesis_ready",
+    )
+
+    result.special_tool_data = special_result.raw_result
+    result.special_tool_operation = special_result.tool_operation
+    result.special_tool_response_mode = special_result.response_mode
+    special_delegation = special_result.delegation_result or DelegationResult(
+        success=False,
+        source_specialist="special",
+        result_mode="failed",
+        summary=special_result.error or "Special tool execution failed.",
+        error=special_result.error,
+    )
+
+    if not special_result.success:
+        result.delegation_results.append(special_delegation.model_dump())
+        result.error = special_result.error or "Special tool execution failed"
+        _set_result_outcome(
+            result,
+            "fail",
+            reason="Special tool execution failed.",
+            user_message=result.error,
+        )
+        logger.error(f"Special tool failed: {result.error}")
+        return _RuntimeStepResult(special_delegation, should_stop=True)
+
+    result.delegation_results.append(special_delegation.model_dump())
+    next_target = await supervisor_next_target(special_delegation)
+    await aggregator.step_end({
+        "title": "Special Tool Complete",
+        "text": special_delegation.summary,
+        "timestamp": time.time()
+    })
+    return _RuntimeStepResult(special_delegation, next_target)
+
+
+async def _run_api_loop_step(
+    *,
+    result: OrchestratorResult,
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    endpoints_list: List[Dict[str, Any]],
+    okta_client: Any,
+    cancellation_check: callable,
+    aggregator: EventAggregator,
+    latest_sql_delegation: Optional[DelegationResult],
+    global_tool_calls_counter: int,
+    max_tool_calls: int,
+    iteration_count: int,
+    max_iterations: int,
+    supervisor_next_target: Callable[[DelegationResult], Any],
+) -> _RuntimeStepResult:
+    logger.info(f"Running API Discovery Agent (iteration {iteration_count}/{max_iterations})")
+    aggregator.set_phase('api')
+    result.phases_executed.append('api')
+    sql_context = _sql_context_for_api(result, latest_sql_delegation, artifacts_file)
+
+    await aggregator.step_start({
+        "title": "API Discovery",
+        "text": "Generating and testing API code to fetch additional data",
+        "timestamp": time.time()
+    })
+
+    api_deps = APIDiscoveryDeps(
+        correlation_id=correlation_id,
+        artifacts_file=artifacts_file,
+        endpoints=endpoints_list,
+        sql_reasoning=sql_context["sql_reasoning"],
+        sql_discovered_data=sql_context["sql_discovered_data"],
+        sql_needs_api=sql_context["sql_needs_api"],
+        sql_found_data=sql_context["sql_found_data"],
+        okta_client=okta_client,
+        cancellation_check=cancellation_check,
+        step_start_callback=aggregator.step_start,
+        step_end_callback=aggregator.step_end,
+        tool_call_callback=aggregator.tool_call,
+        progress_callback=aggregator.progress,
+        global_tool_calls=global_tool_calls_counter,
+        max_global_tool_calls=max_tool_calls
+    )
+
+    result.api_result, api_usage = await execute_api_discovery(user_query, api_deps)
+    global_tool_calls_counter = api_deps.global_tool_calls
+    logger.info(f"Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
+
+    _add_usage_to_result(result, api_usage)
+    api_delegation = _api_delegation_result(result.api_result, artifacts_file, api_usage)
+
+    if not result.api_result.success:
+        error_msg = result.api_result.error or "API phase failed"
+        logger.error(f"API phase failed: {error_msg}")
+        sql_succeeded_before_api = bool(result.sql_result and result.sql_result.success)
+
+        if _is_no_data_discovery_failure(result.api_result) and not sql_succeeded_before_api:
+            logger.info("API discovery completed with no matching data")
+            await aggregator.step_end({
+                "title": "No Data Found",
+                "text": "No matching data was found for this request.",
+                "timestamp": time.time()
+            })
+            result.success = True
+            _set_result_outcome(
+                result,
+                "empty",
+                reason=result.api_result.reasoning or result.api_result.error,
+                user_message="No matching data was found for this request.",
+            )
+            return _RuntimeStepResult(api_delegation, global_tool_calls_counter=global_tool_calls_counter, should_stop=True)
+
+        if "limit exceeded" in error_msg.lower():
+            await aggregator.step_end({
+                "title": "Execution Stopped",
+                "text": f"Error: {error_msg}",
+                "timestamp": time.time()
+            })
+            result.error = error_msg
+            _set_result_outcome(
+                result,
+                "fail",
+                reason="API discovery stopped after a deterministic runtime limit.",
+                user_message=error_msg,
+            )
+            return _RuntimeStepResult(api_delegation, global_tool_calls_counter=global_tool_calls_counter, should_stop=True)
+
+        if api_delegation.unresolved_requirements:
+            logger.info(f"API has unresolved requirements for SQL: {api_delegation.unresolved_requirements}")
+        else:
+            logger.info("Exiting discovery loop due to API error (no unresolved requirements)")
+            return _RuntimeStepResult(api_delegation, global_tool_calls_counter=global_tool_calls_counter, should_break=True)
+
+    result.delegation_results.append(api_delegation.model_dump())
+    next_target = await supervisor_next_target(api_delegation)
+    return _RuntimeStepResult(api_delegation, next_target, global_tool_calls_counter)
+
+
+async def _run_sql_followup_loop_step(
+    *,
+    result: OrchestratorResult,
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    okta_client: Any,
+    cancellation_check: callable,
+    aggregator: EventAggregator,
+    pending_sql_request: List[str],
+    latest_api_delegation: Optional[DelegationResult],
+    db_runtime_summary: Dict[str, Any],
+    global_tool_calls_counter: int,
+    max_tool_calls: int,
+    iteration_count: int,
+    max_iterations: int,
+    supervisor_next_target: Callable[[DelegationResult], Any],
+) -> _RuntimeStepResult:
+    logger.info(f"API agent requests SQL data: {pending_sql_request}")
+    logger.info(f"Running SQL Discovery Agent (iteration {iteration_count}/{max_iterations})")
+
+    db_healthy = bool(db_runtime_summary.get("usable_for_sql"))
+    if not db_healthy:
+        logger.warning("API needs SQL but DB is unavailable - exiting discovery loop")
+        return _RuntimeStepResult(global_tool_calls_counter=global_tool_calls_counter, should_break=True)
+
+    aggregator.set_phase('sql')
+    result.phases_executed.append('sql')
+
+    await aggregator.step_start({
+        "title": "SQL Discovery",
+        "text": f"Fetching base entities from database: {', '.join(pending_sql_request)}",
+        "timestamp": time.time()
+    })
+
+    api_context = _api_context_for_sql(result, latest_api_delegation, pending_sql_request, artifacts_file)
+
+    sql_deps = SQLDiscoveryDeps(
+        correlation_id=correlation_id,
+        artifacts_file=artifacts_file,
+        okta_client=okta_client,
+        cancellation_check=cancellation_check,
+        api_reasoning=api_context["api_reasoning"],
+        api_discovered_data=api_context["api_discovered_data"],
+        api_needs_sql=api_context["api_needs_sql"],
+        api_found_data=api_context["api_found_data"],
+        step_start_callback=aggregator.step_start,
+        step_end_callback=aggregator.step_end,
+        tool_call_callback=aggregator.tool_call,
+        progress_callback=aggregator.progress,
+        global_tool_calls=global_tool_calls_counter,
+        max_global_tool_calls=max_tool_calls
+    )
+
+    result.sql_result, sql_usage = await execute_sql_discovery(user_query, sql_deps)
+    global_tool_calls_counter = sql_deps.global_tool_calls
+    logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
+
+    _add_usage_to_result(result, sql_usage)
+    sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, sql_usage)
+
+    if not result.sql_result.success:
+        error_msg = result.sql_result.error or "SQL phase failed"
+        if "limit exceeded" in error_msg.lower():
+            await aggregator.step_end({
+                "title": "Execution Stopped",
+                "text": f"Error: {error_msg}",
+                "timestamp": time.time()
+            })
+            result.error = error_msg
+            _set_result_outcome(
+                result,
+                "fail",
+                reason="SQL discovery stopped after a deterministic runtime limit.",
+                user_message=error_msg,
+            )
+            return _RuntimeStepResult(sql_delegation, global_tool_calls_counter=global_tool_calls_counter, should_stop=True)
+        if sql_delegation.unresolved_requirements:
+            logger.info(f"SQL has unresolved requirements for API: {sql_delegation.unresolved_requirements}")
+        else:
+            logger.info("Exiting discovery loop due to SQL error (no unresolved requirements)")
+            return _RuntimeStepResult(sql_delegation, global_tool_calls_counter=global_tool_calls_counter, should_break=True)
+
+    result.delegation_results.append(sql_delegation.model_dump())
+    next_target = await supervisor_next_target(sql_delegation)
+    return _RuntimeStepResult(sql_delegation, next_target, global_tool_calls_counter)
+
+
+async def _run_discovery_loop(
+    *,
+    result: OrchestratorResult,
+    phase: str,
+    initial_sql_usage: Any,
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    okta_client: Any,
+    cancellation_check: callable,
+    aggregator: EventAggregator,
+    endpoints_list: List[Dict[str, Any]],
+    db_runtime_summary: Dict[str, Any],
+    special_tool_capabilities: Dict[str, Any],
+    global_tool_calls_counter: int,
+    max_tool_calls: int,
+) -> tuple[Optional[DelegationResult], bool]:
+    max_iterations = 6
+    iteration_count = 0
+    pending_api_request = None
+    pending_sql_request = None
+    pending_processor_source: Optional[DelegationResult] = None
+    pending_special_request = False
+    latest_sql_delegation: Optional[DelegationResult] = None
+    latest_api_delegation: Optional[DelegationResult] = None
+    latest_processor_delegation: Optional[DelegationResult] = None
+    latest_special_delegation: Optional[DelegationResult] = None
+    seen_requirement_steps: set[tuple[str, tuple[str, ...]]] = set()
+
+    async def supervisor_next_target(latest_delegation: DelegationResult) -> Optional[str]:
+        workflow_state = _build_workflow_state(
+            result=result,
+            latest_delegation=latest_delegation,
+            seen_requirement_steps=seen_requirement_steps,
+            iteration_count=iteration_count,
+            max_iterations=max_iterations,
+            global_tool_calls_counter=global_tool_calls_counter,
+            max_tool_calls=max_tool_calls,
+        )
+        return await _ask_supervisor_after_delegation(
+            user_query=user_query,
+            correlation_id=correlation_id,
+            artifacts_file=artifacts_file,
+            result=result,
+            latest_delegation=latest_delegation,
+            db_runtime_summary=db_runtime_summary,
+            special_tool_capabilities=special_tool_capabilities,
+            workflow_state=workflow_state,
+            aggregator=aggregator,
+        )
+
+    if result.sql_result:
+        latest_sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, initial_sql_usage)
+        result.delegation_results.append(latest_sql_delegation.model_dump())
+        next_target = await supervisor_next_target(latest_sql_delegation)
+        transition = _next_target_transition(
+            next_target=next_target,
+            source_label="SQL",
+            source_delegation=latest_sql_delegation,
+            seen_requirement_steps=seen_requirement_steps,
+        )
+        if transition.should_stop or transition.repeated:
+            return latest_processor_delegation, True
+        pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+
+    logger.info(f"Starting multi-step discovery loop (max {max_iterations} phases)")
+
+    while iteration_count < max_iterations:
+        should_run_api = phase == "API" or pending_api_request is not None
+        should_run_sql = pending_sql_request is not None
+        should_run_processor = phase == "PROCESSOR" or pending_processor_source is not None
+        should_run_special = phase == "SPECIAL" or pending_special_request
+
+        if not should_run_api and not should_run_sql and not should_run_processor and not should_run_special:
+            logger.info(f"Discovery loop complete: No more phases needed (iterations: {iteration_count})")
+            break
+
+        processor_source = pending_processor_source
+        pending_api_request = None
+        pending_sql_request = None
+        pending_processor_source = None
+        pending_special_request = False
+
+        if should_run_special:
+            iteration_count += 1
+            special_step = await _run_special_loop_step(
+                result=result,
+                user_query=user_query,
+                correlation_id=correlation_id,
+                artifacts_file=artifacts_file,
+                okta_client=okta_client,
+                aggregator=aggregator,
+                iteration_count=iteration_count,
+                max_iterations=max_iterations,
+                supervisor_next_target=supervisor_next_target,
+            )
+            latest_special_delegation = special_step.delegation or latest_special_delegation
+            if special_step.should_stop:
+                return latest_processor_delegation, True
+            if special_step.should_break:
+                break
+
+            if phase == "SPECIAL":
+                phase = None
+
+            transition = _next_target_transition(
+                next_target=special_step.next_target,
+                source_label="SPECIAL",
+                source_delegation=latest_special_delegation,
+                seen_requirement_steps=seen_requirement_steps,
+            )
+            if transition.should_stop:
+                return latest_processor_delegation, True
+            if transition.repeated:
+                break
+            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+
+        if should_run_processor:
+            iteration_count += 1
+            source_delegation = processor_source or latest_api_delegation or latest_sql_delegation
+            latest_processor_delegation, next_target = await _run_processor_loop_step(
+                result=result,
+                user_query=user_query,
+                artifacts_file=artifacts_file,
+                aggregator=aggregator,
+                source_delegation=source_delegation,
+                iteration_count=iteration_count,
+                max_iterations=max_iterations,
+                supervisor_next_target=supervisor_next_target,
+            )
+
+            if phase == "PROCESSOR":
+                phase = None
+
+            transition = _next_target_transition(
+                next_target=next_target,
+                source_label="processor",
+                source_delegation=latest_processor_delegation,
+                seen_requirement_steps=seen_requirement_steps,
+            )
+            if transition.should_stop:
+                return latest_processor_delegation, True
+            if transition.repeated:
+                break
+            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+
+            await aggregator.step_end({
+                "title": "Result Processing Complete",
+                "text": latest_processor_delegation.summary,
+                "timestamp": time.time()
+            })
+
+        if should_run_api:
+            iteration_count += 1
+            api_step = await _run_api_loop_step(
+                result=result,
+                user_query=user_query,
+                correlation_id=correlation_id,
+                artifacts_file=artifacts_file,
+                endpoints_list=endpoints_list,
+                okta_client=okta_client,
+                cancellation_check=cancellation_check,
+                aggregator=aggregator,
+                latest_sql_delegation=latest_sql_delegation,
+                global_tool_calls_counter=global_tool_calls_counter,
+                max_tool_calls=max_tool_calls,
+                iteration_count=iteration_count,
+                max_iterations=max_iterations,
+                supervisor_next_target=supervisor_next_target,
+            )
+            global_tool_calls_counter = api_step.global_tool_calls_counter
+            latest_api_delegation = api_step.delegation or latest_api_delegation
+            if api_step.should_stop:
+                return latest_processor_delegation, True
+            if api_step.should_break:
+                break
+
+            if phase == "API":
+                phase = None
+
+            transition = _next_target_transition(
+                next_target=api_step.next_target,
+                source_label="API",
+                source_delegation=latest_api_delegation,
+                seen_requirement_steps=seen_requirement_steps,
+            )
+            if transition.should_stop:
+                return latest_processor_delegation, True
+            if transition.repeated:
+                break
+            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+
+        if pending_sql_request is not None:
+            iteration_count += 1
+            sql_step = await _run_sql_followup_loop_step(
+                result=result,
+                user_query=user_query,
+                correlation_id=correlation_id,
+                artifacts_file=artifacts_file,
+                okta_client=okta_client,
+                cancellation_check=cancellation_check,
+                aggregator=aggregator,
+                pending_sql_request=pending_sql_request,
+                latest_api_delegation=latest_api_delegation,
+                db_runtime_summary=db_runtime_summary,
+                global_tool_calls_counter=global_tool_calls_counter,
+                max_tool_calls=max_tool_calls,
+                iteration_count=iteration_count,
+                max_iterations=max_iterations,
+                supervisor_next_target=supervisor_next_target,
+            )
+            global_tool_calls_counter = sql_step.global_tool_calls_counter
+            latest_sql_delegation = sql_step.delegation or latest_sql_delegation
+            if sql_step.should_stop:
+                return latest_processor_delegation, True
+            if sql_step.should_break:
+                break
+
+            transition = _next_target_transition(
+                next_target=sql_step.next_target,
+                source_label="SQL",
+                source_delegation=latest_sql_delegation,
+                seen_requirement_steps=seen_requirement_steps,
+            )
+            if transition.should_stop:
+                return latest_processor_delegation, True
+            if transition.repeated:
+                break
+            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+
+            await aggregator.step_end({
+                "title": "SQL Discovery Complete",
+                "text": f"SQL data retrieved: {result.sql_result.success}",
+                "timestamp": time.time()
+            })
+
+    if iteration_count >= max_iterations:
+        logger.warning(f"Discovery loop hit maximum iterations ({max_iterations})")
+        await aggregator.progress({
+            "message": f"Reached maximum discovery phases ({max_iterations}), proceeding with available data"
+        })
+        _set_result_outcome(
+            result,
+            "degraded_success",
+            reason=f"Reached maximum discovery phases ({max_iterations}) and continued with available evidence.",
+            user_message="The answer uses available evidence because the discovery loop reached its runtime limit.",
+        )
+
+    return latest_processor_delegation, False
+
+
+async def _validate_discovery_before_synthesis(
+    *,
+    result: OrchestratorResult,
+    artifacts_file: Path,
+    latest_processor_delegation: Optional[DelegationResult],
+    aggregator: EventAggregator,
+) -> _DiscoveryValidationResult:
+    sql_succeeded = result.sql_result and result.sql_result.success
+    api_succeeded = result.api_result and result.api_result.success
+    processor_succeeded = latest_processor_delegation and latest_processor_delegation.success
+    special_succeeded = _has_successful_delegation(result, "special")
+
+    if not sql_succeeded and not api_succeeded and not processor_succeeded and not special_succeeded:
+        if _is_no_data_discovery_failure(result.sql_result) or _is_no_data_discovery_failure(result.api_result):
+            logger.info("Discovery completed with no matching data")
+            result.success = True
+            no_data_result = result.sql_result if _is_no_data_discovery_failure(result.sql_result) else result.api_result
+            _set_result_outcome(
+                result,
+                "empty",
+                reason=getattr(no_data_result, "reasoning", None) or getattr(no_data_result, "error", None),
+                user_message="No matching data was found for this request.",
+            )
+            return _DiscoveryValidationResult(True, bool(processor_succeeded))
+
+        error_details = []
+        if result.sql_result and not result.sql_result.success:
+            error_details.append(f"SQL: {result.sql_result.error}")
+        if result.api_result and not result.api_result.success:
+            error_details.append(f"API: {result.api_result.error}")
+
+        error_msg = "Discovery failed - no data retrieved. " + " | ".join(error_details) if error_details else "No discovery phases succeeded"
+        logger.error(error_msg)
+
+        await aggregator.step_end({
+            "title": "Discovery Failed",
+            "text": f"Error: {error_msg}",
+            "timestamp": time.time()
+        })
+
+        result.error = error_msg
+        _set_result_outcome(
+            result,
+            "fail",
+            reason="Discovery failed before any usable evidence was produced.",
+            user_message=error_msg,
+        )
+        return _DiscoveryValidationResult(True, bool(processor_succeeded))
+
+    logger.info(f"Discovery validation passed (SQL: {sql_succeeded}, API: {api_succeeded})")
+
+    try:
+        artifacts = load_artifacts_file(artifacts_file)
+        artifact_count = len(artifacts) if isinstance(artifacts, list) else 0
+
+        if artifact_count == 0:
+            logger.info("Discovery succeeded but found no data (0 artifacts)")
+            result.success = True
+            _set_result_outcome(
+                result,
+                "empty",
+                reason="Discovery completed with zero artifacts.",
+                user_message="No matching data was found for this request.",
+            )
+            return _DiscoveryValidationResult(True, bool(processor_succeeded))
+    except Exception as error:
+        logger.warning(f"Failed to check artifact count: {error}")
+
+    return _DiscoveryValidationResult(False, bool(processor_succeeded))
+
+
+async def _run_synthesis_phase(
+    *,
+    result: OrchestratorResult,
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    aggregator: EventAggregator,
+    latest_processor_delegation: Optional[DelegationResult],
+    processor_succeeded: bool,
+    cli_mode: bool,
+) -> None:
+    logger.info("Running Synthesis Agent")
+    aggregator.set_phase('synthesis')
+
+    await aggregator.step_start({
+        "title": "Synthesis",
+        "text": "Processing collected data and generating final script",
+        "timestamp": time.time()
+    })
+    result.phases_executed.append('synthesis')
+
+    synthesis_deps = SynthesisDeps(
+        correlation_id=correlation_id,
+        artifacts_file=artifacts_file,
+        step_start_callback=aggregator.step_start,
+        step_end_callback=aggregator.step_end,
+        tool_call_callback=aggregator.tool_call,
+        progress_callback=aggregator.progress,
+        cli_mode=cli_mode
+    )
+
+    result.synthesis_result, synthesis_usage = await execute_synthesis(user_query, synthesis_deps)
+    _add_usage_to_result(result, synthesis_usage)
+
+    if not result.synthesis_result.success:
+        logger.error(f"Synthesis failed: {result.synthesis_result.error}")
+        result.error = result.synthesis_result.error
+        _set_result_outcome(
+            result,
+            "fail",
+            reason="Synthesis failed after discovery.",
+            user_message=result.error,
+        )
+        return
+
+    result.success = True
+    result.script_code = result.synthesis_result.script_code
+    result.display_type = result.synthesis_result.display_type
+    degraded_reasons = _discovery_degraded_reasons(result, latest_processor_delegation)
+    if degraded_reasons and result.outcome != "degraded_success":
+        _set_result_outcome(
+            result,
+            "degraded_success",
+            reason="; ".join(degraded_reasons),
+            user_message="The answer uses available evidence, but one or more requested parts could not be fully retrieved.",
+        )
+    elif result.outcome == "pending":
+        _set_result_outcome(
+            result,
+            "success",
+            reason="Synthesis completed with available evidence.",
+        )
+
+    sql_succeeded = result.sql_result and result.sql_result.success
+    api_succeeded = result.api_result and result.api_result.success
+    special_succeeded = _has_successful_delegation(result, "special")
+
+    if sql_succeeded and api_succeeded:
+        result.data_source_type = "hybrid"
+    elif sql_succeeded:
+        result.data_source_type = "sql"
+    elif api_succeeded:
+        result.data_source_type = "api"
+    elif processor_succeeded:
+        result.data_source_type = "processor"
+    elif special_succeeded:
+        result.data_source_type = "special"
+
+    if result.data_source_type in ["sql", "hybrid"]:
+        result.last_sync_time = get_last_sync_timestamp()
+
+    logger.info("Multi-agent workflow complete")
+    logger.info(f"Phases executed: {', '.join(result.phases_executed)}")
+    logger.info(f"Data source: {result.data_source_type}")
+    logger.info(f"Outcome: {result.outcome} ({result.result_mode})")
+
+    if result.total_tokens > 0:
+        avg_per_call = result.total_input_tokens / result.total_requests if result.total_requests > 0 else 0
+        logger.info(
+            f"[{correlation_id}] TOTAL Token Usage: "
+            f"{result.total_input_tokens:,} input, {result.total_output_tokens:,} output, "
+            f"{result.total_tokens:,} total (across {result.total_requests} API calls, "
+            f"avg {avg_per_call:,.0f} input/call)"
+        )
+
+
 # ============================================================================
 # Main Orchestrator Function
 # ============================================================================
@@ -839,6 +1723,12 @@ async def execute_multi_agent_query(
             artifacts_file=artifacts_file,
             db_runtime_summary=db_runtime_summary,
             special_tool_capabilities=special_tool_capabilities,
+            workflow_state={
+                "completed_steps": [],
+                "step_count": 0,
+                "remaining_tool_calls": max_tool_calls,
+                "max_tool_calls": max_tool_calls,
+            },
             step_start_callback=aggregator.step_start,
         )
         result.supervisor_decisions.append(result.initial_supervisor_decision.model_dump())
@@ -855,77 +1745,9 @@ async def execute_multi_agent_query(
         if _apply_initial_terminal_decision(result, result.initial_supervisor_decision):
             return result
         
-        if phase == "SPECIAL":
-            # Execute special tools
-            logger.info(f"Executing special tool handler")
-            result.phases_executed.append('special')
-            
-            # Send initial status to frontend
-            await aggregator.step_start({
-                "title": "Special Tool",
-                "text": "Using specialized tool to fetch your answer. Please wait...",
-                "timestamp": time.time()
-            })
-            
-            special_result = await handle_special_query(
-                user_query=user_query,
-                okta_client=okta_client,
-                correlation_id=correlation_id,
-                progress_callback=aggregator.progress
-            )
-
-            result.special_tool_data = special_result.raw_result
-            result.special_tool_operation = special_result.tool_operation
-            result.special_tool_response_mode = special_result.response_mode
-            if special_result.delegation_result:
-                result.delegation_results.append(special_result.delegation_result.model_dump())
-
-            if special_result.success:
-                # Special tools return pre-formatted results
-                result.success = True
-                result.script_code = special_result.response_text
-                result.display_type = special_result.display_type or "markdown"
-                result.is_special_tool = True  # Flag to skip validation
-                special_mode = special_result.delegation_result.result_mode if special_result.delegation_result else "direct_answer"
-                _set_result_outcome(
-                    result,
-                    "direct_answer" if special_mode == "direct_answer" else "success",
-                    result_mode=special_mode,
-                    reason="Special tool returned a direct response.",
-                    user_message=special_result.response_text,
-                )
-                logger.info(f"Special tool execution successful")
-            else:
-                result.error = special_result.error or "Special tool execution failed"
-                _set_result_outcome(
-                    result,
-                    "fail",
-                    reason="Special tool execution failed.",
-                    user_message=result.error,
-                )
-                logger.error(f"Special tool failed: {result.error}")
-            
-            return result
-        
-        async def supervisor_next_target(latest_delegation: DelegationResult) -> Optional[str]:
-            """Ask the supervisor whether to continue with SQL/API or finish."""
-            supervisor_decision, supervisor_usage = await supervise_next_step(
-                user_query,
-                correlation_id=correlation_id,
-                artifacts_file=artifacts_file,
-                delegation_results=result.delegation_results,
-                latest_delegation_result=latest_delegation,
-                db_runtime_summary=db_runtime_summary,
-                special_tool_capabilities=special_tool_capabilities,
-                step_start_callback=aggregator.step_start,
-            )
-            result.supervisor_decisions.append(supervisor_decision.model_dump())
-            _add_usage_to_result(result, supervisor_usage)
-
-            return _apply_followup_supervisor_decision(result, supervisor_decision)
-        
         # ====================================================================
-        # PHASE 1: SQL Discovery (if Supervisor → SQL AND DB is healthy)
+        # PHASE 1: Initial SQL Discovery (if Supervisor → SQL AND DB is healthy)
+        # Other specialist targets, including SPECIAL, enter the shared loop.
         # ====================================================================
         phase, global_tool_calls_counter, initial_sql_usage, should_stop = await _run_initial_sql_discovery(
             result=result,
@@ -942,535 +1764,45 @@ async def execute_multi_agent_query(
         )
         if should_stop:
             return result
-        
-        # ====================================================================
-        # PHASE 2 & 2.5: Multi-Step Discovery Loop (API ↔ SQL)
-        # ====================================================================
-        # Allow up to 6 phase executions (e.g., API→SQL→API→SQL→API→SQL)
-        # Each SQL or API execution counts as one iteration
-        max_iterations = 6
-        iteration_count = 0
-        
-        # Track unresolved requirements per iteration (cleared after acting on them).
-        pending_api_request = None
-        pending_sql_request = None
-        pending_processor_source: Optional[DelegationResult] = None
-        latest_sql_delegation: Optional[DelegationResult] = None
-        latest_api_delegation: Optional[DelegationResult] = None
-        latest_processor_delegation: Optional[DelegationResult] = None
-        seen_requirement_steps: set[tuple[str, tuple[str, ...]]] = set()
-        
-        # Let the supervisor decide whether the initial SQL result needs another specialist.
-        if result.sql_result:
-            latest_sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, initial_sql_usage)
-            result.delegation_results.append(latest_sql_delegation.model_dump())
-            next_target = await supervisor_next_target(latest_sql_delegation)
-            if next_target == "API":
-                candidate_request = _delegation_requirements(latest_sql_delegation, "api")
-                if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
-                    logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
-                    return result
-                pending_api_request = candidate_request
-                logger.info(f"Supervisor delegates from SQL to API: {pending_api_request}")
-            elif next_target == "SQL":
-                candidate_request = _delegation_requirements(latest_sql_delegation, "sql")
-                if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
-                    logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
-                    return result
-                pending_sql_request = candidate_request
-                logger.info(f"Supervisor delegates from SQL back to SQL: {pending_sql_request}")
-            elif next_target == "PROCESSOR":
-                candidate_request = _processor_requirements(latest_sql_delegation)
-                if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
-                    logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
-                    return result
-                pending_processor_source = latest_sql_delegation
-                logger.info(f"Supervisor delegates from SQL to result-set processor: {candidate_request}")
-            elif next_target == "STOP":
-                return result
-        
-        logger.info(f"Starting multi-step discovery loop (max {max_iterations} phases)")
-        
-        while iteration_count < max_iterations:
-            # Check if we need to run API phase
-            should_run_api = (
-                phase == "API"  # Supervisor decided API (first iteration only)
-                or pending_api_request is not None  # SQL requested API in previous iteration
-            )
-            
-            # Check if we need to run SQL phase
-            should_run_sql = (
-                pending_sql_request is not None  # API requested SQL in previous iteration
-            )
 
-            should_run_processor = (
-                phase == "PROCESSOR"
-                or pending_processor_source is not None
-            )
-            
-            # Exit loop if no more phases needed
-            if not should_run_api and not should_run_sql and not should_run_processor:
-                logger.info(f"Discovery loop complete: No more phases needed (iterations: {iteration_count})")
-                break
-            
-            # Clear pending requests before this iteration
-            processor_source = pending_processor_source
-            pending_api_request = None
-            pending_sql_request = None
-            pending_processor_source = None
-
-            # ================================================================
-            # Run Result-Set Processor (if needed)
-            # ================================================================
-            if should_run_processor:
-                iteration_count += 1
-                source_delegation = processor_source or latest_api_delegation or latest_sql_delegation
-                logger.info(f"Running Result-Set Processor (iteration {iteration_count}/{max_iterations})")
-                aggregator.set_phase('processor')
-                result.phases_executed.append('processor')
-
-                await aggregator.step_start({
-                    "title": "Result Processing",
-                    "text": "Processing saved result-set references",
-                    "timestamp": time.time()
-                })
-
-                latest_processor_delegation = _processor_delegation_result(
-                    user_query,
-                    artifacts_file,
-                    source_delegation,
-                )
-                result.delegation_results.append(latest_processor_delegation.model_dump())
-                next_target = await supervisor_next_target(latest_processor_delegation)
-
-                if phase == "PROCESSOR":
-                    phase = None
-
-                if next_target == "SQL":
-                    candidate_request = _delegation_requirements(latest_processor_delegation, "sql")
-                    if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
-                        logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
-                        break
-                    pending_sql_request = candidate_request
-                    logger.info(f"Supervisor delegates from processor to SQL: {pending_sql_request}")
-                elif next_target == "API":
-                    candidate_request = _delegation_requirements(latest_processor_delegation, "api")
-                    if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
-                        logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
-                        break
-                    pending_api_request = candidate_request
-                    logger.info(f"Supervisor delegates from processor to API: {pending_api_request}")
-                elif next_target == "PROCESSOR":
-                    candidate_request = _processor_requirements(latest_processor_delegation)
-                    if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
-                        logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
-                        break
-                    pending_processor_source = latest_processor_delegation
-                    logger.info(f"Supervisor delegates from processor back to processor: {candidate_request}")
-                elif next_target == "STOP":
-                    return result
-
-                await aggregator.step_end({
-                    "title": "Result Processing Complete",
-                    "text": latest_processor_delegation.summary,
-                    "timestamp": time.time()
-                })
-            
-            # ================================================================
-            # Run API Discovery (if needed)
-            # ================================================================
-            if should_run_api:
-                iteration_count += 1
-                logger.info(f"Running API Discovery Agent (iteration {iteration_count}/{max_iterations})")
-                aggregator.set_phase('api')
-                result.phases_executed.append('api')
-                sql_context = _sql_context_for_api(result, latest_sql_delegation, artifacts_file)
-                
-                # Send STEP-START for API Discovery phase
-                await aggregator.step_start({
-                    "title": "API Discovery",
-                    "text": "Generating and testing API code to fetch additional data",
-                    "timestamp": time.time()
-                })
-                
-                api_deps = APIDiscoveryDeps(
-                    correlation_id=correlation_id,
-                    artifacts_file=artifacts_file,
-                    endpoints=endpoints_list,
-                    sql_reasoning=sql_context["sql_reasoning"],
-                    sql_discovered_data=sql_context["sql_discovered_data"],
-                    sql_needs_api=sql_context["sql_needs_api"],
-                    sql_found_data=sql_context["sql_found_data"],
-                    okta_client=okta_client,
-                    cancellation_check=cancellation_check,
-                    step_start_callback=aggregator.step_start,
-                    step_end_callback=aggregator.step_end,
-                    tool_call_callback=aggregator.tool_call,
-                    progress_callback=aggregator.progress,
-                    # Tool call limits (continue from SQL phase)
-                    global_tool_calls=global_tool_calls_counter,
-                    max_global_tool_calls=max_tool_calls
-                )
-                
-                result.api_result, api_usage = await execute_api_discovery(user_query, api_deps)
-                
-                # Update global counter after API phase
-                global_tool_calls_counter = api_deps.global_tool_calls
-                logger.info(f"Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
-                
-                _add_usage_to_result(result, api_usage)
-                latest_api_delegation = _api_delegation_result(result.api_result, artifacts_file, api_usage)
-                
-                # Check for API limit errors and stop execution
-                if not result.api_result.success:
-                    error_msg = result.api_result.error or "API phase failed"
-                    logger.error(f"API phase failed: {error_msg}")
-                    sql_succeeded_before_api = bool(result.sql_result and result.sql_result.success)
-
-                    if _is_no_data_discovery_failure(result.api_result) and not sql_succeeded_before_api:
-                        logger.info("API discovery completed with no matching data")
-                        await aggregator.step_end({
-                            "title": "No Data Found",
-                            "text": "No matching data was found for this request.",
-                            "timestamp": time.time()
-                        })
-                        result.success = True
-                        _set_result_outcome(
-                            result,
-                            "empty",
-                            reason=result.api_result.reasoning or result.api_result.error,
-                            user_message="No matching data was found for this request.",
-                        )
-                        return result
-                    
-                    # Check if it's a hard limit error
-                    if "limit exceeded" in error_msg.lower():
-                        await aggregator.step_end({
-                            "title": "Execution Stopped",
-                            "text": f"Error: {error_msg}",
-                            "timestamp": time.time()
-                        })
-                        result.error = error_msg
-                        _set_result_outcome(
-                            result,
-                            "fail",
-                            reason="API discovery stopped after a deterministic runtime limit.",
-                            user_message=error_msg,
-                        )
-                        return result
-                    
-                    if latest_api_delegation.unresolved_requirements:
-                        logger.info(f"API has unresolved requirements for SQL: {latest_api_delegation.unresolved_requirements}")
-                    else:
-                        logger.info(f"Exiting discovery loop due to API error (no unresolved requirements)")
-                        break
-                
-                # Reset phase flag after first iteration
-                if phase == "API":
-                    phase = None
-                
-                result.delegation_results.append(latest_api_delegation.model_dump())
-                next_target = await supervisor_next_target(latest_api_delegation)
-                if next_target == "SQL":
-                    candidate_request = _delegation_requirements(latest_api_delegation, "sql")
-                    if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
-                        logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
-                        break
-                    pending_sql_request = candidate_request
-                    logger.info(f"Supervisor delegates from API to SQL: {pending_sql_request}")
-                elif next_target == "API":
-                    candidate_request = _delegation_requirements(latest_api_delegation, "api")
-                    if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
-                        logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
-                        break
-                    pending_api_request = candidate_request
-                    logger.info(f"Supervisor delegates from API back to API: {pending_api_request}")
-                elif next_target == "PROCESSOR":
-                    candidate_request = _processor_requirements(latest_api_delegation)
-                    if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
-                        logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
-                        break
-                    pending_processor_source = latest_api_delegation
-                    logger.info(f"Supervisor delegates from API to result-set processor: {candidate_request}")
-                elif next_target == "STOP":
-                    return result
-            
-            # ================================================================
-            # Run SQL Discovery (if pending request exists)
-            # ================================================================
-            if pending_sql_request is not None:
-                iteration_count += 1
-                logger.info(f"API agent requests SQL data: {pending_sql_request}")
-                logger.info(f"Running SQL Discovery Agent (iteration {iteration_count}/{max_iterations})")
-                
-                # Reuse the initial runtime DB summary for supervisor-consistent safety checks.
-                db_healthy = bool(db_runtime_summary.get("usable_for_sql"))
-                if not db_healthy:
-                    logger.warning(f"API needs SQL but DB is unavailable - exiting discovery loop")
-                    break
-                
-                aggregator.set_phase('sql')
-                result.phases_executed.append('sql')
-                
-                await aggregator.step_start({
-                    "title": "SQL Discovery",
-                    "text": f"Fetching base entities from database: {', '.join(pending_sql_request)}",
-                    "timestamp": time.time()
-                })
-                
-                api_context = _api_context_for_sql(result, latest_api_delegation, pending_sql_request, artifacts_file)
-                
-                sql_deps = SQLDiscoveryDeps(
-                    correlation_id=correlation_id,
-                    artifacts_file=artifacts_file,
-                    okta_client=okta_client,
-                    cancellation_check=cancellation_check,
-                    api_reasoning=api_context["api_reasoning"],
-                    api_discovered_data=api_context["api_discovered_data"],
-                    api_needs_sql=api_context["api_needs_sql"],
-                    api_found_data=api_context["api_found_data"],
-                    step_start_callback=aggregator.step_start,
-                    step_end_callback=aggregator.step_end,
-                    tool_call_callback=aggregator.tool_call,
-                    progress_callback=aggregator.progress,
-                    global_tool_calls=global_tool_calls_counter,
-                    max_global_tool_calls=max_tool_calls
-                )
-                
-                result.sql_result, sql_usage = await execute_sql_discovery(user_query, sql_deps)
-                
-                global_tool_calls_counter = sql_deps.global_tool_calls
-                logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
-                
-                _add_usage_to_result(result, sql_usage)
-                latest_sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, sql_usage)
-                
-                # Check for SQL limit errors
-                if not result.sql_result.success:
-                    error_msg = result.sql_result.error or "SQL phase failed"
-                    if "limit exceeded" in error_msg.lower():
-                        await aggregator.step_end({
-                            "title": "Execution Stopped",
-                            "text": f"Error: {error_msg}",
-                            "timestamp": time.time()
-                        })
-                        result.error = error_msg
-                        _set_result_outcome(
-                            result,
-                            "fail",
-                            reason="SQL discovery stopped after a deterministic runtime limit.",
-                            user_message=error_msg,
-                        )
-                        return result
-                    if latest_sql_delegation.unresolved_requirements:
-                        logger.info(f"SQL has unresolved requirements for API: {latest_sql_delegation.unresolved_requirements}")
-                    else:
-                        logger.info(f"Exiting discovery loop due to SQL error (no unresolved requirements)")
-                        break
-                
-                result.delegation_results.append(latest_sql_delegation.model_dump())
-                next_target = await supervisor_next_target(latest_sql_delegation)
-                if next_target == "API":
-                    candidate_request = _delegation_requirements(latest_sql_delegation, "api")
-                    if not _record_requirement_step(seen_requirement_steps, "api", candidate_request):
-                        logger.warning(f"Stopping repeated API requirement loop: {candidate_request}")
-                        break
-                    pending_api_request = candidate_request
-                    logger.info(f"Supervisor delegates from SQL to API: {pending_api_request}")
-                elif next_target == "SQL":
-                    candidate_request = _delegation_requirements(latest_sql_delegation, "sql")
-                    if not _record_requirement_step(seen_requirement_steps, "sql", candidate_request):
-                        logger.warning(f"Stopping repeated SQL requirement loop: {candidate_request}")
-                        break
-                    pending_sql_request = candidate_request
-                    logger.info(f"Supervisor delegates from SQL back to SQL: {pending_sql_request}")
-                elif next_target == "PROCESSOR":
-                    candidate_request = _processor_requirements(latest_sql_delegation)
-                    if not _record_requirement_step(seen_requirement_steps, "processor", candidate_request):
-                        logger.warning(f"Stopping repeated processor requirement loop: {candidate_request}")
-                        break
-                    pending_processor_source = latest_sql_delegation
-                    logger.info(f"Supervisor delegates from SQL to result-set processor: {candidate_request}")
-                elif next_target == "STOP":
-                    return result
-                
-                await aggregator.step_end({
-                    "title": "SQL Discovery Complete",
-                    "text": f"SQL data retrieved: {result.sql_result.success}",
-                    "timestamp": time.time()
-                })
-        
-        # Check if we hit max iterations
-        if iteration_count >= max_iterations:
-            logger.warning(f"Discovery loop hit maximum iterations ({max_iterations})")
-            await aggregator.progress({
-                "message": f"Reached maximum discovery phases ({max_iterations}), proceeding with available data"
-            })
-            _set_result_outcome(
-                result,
-                "degraded_success",
-                reason=f"Reached maximum discovery phases ({max_iterations}) and continued with available evidence.",
-                user_message="The answer uses available evidence because the discovery loop reached its runtime limit.",
-            )
-        
-        # ====================================================================
-        # Validate Discovery Results Before Synthesis
-        # ====================================================================
-        # Check if any discovery phase actually succeeded
-        sql_succeeded = result.sql_result and result.sql_result.success
-        api_succeeded = result.api_result and result.api_result.success
-        processor_succeeded = latest_processor_delegation and latest_processor_delegation.success
-        
-        if not sql_succeeded and not api_succeeded and not processor_succeeded:
-            if _is_no_data_discovery_failure(result.sql_result) or _is_no_data_discovery_failure(result.api_result):
-                logger.info("Discovery completed with no matching data")
-                result.success = True
-                no_data_result = result.sql_result if _is_no_data_discovery_failure(result.sql_result) else result.api_result
-                _set_result_outcome(
-                    result,
-                    "empty",
-                    reason=getattr(no_data_result, "reasoning", None) or getattr(no_data_result, "error", None),
-                    user_message="No matching data was found for this request.",
-                )
-                return result
-
-            # Both phases failed or didn't run - cannot proceed
-            error_details = []
-            if result.sql_result and not result.sql_result.success:
-                error_details.append(f"SQL: {result.sql_result.error}")
-            if result.api_result and not result.api_result.success:
-                error_details.append(f"API: {result.api_result.error}")
-            
-            error_msg = "Discovery failed - no data retrieved. " + " | ".join(error_details) if error_details else "No discovery phases succeeded"
-            logger.error(f"{error_msg}")
-            
-            await aggregator.step_end({
-                "title": "Discovery Failed",
-                "text": f"Error: {error_msg}",
-                "timestamp": time.time()
-            })
-            
-            result.error = error_msg
-            _set_result_outcome(
-                result,
-                "fail",
-                reason="Discovery failed before any usable evidence was produced.",
-                user_message=error_msg,
-            )
-            return result
-        
-        logger.info(f"Discovery validation passed (SQL: {sql_succeeded}, API: {api_succeeded})")
-        
-        # Check if discovery succeeded but found no data (0 artifacts)
-        try:
-            artifacts = load_artifacts_file(artifacts_file)
-            artifact_count = len(artifacts) if isinstance(artifacts, list) else 0
-            
-            if artifact_count == 0:
-                logger.info(f"Discovery succeeded but found no data (0 artifacts)")
-                result.success = True
-                _set_result_outcome(
-                    result,
-                    "empty",
-                    reason="Discovery completed with zero artifacts.",
-                    user_message="No matching data was found for this request.",
-                )
-                return result
-        except Exception as e:
-            logger.warning(f"Failed to check artifact count: {e}")
-            # Continue to synthesis anyway
-        
-        # ====================================================================
-        # PHASE 3: Synthesis
-        # ====================================================================
-        logger.info(f"Running Synthesis Agent")
-        aggregator.set_phase('synthesis')
-        
-        # Notify user synthesis is starting
-        await aggregator.step_start({
-            "title": "Synthesis",
-            "text": "Processing collected data and generating final script",
-            "timestamp": time.time()
-        })
-        result.phases_executed.append('synthesis')
-        
-        synthesis_deps = SynthesisDeps(
+        latest_processor_delegation, should_stop = await _run_discovery_loop(
+            result=result,
+            phase=phase,
+            initial_sql_usage=initial_sql_usage,
+            user_query=user_query,
             correlation_id=correlation_id,
             artifacts_file=artifacts_file,
-            step_start_callback=aggregator.step_start,
-            step_end_callback=aggregator.step_end,
-            tool_call_callback=aggregator.tool_call,
-            progress_callback=aggregator.progress,
-            cli_mode=cli_mode
+            okta_client=okta_client,
+            cancellation_check=cancellation_check,
+            aggregator=aggregator,
+            endpoints_list=endpoints_list,
+            db_runtime_summary=db_runtime_summary,
+            special_tool_capabilities=special_tool_capabilities,
+            global_tool_calls_counter=global_tool_calls_counter,
+            max_tool_calls=max_tool_calls,
         )
-        
-        result.synthesis_result, synthesis_usage = await execute_synthesis(user_query, synthesis_deps)
-        
-        _add_usage_to_result(result, synthesis_usage)
-        
-        if not result.synthesis_result.success:
-            logger.error(f"Synthesis failed: {result.synthesis_result.error}")
-            result.error = result.synthesis_result.error
-            _set_result_outcome(
-                result,
-                "fail",
-                reason="Synthesis failed after discovery.",
-                user_message=result.error,
-            )
+        if should_stop:
             return result
         
-        # ====================================================================
-        # SUCCESS: Return Script
-        # ====================================================================
-        result.success = True
-        result.script_code = result.synthesis_result.script_code
-        result.display_type = result.synthesis_result.display_type
-        degraded_reasons = _discovery_degraded_reasons(result, latest_processor_delegation)
-        if degraded_reasons and result.outcome != "degraded_success":
-            _set_result_outcome(
-                result,
-                "degraded_success",
-                reason="; ".join(degraded_reasons),
-                user_message="The answer uses available evidence, but one or more requested parts could not be fully retrieved.",
-            )
-        elif result.outcome == "pending":
-            _set_result_outcome(
-                result,
-                "success",
-                reason="Synthesis completed with available evidence.",
-            )
-        
-        # Determine data source type based on which agents ran successfully
-        sql_succeeded = result.sql_result and result.sql_result.success
-        api_succeeded = result.api_result and result.api_result.success
-        
-        if sql_succeeded and api_succeeded:
-            result.data_source_type = "hybrid"
-        elif sql_succeeded:
-            result.data_source_type = "sql"
-        elif api_succeeded:
-            result.data_source_type = "api"
-        elif processor_succeeded:
-            result.data_source_type = "processor"
-        
-        # Get last sync timestamp if SQL was used
-        if result.data_source_type in ["sql", "hybrid"]:
-            result.last_sync_time = get_last_sync_timestamp()
-        
-        logger.info(f"Multi-agent workflow complete")
-        logger.info(f"Phases executed: {', '.join(result.phases_executed)}")
-        logger.info(f"Data source: {result.data_source_type}")
-        logger.info(f"Outcome: {result.outcome} ({result.result_mode})")
-        
-        # Log cumulative token usage
-        if result.total_tokens > 0:
-            avg_per_call = result.total_input_tokens / result.total_requests if result.total_requests > 0 else 0
-            logger.info(
-                f"[{correlation_id}] TOTAL Token Usage: "
-                f"{result.total_input_tokens:,} input, {result.total_output_tokens:,} output, "
-                f"{result.total_tokens:,} total (across {result.total_requests} API calls, "
-                f"avg {avg_per_call:,.0f} input/call)"
-            )
+        validation = await _validate_discovery_before_synthesis(
+            result=result,
+            artifacts_file=artifacts_file,
+            latest_processor_delegation=latest_processor_delegation,
+            aggregator=aggregator,
+        )
+        if validation.should_stop:
+            return result
+
+        await _run_synthesis_phase(
+            result=result,
+            user_query=user_query,
+            correlation_id=correlation_id,
+            artifacts_file=artifacts_file,
+            aggregator=aggregator,
+            latest_processor_delegation=latest_processor_delegation,
+            processor_succeeded=validation.processor_succeeded,
+            cli_mode=cli_mode,
+        )
         
         return result
         
