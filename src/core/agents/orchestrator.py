@@ -572,6 +572,62 @@ def _api_delegation_result(
     )
 
 
+def _sql_context_for_api(
+    result: OrchestratorResult,
+    latest_sql_delegation: Optional[DelegationResult],
+    artifacts_file: Path,
+) -> Dict[str, Any]:
+    context = {
+        "sql_reasoning": None,
+        "sql_discovered_data": None,
+        "sql_needs_api": None,
+        "sql_found_data": None,
+    }
+
+    if result.sql_result and result.sql_result.success:
+        context["sql_reasoning"] = result.sql_result.reasoning
+        context["sql_needs_api"] = (
+            _delegation_requirements(latest_sql_delegation, "api")
+            if latest_sql_delegation
+            else result.sql_result.needs_api
+        )
+        context["sql_found_data"] = _delegation_evidence(latest_sql_delegation, result.sql_result.found_data)
+        context["sql_discovered_data"] = _load_artifacts_by_category(artifacts_file, "sql_results")
+        if context["sql_discovered_data"]:
+            logger.info(f"Passing SQL discovered data to API agent ({len(context['sql_discovered_data'])} chars)")
+    elif result.sql_result:
+        context["sql_reasoning"] = f"SQL phase failed: {result.sql_result.error}"
+
+    return context
+
+
+def _api_context_for_sql(
+    result: OrchestratorResult,
+    latest_api_delegation: Optional[DelegationResult],
+    pending_sql_request: List[str],
+    artifacts_file: Path,
+) -> Dict[str, Any]:
+    api_found_data = _delegation_evidence(
+        latest_api_delegation,
+        result.api_result.found_data if result.api_result else [],
+    )
+    if result.api_result and result.api_result.success and result.api_result.reasoning:
+        api_reasoning = result.api_result.reasoning
+    else:
+        api_reasoning = f"API agent needs base entities: {', '.join(pending_sql_request)}"
+
+    api_discovered_data = _load_artifacts_by_category(artifacts_file, "api_results")
+    if api_discovered_data:
+        logger.info(f"Passing API discovered data to SQL agent ({len(api_discovered_data)} chars)")
+
+    return {
+        "api_reasoning": api_reasoning,
+        "api_discovered_data": api_discovered_data,
+        "api_needs_sql": pending_sql_request,
+        "api_found_data": api_found_data,
+    }
+
+
 # ============================================================================
 # Decision Functions (REMOVED - Now using Supervisor Agent)
 # ============================================================================
@@ -628,6 +684,83 @@ class EventAggregator:
         """Forward progress event (no renumbering needed)"""
         if self.event_callback:
             await self.event_callback('progress', event)
+
+
+async def _run_initial_sql_discovery(
+    *,
+    result: OrchestratorResult,
+    phase: str,
+    db_runtime_summary: Dict[str, Any],
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    okta_client: Any,
+    cancellation_check: callable,
+    aggregator: EventAggregator,
+    global_tool_calls_counter: int,
+    max_tool_calls: int,
+) -> tuple[str, int, Any, bool]:
+    initial_sql_usage = None
+    should_run_sql = phase == "SQL"
+
+    if should_run_sql and not bool(db_runtime_summary.get("usable_for_sql")):
+        logger.info("Supervisor chose SQL, but database is unavailable or empty - using runtime-safe API fallback")
+        return "API", global_tool_calls_counter, initial_sql_usage, False
+
+    if not should_run_sql:
+        logger.info(f"Skipped SQL Discovery (Supervisor decision: {phase})")
+        return phase, global_tool_calls_counter, initial_sql_usage, False
+
+    logger.info("Running SQL Discovery Agent")
+    aggregator.set_phase('sql')
+    result.phases_executed.append('sql')
+
+    await aggregator.step_start({
+        "title": "SQL Discovery",
+        "text": "Analyzing database schema and executing SQL queries",
+        "timestamp": time.time()
+    })
+
+    sql_deps = SQLDiscoveryDeps(
+        correlation_id=correlation_id,
+        artifacts_file=artifacts_file,
+        okta_client=okta_client,
+        cancellation_check=cancellation_check,
+        step_start_callback=aggregator.step_start,
+        step_end_callback=aggregator.step_end,
+        tool_call_callback=aggregator.tool_call,
+        progress_callback=aggregator.progress,
+        global_tool_calls=global_tool_calls_counter,
+        max_global_tool_calls=max_tool_calls,
+    )
+
+    result.sql_result, initial_sql_usage = await execute_sql_discovery(user_query, sql_deps)
+    global_tool_calls_counter = sql_deps.global_tool_calls
+    logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
+    _add_usage_to_result(result, initial_sql_usage)
+
+    if not result.sql_result.success:
+        error_msg = result.sql_result.error or "SQL phase failed"
+        logger.error(f"SQL phase failed: {error_msg}")
+
+        if "limit exceeded" in error_msg.lower():
+            await aggregator.step_end({
+                "title": "Execution Stopped",
+                "text": f"Error: {error_msg}",
+                "timestamp": time.time()
+            })
+            result.error = error_msg
+            _set_result_outcome(
+                result,
+                "fail",
+                reason="SQL discovery stopped after a deterministic runtime limit.",
+                user_message=error_msg,
+            )
+            return phase, global_tool_calls_counter, initial_sql_usage, True
+
+        logger.info("Continuing to API phase despite SQL error")
+
+    return phase, global_tool_calls_counter, initial_sql_usage, False
 
 
 # ============================================================================
@@ -794,79 +927,21 @@ async def execute_multi_agent_query(
         # ====================================================================
         # PHASE 1: SQL Discovery (if Supervisor → SQL AND DB is healthy)
         # ====================================================================
-        should_run_sql = phase == "SQL"
-        
-        # Check database health before attempting SQL phase
-        initial_sql_usage = None
-
-        if should_run_sql:
-            db_healthy = bool(db_runtime_summary.get("usable_for_sql"))
-            if not db_healthy:
-                logger.info("Supervisor chose SQL, but database is unavailable or empty - using runtime-safe API fallback")
-                should_run_sql = False
-                # Force API mode since DB is unavailable
-                phase = "API"
-        
-        if should_run_sql:
-            logger.info(f"Running SQL Discovery Agent")
-            aggregator.set_phase('sql')
-            result.phases_executed.append('sql')
-            
-            # Send STEP-START for SQL Discovery phase
-            await aggregator.step_start({
-                "title": "SQL Discovery",
-                "text": "Analyzing database schema and executing SQL queries",
-                "timestamp": time.time()
-            })
-            
-            sql_deps = SQLDiscoveryDeps(
-                correlation_id=correlation_id,
-                artifacts_file=artifacts_file,
-                okta_client=okta_client,
-                cancellation_check=cancellation_check,
-                step_start_callback=aggregator.step_start,
-                step_end_callback=aggregator.step_end,
-                tool_call_callback=aggregator.tool_call,
-                progress_callback=aggregator.progress,
-                # Tool call limits
-                global_tool_calls=global_tool_calls_counter,
-                max_global_tool_calls=max_tool_calls
-            )
-            
-            result.sql_result, initial_sql_usage = await execute_sql_discovery(user_query, sql_deps)
-            
-            # Update global counter after SQL phase
-            global_tool_calls_counter = sql_deps.global_tool_calls
-            logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
-            
-            # Track token usage
-            _add_usage_to_result(result, initial_sql_usage)
-            
-            if not result.sql_result.success:
-                error_msg = result.sql_result.error or "SQL phase failed"
-                logger.error(f"SQL phase failed: {error_msg}")
-                
-                # Check if it's a hard limit error
-                if "limit exceeded" in error_msg.lower():
-                    # Hard stop - notify frontend and return
-                    await aggregator.step_end({
-                        "title": "Execution Stopped",
-                        "text": f"Error: {error_msg}",
-                        "timestamp": time.time()
-                    })
-                    result.error = error_msg
-                    _set_result_outcome(
-                        result,
-                        "fail",
-                        reason="SQL discovery stopped after a deterministic runtime limit.",
-                        user_message=error_msg,
-                    )
-                    return result
-                
-                # Other SQL errors - continue anyway, API might still work
-                logger.info(f"Continuing to API phase despite SQL error")
-        else:
-            logger.info(f"Skipped SQL Discovery (Supervisor decision: {phase})")
+        phase, global_tool_calls_counter, initial_sql_usage, should_stop = await _run_initial_sql_discovery(
+            result=result,
+            phase=phase,
+            db_runtime_summary=db_runtime_summary,
+            user_query=user_query,
+            correlation_id=correlation_id,
+            artifacts_file=artifacts_file,
+            okta_client=okta_client,
+            cancellation_check=cancellation_check,
+            aggregator=aggregator,
+            global_tool_calls_counter=global_tool_calls_counter,
+            max_tool_calls=max_tool_calls,
+        )
+        if should_stop:
+            return result
         
         # ====================================================================
         # PHASE 2 & 2.5: Multi-Step Discovery Loop (API ↔ SQL)
@@ -1009,22 +1084,7 @@ async def execute_multi_agent_query(
                 logger.info(f"Running API Discovery Agent (iteration {iteration_count}/{max_iterations})")
                 aggregator.set_phase('api')
                 result.phases_executed.append('api')
-                
-                # Get SQL context for API agent
-                sql_reasoning = None
-                sql_discovered_data = None
-                sql_needs_api = None
-                sql_found_data = None
-                
-                if result.sql_result and result.sql_result.success:
-                    sql_reasoning = result.sql_result.reasoning
-                    sql_needs_api = _delegation_requirements(latest_sql_delegation, "api") if latest_sql_delegation else result.sql_result.needs_api
-                    sql_found_data = _delegation_evidence(latest_sql_delegation, result.sql_result.found_data)
-                    sql_discovered_data = _load_artifacts_by_category(artifacts_file, 'sql_results')
-                    if sql_discovered_data:
-                        logger.info(f"Passing SQL discovered data to API agent ({len(sql_discovered_data)} chars)")
-                elif result.sql_result:
-                    sql_reasoning = f"SQL phase failed: {result.sql_result.error}"
+                sql_context = _sql_context_for_api(result, latest_sql_delegation, artifacts_file)
                 
                 # Send STEP-START for API Discovery phase
                 await aggregator.step_start({
@@ -1037,10 +1097,10 @@ async def execute_multi_agent_query(
                     correlation_id=correlation_id,
                     artifacts_file=artifacts_file,
                     endpoints=endpoints_list,
-                    sql_reasoning=sql_reasoning,
-                    sql_discovered_data=sql_discovered_data,  # Pass SQL content
-                    sql_needs_api=sql_needs_api,  # Pass structured list
-                    sql_found_data=sql_found_data,  # Pass structured list
+                    sql_reasoning=sql_context["sql_reasoning"],
+                    sql_discovered_data=sql_context["sql_discovered_data"],
+                    sql_needs_api=sql_context["sql_needs_api"],
+                    sql_found_data=sql_context["sql_found_data"],
                     okta_client=okta_client,
                     cancellation_check=cancellation_check,
                     step_start_callback=aggregator.step_start,
@@ -1158,30 +1218,17 @@ async def execute_multi_agent_query(
                     "timestamp": time.time()
                 })
                 
-                # Get API reasoning and data for SQL agent
-                api_needs_sql = pending_sql_request
-                api_found_data = _delegation_evidence(latest_api_delegation, result.api_result.found_data)
-                
-                # Use API agent's reasoning output or provide default
-                if result.api_result.success and result.api_result.reasoning:
-                    api_reasoning = result.api_result.reasoning
-                else:
-                    api_reasoning = f"API agent needs base entities: {', '.join(pending_sql_request)}"
-                
-                # Load API artifacts
-                api_discovered_data = _load_artifacts_by_category(artifacts_file, 'api_results')
-                if api_discovered_data:
-                    logger.info(f"Passing API discovered data to SQL agent ({len(api_discovered_data)} chars)")
+                api_context = _api_context_for_sql(result, latest_api_delegation, pending_sql_request, artifacts_file)
                 
                 sql_deps = SQLDiscoveryDeps(
                     correlation_id=correlation_id,
                     artifacts_file=artifacts_file,
                     okta_client=okta_client,
                     cancellation_check=cancellation_check,
-                    api_reasoning=api_reasoning,
-                    api_discovered_data=api_discovered_data,
-                    api_needs_sql=api_needs_sql,
-                    api_found_data=api_found_data,
+                    api_reasoning=api_context["api_reasoning"],
+                    api_discovered_data=api_context["api_discovered_data"],
+                    api_needs_sql=api_context["api_needs_sql"],
+                    api_found_data=api_context["api_found_data"],
                     step_start_callback=aggregator.step_start,
                     step_end_callback=aggregator.step_end,
                     tool_call_callback=aggregator.tool_call,

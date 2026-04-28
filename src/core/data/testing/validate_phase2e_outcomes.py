@@ -6,6 +6,7 @@ Run from the repository root with:
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,13 +17,16 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from src.core.agents.api_discovery_agent import APIDiscoveryResult
 from src.core.agents.orchestrator import (
     OrchestratorResult,
+    _api_context_for_sql,
     _api_delegation_result,
     _apply_followup_supervisor_decision,
     _apply_initial_terminal_decision,
     _delegation_requirements,
     _discovery_degraded_reasons,
     _record_requirement_step,
+    _run_initial_sql_discovery,
     _set_result_outcome,
+    _sql_context_for_api,
     _sql_delegation_result,
 )
 from src.core.agents.special_tools_handler import (
@@ -40,8 +44,31 @@ from src.data.schemas.artifact_manifest import DelegationResult
 _TEMP_DIRS: list[TemporaryDirectory[str]] = []
 
 
+class _DummyAggregator:
+    def __init__(self) -> None:
+        self.phase = None
+        self.events: list[tuple[str, dict]] = []
+
+    def set_phase(self, phase: str) -> None:
+        self.phase = phase
+
+    async def step_start(self, event: dict) -> None:
+        self.events.append(("step_start", event))
+
+    async def step_end(self, event: dict) -> None:
+        self.events.append(("step_end", event))
+
+    async def tool_call(self, event: dict) -> None:
+        self.events.append(("tool_call", event))
+
+    async def progress(self, event: dict) -> None:
+        self.events.append(("progress", event))
+
+
 def _artifacts_file() -> Path:
-    temp_dir = TemporaryDirectory()
+    logs_dir = PROJECT_ROOT / "logs"
+    logs_dir.mkdir(exist_ok=True)
+    temp_dir = TemporaryDirectory(dir=logs_dir)
     _TEMP_DIRS.append(temp_dir)
     return Path(temp_dir.name) / "artifacts.json"
 
@@ -246,6 +273,65 @@ def test_followup_supervisor_decision_helper() -> None:
     assert degraded_result.is_degraded_success is True
 
 
+def test_initial_sql_fallback_helper() -> None:
+    result = OrchestratorResult()
+    phase, tool_calls, usage, should_stop = asyncio.run(
+        _run_initial_sql_discovery(
+            result=result,
+            phase="SQL",
+            db_runtime_summary={"usable_for_sql": False},
+            user_query="list users",
+            correlation_id="phase2e-test",
+            artifacts_file=_artifacts_file(),
+            okta_client=None,
+            cancellation_check=lambda: False,
+            aggregator=_DummyAggregator(),
+            global_tool_calls_counter=3,
+            max_tool_calls=30,
+        )
+    )
+
+    assert phase == "API"
+    assert tool_calls == 3
+    assert usage is None
+    assert should_stop is False
+    assert result.sql_result is None
+
+
+def test_specialist_context_helpers() -> None:
+    artifacts_file = _artifacts_file()
+
+    sql_result = OrchestratorResult()
+    sql_result.sql_result = SQLDiscoveryResult(
+        success=True,
+        found_data=["users"],
+        needs_api=["roles"],
+        reasoning="Found users in SQL.",
+    )
+    sql_delegation = _sql_delegation_result(sql_result.sql_result, artifacts_file, usage=None)
+    sql_context = _sql_context_for_api(sql_result, sql_delegation, artifacts_file)
+
+    api_result = OrchestratorResult()
+    api_result.api_result = APIDiscoveryResult(
+        success=True,
+        api_data_retrieved=True,
+        found_data=["roles"],
+        needs_sql=["users"],
+        reasoning="Fetched roles from API.",
+    )
+    api_delegation = _api_delegation_result(api_result.api_result, artifacts_file, usage=None)
+    api_context = _api_context_for_sql(api_result, api_delegation, ["users"], artifacts_file)
+
+    assert sql_context["sql_reasoning"] == "Found users in SQL."
+    assert sql_context["sql_needs_api"] == ["roles"]
+    assert sql_context["sql_found_data"] == ["users"]
+    assert sql_context["sql_discovered_data"] is None
+    assert api_context["api_reasoning"] == "Fetched roles from API."
+    assert api_context["api_needs_sql"] == ["users"]
+    assert api_context["api_found_data"] == ["roles"]
+    assert api_context["api_discovered_data"] is None
+
+
 def test_degraded_completion_outcome() -> None:
     latest_delegation = DelegationResult(
         success=True,
@@ -324,6 +410,8 @@ def main() -> None:
         test_clarify_and_failure_decisions,
         test_initial_terminal_decision_helper,
         test_followup_supervisor_decision_helper,
+        test_initial_sql_fallback_helper,
+        test_specialist_context_helpers,
         test_degraded_completion_outcome,
         test_failure_outcome_and_loop_guard,
         test_runtime_degraded_reason_detection,
