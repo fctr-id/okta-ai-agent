@@ -199,6 +199,42 @@ def _usage_token_dict(usage: Any) -> Dict[str, int]:
     }
 
 
+def _load_api_endpoints() -> List[Dict[str, Any]]:
+    endpoints_file = Path("src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json")
+    try:
+        with open(endpoints_file, "r", encoding="utf-8") as file_handle:
+            endpoints_data = json.load(file_handle)
+    except Exception as error:
+        logger.warning(f"Failed to load endpoints file: {error}")
+        return []
+
+    endpoints = endpoints_data.get("endpoints", [])
+    logger.debug(f"Loaded {len(endpoints)} API endpoints")
+    return endpoints
+
+
+def _load_artifacts_by_category(artifacts_file: Path, category: str) -> Optional[str]:
+    """Load compact artifact context for a category without full payloads."""
+    try:
+        resolved_artifacts_file = artifacts_file.resolve()
+        allowed_roots = [Path("logs").resolve(), RUNTIME_ROOT.resolve()]
+        if not any(resolved_artifacts_file.is_relative_to(root) for root in allowed_roots):
+            raise ValueError
+    except (OSError, ValueError):
+        logger.error(f"Unsafe artifacts file path: {artifacts_file}")
+        return None
+
+    if not artifacts_file.is_file():
+        return None
+
+    try:
+        context = build_artifact_prompt_context(artifacts_file, categories=[category])
+        return context if context != "[]" else None
+    except Exception as error:
+        logger.warning(f"Failed to load {category} artifacts: {error}")
+        return None
+
+
 def _set_result_outcome(
     result: OrchestratorResult,
     outcome: str,
@@ -221,6 +257,106 @@ def _set_result_outcome(
     if outcome == "empty":
         result.no_data_found = True
     result.is_degraded_success = outcome == "degraded_success"
+
+
+def _apply_initial_terminal_decision(
+    result: OrchestratorResult,
+    decision: SupervisorDecision,
+) -> bool:
+    if decision.mode == "delegate":
+        return False
+
+    if decision.mode == "fail":
+        result.error = decision.user_message or "NOT-OKTA-RELATED"
+        _set_result_outcome(
+            result,
+            "fail",
+            reason=decision.reasoning,
+            user_message=result.error,
+        )
+        return True
+
+    if decision.mode == "clarify":
+        result.error = decision.user_message or "Clarification required before routing"
+        _set_result_outcome(
+            result,
+            "clarify",
+            reason=decision.reasoning,
+            user_message=result.error,
+        )
+        return True
+
+    if decision.mode == "complete":
+        result.error = decision.user_message or "Supervisor completed before any data specialist ran"
+        _set_result_outcome(
+            result,
+            "fail",
+            reason=decision.reasoning,
+            user_message=result.error,
+        )
+        return True
+
+    if decision.mode == "empty":
+        result.success = True
+        _set_result_outcome(
+            result,
+            "empty",
+            reason=decision.reasoning,
+            user_message=decision.user_message,
+        )
+        return True
+
+    if decision.mode == "degraded_success":
+        result.error = decision.user_message or "Supervisor reported degraded success before any data specialist ran"
+        _set_result_outcome(
+            result,
+            "fail",
+            reason=decision.reasoning,
+            user_message=result.error,
+        )
+        return True
+
+    return False
+
+
+def _apply_followup_supervisor_decision(
+    result: OrchestratorResult,
+    decision: SupervisorDecision,
+) -> Optional[str]:
+    if decision.mode == "delegate":
+        return decision.target
+
+    if decision.mode == "complete":
+        return None
+
+    if decision.mode == "empty":
+        result.success = True
+        _set_result_outcome(
+            result,
+            "empty",
+            reason=decision.reasoning,
+            user_message=decision.user_message,
+        )
+        return "STOP"
+
+    if decision.mode == "degraded_success":
+        _set_result_outcome(
+            result,
+            "degraded_success",
+            reason=decision.reasoning,
+            user_message=decision.user_message,
+        )
+        return None
+
+    result.error = decision.user_message or decision.reasoning
+    _set_result_outcome(
+        result,
+        "clarify" if decision.mode == "clarify" else "fail",
+        result_mode=decision.result_mode,
+        reason=decision.reasoning,
+        user_message=result.error,
+    )
+    return "STOP"
 
 
 def _discovery_degraded_reasons(
@@ -543,16 +679,7 @@ async def execute_multi_agent_query(
     global_tool_calls_counter = 0  # Shared across all agents
     logger.info(f"Tool call limits: {max_tool_calls} total, 3 per tool type")
     
-    # Load API endpoints data (needed for API discovery agent)
-    endpoints_file = Path("src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json")
-    endpoints_list = []
-    try:
-        with open(endpoints_file, 'r', encoding='utf-8') as f:
-            endpoints_data = json.load(f)
-            endpoints_list = endpoints_data.get('endpoints', [])
-            logger.debug(f"Loaded {len(endpoints_list)} API endpoints")
-    except Exception as e:
-        logger.warning(f"Failed to load endpoints file: {e}")
+    endpoints_list = _load_api_endpoints()
 
     db_runtime_summary = get_database_runtime_summary()
     special_tool_capabilities = get_special_tool_capability_summary()
@@ -592,55 +719,7 @@ async def execute_multi_agent_query(
         logger.info(f"Supervisor decision target: {phase}")
         logger.info(f"Supervisor reasoning: {reasoning}")
         
-        # Handle special cases
-        if decision_mode == "fail":
-            result.error = result.initial_supervisor_decision.user_message or "NOT-OKTA-RELATED"
-            _set_result_outcome(
-                result,
-                "fail",
-                reason=reasoning,
-                user_message=result.error,
-            )
-            return result
-
-        if decision_mode == "clarify":
-            result.error = result.initial_supervisor_decision.user_message or "Clarification required before routing"
-            _set_result_outcome(
-                result,
-                "clarify",
-                reason=reasoning,
-                user_message=result.error,
-            )
-            return result
-
-        if decision_mode == "complete":
-            result.error = result.initial_supervisor_decision.user_message or "Supervisor completed before any data specialist ran"
-            _set_result_outcome(
-                result,
-                "fail",
-                reason=reasoning,
-                user_message=result.error,
-            )
-            return result
-
-        if decision_mode == "empty":
-            result.success = True
-            _set_result_outcome(
-                result,
-                "empty",
-                reason=reasoning,
-                user_message=result.initial_supervisor_decision.user_message,
-            )
-            return result
-
-        if decision_mode == "degraded_success":
-            result.error = result.initial_supervisor_decision.user_message or "Supervisor reported degraded success before any data specialist ran"
-            _set_result_outcome(
-                result,
-                "fail",
-                reason=reasoning,
-                user_message=result.error,
-            )
+        if _apply_initial_terminal_decision(result, result.initial_supervisor_decision):
             return result
         
         if phase == "SPECIAL":
@@ -695,31 +774,6 @@ async def execute_multi_agent_query(
             
             return result
         
-        # ====================================================================
-        # Helper: Load artifacts from file (DRY principle)
-        # ====================================================================
-        def load_artifacts_by_category(category: str) -> Optional[str]:
-            """Load compact artifact context for a category without full payloads."""
-            # Validate artifacts_file is within a known runtime output directory.
-            try:
-                resolved_artifacts_file = artifacts_file.resolve()
-                allowed_roots = [Path("logs").resolve(), RUNTIME_ROOT.resolve()]
-                if not any(resolved_artifacts_file.is_relative_to(root) for root in allowed_roots):
-                    raise ValueError
-            except ValueError:
-                logger.error(f"Unsafe artifacts file path: {artifacts_file}")
-                return None
-            
-            # Only proceed if the artifacts path points to an actual file
-            if not artifacts_file.is_file():
-                return None
-            try:
-                context = build_artifact_prompt_context(artifacts_file, categories=[category])
-                return context if context != "[]" else None
-            except Exception as e:
-                logger.warning(f"Failed to load {category} artifacts: {e}")
-                return None
-
         async def supervisor_next_target(latest_delegation: DelegationResult) -> Optional[str]:
             """Ask the supervisor whether to continue with SQL/API or finish."""
             supervisor_decision, supervisor_usage = await supervise_next_step(
@@ -735,40 +789,7 @@ async def execute_multi_agent_query(
             result.supervisor_decisions.append(supervisor_decision.model_dump())
             _add_usage_to_result(result, supervisor_usage)
 
-            if supervisor_decision.mode == "delegate":
-                return supervisor_decision.target
-
-            if supervisor_decision.mode == "complete":
-                return None
-
-            if supervisor_decision.mode == "empty":
-                result.success = True
-                _set_result_outcome(
-                    result,
-                    "empty",
-                    reason=supervisor_decision.reasoning,
-                    user_message=supervisor_decision.user_message,
-                )
-                return "STOP"
-
-            if supervisor_decision.mode == "degraded_success":
-                _set_result_outcome(
-                    result,
-                    "degraded_success",
-                    reason=supervisor_decision.reasoning,
-                    user_message=supervisor_decision.user_message,
-                )
-                return None
-
-            result.error = supervisor_decision.user_message or supervisor_decision.reasoning
-            _set_result_outcome(
-                result,
-                "clarify" if supervisor_decision.mode == "clarify" else "fail",
-                result_mode=supervisor_decision.result_mode,
-                reason=supervisor_decision.reasoning,
-                user_message=result.error,
-            )
-            return "STOP"
+            return _apply_followup_supervisor_decision(result, supervisor_decision)
         
         # ====================================================================
         # PHASE 1: SQL Discovery (if Supervisor → SQL AND DB is healthy)
@@ -999,7 +1020,7 @@ async def execute_multi_agent_query(
                     sql_reasoning = result.sql_result.reasoning
                     sql_needs_api = _delegation_requirements(latest_sql_delegation, "api") if latest_sql_delegation else result.sql_result.needs_api
                     sql_found_data = _delegation_evidence(latest_sql_delegation, result.sql_result.found_data)
-                    sql_discovered_data = load_artifacts_by_category('sql_results')
+                    sql_discovered_data = _load_artifacts_by_category(artifacts_file, 'sql_results')
                     if sql_discovered_data:
                         logger.info(f"Passing SQL discovered data to API agent ({len(sql_discovered_data)} chars)")
                 elif result.sql_result:
@@ -1148,7 +1169,7 @@ async def execute_multi_agent_query(
                     api_reasoning = f"API agent needs base entities: {', '.join(pending_sql_request)}"
                 
                 # Load API artifacts
-                api_discovered_data = load_artifacts_by_category('api_results')
+                api_discovered_data = _load_artifacts_by_category(artifacts_file, 'api_results')
                 if api_discovered_data:
                     logger.info(f"Passing API discovered data to SQL agent ({len(api_discovered_data)} chars)")
                 

@@ -17,6 +17,8 @@ from src.core.agents.api_discovery_agent import APIDiscoveryResult
 from src.core.agents.orchestrator import (
     OrchestratorResult,
     _api_delegation_result,
+    _apply_followup_supervisor_decision,
+    _apply_initial_terminal_decision,
     _delegation_requirements,
     _discovery_degraded_reasons,
     _record_requirement_step,
@@ -180,6 +182,70 @@ def test_clarify_and_failure_decisions() -> None:
     assert failure_decision.result_mode == "failed"
 
 
+def test_initial_terminal_decision_helper() -> None:
+    empty_result = OrchestratorResult()
+    empty_decision = SupervisorDecision(
+        mode="empty",
+        reasoning="Validated zero results.",
+        user_message="No data found.",
+    )
+    handled_empty = _apply_initial_terminal_decision(empty_result, empty_decision)
+
+    fail_result = OrchestratorResult()
+    fail_decision = SupervisorDecision(
+        mode="complete",
+        target="SYNTHESIS",
+        reasoning="Completion before specialist evidence is unsafe.",
+    )
+    handled_fail = _apply_initial_terminal_decision(fail_result, fail_decision)
+
+    delegate_result = OrchestratorResult()
+    delegate_decision = SupervisorDecision(
+        mode="delegate",
+        target="SQL",
+        reasoning="Run SQL first.",
+    )
+    handled_delegate = _apply_initial_terminal_decision(delegate_result, delegate_decision)
+
+    assert handled_empty is True
+    assert empty_result.success is True
+    assert empty_result.no_data_found is True
+    assert empty_result.outcome == "empty"
+    assert handled_fail is True
+    assert fail_result.success is False
+    assert fail_result.result_mode == "failed"
+    assert handled_delegate is False
+    assert delegate_result.outcome == "pending"
+
+
+def test_followup_supervisor_decision_helper() -> None:
+    delegate_result = OrchestratorResult()
+    delegate_decision = SupervisorDecision(
+        mode="delegate",
+        target="API",
+        reasoning="Fetch enrichment.",
+    )
+    empty_result = OrchestratorResult()
+    empty_decision = SupervisorDecision(
+        mode="empty",
+        reasoning="Validated no matches.",
+    )
+    degraded_result = OrchestratorResult()
+    degraded_decision = SupervisorDecision(
+        mode="degraded_success",
+        target="SYNTHESIS",
+        reasoning="Usable partial evidence exists.",
+    )
+
+    assert _apply_followup_supervisor_decision(delegate_result, delegate_decision) == "API"
+    assert delegate_result.outcome == "pending"
+    assert _apply_followup_supervisor_decision(empty_result, empty_decision) == "STOP"
+    assert empty_result.success is True
+    assert empty_result.outcome == "empty"
+    assert _apply_followup_supervisor_decision(degraded_result, degraded_decision) is None
+    assert degraded_result.is_degraded_success is True
+
+
 def test_degraded_completion_outcome() -> None:
     latest_delegation = DelegationResult(
         success=True,
@@ -256,6 +322,8 @@ def main() -> None:
         test_zero_result_outcome,
         test_special_tool_direct_answer_outcome,
         test_clarify_and_failure_decisions,
+        test_initial_terminal_decision_helper,
+        test_followup_supervisor_decision_helper,
         test_degraded_completion_outcome,
         test_failure_outcome_and_loop_guard,
         test_runtime_degraded_reason_detection,
