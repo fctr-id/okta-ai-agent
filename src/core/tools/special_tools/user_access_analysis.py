@@ -31,7 +31,7 @@ TOOL_METADATA = {
         "entities": {
             "access_analysis": {
                 "operations": ["special_tool_analyze_user_app_access"],
-                "description": "Comprehensive access data collection for user application access evaluation - returns raw data AND an AI-generated access determination summary.",
+                "description": "Comprehensive access data collection for user application access evaluation - returns raw evidence for synthesis and can optionally produce a direct-answer summary.",
                 "aliases": ["user access", "app access", "access check", "permissions", "can access"],
                 "query_patterns": [
                     "can user {user} access {app}",
@@ -54,7 +54,7 @@ TOOL_METADATA = {
                 "path": "/special-tools/access-analysis",
                 "method": "GET",
                 "summary": "SPECIAL TOOL: Comprehensive access analysis for users and applications",
-                "description": "REQUIRED PARAMETERS: Extract ALL parameters from the user's natural language query: 'user_identifier' (OPTIONAL - user email/login from query), 'app_identifier' (REQUIRED - application name from query), and 'group_identifier' (OPTIONAL - group name if specified). ALL parameters must be included in PARAMETERS section even if optional. SPECIAL TOOL: Collects ALL access-related data including user details, assignments, application info, policy rules, MFA factors, and network zones. Returns comprehensive raw data AND an embedded AI access determination in the 'llm_summary' field. The tool performs its own analysis using a reasoning model. IMPORTANT: When generating code or reports, DO NOT manually format the raw data. ALWAYS output the 'llm_summary' string directly as it contains the expert analysis.",
+                "description": "REQUIRED PARAMETERS: Extract ALL parameters from the user's natural language query: 'user_identifier' (OPTIONAL - user email/login from query), 'app_identifier' (REQUIRED - application name from query), and 'group_identifier' (OPTIONAL - group name if specified). ALL parameters must be included in PARAMETERS section even if optional. SPECIAL TOOL: Collects access-related data including user details, assignments, application info, policy rules, MFA factors, and network zones. Returns comprehensive raw data for synthesis. In direct-answer mode it may also return an expert markdown summary in 'llm_summary'.",
                 "entity": "access_analysis",
                 "operation_group": "special_tool_analyze_user_app_access",
                 "parameters": {
@@ -192,15 +192,16 @@ async def can_user_access_application(
     client, 
     user_identifier: str = None, 
     app_identifier: str = None,
-    group_identifier: str = None
+    group_identifier: str = None,
+    response_mode: str = "synthesis_ready"
 ) -> Dict[str, Any]:
     """
     SPECIAL TOOL: Comprehensive access data collection for user application access.
     
     Uses only base_okta_api_client.py - no SDK dependencies.
     
-    IMPORTANT: This tool ONLY collects raw data - it makes NO access decisions.
-    The LLM will analyze the returned data and make the final access determination.
+    IMPORTANT: In synthesis_ready mode this tool only collects raw data.
+    In direct mode it may also generate an inline markdown access determination.
     
     Args:
         client: OktaAPIClient instance
@@ -640,50 +641,43 @@ async def can_user_access_application(
         }
         
         logger.debug("Returning successful result")
-        
-        # --- INTELLIGENT TOOL: Generate LLM Access Determination ---
-        try:
-            if ModelConfig and Agent:
-                logger.info("Step 4 - Generating LLM Access Determination")
-                # Use print to stderr for user visibility
-                import sys
-                print("Generating AI Access Determination...", file=sys.stderr)
-                
-                # Initialize the reasoning model
-                model = ModelConfig.get_model(ModelType.REASONING)
-                agent = Agent(model)
-                
-                # Prepare the prompt with all the data and guidelines
-                # Create a simplified version of result for the prompt to save tokens if needed, 
-                # but for now pass the whole thing as it contains critical details
-                
-                prompt = f"""
-                You are an expert Okta security architect. Analyze the following access data and determine if the user/group can access the application.
-                
-                FULL ACCESS DATA:
-                {json.dumps(result, indent=2)}
-                
-                Provide a comprehensive access determination following the 'response_format_instructions' in the 'notes_must_read' section of the data.
-                
-                IMPORTANT FORMATTING INSTRUCTION:
-                Provide the output as a clear, narrative Markdown summary. 
-                Do NOT use tables. 
-                Use headers, bullet points, and bold text for readability.
-                """
-                
-                # Run the agent
-                llm_response = await agent.run(prompt)
-                result["llm_summary"] = llm_response.output
-                
-                logger.info("LLM Access Determination generated successfully")
-            else:
-                logger.warning("ModelConfig or Agent not available - skipping LLM assessment")
-                result["llm_summary"] = "LLM assessment skipped - dependencies not available"
-            
-        except Exception as e:
-            logger.error(f"Failed to generate LLM assessment: {str(e)}")
-            result["llm_summary"] = f"Error generating access determination: {str(e)}"
-            # Don't fail the whole tool, just return the data without summary
+        if response_mode == "direct":
+            try:
+                if ModelConfig and Agent:
+                    logger.info("Step 4 - Generating LLM Access Determination")
+                    print("Generating AI Access Determination...", file=sys.stderr)
+
+                    model = ModelConfig.get_model(ModelType.REASONING)
+                    agent = Agent(model)
+
+                    prompt = f"""
+                    You are an expert Okta security architect. Analyze the following access data and determine if the user/group can access the application.
+
+                    FULL ACCESS DATA:
+                    {json.dumps(result, indent=2)}
+
+                    Provide a comprehensive access determination following the 'response_format_instructions' in the 'notes_must_read' section of the data.
+
+                    IMPORTANT FORMATTING INSTRUCTION:
+                    Provide the output as a clear, narrative Markdown summary.
+                    Do NOT use tables.
+                    Use headers, bullet points, and bold text for readability.
+                    """
+
+                    llm_response = await agent.run(prompt)
+                    result["llm_summary"] = llm_response.output
+
+                    logger.info("LLM Access Determination generated successfully")
+                else:
+                    logger.warning("ModelConfig or Agent not available - skipping LLM assessment")
+                    result["llm_summary"] = "LLM assessment skipped - dependencies not available"
+
+            except Exception as e:
+                logger.error(f"Failed to generate LLM assessment: {str(e)}")
+                result["llm_summary"] = f"Error generating access determination: {str(e)}"
+        else:
+            logger.info("Skipping inline LLM access determination; synthesis will generate the final summary")
+            print("Access analysis completed - ready for synthesis", file=sys.stderr)
 
         return result
         
