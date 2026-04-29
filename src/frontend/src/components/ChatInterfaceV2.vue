@@ -2,78 +2,82 @@
     <AppLayout contentClass="chat-content" ref="appLayoutRef">
         <main class="content-area" :class="{ 'has-results': hasResults }">
             <!-- Search Container with Animated Position -->
-            <div :class="['search-container', hasResults ? 'moved' : '']">
+            <div class="search-container">
                 <!-- Hero title -->
-                <div class="hero-card" :class="{ hidden: hasResults }">
+                <div class="hero-card" :class="{ hidden: hasResults || isReturningHome }">
                     <div class="title-wrapper">
                         <h1 class="main-title gradient-title">
-                            Hey there! I'm Tako
+                            Hey There! I'm Tako 
                         </h1>
-                        <p class="main-subtitle">Ask your AI agent anything about your Okta tenant</p>
+                        <p class="main-subtitle">Ask your AI agent anything about your okta tenant.</p>
                     </div>
                 </div>
 
                 <!-- Modern integrated search - Plain CSS Card -->
-                <div class="search-wrapper">
-                    <div class="query-card" :class="{ 'is-focused': isFocused }">
+                <div :class="['composer-shell', hasResults ? 'moved' : '']">
+                    <div ref="searchWrapperRef" class="search-wrapper">
+                        <div class="query-card" :class="{ 'is-focused': isFocused }">
                         
-                        <!-- Input row with icons -->
-                        <div class="query-input-row">
-                            <!-- Left icons (reset/stop) -->
-                            <div class="query-icons-left">
-                                <!-- Reset button when has results -->
+                            <!-- Input row with icons -->
+                            <div class="query-input-row">
+                                <!-- Left icons (reset/stop) -->
+                                <div class="query-icons-left">
+                                    <!-- Reset button when has results -->
+                                    <button 
+                                        v-if="hasResults && !isLoading && !reactLoading" 
+                                        class="icon-btn" 
+                                        @click="resetInterface"
+                                        title="Start over"
+                                    >
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M1 4v6h6M23 20v-6h-6"/>
+                                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                                        </svg>
+                                    </button>
+                                    <!-- Stop button when loading -->
+                                    <button 
+                                        v-if="isLoading || reactLoading" 
+                                        class="icon-btn stop-icon" 
+                                        @click="stopProcessing"
+                                        title="Stop processing"
+                                    >
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                
+                                <!-- Native textarea -->
+                                <textarea 
+                                    ref="searchTextarea"
+                                    v-model="userInput"
+                                    @keydown="handleKeyDown"
+                                    @focus="isFocused = true"
+                                    @blur="isFocused = false"
+                                    @input="autoResizeTextarea"
+                                    placeholder="List all users in ACTIVE status"
+                                    class="query-textarea"
+                                    rows="1"
+                                ></textarea>
+                                
+                                <!-- Submit button -->
                                 <button 
-                                    v-if="hasResults && !isLoading && !reactLoading" 
-                                    class="icon-btn" 
-                                    @click="resetInterface"
-                                    title="Start over"
+                                    class="send-button"
+                                    :disabled="!userInput || !(userInput?.trim?.())"
+                                    @click="sendQuery"
+                                    title="Send query"
+                                    aria-label="Send query"
                                 >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M1 4v6h6M23 20v-6h-6"/>
-                                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
-                                    </svg>
-                                </button>
-                                <!-- Stop button when loading -->
-                                <button 
-                                    v-if="isLoading || reactLoading" 
-                                    class="icon-btn stop-icon" 
-                                    @click="stopProcessing"
-                                    title="Stop processing"
-                                >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                                        <rect x="6" y="6" width="12" height="12" rx="2"/>
-                                    </svg>
+                                    <v-icon icon="mdi-arrow-up" size="18" />
                                 </button>
                             </div>
-                            
-                            <!-- Native textarea -->
-                            <textarea 
-                                ref="searchTextarea"
-                                v-model="userInput"
-                                @keydown="handleKeyDown"
-                                @focus="isFocused = true"
-                                @blur="isFocused = false"
-                                @input="autoResizeTextarea"
-                                placeholder="List all users in ACTIVE status"
-                                class="query-textarea"
-                                rows="1"
-                            ></textarea>
-                            
-                            <!-- Submit button -->
-                            <button 
-                                class="send-button"
-                                :disabled="!userInput || !(userInput?.trim?.())"
-                                @click="sendQuery"
-                            >
-                                SUBMIT
-                            </button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Suggestions -->
                 <transition name="fade-up">
-                    <div v-if="!hasResults" class="suggestions-wrapper">
+                    <div v-if="!hasResults && !isReturningHome" class="suggestions-wrapper">
                         <div class="suggestions-grid">
                             <button 
                                 v-for="(suggestion, i) in suggestions" 
@@ -81,7 +85,6 @@
                                 class="suggestion-btn"
                                 @click="selectSuggestion(suggestion.query)"
                             >
-                                <v-icon class="suggestion-icon" size="16">{{ suggestion.icon }}</v-icon>
                                 <span class="suggestion-text">{{ suggestion.query }}</span>
                             </button>
                         </div>
@@ -98,11 +101,11 @@
             </div>
 
             <!-- Display User question -->
-            <transition name="fade">
+            <transition name="working-bar">
                 <div v-if="hasResults && lastQuestion" class="question-header-container">
                     <div class="question-header">
                         <div class="question-icon">
-                            <v-icon color="#4C64E2">mdi-help-circle</v-icon>
+                            <v-icon style="color: white;">mdi-help-circle</v-icon>
                         </div>
                         <div class="question-text">{{ lastQuestion }}</div>
                         <div class="question-timestamp">{{ getCurrentTime() }}</div>
@@ -166,7 +169,7 @@
             <!-- Results Area with Smooth Transitions -->
             <transition name="fade-up">
                 <div v-if="hasResults && ((isReActMode && !reactLoading) || (!isReActMode && !isLoading))"
-                    :class="['results-container', getContentClass(isReActMode ? MessageType.TABLE : currentResponse.type)]" class="mt-8">
+                    :class="['results-container', getContentClass(isReActMode ? reactResults?.display_type : currentResponse.type)]" class="mt-8">
                     <DataDisplay 
                         v-if="isReActMode && reactResults"
                         :type="reactResults.display_type"
@@ -197,7 +200,7 @@
                 <v-card-text class="modal-content">
                     <!-- Info Note -->
                     <div class="info-note">
-                        <v-icon icon="mdi-information" size="20" color="#4C64E2" />
+                        <v-icon icon="mdi-information" size="20" style="color: var(--primary)" />
                         <span>These tools will automatically be invoked when your query matches the criteria. You don't need to do anything special.</span>
                     </div>
                     
@@ -255,7 +258,7 @@
  * user input, displays results, and manages the overall UI state.
  */
 
-import { ref, watch, nextTick, onMounted, inject } from 'vue'
+import { ref, watch, nextTick, onMounted, onBeforeUnmount, inject } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import { useSanitize } from '@/composables/useSanitize'
 import { useReactStream } from '@/composables/useReactStream'
@@ -276,12 +279,17 @@ import AppLayout from '@/components/layout/AppLayout.vue'
  */
 const userInput = ref('') // Current text in the input field
 const searchTextarea = ref(null) // Ref for native textarea
+const searchWrapperRef = ref(null) // Ref for the moving composer wrapper
 const isLoading = ref(false) // Loading state for API calls
 const lastQuestion = ref('') // Stores the last question that was asked
 const isFocused = ref(false) // Tracks if the search input is focused
 const hasResults = ref(false) // Whether there are results to display
+const isReturningHome = ref(false) // Keeps the home shell hidden during reverse motion
 const auth = useAuth()
 const router = useRouter()
+
+let composerCleanupTimerId = null
+let homeRevealTimerId = null
 
 /**
  * Auto-resize textarea to fit content
@@ -292,6 +300,94 @@ const autoResizeTextarea = () => {
         textarea.style.height = 'auto'
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
     }
+}
+
+const clearComposerAnimationTimer = () => {
+    if (composerCleanupTimerId !== null) {
+        window.clearTimeout(composerCleanupTimerId)
+        composerCleanupTimerId = null
+    }
+}
+
+const clearHomeRevealTimer = () => {
+    if (homeRevealTimerId !== null) {
+        window.clearTimeout(homeRevealTimerId)
+        homeRevealTimerId = null
+    }
+}
+
+const cleanupComposerAnimation = () => {
+    const searchWrapper = searchWrapperRef.value
+    if (!searchWrapper) {
+        return
+    }
+
+    searchWrapper.style.removeProperty('transform')
+    searchWrapper.style.removeProperty('transition')
+    searchWrapper.style.removeProperty('transform-origin')
+    searchWrapper.style.removeProperty('will-change')
+    searchWrapper.style.removeProperty('opacity')
+}
+
+const animateComposerDock = async (beforeRect) => {
+    await nextTick()
+
+    const searchWrapper = searchWrapperRef.value
+    if (!searchWrapper || !beforeRect) {
+        return false
+    }
+
+    const afterRect = searchWrapper.getBoundingClientRect()
+    const deltaX = beforeRect.left - afterRect.left
+    const deltaY = beforeRect.top - afterRect.top
+    const scaleX = beforeRect.width / Math.max(afterRect.width, 1)
+    const scaleY = beforeRect.height / Math.max(afterRect.height, 1)
+    const hasMovement = Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1 || Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01
+
+    if (!hasMovement) {
+        return false
+    }
+
+    clearComposerAnimationTimer()
+
+    searchWrapper.style.transformOrigin = 'top left'
+    searchWrapper.style.willChange = 'transform, opacity'
+    searchWrapper.style.transition = 'none'
+    searchWrapper.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`
+    searchWrapper.style.opacity = '0.98'
+    searchWrapper.getBoundingClientRect()
+
+    requestAnimationFrame(() => {
+        searchWrapper.style.transition = 'transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
+        searchWrapper.style.transform = 'translate(0, 0) scale(1, 1)'
+        searchWrapper.style.opacity = '1'
+    })
+
+    composerCleanupTimerId = window.setTimeout(() => {
+        cleanupComposerAnimation()
+        composerCleanupTimerId = null
+    }, 380)
+
+    return true
+}
+
+const animateComposerReturnHome = async (beforeRect) => {
+    const didAnimate = await animateComposerDock(beforeRect)
+
+    if (!isReturningHome.value) {
+        return
+    }
+
+    if (!didAnimate) {
+        isReturningHome.value = false
+        return
+    }
+
+    clearHomeRevealTimer()
+    homeRevealTimerId = window.setTimeout(() => {
+        isReturningHome.value = false
+        homeRevealTimerId = null
+    }, 360)
 }
 
 // Add new refs to store stream controller and track streaming progress
@@ -388,6 +484,12 @@ const stopProcessing = () => {
         isLoading.value = false;
     }
 }
+
+onBeforeUnmount(() => {
+    clearComposerAnimationTimer()
+    clearHomeRevealTimer()
+    cleanupComposerAnimation()
+})
 
 /**
  * Get the current time formatted as HH:MM
@@ -505,6 +607,16 @@ const handleKeyDown = (e) => {
  * Resets the interface to its initial state
  */
 const resetInterface = () => {
+    const shouldAnimateHome = hasResults.value
+    const composerRect = shouldAnimateHome ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
+
+    clearHomeRevealTimer()
+    if (shouldAnimateHome) {
+        isReturningHome.value = true
+    }
+
+    clearComposerAnimationTimer()
+    cleanupComposerAnimation()
     hasResults.value = false
     userInput.value = ''
     currentResponse.value = {
@@ -530,6 +642,12 @@ const resetInterface = () => {
         reactTokenUsage.value = null
         reactDiscoveryComplete.value = false
         reactError.value = null
+    }
+
+    if (shouldAnimateHome) {
+        void animateComposerReturnHome(composerRect)
+    } else {
+        isReturningHome.value = false
     }
 }
 
@@ -617,11 +735,20 @@ const sendQuery = async () => {
     // Apply full sanitization before sending query
     const rawQuery = userInput.value.trim()
     const sanitizedQuery = sanitizeQuery(rawQuery, { maxLength: 2000 })
+    const shouldAnimateDock = !hasResults.value
+    const composerRect = shouldAnimateDock ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
+
+    clearHomeRevealTimer()
+    isReturningHome.value = false
 
     lastQuestion.value = sanitizedQuery
     isLoading.value = true
     hasResults.value = true
     userInput.value = ''
+
+    if (shouldAnimateDock) {
+        void animateComposerDock(composerRect)
+    }
 
     // Store sanitized query in history
     updateMessageHistory(sanitizedQuery)
@@ -777,9 +904,19 @@ onMounted(async () => {
 
         window.addEventListener('tako:execute-history', async (e) => {
             const item = e.detail
+            const shouldAnimateDock = !hasResults.value
+            const composerRect = shouldAnimateDock ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
+
+            clearHomeRevealTimer()
+            isReturningHome.value = false
+
             lastQuestion.value = item.query_text
             isLoading.value = true
             hasResults.value = true
+
+            if (shouldAnimateDock) {
+                void animateComposerDock(composerRect)
+            }
             
             try {
                 const pid = await startScriptExecution(item.query_text, item.final_script)
@@ -835,12 +972,6 @@ const updateMessageHistory = (query) => {
 }
 
 onMounted(() => {
-    // Force document to be scrollable
-    document.documentElement.style.overflow = 'auto'
-    document.body.style.overflow = 'auto'
-    document.documentElement.style.height = 'auto'
-    document.body.style.height = 'auto'
-
     // Force layout recalculation on smaller screens
     if (window.innerHeight <= 800) {
         document.querySelector('.chat-content')?.classList.add('small-screen')
@@ -870,37 +1001,40 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     padding: 0;
-    transition: all 0.3s ease;
+    transition: padding 0.3s ease;
     position: relative;
+    min-height: 0;
+    box-sizing: border-box;
 }
 
 /* Initially center the search container vertically and horizontally */
 .content-area:not(.has-results) {
     justify-content: center;
     align-items: center;
-}
-
-/* Add bottom padding when results appear to prevent content hiding under fixed input */
-.content-area.has-results {
-    padding-bottom: 180px;
+    padding-bottom: 42px;
+    padding-top: 0;
 }
 
 .search-container {
     width: 100%;
-    max-width: 900px;
-    padding-bottom: 40px;
-    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    max-width: 1080px;
+    padding: 0 24px 32px;
+    transition: opacity 0.28s ease;
     z-index: 50;
     margin: 0 auto;
 }
 
+.composer-shell {
+    width: 100%;
+}
+
 /* When results appear, fix search bar to bottom with space for footer */
-.search-container.moved {
+.composer-shell.moved {
     position: fixed;
-    bottom: 70px;
+    bottom: 30px;
     left: 50%;
     transform: translateX(-50%);
-    width: 900px;
+    width: 760px;
     max-width: calc(100vw - 360px);
     padding-bottom: 0;
     z-index: 90;
@@ -908,44 +1042,44 @@ onMounted(() => {
 }
 
 /* Adjust horizontal position when sidebar is expanded */
-.sidebar-expanded .search-container.moved {
+.sidebar-expanded .composer-shell.moved {
     left: calc(50% + 140px);
 }
 
 /* Hide placeholder when in mini mode */
-.search-container.moved .query-textarea::placeholder {
+.composer-shell.moved .query-textarea::placeholder {
     opacity: 0;
 }
 
 /* Compact style when moved - Clean white bar */
-.search-container.moved .query-card {
-    padding: 12px 16px;
-    border-radius: 16px;
+.composer-shell.moved .query-card {
+    padding: 10px 12px;
+    border-radius: 10px;
     background: #ffffff;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+    box-shadow: none;
 }
 
-.search-container.moved .query-card::before {
-    border-radius: 16px;
+.composer-shell.moved .query-card::before {
+    border-radius: 10px;
 }
 
-.search-container.moved .query-label {
+.composer-shell.moved .query-label {
     display: none;
 }
 
-.search-container.moved .query-input-row {
+.composer-shell.moved .query-input-row {
     flex-direction: row;
     align-items: center;
     gap: 12px;
 }
 
-.search-container.moved .query-icons-left {
+.composer-shell.moved .query-icons-left {
     display: flex;
     align-items: center;
     flex-shrink: 0;
 }
 
-.search-container.moved .query-textarea {
+.composer-shell.moved .query-textarea {
     min-height: 32px;
     max-height: 120px;
     font-size: 15px;
@@ -955,34 +1089,35 @@ onMounted(() => {
     padding: 6px 0;
 }
 
-.search-container.moved .send-button {
+.composer-shell.moved .send-button {
     margin-top: 0;
-    padding: 10px 20px;
-    border-radius: 10px;
-    font-size: 13px;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 8px;
     flex-shrink: 0;
     background: var(--primary);
     color: white;
 }
 
-.search-container.moved .icon-btn {
+.composer-shell.moved .icon-btn {
     width: 38px;
     height: 38px;
     border-radius: 10px;
     background: #f3f4f6;
 }
 
-.search-container.moved .icon-btn:hover {
+.composer-shell.moved .icon-btn:hover {
     background: #e5e7eb;
 }
 
-.search-container.moved .icon-btn.stop-icon {
+.composer-shell.moved .icon-btn.stop-icon {
     background: rgba(239, 68, 68, 0.1);
     color: #ef4444;
     animation: pulse-stop 1.5s ease-in-out infinite;
 }
 
-.search-container.moved .icon-btn.stop-icon:hover {
+.composer-shell.moved .icon-btn.stop-icon:hover {
     background: rgba(239, 68, 68, 0.15);
 }
 
@@ -991,28 +1126,33 @@ onMounted(() => {
     50% { opacity: 0.6; }
 }
 
-.search-container.moved .send-button {
-    padding: 10px 20px;
-    border-radius: 10px;
-    font-size: 13px;
+.composer-shell.moved .send-button {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 8px;
 }
 
 /* Title with animated underline */
 
 .hero-card {
-    max-width: 920px;
-    margin: 0 auto 16px;
-    padding: 10px 0 6px;
+    max-width: 760px;
+    margin: 0 auto 18px;
+    max-height: 140px;
+    overflow: hidden;
+    padding: 0;
     border-radius: 0;
     background: transparent;
     border: none;
     box-shadow: none;
-    transition: opacity 0.35s ease, transform 0.35s ease;
+    transition: opacity 0.35s ease, transform 0.35s ease, max-height 0.35s ease, margin 0.35s ease;
 }
 
 .hero-card.hidden {
     opacity: 0;
     transform: translateY(-16px);
+    max-height: 0;
+    margin-bottom: 0;
     pointer-events: none;
 }
 
@@ -1023,27 +1163,29 @@ onMounted(() => {
 
 .main-title {
     font-family: var(--font-family-display);
-    font-size: 55px;
+    font-size: 36px;
     font-weight: 700;
-    margin-bottom: 10px;
-    color: #1a1a1a;
+    margin-bottom: 8px;
+    color: var(--text-primary);
     position: relative;
+    letter-spacing: 0;
+    line-height: 1.12;
 }
 
 .main-title.gradient-title {
-    background: linear-gradient(135deg, #4C64E2 0%, #8B5CF6 50%, #d442f5 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
+    background: none;
+    color: var(--text-primary);
 }
 
 .main-subtitle {
-    font-family: var(--font-family-display);
-    font-size: 18px;
-    font-weight: 600;
-    color: #475569;
-    margin: 6px 0 0 0;
-    letter-spacing: -0.005em;
+    font-family: var(--font-family-body);
+    font-size: 14px;
+    font-weight: 450;
+    color: var(--text-secondary);
+    margin: 0 auto;
+    max-width: 520px;
+    line-height: 1.5;
+    letter-spacing: 0;
 }
 
 .content-area.has-results {
@@ -1054,30 +1196,30 @@ onMounted(() => {
 /* Modern integrated search - Plain CSS Card */
 .search-wrapper {
     width: 100%;
-    max-width: 900px;
+    max-width: 760px;
     margin: 0 auto;
 }
 
 .query-card {
     position: relative;
     background: white;
-    border-radius: 20px; /* Rounded card */
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
-    padding: 20px 24px; /* Even padding for card */
-    transition: all 0.25s ease;
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 10px;
+    box-shadow: none;
+    padding: 14px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+    border: 2px solid rgba(15, 23, 42, 0.28);
     display: flex;
     flex-direction: column;
 }
 
 .query-card:hover {
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-    transform: translateY(-1px);
+    border-color: rgba(15, 23, 42, 0.42);
+    box-shadow: none;
 }
 
 .query-card.is-focused {
-    box-shadow: 0 8px 30px rgba(76, 100, 226, 0.2);
-    border-color: rgba(76, 100, 226, 0.3);
+    box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.14);
+    border-color: rgba(var(--primary-rgb), 0.62);
 }
 
 .query-label {
@@ -1086,7 +1228,7 @@ onMounted(() => {
 
 .query-input-row {
     display: flex;
-    flex-direction: column; /* Vertical layout */
+    align-items: flex-end;
     width: 100%;
     gap: 12px;
 }
@@ -1101,19 +1243,20 @@ onMounted(() => {
     outline: none;
     resize: none;
     font-family: inherit;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 400;
-    line-height: 1.6;
-    color: #1f2937;
+    line-height: 1.5;
+    color: var(--text-primary);
     background: transparent;
-    min-height: 52px; /* 2 lines approximately */
+    min-height: 42px;
     max-height: 150px;
     overflow-y: auto;
-    padding: 0;
+    padding: 8px 2px;
+    flex: 1;
 }
 
 .query-textarea::placeholder {
-    color: #9ca3af;
+    color: var(--text-muted);
 }
 
 .icon-btn {
@@ -1136,37 +1279,39 @@ onMounted(() => {
 }
 
 .icon-btn.stop-icon {
-    color: #4C64E2;
-    background: rgba(76, 100, 226, 0.08);
+    color: var(--primary);
+    background: rgba(var(--primary-rgb), 0.08);
 }
 
 .icon-btn.stop-icon:hover {
-    background: rgba(76, 100, 226, 0.12);
+    background: rgba(var(--primary-rgb), 0.12);
 }
 
 .send-button {
-    align-self: flex-end; /* Align to right */
-    padding: 10px 28px;
+    align-self: flex-end;
+    width: 40px;
+    height: 40px;
+    padding: 0;
     border: none;
-    border-radius: 100px; /* Pill button */
-    background: #4C64E2;
+    border-radius: 8px;
+    background: var(--primary);
     color: white;
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 0.15s ease, transform 0.15s ease;
     flex-shrink: 0;
 }
 
 .send-button:hover:not(:disabled) {
-    background: #3d52c7;
-    transform: scale(1.02);
+    background: var(--primary-hover);
+    transform: translateY(-1px);
 }
 
 .send-button:disabled {
-    background: #e5e7eb;
-    color: #9ca3af;
+    background: var(--surface-muted);
+    color: var(--text-faint);
     cursor: not-allowed;
 }
 
@@ -1178,76 +1323,61 @@ onMounted(() => {
     padding: 5px 10px;
     border-radius: 4px;
     opacity: 0.95;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
 }
 
 /* Modern 2026 Suggestion Cards - Clean minimal style */
 .suggestions-wrapper {
-    margin-top: 2rem;
-    padding: 0 1rem;
-    width: calc(100vw - 2rem);
-    max-width: 1200px;
+    margin-top: 14px;
+    padding: 0;
+    width: 100%;
+    max-width: 1040px;
     position: relative;
-    left: 50%;
-    transform: translateX(-50%);
     opacity: 1;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
     transition: opacity 0.4s ease;
 }
 
 .suggestions-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 10px;
+    gap: 8px;
     justify-content: center;
     width: 100%;
-    max-width: 1400px;
+    max-width: 1040px;
     margin: 0 auto;
 }
 
 .suggestion-btn {
     position: relative;
-    padding: 9px 12px;
+    padding: 8px 12px;
     width: auto;
     max-width: 100%;
     display: inline-flex;
     margin: 0;
-    /* Brighter subtle dirty white */
-    background: rgba(250, 250, 248, 0.75);
-    /* Gradient border matching hero title */
-    border: 1.5px solid transparent;
-    background-clip: padding-box;
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.4),
-        0 2px 8px rgba(0, 0, 0, 0.02);
-    border-radius: 999px;
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    box-shadow: none;
+    border-radius: 10px;
     cursor: pointer;
     text-align: left;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
-    transition: all 0.2s ease;
+    gap: 0;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .suggestion-btn::before {
-    content: '';
-    position: absolute;
-    inset: -1.5px;
-    border-radius: 999px;
-    padding: 1.5px;
-    background: linear-gradient(135deg, #4C64E2, #8B5CF6, #d442f5);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    opacity: 0.15;
-    transition: opacity 0.2s ease;
+    display: none;
 }
 
 .suggestion-btn:hover {
-    background: rgba(252, 252, 250, 0.88);
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.5),
-        0 4px 12px rgba(76, 100, 226, 0.08),
-        0 2px 6px rgba(0, 0, 0, 0.03);
+    background: #ffffff;
+    border-color: var(--border-strong);
+    box-shadow: none;
     transform: translateY(-1px);
 }
 
@@ -1256,16 +1386,15 @@ onMounted(() => {
 }
 
 .suggestion-btn:focus-visible {
-    outline: 2px solid rgba(79, 70, 229, 0.35);
+    outline: 2px solid rgba(var(--primary-rgb), 0.35);
     outline-offset: 2px;
 }
 
 .suggestion-text {
-    font-size: 13px;
-    font-weight: 450;
-    color: #374151;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
     line-height: 1.4;
-    flex: 1;
 }
 
 .suggestion-header {
@@ -1275,20 +1404,11 @@ onMounted(() => {
 }
 
 .suggestion-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px;
-    border-radius: 12px;
-    background: transparent;
-    color: #8B5CF6;
+    display: none;
 }
 
 .suggestion-icon :deep(.v-icon) {
-    color: #8B5CF6;
+    display: none;
 }
 
 /* Remove glow effect */
@@ -1297,12 +1417,11 @@ onMounted(() => {
 }
 
 .suggestion-btn:hover .suggestion-icon {
-    background: transparent;
-    color: #a78bfa;
+    display: none;
 }
 
 .suggestion-btn:hover .suggestion-icon :deep(.v-icon) {
-    color: #a78bfa;
+    display: none;
 }
 
 /* Centered question header with blue background */
@@ -1330,7 +1449,7 @@ onMounted(() => {
     display: flex;
     align-items: center;
     gap: 12px;
-    box-shadow: 0 4px 16px rgba(76, 100, 226, 0.2);
+    box-shadow: none;
 }
 
 .question-icon {
@@ -1384,16 +1503,17 @@ onMounted(() => {
 
 .full-width-results {
     border-radius: var(--border-radius);
-    box-shadow: var(--shadow-medium);
+    box-shadow: none;
     background: white;
+    border: 1px solid var(--border-color);
     overflow: hidden;
     width: 100%;
 }
 
 .compact-results {
-    width: fit-content;
-    max-width: var(--max-width);
-    margin-left: 0;
+    width: 100%;
+    max-width: 900px;
+    margin-left: auto;
     margin-right: auto;
     background: transparent;
     box-shadow: none;
@@ -1435,6 +1555,17 @@ onMounted(() => {
     transform: translateY(20px);
 }
 
+.working-bar-enter-active,
+.working-bar-leave-active {
+    transition: opacity 0.24s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.working-bar-enter-from,
+.working-bar-leave-to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+}
+
 /* Responsive styles */
 @media (max-width: 1300px) {
     .content-area {
@@ -1457,11 +1588,11 @@ onMounted(() => {
         max-width: 100%;
     }
 
-    .search-container.moved {
+    .composer-shell.moved {
         bottom: 16px;
     }
 
-    .search-container.moved .send-button {
+    .composer-shell.moved .send-button {
         padding: 8px 16px;
     }
 
@@ -1475,15 +1606,15 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
-    .search-container.moved {
+    .composer-shell.moved {
         bottom: 12px;
     }
 
-    .search-container.moved .query-card {
+    .composer-shell.moved .query-card {
         padding: 10px 12px;
     }
 
-    .search-container.moved .send-button {
+    .composer-shell.moved .send-button {
         padding: 8px 12px;
         font-size: 12px;
     }
@@ -1549,7 +1680,7 @@ onMounted(() => {
 
 /* Special Tools Button */
 .special-tools-container {
-    margin-top: 20px;
+    margin-top: 16px;
     display: flex;
     justify-content: center;
 }
@@ -1559,21 +1690,24 @@ onMounted(() => {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 13px 24px;
-    background: linear-gradient(135deg, #4C64E2, #8B5CF6);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 14px;
+    padding: 8px 12px;
+    background: #ffffff;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.2);
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    box-shadow: none;
 }
 
 .special-tools-btn:hover {
+    background: var(--surface-muted);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.3);
+    box-shadow: none;
 }
 
 .special-tools-btn:active {
@@ -1588,6 +1722,8 @@ onMounted(() => {
 .special-tools-modal {
     border-radius: 16px;
     overflow: hidden;
+    box-shadow: none;
+    border: 1px solid var(--border-strong);
 }
 
 .modal-header {
@@ -1595,7 +1731,7 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
     padding: 20px 24px;
-    background: linear-gradient(135deg, #f8f9fb 0%, #ffffff 100%);
+    background: #ffffff;
     border-bottom: 1px solid #e5e7eb;
 }
 
@@ -1617,7 +1753,7 @@ onMounted(() => {
 }
 
 .title-icon {
-    color: #4C64E2;
+    color: var(--primary);
 }
 
 .modal-content {
@@ -1648,12 +1784,12 @@ onMounted(() => {
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    background: #EEF2FF;
-    border: 1px solid #C7D2FE;
+    background: var(--primary-light);
+    border: 1px solid rgba(var(--primary-rgb), 0.18);
     border-radius: 8px;
     margin-bottom: 20px;
     font-size: 13px;
-    color: #4338CA;
+    color: var(--primary-dark);
     line-height: 1.5;
 }
 
@@ -1674,8 +1810,8 @@ onMounted(() => {
 }
 
 .tool-card:hover {
-    border-color: #4C64E2;
-    background: #f8f9fb;
+    border-color: var(--primary);
+    background: #f8fbff;
     transform: translateX(4px);
 }
 

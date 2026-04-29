@@ -84,7 +84,7 @@
         <!-- No Results Message -->
         <div v-else-if="!loading && !displayedItems.length && !isTextData && !isJsonData && !isError && !isStreaming"
             class="no-results">
-            <v-icon icon="mdi-information-outline" color="#4C64E2" size="large" class="mb-3"></v-icon>
+            <v-icon icon="mdi-information-outline" size="large" class="mb-3" style="color: var(--primary)"></v-icon>
             <div class="no-results-message">No results found</div>
             <div class="no-results-hint">Try adjusting your query or search terms</div>
         </div>
@@ -694,22 +694,22 @@ const downloadCSV = () => {
 }
 
 .download-btn {
-    color: #4C64E2;
+    color: var(--primary);
     text-transform: none;
     font-size: 13px;
     font-weight: 500;
     padding: 0 14px !important;
     height: 34px;
-    border: 1px solid rgba(76, 100, 226, 0.15) !important;
+    border: 1px solid rgba(var(--primary-rgb), 0.15) !important;
     background: rgba(255, 255, 255, 0.6) !important;
     border-radius: 8px !important;
     transition: all 0.2s ease;
 }
 
 .download-btn:hover {
-    background: rgba(76, 100, 226, 0.08) !important;
+    background: rgba(var(--primary-rgb), 0.08) !important;
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.12);
+    box-shadow: none;
 }
 
 .sync-info {
@@ -720,12 +720,12 @@ const downloadCSV = () => {
     font-size: 12px;
     white-space: nowrap;
     padding: 6px 10px;
-    background: rgba(76, 100, 226, 0.06);
+    background: rgba(var(--primary-rgb), 0.06);
     border-radius: 6px;
 }
 
 .sync-icon {
-    color: #4C64E2;
+    color: var(--primary);
     font-size: 16px;
 }
 
@@ -869,7 +869,7 @@ const downloadCSV = () => {
     border-radius: 14px;
     background: #ffffff;
     border: 1px solid #cbd5e1;
-    box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.1);
+    box-shadow: none;
 }
 
 /* 2026 Minimal Table Header */
@@ -889,17 +889,15 @@ const downloadCSV = () => {
     padding: 14px 16px !important;
 }
 
-/* Subtle hover */
 :deep(.v-data-table) th:hover,
 :deep(.v-data-table-header th:hover),
 :deep(.v-data-table-header__cell:hover),
 :deep(.v-data-table) .v-data-table-header th:hover {
-    background: rgba(76, 100, 226, 0.06) !important;
-    color: #4C64E2 !important;
+    background: rgba(var(--primary-rgb), 0.06) !important;
+    color: var(--primary) !important;
     cursor: pointer !important;
 }
 
-/* Bottom indicator using multiple selectors */
 :deep(.v-data-table) th:hover::after,
 :deep(.v-data-table-header th:hover::after),
 :deep(.v-data-table-header__cell:hover::after) {
@@ -909,7 +907,7 @@ const downloadCSV = () => {
     left: 0 !important;
     right: 0 !important;
     height: 2px !important;
-    background: #4C64E2 !important;
+    background: var(--primary) !important;
     opacity: 0.6 !important;
 }
 
@@ -919,8 +917,8 @@ const downloadCSV = () => {
 }
 
 :deep([role="columnheader"]:hover) {
-    background-color: rgba(76, 100, 226, 0.08) !important;
-    color: #4C64E2 !important;
+    background-color: rgba(var(--primary-rgb), 0.08) !important;
+    color: var(--primary) !important;
 }
 
 /* Clean row styles */
@@ -930,7 +928,7 @@ const downloadCSV = () => {
 }
 
 :deep(.v-data-table-row:hover) {
-    background: rgba(76, 100, 226, 0.04) !important;
+    background: rgba(var(--primary-rgb), 0.04) !important;
 }
 
 :deep(.v-data-table .v-data-table-row td) {
@@ -949,21 +947,20 @@ const downloadCSV = () => {
     border-radius: 0 0 16px 16px !important;
 }
 
-/* Compact markdown styling - Studio Focus Card */
+/* Compact markdown styling - text-first results */
 .markdown-content {
-  padding: 32px;
-  line-height: 1.7;
-  font-size: 14.5px;
-  color: #1e293b;
-  width: 100%;
-  overflow-wrap: break-word;
-  background-color: #ffffff;
-  border-radius: 20px;
-  border: 1px solid #cbd5e1; /* Sharp Slate-300 border */
-  box-shadow: 
-    0 4px 20px rgba(15, 23, 42, 0.04),
-    0 20px 40px -20px rgba(15, 23, 42, 0.1);
-  animation: fade-in-up 0.5s ease-out;
+    padding: 22px 24px;
+    line-height: 1.7;
+    font-size: 14.5px;
+    color: #1e293b;
+    width: 100%;
+    max-width: 900px;
+    overflow-wrap: break-word;
+    background-color: rgba(255, 255, 255, 0.96);
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    box-shadow: none;
+    animation: fade-in-up 0.5s ease-out;
 }
 
 @keyframes fade-in-up {
@@ -980,6 +977,14 @@ const downloadCSV = () => {
   font-weight: 500;
   color: #1f2937;
   line-height: 1.3;
+}
+
+.markdown-content :deep(h1:first-child),
+.markdown-content :deep(h2:first-child),
+.markdown-content :deep(h3:first-child),
+.markdown-content :deep(h4:first-child),
+.markdown-content :deep(p:first-child) {
+    margin-top: 0;
 }
 
 .markdown-content :deep(h3) {
@@ -1051,8 +1056,8 @@ const downloadCSV = () => {
   border-radius: 4px;
   font-family: 'SF Mono', 'Courier New', monospace;
   font-size: 0.9em;
-  color: #4C64E2;
-  border: 1px solid rgba(76, 100, 226, 0.1);
+    color: var(--primary);
+    border: 1px solid rgba(var(--primary-rgb), 0.1);
 }
 
 .markdown-content :deep(pre) {
@@ -1062,7 +1067,7 @@ const downloadCSV = () => {
   overflow-x: auto;
   margin: 0.8em 0;
   border: 1px solid #e2e8f0;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    box-shadow: none;
 }
 
 /* Enhanced table styling */
@@ -1071,7 +1076,7 @@ const downloadCSV = () => {
   width: 100%;
   margin: 0.8em 0;
   font-size: 0.95em;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    box-shadow: none;
   border-radius: 8px;
   overflow: hidden;
 }
@@ -1117,20 +1122,19 @@ const downloadCSV = () => {
 
 /* Clean links */
 .markdown-content :deep(a) {
-  color: #4C64E2;
+    color: var(--primary);
   text-decoration: none;
   transition: color 0.2s ease;
 }
 
 .markdown-content :deep(a:hover) {
   text-decoration: underline;
-  color: #3b4fc1;
+    color: var(--primary-hover);
 }
 
 /* Container when inside cards or boxes */
 .final-results .markdown-content {
-    padding: 8px 16px;
-    /* Adjusted padding when inside result cards */
+    padding: 22px 24px;
 }
 
 /* Responsive adjustments */

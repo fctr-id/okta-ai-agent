@@ -1,27 +1,41 @@
 :root {
-    /* Background */
-    --bg-gradient: linear-gradient(180deg, #e0e7ff 0%, #d1d8f0 100%);
+    /* Surfaces - quiet workspace */
+    --bg-page: #f3f5f8;        /* Light cool canvas for better surface contrast */
+    --bg-gradient: #f3f5f8;    /* Legacy alias - now flat */
+    --surface: #ffffff;
+    --surface-muted: #f4f4f2;
+    --surface-sidebar: #f7f7f5;
+    --surface-hover: #ececea;
 
-    /* Typography - Neutral Gray */
-    --text-primary: #111827;   /* Gray 900 */
-    --text-secondary: #374151; /* Gray 700 */
-    --text-muted: #6B7280;     /* Gray 500 */
+    /* Typography */
+    --text-primary: #1a1a1a;
+    --text-secondary: #52525b;
+    --text-muted: #8a8a8a;
+    --text-faint: #b4b4b0;
 
-    /* Brand Actions */
-    --primary: #4F46E5;        /* Indigo 600 - Pops against background */
-    --primary-hover: #4338CA;  /* Indigo 700 */
-    --primary-light: #EEF2FF;  /* Indigo 50 */
-    --primary-dark: #3730A3;   /* Indigo 800 */
+    /* Brand - used sparingly for actions/focus/selected */
+    --primary-rgb: 62, 99, 221;
+    --primary: #3E63DD;        /* Calm ink blue */
+    --primary-hover: #3556C3;
+    --primary-light: #EDF2FE;
+    --primary-dark: #2948A8;
+    --accent-line: #3E63DD;    /* Identity rail (left bar on selected) */
 
     /* UI Components */
     --card-bg: #FFFFFF;
-    --border-color: #E5E7EB;   /* Gray 200 */
-    
+    --border-color: rgba(15, 23, 42, 0.08);   /* Hairline */
+    --border-strong: rgba(15, 23, 42, 0.14);
+
     /* Layout */
-    --border-radius: 16px;
+    --border-radius: 12px;
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-composer: 24px;
     --max-width: 1400px;
-    
-    /* Shadows */
-    --shadow-light: 0 2px 20px rgba(79, 70, 229, 0.08), 0 1px 8px rgba(79, 70, 229, 0.05);
-    --shadow-medium: 0 6px 30px rgba(79, 70, 229, 0.08);
+
+    /* Shadows - very restrained */
+    --shadow-light: none;
+    --shadow-medium: none;
+    --shadow-floating: none;
   }

@@ -1,11 +1,14 @@
 <template>
   <v-app>
-    <v-main>
-      <!-- Fixed structure: router-view outside, transition inside -->
+    <v-main class="app-main">
       <router-view v-slot="{ Component, route }">
-        <transition name="smooth" mode="out-in">
-          <component :is="Component" :key="route.name || route.path" />
-        </transition>
+        <div class="route-stage">
+          <transition name="page-swap" mode="out-in">
+            <div :key="route.name || route.path" class="route-layer">
+              <component :is="Component" />
+            </div>
+          </transition>
+        </div>
       </router-view>
     </v-main>
   </v-app>
@@ -34,6 +37,23 @@ body {
   overflow: hidden;
 }
 
+.app-main {
+  min-height: 100dvh;
+  background: var(--bg-page, #fbfbfa);
+}
+
+.route-stage {
+  position: relative;
+  min-height: 100dvh;
+  isolation: isolate;
+}
+
+.route-layer {
+  min-height: 100dvh;
+  width: 100%;
+  will-change: opacity, transform, filter;
+}
+
 /* Search container - converted from SCSS to CSS variables */
 .search-container {
   max-width: var(--max-width);
@@ -41,20 +61,25 @@ body {
   padding: 0 24px;
 }
 
-/* Smoother transitions that don't cause scrollbar issues */
-.smooth-enter-active,
-.smooth-leave-active {
-  transition: opacity 0.50s ease;
-  position: absolute;
-  width: 100%;
-  top: 0;
-  left: 0;
-  right: 0;
+/* App-level route swaps */
+.page-swap-enter-active,
+.page-swap-leave-active {
+  transition:
+    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.42s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.smooth-enter-from,
-.smooth-leave-to {
+.page-swap-enter-from {
   opacity: 0;
+  transform: translateY(14px) scale(0.992);
+  filter: blur(10px);
+}
+
+.page-swap-leave-to {
+  opacity: 0;
+  transform: translateY(-8px) scale(1.004);
+  filter: blur(4px);
 }
 
 /* Alternative fade transition if needed for specific components */
@@ -92,9 +117,22 @@ body {
 /* For mobile devices */
 @media (max-width: 768px) {
 
-  .smooth-enter-active,
-  .smooth-leave-active {
-    transition-duration: 0.25s;
+  .page-swap-enter-active,
+  .page-swap-leave-active {
+    transition-duration: 0.24s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-swap-enter-active,
+  .page-swap-leave-active {
+    transition: opacity 0.18s ease;
+  }
+
+  .page-swap-enter-from,
+  .page-swap-leave-to {
+    transform: none;
+    filter: none;
   }
 }
 </style>

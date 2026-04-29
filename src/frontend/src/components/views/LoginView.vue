@@ -131,16 +131,14 @@ const handleLogin = async () => {
 <style scoped>
 /* 2026 Glassmorphism Auth Box */
 .auth-box {
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(24px) saturate(120%);
-  -webkit-backdrop-filter: blur(24px) saturate(120%);
-  border-radius: 24px;
-  padding: 3rem 2.5rem;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 20px;
+  padding: 2.5rem 2.25rem;
   width: 100%;
   max-width: 440px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  animation: card-appear 0.5s ease-out forwards;
+  box-shadow: none;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  animation: none;
 }
 
 .auth-logo {
@@ -151,15 +149,15 @@ const handleLogin = async () => {
 
 .auth-header {
   text-align: center;
-  margin-bottom: 2.5rem;
+  margin-bottom: 2rem;
 }
 
 .auth-subtitle {
-  color: #64748b;
-  font-size: 17px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  color: var(--text-primary);
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-transform: none;
 }
 
 .auth-form {
@@ -193,37 +191,36 @@ const handleLogin = async () => {
 .form-field label {
   display: block;
   font-size: 13px;
-  font-weight: 500;
-  color: #666;
+  font-weight: 600;
+  color: var(--text-secondary);
   margin-bottom: 8px;
   letter-spacing: 0.01em;
 }
 
 .form-field:focus-within label {
-  color: #4C64E2;
+  color: var(--primary);
 }
 
-/* Glassmorphism inputs */
 .input-wrapper {
   position: relative;
-  background: rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 12px;
   overflow: hidden;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
   display: flex;
   align-items: center;
 }
 
 .input-wrapper:hover {
-  background: rgba(255, 255, 255, 0.8);
-  border-color: rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.2);
 }
 
 .input-wrapper:focus-within {
-  background: rgba(255, 255, 255, 0.9);
-  border-color: rgba(76, 100, 226, 0.4);
-  box-shadow: 0 0 0 3px rgba(76, 100, 226, 0.08);
+  background: #ffffff;
+  border-color: rgba(var(--primary-rgb), 0.5);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
 }
 
 .input-wrapper input {
@@ -237,13 +234,13 @@ const handleLogin = async () => {
 }
 
 .input-wrapper input::placeholder {
-  color: #999;
+  color: var(--text-muted);
 }
 
 .password-toggle {
   background: transparent;
   border: none;
-  color: #999;
+  color: var(--text-muted);
   padding: 0 12px;
   cursor: pointer;
   outline: none;
@@ -251,7 +248,7 @@ const handleLogin = async () => {
 }
 
 .password-toggle:hover {
-  color: #4C64E2;
+  color: var(--primary);
 }
 
 /* Error alert - 2026 minimal glassmorphism */
@@ -300,24 +297,25 @@ const handleLogin = async () => {
 .auth-button {
   width: 100%;
   padding: 14px;
-  background: #4C64E2;
+  background: var(--primary);
   color: white;
-  border: none;
+  border: 1px solid var(--primary-dark);
   border-radius: 12px;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba(76, 100, 226, 0.2);
+  box-shadow: none;
   margin-top: 8px;
 }
 
 .auth-button:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(76, 100, 226, 0.3);
 }
 
 .auth-button:active:not(:disabled) {
@@ -325,7 +323,8 @@ const handleLogin = async () => {
 }
 
 .auth-button:disabled {
-  background: #a5b4fc;
+  background: rgba(var(--primary-rgb), 0.42);
+  border-color: rgba(var(--primary-rgb), 0.32);
   cursor: not-allowed;
   box-shadow: none;
 }
@@ -370,7 +369,7 @@ const handleLogin = async () => {
 @media (max-width: 480px) {
   .auth-box {
     padding: 2rem 1.5rem;
-    border-radius: 20px;
+    border-radius: 18px;
   }
 }
 </style>

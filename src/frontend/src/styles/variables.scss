@@ -1,18 +1,23 @@
 // Brand colors
-$primary: #4C64E2;
-$primary-light: #F0F3FF;
-$primary-dark: #3b4fd9;
+$primary: #3E63DD;
+$primary-light: #EDF2FE;
+$primary-dark: #2948A8;
 
 // Text colors
-$text-primary: #333333;
-$text-secondary: #666666;
-$text-muted: #5d6b8a;
+$text-primary: #1a1a1a;
+$text-secondary: #52525b;
+$text-muted: #8a8a8a;
 
 // Backgrounds
-$bg-gradient: linear-gradient(180deg, #fafbff 0%, #f8f9ff 100%);
+$bg-page: #f3f5f8;
+$bg-gradient: #f3f5f8;
+$surface: #ffffff;
+$surface-muted: #f4f4f2;
 
 // Layout
-$border-radius: 16px;
+$border-radius: 12px;
 $max-width: 1400px;
-$shadow-light: 0 2px 20px rgba($primary, 0.08), 0 1px 8px rgba($primary, 0.05);
-$shadow-medium: 0 6px 30px rgba($primary, 0.08);
+$border-color: rgba(15, 23, 42, 0.08);
+$shadow-light: none;
+$shadow-medium: none;
+$shadow-floating: none;
