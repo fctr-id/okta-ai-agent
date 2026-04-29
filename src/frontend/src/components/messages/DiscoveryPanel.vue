@@ -13,7 +13,7 @@
       >
         <path d="M9 18l6-6-6-6"/>
       </svg>
-      <span class="header-text">Thinking</span>
+      <span class="header-text">Planning & Tools</span>
       
       <div class="header-spacer"></div>
       
@@ -283,47 +283,58 @@ const formatToolName = (name) => {
 
 /* Steps list */
 .steps-list {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+}
+
+.steps-list::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 18px;
+  bottom: 18px;
+  width: 1px;
+  background: rgba(var(--primary-rgb), 0.28);
 }
 
 .step-item {
   position: relative;
-  padding: 10px 12px 10px 18px;
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
+  padding: 10px 12px 10px 32px;
+  background: transparent;
+  border: none;
   border-radius: 10px;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .step-item::before {
   content: '';
   position: absolute;
-  left: 8px;
-  top: 10px;
-  bottom: 10px;
-  width: 2px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.28);
+  left: 11px;
+  top: 8px;
+  width: 14px;
+  height: 12px;
+  border-left: 1px solid rgba(var(--primary-rgb), 0.28);
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.28);
 }
 
 .step-item.current {
-  background: #ffffff;
-  border-color: rgba(15, 23, 42, 0.18);
+  background: rgba(var(--primary-rgb), 0.05);
 }
 
 .step-item.current::before {
-  background: rgba(15, 23, 42, 0.44);
+  border-left-color: rgba(var(--primary-rgb), 0.62);
+  border-bottom-color: rgba(var(--primary-rgb), 0.62);
 }
 
 .step-item.error {
-  background: #ffffff;
-  border-color: rgba(239, 68, 68, 0.12);
+  background: rgba(239, 68, 68, 0.05);
 }
 
 .step-item.error::before {
-  background: rgba(239, 68, 68, 0.65);
+  border-left-color: rgba(239, 68, 68, 0.48);
+  border-bottom-color: rgba(239, 68, 68, 0.48);
 }
 
 .step-text {
@@ -385,7 +396,7 @@ const formatToolName = (name) => {
 }
 
 .tool-chip.active {
-  background: #ffffff;
+  background: rgba(var(--primary-rgb), 0.08);
   border-color: rgba(var(--primary-rgb), 0.48);
   color: var(--primary-dark);
   box-shadow: none;
@@ -396,16 +407,17 @@ const formatToolName = (name) => {
 }
 
 .tool-chip.done {
-  background: #ffffff;
+  background: rgba(34, 197, 94, 0.04);
+  border-color: rgba(34, 197, 94, 0.24);
   color: var(--text-primary);
 }
 
 .tool-chip.done:hover {
-  border-color: rgba(var(--primary-rgb), 0.34);
+  border-color: rgba(34, 197, 94, 0.34);
 }
 
 .tool-icon.done {
-  color: var(--primary);
+  color: #16a34a;
 }
 
 .tool-separator {

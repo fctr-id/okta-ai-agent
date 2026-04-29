@@ -14,7 +14,7 @@
         >
           <path d="M9 18l6-6-6-6"/>
         </svg>
-        <span class="header-text">Running</span>
+        <span class="header-text">Security & Execution</span>
       </div>
 
       <div class="header-badges">
