@@ -662,7 +662,33 @@ async def stream_react_updates(
                     "outcome": result.outcome_metadata(),
                 })
                 update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
-                process["status"] = "completed"
+
+                # Save history before closing the stream so the frontend follows the normal success path.
+                try:
+                    logger.debug(f"[{process_id}] Starting no-data history save...")
+                    db_ops = DatabaseOperations()
+                    await asyncio.shield(
+                        db_ops.save_query_history(
+                            tenant_id=settings.tenant_id,
+                            user_id=process.get("user_id", "localadmin"),
+                            query_text=process["query"],
+                            final_script="",
+                            results_summary=no_data_message
+                        )
+                    )
+                    logger.info(f"[{process_id}] ✅ No-data query history saved")
+                except asyncio.CancelledError:
+                    logger.warning(f"[{process_id}] No-data history save cancelled")
+                except Exception as e:
+                    logger.error(f"[{process_id}] Failed to save no-data query history: {e}", exc_info=True)
+
+                process["status"] = "complete"
+
+                done_event = {
+                    "type": "DONE",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
                 return
             
             if not result.success:

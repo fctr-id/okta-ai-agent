@@ -437,6 +437,33 @@ def _artifact_refs_for_category(artifacts_file: Path, category: str) -> tuple[Li
     return artifact_keys, result_set_refs
 
 
+def _artifact_row_count(artifact: Dict[str, Any]) -> Optional[int]:
+    inspection = artifact.get("result_set_inspection")
+    if isinstance(inspection, dict) and isinstance(inspection.get("row_count"), int):
+        return inspection.get("row_count")
+
+    manifest = artifact.get("artifact_manifest")
+    if isinstance(manifest, dict) and isinstance(manifest.get("row_count"), int):
+        return manifest.get("row_count")
+
+    return None
+
+
+def _artifact_category_has_only_empty_results(artifacts_file: Path, category: str) -> bool:
+    saw_artifact = False
+
+    for artifact in load_artifacts_file(artifacts_file):
+        if artifact.get("category") != category:
+            continue
+
+        saw_artifact = True
+        row_count = _artifact_row_count(artifact)
+        if row_count is None or row_count > 0:
+            return False
+
+    return saw_artifact
+
+
 def _delegation_requirements(delegation: DelegationResult, fallback: str) -> List[str]:
     """Return neutral unresolved requirements for the next specialist run."""
     return list(delegation.unresolved_requirements or [fallback])
@@ -603,9 +630,12 @@ def _sql_delegation_result(
     usage: Any,
 ) -> DelegationResult:
     artifact_keys, result_set_refs = _artifact_refs_for_category(artifacts_file, "sql_results")
+    empty_sql_artifacts = _artifact_category_has_only_empty_results(artifacts_file, "sql_results")
     needs_api = list(sql_result.needs_api or [])
     found_data = list(sql_result.found_data or [])
-    if sql_result.success and not needs_api and not found_data and not artifact_keys and not result_set_refs:
+    if sql_result.success and not needs_api and not found_data and (
+        empty_sql_artifacts or (not artifact_keys and not result_set_refs)
+    ):
         result_mode = "empty"
     elif sql_result.success and needs_api:
         result_mode = "continue"

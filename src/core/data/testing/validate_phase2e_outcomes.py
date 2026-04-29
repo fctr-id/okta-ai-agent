@@ -45,7 +45,11 @@ from src.core.agents.supervisor_agent import (
     SupervisorDecision,
     _normalize_after_delegation_decision,
 )
-from src.data.schemas.artifact_manifest import DelegationResult, append_artifacts_to_file
+from src.data.schemas.artifact_manifest import (
+    DelegationResult,
+    append_artifacts_to_file,
+    append_artifacts_with_result_sets,
+)
 
 
 _TEMP_DIRS: list[TemporaryDirectory[str]] = []
@@ -176,6 +180,48 @@ def test_zero_result_outcome() -> None:
     assert orchestrator_result.no_data_found is True
     assert orchestrator_result.result_mode == "empty"
     assert orchestrator_result.outcome_metadata()["outcome"] == "empty"
+
+
+def test_zero_result_sql_artifact_outcome() -> None:
+    artifacts_file = _artifacts_file()
+    append_artifacts_with_result_sets(
+        artifacts_file,
+        [
+            {
+                "key": "applications_starting_with_x",
+                "category": "sql_results",
+                "content": "[]",
+                "sql_query": 'SELECT okta_id, name FROM applications WHERE name LIKE "x%"',
+                "notes": "No matching applications found.",
+            }
+        ],
+        source_specialist="sql",
+    )
+
+    sql_result = SQLDiscoveryResult(
+        success=True,
+        found_data=[],
+        needs_api=None,
+        reasoning="No matching applications found.",
+    )
+
+    delegation = _sql_delegation_result(sql_result, artifacts_file, usage=None)
+    normalized = _normalize_after_delegation_decision(
+        SupervisorDecision(
+            mode="complete",
+            target="SYNTHESIS",
+            result_mode="synthesis_ready",
+            reasoning="Evidence exists.",
+        ),
+        delegation,
+    )
+
+    assert delegation.result_mode == "empty"
+    assert delegation.status == "empty"
+    assert delegation.artifact_keys == ["applications_starting_with_x"]
+    assert len(delegation.result_set_refs) == 1
+    assert normalized.mode == "empty"
+    assert normalized.result_mode == "empty"
 
 
 def test_special_tool_flow_outcome() -> None:
@@ -646,6 +692,7 @@ def main() -> None:
         test_sql_to_api_outcome,
         test_api_to_sql_outcome,
         test_zero_result_outcome,
+        test_zero_result_sql_artifact_outcome,
         test_special_tool_flow_outcome,
         test_special_tool_response_text_skips_inline_summary_for_synthesis,
         test_special_tool_response_text_keeps_inline_summary_for_direct_mode,
