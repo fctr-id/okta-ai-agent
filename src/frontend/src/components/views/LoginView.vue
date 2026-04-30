@@ -1,58 +1,75 @@
 <template>
   <AppLayout :showHeader="true" :showLogout="false" contentClass="auth-content">
-    <div class="auth-box animate-entry">
-      <div class="auth-header">
-        <h1 class="auth-subtitle">Login to Tako AI</h1>
+    <section class="auth-shell animate-entry">
+      <div class="auth-hero">
+        <h1 class="auth-title">Login to Tako AI</h1>
+        <p class="auth-description">Use your admin credentials to continue into the Tako workspace.</p>
       </div>
 
-      <form @submit.prevent="handleLogin" class="auth-form">
-        <transition name="fade-slide">
-          <div v-if="auth.error.value || validationError" class="error-alert">
-            {{ auth.error.value || validationError }}
-          </div>
-        </transition>
-
-        <div class="form-field">
-          <label for="username">Username</label>
-          <div class="input-wrapper">
-            <input type="text" id="username" v-model="username" placeholder="Enter your username"
-              autocomplete="username" required :disabled="auth.loading.value" @input="sanitizeUsernameInput" />
-          </div>
-          <transition name="fade">
-            <small v-if="usernameModified" class="input-modified-hint">
-              Username was adjusted to remove invalid characters
-            </small>
+      <div class="auth-card">
+        <form @submit.prevent="handleLogin" class="auth-form">
+          <transition name="fade-slide">
+            <div v-if="auth.error.value || validationError" class="status-alert status-alert-error">
+              {{ auth.error.value || validationError }}
+            </div>
           </transition>
-        </div>
 
-        <div class="form-field">
-          <label for="password">Password</label>
-          <div class="input-wrapper">
-            <input :type="showPassword ? 'text' : 'password'" id="password" v-model="password"
-              placeholder="Enter your password" autocomplete="current-password" required :disabled="auth.loading.value"
-              @input="sanitizePasswordInput" />
-            <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
-              <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
-            </button>
+          <div class="form-field">
+            <label for="username">Username</label>
+            <div class="input-wrapper">
+              <input
+                id="username"
+                v-model="username"
+                type="text"
+                placeholder="Enter your username"
+                autocomplete="username"
+                required
+                :disabled="auth.loading.value"
+                @input="sanitizeUsernameInput"
+              />
+            </div>
+            <transition name="fade">
+              <small v-if="usernameModified" class="input-modified-hint">
+                Username was adjusted to remove invalid characters.
+              </small>
+            </transition>
           </div>
-        </div>
 
-        <!-- In the template, inside your button -->
-        <button type="submit" class="auth-button glow-effect" :disabled="auth.loading.value || !username || !password">
-          <span v-if="!auth.loading.value">Sign In</span>
-          <div v-else class="three-dots-loader">
-            <div class="dot"></div>
-            <div class="dot"></div>
-            <div class="dot"></div>
+          <div class="form-field">
+            <label for="password">Password</label>
+            <div class="input-wrapper">
+              <input
+                id="password"
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="Enter your password"
+                autocomplete="current-password"
+                required
+                :disabled="auth.loading.value"
+                @input="sanitizePasswordInput"
+              />
+              <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
+                <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
+              </button>
+            </div>
           </div>
-        </button>
-      </form>
-    </div>
+
+          <button type="submit" class="auth-button" :disabled="auth.loading.value || !username || !password">
+            <span v-if="!auth.loading.value">Sign In</span>
+            <div v-else class="three-dots-loader">
+              <div class="dot"></div>
+              <div class="dot"></div>
+              <div class="dot"></div>
+            </div>
+          </button>
+        </form>
+      </div>
+    </section>
   </AppLayout>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuth } from '@/composables/useAuth'
 import { useSanitize } from '@/composables/useSanitize'
@@ -66,14 +83,8 @@ const { username: sanitizeUsername, text: sanitizeText } = useSanitize()
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
-const animationReady = ref(false)
 const validationError = ref('')
 const usernameModified = ref(false)
-
-// Animation setup
-onMounted(() => {
-  animationReady.value = true
-})
 
 // Input sanitization
 const sanitizeUsernameInput = () => {
@@ -129,35 +140,49 @@ const handleLogin = async () => {
 
 
 <style scoped>
-/* 2026 Glassmorphism Auth Box */
-.auth-box {
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 20px;
-  padding: 2.5rem 2.25rem;
-  width: 100%;
-  max-width: 440px;
-  box-shadow: none;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  animation: none;
-}
-
-.auth-logo {
+.auth-shell {
+  width: min(100%, 820px);
   display: flex;
-  justify-content: center;
-  margin-bottom: 1.5rem;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 24px 24px 40px;
 }
 
-.auth-header {
+.animate-entry {
+  animation: auth-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.auth-hero {
   text-align: center;
-  margin-bottom: 2rem;
+  max-width: 640px;
 }
 
-.auth-subtitle {
+.auth-title {
+  margin: 0;
   color: var(--text-primary);
-  font-size: 26px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  text-transform: none;
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+.auth-description {
+  margin: 10px auto 0;
+  max-width: 560px;
+  font-size: 15px;
+  font-weight: 450;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.auth-card {
+  width: min(100%, 620px);
+  background: #ffffff;
+  border: 2px solid rgba(15, 23, 42, 0.28);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: none;
 }
 
 .auth-form {
@@ -165,72 +190,51 @@ const handleLogin = async () => {
 }
 
 .form-field {
-  margin-bottom: 24px;
-}
-
-.form-field:nth-child(2) {
-  animation-delay: 0.1s;
-}
-
-.form-field:nth-child(3) {
-  animation-delay: 0.2s;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  margin-bottom: 20px;
 }
 
 .form-field label {
   display: block;
+  margin-bottom: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
   letter-spacing: 0.01em;
+  color: var(--text-secondary);
 }
 
 .form-field:focus-within label {
-  color: var(--primary);
+  color: var(--text-primary);
 }
 
 .input-wrapper {
   position: relative;
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
   display: flex;
   align-items: center;
+  min-height: 52px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .input-wrapper:hover {
-  background: #ffffff;
-  border-color: rgba(15, 23, 42, 0.2);
+  border-color: rgba(15, 23, 42, 0.24);
 }
 
 .input-wrapper:focus-within {
-  background: #ffffff;
   border-color: rgba(var(--primary-rgb), 0.5);
   box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
 }
 
 .input-wrapper input {
   width: 100%;
-  padding: 14px 16px;
   border: none;
   outline: none;
-  font-size: 15px;
   background: transparent;
-  color: #1a1a1a;
+  padding: 0 16px;
+  font-size: 15px;
+  color: var(--text-primary);
 }
 
 .input-wrapper input::placeholder {
@@ -238,98 +242,71 @@ const handleLogin = async () => {
 }
 
 .password-toggle {
-  background: transparent;
   border: none;
+  background: transparent;
   color: var(--text-muted);
-  padding: 0 12px;
+  padding: 0 14px;
   cursor: pointer;
-  outline: none;
-  transition: color 0.2s ease;
+  transition: color 0.18s ease;
 }
 
 .password-toggle:hover {
-  color: var(--primary);
+  color: var(--text-primary);
 }
 
-/* Error alert - 2026 minimal glassmorphism */
-.error-alert {
-  background: rgba(254, 202, 202, 0.5);
-  color: #991b1b;
-  padding: 10px 14px;
-  border-radius: 10px;
+.status-alert {
   margin-bottom: 16px;
+  border-radius: 10px;
+  padding: 10px 12px;
   font-size: 13px;
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  text-align: center;
+  line-height: 1.45;
+  border: 1px solid transparent;
+}
+
+.status-alert-error {
+  background: rgba(180, 35, 24, 0.06);
+  border-color: rgba(180, 35, 24, 0.14);
+  color: #a22c29;
 }
 
 .input-modified-hint {
-  color: #b45309;
-  font-size: 11px;
-  margin-top: 4px;
   display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #9a5a00;
 }
 
-/* Fade transition for hints */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* Fade-slide transition */
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: opacity 0.3s, transform 0.3s;
-}
-
-.fade-slide-enter-from,
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-
-/* Modern submit button */
 .auth-button {
   width: 100%;
-  padding: 14px;
+  min-height: 52px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 10px;
   background: var(--primary);
-  color: white;
-  border: 1px solid var(--primary-dark);
-  border-radius: 12px;
+  color: #ffffff;
   font-size: 15px;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-  display: flex;
+  letter-spacing: -0.01em;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
   box-shadow: none;
-  margin-top: 8px;
 }
 
 .auth-button:hover:not(:disabled) {
   background: var(--primary-hover);
-  border-color: var(--primary-hover);
   transform: translateY(-1px);
 }
 
-.auth-button:active:not(:disabled) {
-  transform: translateY(0);
-}
-
 .auth-button:disabled {
-  background: rgba(var(--primary-rgb), 0.42);
-  border-color: rgba(var(--primary-rgb), 0.32);
+  background: var(--surface-muted);
+  color: var(--text-faint);
   cursor: not-allowed;
   box-shadow: none;
 }
 
-/* 3-dot loader */
 .three-dots-loader {
   display: flex;
   justify-content: center;
@@ -354,22 +331,67 @@ const handleLogin = async () => {
   animation-delay: 0.4s;
 }
 
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.fade-slide-enter-from,
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
 @keyframes bounce {
   0%, 80%, 100% {
     transform: scale(0.8);
     opacity: 0.6;
   }
+
   40% {
     transform: scale(1.1);
     opacity: 1;
   }
 }
 
-/* Responsive */
-@media (max-width: 480px) {
-  .auth-box {
-    padding: 2rem 1.5rem;
-    border-radius: 18px;
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-shell {
+    padding: 16px 16px 28px;
+    gap: 16px;
+  }
+
+  .auth-title {
+    font-size: 32px;
+  }
+
+  .auth-card {
+    padding: 14px;
+  }
+
+  .auth-description {
+    font-size: 14px;
   }
 }
 </style>

@@ -54,7 +54,7 @@
             v-if="showLogout" 
             ref="sidebarRef"
             @select="handleSelectHistory"
-            @execute="handleExecuteHistory"
+            @new-session="handleNewSession"
             @collapse-change="handleCollapseChange"
         />
     </div>
@@ -116,8 +116,8 @@ const handleSelectHistory = (item) => {
     window.dispatchEvent(new CustomEvent('tako:select-history', { detail: item }))
 }
 
-const handleExecuteHistory = (item) => {
-    window.dispatchEvent(new CustomEvent('tako:execute-history', { detail: item }))
+const handleNewSession = () => {
+    window.dispatchEvent(new CustomEvent('tako:new-session'))
 }
 </script>
 
@@ -127,6 +127,7 @@ const handleExecuteHistory = (item) => {
     --collapsed-sidebar-width: 48px;
     --header-height: 56px;
     min-height: 100vh;
+    height: 100dvh;
     background: var(--bg-page);
     position: relative;
     overflow-y: auto;
@@ -295,7 +296,7 @@ const handleExecuteHistory = (item) => {
     align-items: center;
     flex: 1;
     width: 100%;
-    padding: 20px 0;
+    padding: 16px 0 clamp(72px, 10vh, 96px);
 }
 
 

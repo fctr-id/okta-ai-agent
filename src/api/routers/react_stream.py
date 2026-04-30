@@ -49,6 +49,7 @@ from src.data.schemas.runtime_storage import (
     update_turn_metadata,
     write_turn_summary,
 )
+from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 
 # Track background tasks to prevent memory leaks
 background_tasks: set = set()
@@ -111,6 +112,115 @@ def _derive_session_title(query: str, *, max_length: int = 120) -> str:
     if len(cleaned) <= max_length:
         return cleaned or "New conversation"
     return cleaned[: max_length - 3].rstrip() + "..."
+
+
+def _build_turn_output_summary(complete_event: Optional[Dict[str, Any]]) -> str:
+    if not complete_event:
+        return "Completed successfully."
+
+    display_type = str(complete_event.get("display_type") or "markdown")
+    if display_type == "markdown":
+        markdown = str(complete_event.get("content") or "").strip()
+        compact_markdown = " ".join(markdown.replace("#", " ").split())
+        if len(compact_markdown) <= 240:
+            return compact_markdown or "Completed with markdown response."
+        return f"{compact_markdown[:237].rstrip()}..."
+
+    metadata = complete_event.get("metadata") if isinstance(complete_event.get("metadata"), dict) else {}
+    summary_text = str(metadata.get("summary") or "").strip()
+    if summary_text:
+        return summary_text
+
+    count = complete_event.get("count")
+    if count == 0:
+        return "No matching data was found for this turn."
+    if isinstance(count, int):
+        return f"Returned {count} results."
+
+    return "Completed with structured results."
+
+
+def _build_turn_output_artifact_payload(
+    complete_event: Dict[str, Any],
+    *,
+    include_results: bool = True,
+    result_set_refs: Optional[List[str]] = None,
+) -> str:
+    display_type = str(complete_event.get("display_type") or "markdown")
+    if display_type == "markdown":
+        return str(complete_event.get("content") or "")
+
+    metadata = complete_event.get("metadata") if isinstance(complete_event.get("metadata"), dict) else {}
+    results: List[Any] = []
+    if include_results:
+        raw_results = complete_event.get("results")
+        if raw_results is None and isinstance(complete_event.get("content"), list):
+            raw_results = complete_event.get("content")
+        if isinstance(raw_results, list):
+            results = raw_results
+
+    if not isinstance(results, list):
+        results = []
+
+    headers = complete_event.get("headers") if isinstance(complete_event.get("headers"), list) else []
+    payload = {
+        "display_type": display_type,
+        "results": results,
+        "headers": headers,
+        "count": complete_event.get("count", len(results)),
+        "metadata": metadata,
+    }
+    if result_set_refs:
+        payload["result_set_refs"] = result_set_refs
+        payload["content_omitted"] = True
+    return json.dumps(payload, indent=2, default=str)
+
+
+def _persist_turn_output_artifact(
+    *,
+    artifacts_file: Optional[Path],
+    complete_event: Optional[Dict[str, Any]],
+) -> None:
+    if not artifacts_file or not complete_event:
+        return
+
+    display_type = str(complete_event.get("display_type") or "markdown")
+    artifact_summary = _build_turn_output_summary(complete_event)
+    metadata = complete_event.get("metadata") if isinstance(complete_event.get("metadata"), dict) else {}
+
+    artifact_payload = {
+        "key": "turn_output_final",
+        "category": "turn_output",
+        "display_type": display_type,
+        "content": _build_turn_output_artifact_payload(complete_event),
+        "notes": artifact_summary[:500],
+        "canonical_turn_output": True,
+        "row_count": complete_event.get("count"),
+        "entity_type": metadata.get("entity_type"),
+        "metadata": metadata,
+    }
+
+    saved_artifacts, result_refs = append_artifacts_with_result_sets(
+        artifacts_file,
+        [artifact_payload],
+        source_specialist="unknown",
+    )
+
+    if display_type != "markdown" and result_refs:
+        result_set_ids = [result_ref.result_set_id for result_ref in result_refs]
+        compact_payload = _build_turn_output_artifact_payload(
+            complete_event,
+            include_results=False,
+            result_set_refs=result_set_ids,
+        )
+        for saved_artifact in reversed(saved_artifacts):
+            if saved_artifact.get("key") == "turn_output_final" and saved_artifact.get("category") == "turn_output":
+                saved_artifact["content"] = compact_payload
+                saved_artifact["content_omitted"] = True
+                break
+
+        with open(artifacts_file, "w", encoding="utf-8") as file_handle:
+            json.dump(saved_artifacts, file_handle, indent=2, default=str)
 
 
 async def _bootstrap_conversation_process(
@@ -588,6 +698,7 @@ async def stream_react_updates(
         okta_client = None
         orchestrator_task = None
         stream_started = False  # Track if stream actually started
+        auto_save_legacy_query_history = process.get("source") not in {"web", "saved_script"}
 
         async def mirror_runtime_state() -> None:
             if not runtime_paths:
@@ -761,35 +872,42 @@ async def stream_react_updates(
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
+                _persist_turn_output_artifact(
+                    artifacts_file=artifacts_file,
+                    complete_event=complete_event,
+                )
                 write_turn_summary(runtime_paths, {
                     "status": "completed",
                     "user_query": process["query"],
-                    "final_response_summary": no_data_message,
+                    "final_response_summary": _build_turn_output_summary(complete_event),
                     "display_type": "markdown",
+                    "result_count": 0,
                     "artifact_file": artifacts_file.as_posix(),
                     "outcome": result.outcome_metadata(),
                 })
                 update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
                 await mirror_runtime_state()
 
-                # Save history before closing the stream so the frontend follows the normal success path.
-                try:
-                    logger.debug(f"[{process_id}] Starting no-data history save...")
-                    db_ops = DatabaseOperations()
-                    await asyncio.shield(
-                        db_ops.save_query_history(
-                            tenant_id=settings.tenant_id,
-                            user_id=process.get("user_id", "localadmin"),
-                            query_text=process["query"],
-                            final_script="",
-                            results_summary=no_data_message
+                if auto_save_legacy_query_history:
+                    try:
+                        logger.debug(f"[{process_id}] Starting no-data history save...")
+                        db_ops = DatabaseOperations()
+                        await asyncio.shield(
+                            db_ops.save_query_history(
+                                tenant_id=settings.tenant_id,
+                                user_id=process.get("user_id", "localadmin"),
+                                query_text=process["query"],
+                                final_script="",
+                                results_summary=no_data_message
+                            )
                         )
-                    )
-                    logger.info(f"[{process_id}] ✅ No-data query history saved")
-                except asyncio.CancelledError:
-                    logger.warning(f"[{process_id}] No-data history save cancelled")
-                except Exception as e:
-                    logger.error(f"[{process_id}] Failed to save no-data query history: {e}", exc_info=True)
+                        logger.info(f"[{process_id}] ✅ No-data query history saved")
+                    except asyncio.CancelledError:
+                        logger.warning(f"[{process_id}] No-data history save cancelled")
+                    except Exception as e:
+                        logger.error(f"[{process_id}] Failed to save no-data query history: {e}", exc_info=True)
+                else:
+                    logger.debug(f"[{process_id}] Skipping legacy query history auto-save for conversation-backed web run")
 
                 process["status"] = "complete"
 
@@ -861,10 +979,14 @@ async def stream_react_updates(
                     **result.outcome_metadata(),
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
+                _persist_turn_output_artifact(
+                    artifacts_file=artifacts_file,
+                    complete_event=complete_event,
+                )
                 write_turn_summary(runtime_paths, {
                     "status": "completed",
                     "user_query": process["query"],
-                    "final_response_summary": result.script_code or "Special tool result",
+                    "final_response_summary": _build_turn_output_summary(complete_event),
                     "display_type": result.display_type or "markdown",
                     "artifact_file": artifacts_file.as_posix(),
                     "is_special_tool": True,
@@ -873,27 +995,28 @@ async def stream_react_updates(
                 update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
                 await mirror_runtime_state()
                 
-                # CRITICAL: Save history BEFORE DONE
-                # Shield from cancellation
-                try:
-                    logger.debug(f"[{process_id}] Starting special tool history save...")
-                    db_ops = DatabaseOperations()
-                    summary = (result.script_code[:100] + "...") if result.script_code else "Special tool result"
-                    
-                    await asyncio.shield(
-                        db_ops.save_query_history(
-                            tenant_id=settings.tenant_id,
-                            user_id=process.get("user_id", "localadmin"),
-                            query_text=process["query"],
-                            final_script="",  # Special tools don't have a script
-                            results_summary=summary
+                if auto_save_legacy_query_history:
+                    try:
+                        logger.debug(f"[{process_id}] Starting special tool history save...")
+                        db_ops = DatabaseOperations()
+                        summary = (result.script_code[:100] + "...") if result.script_code else "Special tool result"
+
+                        await asyncio.shield(
+                            db_ops.save_query_history(
+                                tenant_id=settings.tenant_id,
+                                user_id=process.get("user_id", "localadmin"),
+                                query_text=process["query"],
+                                final_script="",  # Special tools don't have a script
+                                results_summary=summary
+                            )
                         )
-                    )
-                    logger.info(f"[{process_id}] ✅ Special tool history saved")
-                except asyncio.CancelledError:
-                    logger.warning(f"[{process_id}] Special tool history save cancelled")
-                except Exception as e:
-                    logger.error(f"[{process_id}] Failed to save special tool history: {e}", exc_info=True)
+                        logger.info(f"[{process_id}] ✅ Special tool history saved")
+                    except asyncio.CancelledError:
+                        logger.warning(f"[{process_id}] Special tool history save cancelled")
+                    except Exception as e:
+                        logger.error(f"[{process_id}] Failed to save special tool history: {e}", exc_info=True)
+                else:
+                    logger.debug(f"[{process_id}] Skipping legacy query history auto-save for conversation-backed web run")
                 
                 # Send DONE after save completes
                 done_event = {
@@ -1038,10 +1161,14 @@ async def stream_react_updates(
                 "timestamp": time.time()
             }
             yield f"data: {json.dumps(execution_success)}\n\n"
+            _persist_turn_output_artifact(
+                artifacts_file=artifacts_file,
+                complete_event=final_execution_event,
+            )
             write_turn_summary(runtime_paths, {
                 "status": "completed",
                 "user_query": process["query"],
-                "final_response_summary": "Script executed successfully",
+                "final_response_summary": _build_turn_output_summary(final_execution_event),
                 "display_type": final_execution_event.get("display_type") if final_execution_event else result.display_type,
                 "result_count": final_execution_event.get("count") if final_execution_event else None,
                 "artifact_file": artifacts_file.as_posix(),
@@ -1058,10 +1185,9 @@ async def stream_react_updates(
             
             logger.info(f"[{process_id}] Phase 3 complete: Script executed successfully")
             
-            # CRITICAL: Save history BEFORE DONE event
-            # Shield from cancellation - we want this to complete even if client disconnects
-            logger.debug(f"[{process_id}] History save check: execution_succeeded={execution_succeeded}, has_event={final_execution_event is not None}")
-            if execution_succeeded and final_execution_event:
+            # Legacy QueryHistory auto-save is intentionally disabled for conversation-backed web runs.
+            logger.debug(f"[{process_id}] History save check: execution_succeeded={execution_succeeded}, has_event={final_execution_event is not None}, auto_save_legacy_query_history={auto_save_legacy_query_history}")
+            if auto_save_legacy_query_history and execution_succeeded and final_execution_event:
                 try:
                     logger.debug(f"[{process_id}] Starting history save...")
                     db_ops = DatabaseOperations()
@@ -1098,6 +1224,8 @@ async def stream_react_updates(
                         logger.error(f"[{process_id}] Failed to save history on retry: {retry_err}", exc_info=True)
                 except Exception as e:
                     logger.error(f"[{process_id}] Failed to save query history: {e}", exc_info=True)
+            elif execution_succeeded and final_execution_event:
+                logger.debug(f"[{process_id}] Skipping legacy query history auto-save for conversation-backed web run")
             
             # Log token usage summary at end for visibility
             if result.total_tokens > 0:

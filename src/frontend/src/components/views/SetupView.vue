@@ -1,97 +1,125 @@
 <template>
   <AppLayout :showHeader="true" :showLogout="false" contentClass="auth-content">
-    <div class="auth-box animate-entry">
-      <div class="auth-header">
-        <h1 class="auth-subtitle">Initial Setup</h1>
+    <section class="auth-shell animate-entry">
+      <div class="auth-hero">
+        <h1 class="auth-title">Create your admin account</h1>
+        <p class="auth-description">Set up the first admin account before entering the Tako workspace.</p>
       </div>
-      <p class="auth-subtitle-secondary">Create your admin account to get started</p>
 
-      <form @submit.prevent="handleSetup" class="auth-form">
-        <div v-if="auth.error.value" class="error-alert">
-          {{ auth.error.value }}
-        </div>
-
-        <div v-if="validationError" class="warning-alert">
-          {{ validationError }}
-        </div>
-
-        <div class="form-field">
-          <label for="username">Admin Username</label>
-          <div class="input-wrapper">
-            <input type="text" id="username" v-model="username" placeholder="Choose an admin username"
-              autocomplete="username" required :disabled="auth.loading.value" @input="sanitizeUsernameInput" />
-          </div>
-          <transition name="fade">
-            <small v-if="usernameModified" class="input-modified-hint">
-              Username was adjusted to remove invalid characters
-            </small>
+      <div class="auth-card auth-card-wide">
+        <form @submit.prevent="handleSetup" class="auth-form">
+          <transition name="fade-slide">
+            <div v-if="auth.error.value" class="status-alert status-alert-error">
+              {{ auth.error.value }}
+            </div>
           </transition>
-        </div>
 
-        <div class="form-field">
-          <label for="password">Password</label>
-          <div class="input-wrapper">
-            <input :type="showPassword ? 'text' : 'password'" id="password" v-model="password"
-              placeholder="Create a secure password" autocomplete="new-password" required :disabled="auth.loading.value"
-              @input="sanitizePasswordInput" />
-            <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
-              <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
-            </button>
-          </div>
-          <div class="password-requirements">
-            <div class="requirement" :class="{ met: passwordLength }">
-              <v-icon size="14" :color="passwordLength ? '#10b981' : '#9ca3af'">
-                {{ passwordLength ? 'mdi-check-circle' : 'mdi-circle-outline' }}
-              </v-icon>
-              <span>At least 12 characters</span>
+          <transition name="fade-slide">
+            <div v-if="validationError" class="status-alert status-alert-warning">
+              {{ validationError }}
             </div>
-            <div class="requirement" :class="{ met: passwordUppercase }">
-              <v-icon size="14" :color="passwordUppercase ? '#10b981' : '#9ca3af'">
-                {{ passwordUppercase ? 'mdi-check-circle' : 'mdi-circle-outline' }}
-              </v-icon>
-              <span>One uppercase letter</span>
-            </div>
-            <div class="requirement" :class="{ met: passwordLowercase }">
-              <v-icon size="14" :color="passwordLowercase ? '#10b981' : '#9ca3af'">
-                {{ passwordLowercase ? 'mdi-check-circle' : 'mdi-circle-outline' }}
-              </v-icon>
-              <span>One lowercase letter</span>
-            </div>
-            <div class="requirement" :class="{ met: passwordNumber }">
-              <v-icon size="14" :color="passwordNumber ? '#10b981' : '#9ca3af'">
-                {{ passwordNumber ? 'mdi-check-circle' : 'mdi-circle-outline' }}
-              </v-icon>
-              <span>One number</span>
-            </div>
-            <div class="requirement" :class="{ met: passwordSpecial }">
-              <v-icon size="14" :color="passwordSpecial ? '#10b981' : '#9ca3af'">
-                {{ passwordSpecial ? 'mdi-check-circle' : 'mdi-circle-outline' }}
-              </v-icon>
-              <span>One special character</span>
-            </div>
-          </div>
-        </div>
+          </transition>
 
-        <div class="form-field">
-          <label for="confirmPassword">Confirm Password</label>
-          <div class="input-wrapper">
-            <input :type="showPassword ? 'text' : 'password'" id="confirmPassword" v-model="confirmPassword"
-              placeholder="Confirm your password" autocomplete="new-password" required :disabled="auth.loading.value"
-              @input="sanitizeConfirmPasswordInput" />
+          <div class="form-field">
+            <label for="username">Admin Username</label>
+            <div class="input-wrapper">
+              <input
+                id="username"
+                v-model="username"
+                type="text"
+                placeholder="Choose an admin username"
+                autocomplete="username"
+                required
+                :disabled="auth.loading.value"
+                @input="sanitizeUsernameInput"
+              />
+            </div>
+            <transition name="fade">
+              <small v-if="usernameModified" class="input-modified-hint">
+                Username was adjusted to remove invalid characters.
+              </small>
+            </transition>
           </div>
-        </div>
 
-        <button type="submit" class="auth-button"
-          :disabled="auth.loading.value || !formIsValid">
-          <span v-if="!auth.loading.value">Complete Setup</span>
-          <div v-else class="three-dots-loader">
-            <div class="dot"></div>
-            <div class="dot"></div>
-            <div class="dot"></div>
+          <div class="form-field">
+            <label for="password">Password</label>
+            <div class="input-wrapper">
+              <input
+                id="password"
+                v-model="password"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="Create a secure password"
+                autocomplete="new-password"
+                required
+                :disabled="auth.loading.value"
+                @input="sanitizePasswordInput"
+              />
+              <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
+                <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
+              </button>
+            </div>
+
+            <div class="password-requirements">
+              <div class="requirement" :class="{ met: passwordLength }">
+                <v-icon size="14" :color="passwordLength ? '#0f766e' : '#94a3b8'">
+                  {{ passwordLength ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                </v-icon>
+                <span>At least 12 characters</span>
+              </div>
+              <div class="requirement" :class="{ met: passwordUppercase }">
+                <v-icon size="14" :color="passwordUppercase ? '#0f766e' : '#94a3b8'">
+                  {{ passwordUppercase ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                </v-icon>
+                <span>One uppercase letter</span>
+              </div>
+              <div class="requirement" :class="{ met: passwordLowercase }">
+                <v-icon size="14" :color="passwordLowercase ? '#0f766e' : '#94a3b8'">
+                  {{ passwordLowercase ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                </v-icon>
+                <span>One lowercase letter</span>
+              </div>
+              <div class="requirement" :class="{ met: passwordNumber }">
+                <v-icon size="14" :color="passwordNumber ? '#0f766e' : '#94a3b8'">
+                  {{ passwordNumber ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                </v-icon>
+                <span>One number</span>
+              </div>
+              <div class="requirement" :class="{ met: passwordSpecial }">
+                <v-icon size="14" :color="passwordSpecial ? '#0f766e' : '#94a3b8'">
+                  {{ passwordSpecial ? 'mdi-check-circle' : 'mdi-circle-outline' }}
+                </v-icon>
+                <span>One special character</span>
+              </div>
+            </div>
           </div>
-        </button>
-      </form>
-    </div>
+
+          <div class="form-field">
+            <label for="confirmPassword">Confirm Password</label>
+            <div class="input-wrapper">
+              <input
+                id="confirmPassword"
+                v-model="confirmPassword"
+                :type="showPassword ? 'text' : 'password'"
+                placeholder="Confirm your password"
+                autocomplete="new-password"
+                required
+                :disabled="auth.loading.value"
+                @input="sanitizeConfirmPasswordInput"
+              />
+            </div>
+          </div>
+
+          <button type="submit" class="auth-button" :disabled="auth.loading.value || !formIsValid">
+            <span v-if="!auth.loading.value">Complete Setup</span>
+            <div v-else class="three-dots-loader">
+              <div class="dot"></div>
+              <div class="dot"></div>
+              <div class="dot"></div>
+            </div>
+          </button>
+        </form>
+      </div>
+    </section>
   </AppLayout>
 </template>
 
@@ -221,63 +249,53 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 </script>
 
 <style scoped>
-/* 2026 Glassmorphism Auth Box */
-.auth-box {
-  background: rgba(255, 255, 255, 0.98);
-  border-radius: 20px;
-  padding: 2.5rem 2.25rem;
-  width: 100%;
-  max-width: 480px;
-  box-shadow: none;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  animation: none;
-  margin: auto;
-}
-
-.auth-logo {
+.auth-shell {
+  width: min(100%, 840px);
   display: flex;
-  justify-content: center;
-  margin-bottom: 1.5rem;
-}
-
-.auth-logo img {
-  height: 28px;
-}
-
-@keyframes card-appear {
-  0% {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 24px 24px 40px;
 }
 
 .animate-entry {
-  animation: card-appear 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: auth-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.auth-header {
+.auth-hero {
   text-align: center;
-  margin-bottom: 1rem;
+  max-width: 720px;
 }
 
-.auth-subtitle {
+.auth-title {
+  margin: 0;
   color: var(--text-primary);
-  font-size: 24px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
-  text-transform: none;
+  font-size: 42px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.08;
 }
 
-.auth-subtitle-secondary {
-  font-size: 14px;
+.auth-description {
+  margin: 10px auto 0;
+  max-width: 580px;
+  font-size: 15px;
+  font-weight: 450;
+  line-height: 1.55;
   color: var(--text-secondary);
-  text-align: center;
-  margin-bottom: 2rem;
-  margin-top: 0.5rem;
+}
+
+.auth-card {
+  width: min(100%, 620px);
+  background: #ffffff;
+  border: 2px solid rgba(15, 23, 42, 0.28);
+  border-radius: 10px;
+  padding: 16px;
+  box-shadow: none;
+}
+
+.auth-card-wide {
+  width: min(100%, 680px);
 }
 
 .auth-form {
@@ -285,52 +303,51 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 }
 
 .form-field {
-  margin-bottom: 22px;
+  margin-bottom: 20px;
 }
 
 .form-field label {
   display: block;
+  margin-bottom: 8px;
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-secondary);
-  margin-bottom: 8px;
   letter-spacing: 0.01em;
+  color: var(--text-secondary);
 }
 
 .form-field:focus-within label {
-  color: var(--primary);
+  color: var(--text-primary);
 }
 
 .input-wrapper {
   position: relative;
-  background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 12px;
-  overflow: hidden;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
   display: flex;
   align-items: center;
+  min-height: 52px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .input-wrapper:hover {
-  background: #ffffff;
-  border-color: rgba(15, 23, 42, 0.2);
+  border-color: rgba(15, 23, 42, 0.24);
 }
 
 .input-wrapper:focus-within {
-  background: #ffffff;
   border-color: rgba(var(--primary-rgb), 0.5);
   box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
 }
 
 .input-wrapper input {
   width: 100%;
-  padding: 14px 16px;
   border: none;
   outline: none;
-  font-size: 15px;
   background: transparent;
-  color: #1a1a1a;
+  padding: 0 16px;
+  font-size: 15px;
+  color: var(--text-primary);
 }
 
 .input-wrapper input::placeholder {
@@ -338,107 +355,105 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 }
 
 .password-toggle {
-  background: transparent;
   border: none;
+  background: transparent;
   color: var(--text-muted);
-  padding: 0 12px;
+  padding: 0 14px;
   cursor: pointer;
-  outline: none;
-  transition: color 0.2s ease;
+  transition: color 0.18s ease;
 }
 
 .password-toggle:hover {
-  color: var(--primary);
+  color: var(--text-primary);
 }
 
-/* Password requirements - minimal 2026 */
 .password-requirements {
-  margin-top: 10px;
+  margin-top: 12px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 8px;
-  font-size: 11px;
-  color: var(--text-muted);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .requirement {
   display: flex;
   align-items: center;
-  gap: 4px;
-  transition: color 0.2s ease;
+  gap: 6px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(15, 23, 42, 0.03);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .requirement.met {
-  color: #10b981;
+  color: #0f766e;
+  border-color: rgba(15, 118, 110, 0.16);
+  background: rgba(15, 118, 110, 0.07);
 }
 
-/* Error/Warning alerts - glassmorphism */
-.error-alert {
-  background: rgba(254, 202, 202, 0.5);
-  color: #991b1b;
-  padding: 10px 14px;
-  border-radius: 10px;
+.status-alert {
   margin-bottom: 16px;
+  border-radius: 10px;
+  padding: 10px 12px;
   font-size: 13px;
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  text-align: center;
+  line-height: 1.45;
+  border: 1px solid transparent;
 }
 
-.warning-alert {
-  background: rgba(254, 243, 199, 0.5);
-  color: #92400e;
-  padding: 10px 14px;
-  border-radius: 10px;
-  margin-bottom: 16px;
-  font-size: 13px;
-  border: 1px solid rgba(251, 191, 36, 0.2);
-  text-align: center;
+.status-alert-error {
+  background: rgba(180, 35, 24, 0.06);
+  border-color: rgba(180, 35, 24, 0.14);
+  color: #a22c29;
+}
+
+.status-alert-warning {
+  background: rgba(154, 90, 0, 0.08);
+  border-color: rgba(154, 90, 0, 0.16);
+  color: #9a5a00;
 }
 
 .input-modified-hint {
-  color: #b45309;
-  font-size: 11px;
-  margin-top: 4px;
   display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #9a5a00;
 }
 
-/* Modern submit button */
 .auth-button {
   width: 100%;
-  padding: 14px;
+  min-height: 52px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 10px;
   background: var(--primary);
-  color: white;
-  border: 1px solid var(--primary-dark);
-  border-radius: 12px;
+  color: #ffffff;
   font-size: 15px;
   font-weight: 600;
-  cursor: pointer;
-  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-  display: flex;
+  letter-spacing: -0.01em;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  margin-top: 12px;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
   box-shadow: none;
 }
 
 .auth-button:hover:not(:disabled) {
   background: var(--primary-hover);
-  border-color: var(--primary-hover);
   transform: translateY(-1px);
 }
 
-.auth-button:active:not(:disabled) {
-  transform: translateY(0);
-}
-
 .auth-button:disabled {
-  background: rgba(var(--primary-rgb), 0.42);
-  border-color: rgba(var(--primary-rgb), 0.32);
+  background: var(--surface-muted);
+  color: var(--text-faint);
   cursor: not-allowed;
   box-shadow: none;
 }
 
-/* 3-dot loader */
 .three-dots-loader {
   display: flex;
   gap: 6px;
@@ -463,21 +478,9 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   animation-delay: 0.4s;
 }
 
-@keyframes bounce {
-  0%, 80%, 100% {
-    transform: scale(0.8);
-    opacity: 0.6;
-  }
-  40% {
-    transform: scale(1.1);
-    opacity: 1;
-  }
-}
-
-/* Fade transitions */
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.25s ease;
 }
 
 .fade-enter-from,
@@ -485,11 +488,57 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   opacity: 0;
 }
 
-/* Responsive */
-@media (max-width: 480px) {
-  .auth-box {
-    padding: 2rem 1.5rem;
-    border-radius: 18px;
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.fade-slide-enter-from,
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@keyframes bounce {
+  0%, 80%, 100% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+
+  40% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+@keyframes auth-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .auth-shell {
+    padding: 16px 16px 28px;
+    gap: 16px;
+  }
+
+  .auth-title {
+    font-size: 32px;
+  }
+
+  .auth-card {
+    padding: 14px;
+  }
+
+  .auth-description {
+    font-size: 14px;
   }
 
   .password-requirements {

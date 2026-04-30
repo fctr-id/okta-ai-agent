@@ -38,6 +38,18 @@
                         <div class="search-row pl-4">
                             <div class="header-actions">
                                 <div class="left-section">
+                                    <v-btn
+                                        v-if="showTableAction"
+                                        class="saved-results-btn"
+                                        :loading="tableActionLoading"
+                                        :disabled="tableActionLoading"
+                                        variant="flat"
+                                        @click="emit('table-action')"
+                                    >
+                                        <v-icon size="small" start>mdi-database-arrow-down-outline</v-icon>
+                                        {{ tableActionLabel }}
+                                    </v-btn>
+
                                     <v-btn class="download-btn" @click="downloadCSV" variant="tonal">
                                         <v-icon size="small" start>mdi-download</v-icon>
                                         Download CSV
@@ -93,7 +105,7 @@
 
 <script setup>
 import { marked } from 'marked'
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
 
 marked.setOptions({
@@ -135,19 +147,22 @@ const props = defineProps({
     loading: {
         type: Boolean,
         default: false
+    },
+    showTableAction: {
+        type: Boolean,
+        default: false
+    },
+    tableActionLabel: {
+        type: String,
+        default: 'Fetch all records'
+    },
+    tableActionLoading: {
+        type: Boolean,
+        default: false
     }
 })
 
-// Debug logging for props
-// console.log('📊 DataDisplay: Props received:', {
-//     type: props.type,
-//     contentType: typeof props.content,
-//     contentIsArray: Array.isArray(props.content),
-//     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
-//     content: props.content,
-//     metadata: props.metadata,
-//     loading: props.loading
-// });
+const emit = defineEmits(['table-action'])
 
 // State management
 
@@ -157,12 +172,10 @@ const sortBy = ref([{ key: 'email', order: 'asc' }])
 // Type checks with simplified logic
 const isJsonData = computed(() => {
     const result = props.type === MessageType.JSON;
-    // console.log('🔧 DataDisplay: isJsonData:', result, 'type:', props.type);
     return result;
 });
 const isError = computed(() => {
     const result = props.type === MessageType.ERROR;
-    // console.log('❌ DataDisplay: isError:', result, 'type:', props.type);
     return result;
 });
 
@@ -170,19 +183,10 @@ const isTextData = computed(() => {
     const result = props.type === 'text' ||
         props.type === MessageType.MARKDOWN ||
         (typeof props.content === 'object' && props.content?.type === 'text');
-    // console.log('📝 DataDisplay: isTextData:', result, 'type:', props.type, 'contentType:', typeof props.content);
     return result;
 });
 
 const displayedItems = computed(() => {
-    console.log('📋 DataDisplay: displayedItems computed called:', {
-        propsType: props.type,
-        contentIsArray: Array.isArray(props.content),
-        contentLength: Array.isArray(props.content) ? props.content.length : 'N/A',
-        isStreamingValue: isStreaming.value,
-        lastDisplayedItemsLength: lastDisplayedItems.value?.length || 0
-    });
-    
     if (props.type === MessageType.STREAM || props.type === MessageType.BATCH || props.type === MessageType.TABLE) {
         // Handle both direct array content and nested content structure
         let items = [];
@@ -195,12 +199,6 @@ const displayedItems = computed(() => {
             items = props.content.content;
         }
         
-        console.log('📋 DataDisplay: Table type processing:', {
-            itemsLength: items.length,
-            isStreaming: isStreaming.value,
-            lastDisplayedLength: lastDisplayedItems.value?.length || 0
-        });
-        
         // Keep a reference to the last known items to prevent table disappearing
         if (items.length > 0) {
             lastDisplayedItems.value = items;
@@ -209,14 +207,11 @@ const displayedItems = computed(() => {
         // If items are empty but we were displaying items before and not streaming,
         // show the old items briefly to avoid flicker
         if (items.length === 0 && !isStreaming.value && lastDisplayedItems.value.length > 0) {
-            console.log('📋 DataDisplay: Using fallback lastDisplayedItems');
             return lastDisplayedItems.value;
         }
-        
-        console.log('📋 DataDisplay: Returning', items.length, 'items');
+
         return items;
     }
-    console.log('📋 DataDisplay: Not a table type, returning empty array');
     return [];
 });
 
@@ -270,15 +265,7 @@ const isStreaming = computed(() => {
     const contentMetadataStreaming = props.content?.metadata?.isStreaming === true;
     
     const result = directStreaming || nestedStreaming || contentMetadataStreaming;
-    
-    // console.log('🔄 DataDisplay: isStreaming computed:', {
-    //     result: result,
-    //     metadata: props.metadata,
-    //     directStreaming,
-    //     nestedStreaming,
-    //     contentMetadataStreaming,
-    //     isStreamingValue: props.metadata?.isStreaming
-    // });
+
     return result;
 })
 
@@ -292,17 +279,8 @@ const streamingProgressPercent = computed(() => {
     return total > 0 ? Math.round((current / total) * 100) : 0
 })
 
-// Debug computed for empty streaming table condition
 const shouldShowEmptyStreamingTable = computed(() => {
     const condition = displayMode.value === 'table' && displayedItems.value.length === 0 && isStreaming.value;
-    // console.log('🚨 DataDisplay: shouldShowEmptyStreamingTable debug:', {
-    //     condition: condition,
-    //     displayMode: displayMode.value,
-    //     displayedItemsLength: displayedItems.value.length,
-    //     isStreaming: isStreaming.value,
-    //     metadata: props.metadata,
-    //     metadataIsStreaming: props.metadata?.isStreaming
-    // });
     return condition;
 });
 
@@ -323,19 +301,7 @@ const displayMode = computed(() => {
     else if (props.type === 'table' && isStream) mode = 'table'; // Show empty table during streaming
     else if (!isLoad && !hasDisplayedItems && !isText && !isJson && !isErr && !isStream) mode = 'no-results';
     else mode = 'loading-or-hidden';
-    
-    // console.log('🎯 DataDisplay: displayMode computed:', {
-    //     mode: mode,
-    //     hasDisplayedItems: hasDisplayedItems,
-    //     displayedItemsLength: displayedItems.value.length,
-    //     isTextData: isText,
-    //     isJsonData: isJson,
-    //     isError: isErr,
-    //     loading: isLoad,
-    //     isStreaming: isStream,
-    //     propsType: props.type
-    // });
-    
+
     return mode;
 })
 
@@ -344,6 +310,12 @@ const getDataSourceDisplay = computed(() => {
     const dataSourceType = props.metadata?.data_source_type || 'api';
     
     switch (dataSourceType) {
+        case 'saved_session':
+            return {
+                showRealtime: false,
+                prefix: 'Data Source:',
+                source: 'Saved Session Preview'
+            };
         case 'sql':
             return {
                 showRealtime: false,
@@ -461,61 +433,7 @@ onBeforeUnmount(() => {
     search.value = ''
     sortBy.value = [{ key: 'email', order: 'asc' }]
 
-    // Clear table data
-    //displayedContent.value = []
-    //headerCache.value = []
 })
-
-// Add watchers for debugging race conditions
-watch(() => props.content, (newContent, oldContent) => {
-    // console.log('👀 DataDisplay: props.content changed:', {
-    //     newLength: Array.isArray(newContent) ? newContent.length : 'N/A',
-    //     oldLength: Array.isArray(oldContent) ? oldContent.length : 'N/A',
-    //     newIsArray: Array.isArray(newContent),
-    //     oldIsArray: Array.isArray(oldContent),
-    //     newContent: newContent,
-    //     oldContent: oldContent
-    // });
-}, { deep: true });
-
-watch(() => props.metadata, (newMetadata, oldMetadata) => {
-    // console.log('👀 DataDisplay: props.metadata changed:', {
-    //     newIsStreaming: newMetadata?.isStreaming,
-    //     oldIsStreaming: oldMetadata?.isStreaming,
-    //     newProgress: newMetadata?.streamingProgress,
-    //     oldProgress: oldMetadata?.streamingProgress,
-    //     newMetadata: newMetadata,
-    //     oldMetadata: oldMetadata
-    // });
-}, { deep: true });
-
-watch(displayedItems, (newItems, oldItems) => {
-    // console.log('👀 DataDisplay: displayedItems changed:', {
-    //     newLength: newItems?.length || 0,
-    //     oldLength: oldItems?.length || 0,
-    //     newItems: newItems,
-    //     oldItems: oldItems
-    // });
-});
-
-watch(isStreaming, (newIsStreaming, oldIsStreaming) => {
-    // console.log('👀 DataDisplay: isStreaming changed:', {
-    //     newIsStreaming: newIsStreaming,
-    //     oldIsStreaming: oldIsStreaming,
-    //     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A'
-    // });
-});
-
-watch(displayMode, (newMode, oldMode) => {
-    // console.log('👀 DataDisplay: displayMode changed:', {
-    //     newMode: newMode,
-    //     oldMode: oldMode,
-    //     displayedItemsLength: displayedItems.value.length,
-    //     isStreaming: isStreaming.value,
-    //     contentLength: Array.isArray(props.content) ? props.content.length : 'N/A'
-    // });
-});
-
 
 // Add CSV download functionality
 const downloadCSV = () => {
@@ -672,27 +590,6 @@ const downloadCSV = () => {
 
 /* End of markdown content */
 
-/* Streamlined header */
-.header-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 0 0 12px 0;
-}
-
-.left-section {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
-.right-section {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-}
-
 .download-btn {
     color: var(--primary);
     text-transform: none;
@@ -704,6 +601,26 @@ const downloadCSV = () => {
     background: rgba(255, 255, 255, 0.6) !important;
     border-radius: 8px !important;
     transition: all 0.2s ease;
+}
+
+.saved-results-btn {
+    color: var(--primary) !important;
+    text-transform: none;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 14px !important;
+    height: 34px;
+    border: 1px solid rgba(var(--primary-rgb), 0.18) !important;
+    background: rgba(var(--primary-rgb), 0.1) !important;
+    border-radius: 8px !important;
+    box-shadow: none !important;
+    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.saved-results-btn:hover {
+    background: rgba(var(--primary-rgb), 0.14) !important;
+    border-color: rgba(var(--primary-rgb), 0.26) !important;
+    transform: translateY(-1px);
 }
 
 .download-btn:hover {

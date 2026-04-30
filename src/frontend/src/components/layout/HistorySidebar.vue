@@ -5,7 +5,7 @@
       <div v-if="!isCollapsed" class="sidebar-title">
         <v-icon icon="mdi-history" size="15" class="title-icon" />
         <span>Activity</span>
-        <span class="count-pill">{{ history.length }}</span>
+        <span class="count-pill">{{ sessions.length }}</span>
       </div>
       <div class="header-spacer"></div>
       <button class="collapse-toggle" :title="isCollapsed ? 'Expand' : 'Collapse'">
@@ -15,8 +15,13 @@
 
     <!-- Content Area -->
     <div v-if="!isCollapsed" class="sidebar-content">
+      <button type="button" class="new-session-btn" @click.stop="handleNewSession">
+        <v-icon icon="mdi-plus" size="14" />
+        <span>New session</span>
+      </button>
+
       <!-- Loading State -->
-      <div v-if="loading && history.length === 0" class="loading-state">
+      <div v-if="isInitialLoading" class="loading-state">
         <div class="loading-shimmer">
           <div class="shimmer-bar"></div>
           <div class="shimmer-bar short"></div>
@@ -24,79 +29,116 @@
       </div>
 
       <!-- Empty State -->
-      <div v-else-if="history.length === 0" class="empty-state">
+      <div v-else-if="sessions.length === 0" class="empty-state">
         <div class="empty-icon-bg">
-          <v-icon icon="mdi-text-search-variant" size="24" class="opacity-40" />
+          <v-icon icon="mdi-chat-outline" size="24" class="opacity-40" />
         </div>
-        <p>No queries found</p>
+        <p>No conversations yet</p>
       </div>
 
-      <!-- History List -->
-      <div v-else class="history-list">
-        <div
-          v-for="item in history"
-          :key="item.id"
-          class="history-row"
-          :class="{ 'is-favorite': item.is_favorite }"
-          @click="$emit('select', item)"
-        >
-          <div class="row-main">
-            <div class="row-copy">
-              <div class="row-title" :title="item.query_text">
-                {{ item.query_text }}
-              </div>
+      <div v-else class="sidebar-sections">
+        <section class="sidebar-section">
+          <button type="button" class="section-header section-toggle" @click="sessionsExpanded = !sessionsExpanded">
+            <span class="section-header-main">
+              <v-icon :icon="sessionsExpanded ? 'mdi-chevron-down' : 'mdi-chevron-right'" size="14" />
+              <span class="section-label">Recent</span>
+            </span>
+            <span class="section-count">{{ sessions.length }}</span>
+          </button>
 
-              <div class="row-meta">
-                <span class="row-date">{{ formatDate(item.last_run_at) }}</span>
-                <span v-if="item.results_summary" class="row-summary" :title="formatSummary(item.results_summary)">
-                  {{ formatSummary(item.results_summary) }}
-                </span>
+          <div v-if="sessionsExpanded">
+            <div v-if="sessions.length === 0" class="section-empty">
+              Start a new question to create a conversation.
+            </div>
+
+            <div v-else class="history-list">
+              <div
+                v-for="session in sessions"
+                :key="session.session_id"
+                class="history-row session-row"
+                :class="{ 'is-pinned': session.is_pinned, 'is-archived': session.is_archived, 'is-selected': selectedSessionId === session.session_id }"
+                @click="handleSessionSelect(session)"
+              >
+                <div class="row-main">
+                  <div class="row-copy">
+                    <div class="row-title" :title="session.title || session.session_id">
+                      {{ session.title || 'Untitled conversation' }}
+                    </div>
+
+                    <div class="row-meta">
+                      <span class="row-date">{{ formatDate(session.last_activity_at) }}</span>
+                      <span v-if="formatSessionSummary(session)" class="row-summary" :title="formatSessionSummary(session)">
+                        {{ formatSessionSummary(session) }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div class="row-status-group">
+                    <button
+                      type="button"
+                      class="pin-toggle"
+                      :class="{ 'is-active': session.is_pinned }"
+                      :title="session.is_pinned ? 'Unpin session' : 'Pin session'"
+                      :aria-label="session.is_pinned ? 'Unpin session' : 'Pin session'"
+                      :disabled="pinningSessionId === session.session_id"
+                      @click.stop="toggleSessionPin(session)"
+                    >
+                      <v-progress-circular
+                        v-if="pinningSessionId === session.session_id"
+                        indeterminate
+                        size="12"
+                        width="2"
+                        color="currentColor"
+                      />
+                      <v-icon v-else :icon="session.is_pinned ? 'mdi-pin' : 'mdi-pin-outline'" size="14" />
+                    </button>
+                    <span v-if="session.is_pinned" class="status-chip status-chip-pin">
+                      <v-icon icon="mdi-pin" size="11" />
+                      <span>Pinned</span>
+                    </span>
+                    <span v-if="getSessionDisplayStatus(session)" class="status-chip" :class="statusClass(getSessionDisplayStatus(session))">
+                      {{ formatStatus(getSessionDisplayStatus(session)) }}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
+        </section>
 
-          <div class="row-actions">
-            <button
-              class="row-btn"
-              :class="{ 'active': item.is_favorite }"
-              :title="item.is_favorite ? 'Unsave' : 'Save'"
-              @click.stop="toggleFav(item)"
-            >
-              <v-icon :icon="item.is_favorite ? 'mdi-star' : 'mdi-star-outline'" size="14" />
-              <span>{{ item.is_favorite ? 'Saved' : 'Save' }}</span>
-            </button>
-            <button
-              class="row-btn"
-              title="Run"
-              @click.stop="$emit('execute', item)"
-            >
-              <v-icon icon="mdi-play" size="14" />
-              <span>Run</span>
-            </button>
-          </div>
-        </div>
       </div>
     </div>
     
     <!-- Collapsed State Icons -->
     <div v-else class="collapsed-icons" @click="isCollapsed = false">
+      <button type="button" class="collapsed-action-btn" title="New session" @click.stop="handleNewSession">
+        <v-icon icon="mdi-plus" size="18" />
+      </button>
+
       <div class="collapsed-icon-wrapper">
-        <v-icon icon="mdi-history" size="20" class="icon-dim" />
-        <div v-if="favoritesCount > 0" class="mini-fav-badge">{{ favoritesCount }}</div>
+        <v-icon icon="mdi-chat-processing-outline" size="20" class="icon-dim" />
+        <div v-if="sessions.length > 0" class="mini-fav-badge">{{ sessions.length }}</div>
       </div>
     </div>
   </aside>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useHistory } from '@/composables/useHistory'
 
-const emit = defineEmits(['select', 'execute', 'collapse-change'])
-const { history, loading, fetchHistory, toggleFavorite } = useHistory()
+const emit = defineEmits(['select', 'collapse-change', 'new-session'])
+const {
+  sessions,
+  sessionsLoading,
+  fetchSessions,
+  updateSession
+} = useHistory()
 const isCollapsed = ref(false)
-
-const favoritesCount = computed(() => history.value.filter(h => h.is_favorite).length)
+const sessionsExpanded = ref(true)
+const selectedSessionId = ref(null)
+const pinningSessionId = ref(null)
+const isInitialLoading = computed(() => sessionsLoading.value && sessions.value.length === 0)
 
 // Emit collapse state changes to parent
 watch(isCollapsed, (newVal) => {
@@ -104,24 +146,95 @@ watch(isCollapsed, (newVal) => {
 })
 
 onMounted(() => {
-  fetchHistory()
+  window.addEventListener('tako:session-loaded', handleSessionLoaded)
+  window.addEventListener('tako:session-load-failed', handleSessionLoadFailed)
+  window.addEventListener('tako:conversation-reset', handleConversationReset)
+  void refreshSidebar()
 })
 
-const toggleFav = async (item) => {
-  await toggleFavorite(item.id, !item.is_favorite)
+onBeforeUnmount(() => {
+  window.removeEventListener('tako:session-loaded', handleSessionLoaded)
+  window.removeEventListener('tako:session-load-failed', handleSessionLoadFailed)
+  window.removeEventListener('tako:conversation-reset', handleConversationReset)
+})
+
+const refreshSidebar = async () => {
+  await fetchSessions()
+}
+
+const handleSessionSelect = (session) => {
+  selectedSessionId.value = session.session_id
+  emit('select', { kind: 'session', ...session })
+}
+
+const handleNewSession = () => {
+  selectedSessionId.value = null
+  emit('new-session')
+}
+
+const toggleSessionPin = async (session) => {
+  if (!session?.session_id || pinningSessionId.value) return
+
+  pinningSessionId.value = session.session_id
+  try {
+    await updateSession(session.session_id, {
+      is_pinned: !Boolean(session.is_pinned)
+    })
+  } catch (error) {
+    console.error('Failed to toggle session pin:', error)
+  } finally {
+    if (pinningSessionId.value === session.session_id) {
+      pinningSessionId.value = null
+    }
+  }
+}
+
+const handleSessionLoaded = (event) => {
+  const sessionId = event?.detail?.sessionId
+  if (!sessionId) return
+
+  selectedSessionId.value = sessionId
+}
+
+const handleSessionLoadFailed = (event) => {
+  const sessionId = event?.detail?.sessionId
+  if (!sessionId || selectedSessionId.value === sessionId) {
+    selectedSessionId.value = null
+  }
+}
+
+const handleConversationReset = () => {
+  selectedSessionId.value = null
+}
+
+const parseApiTimestamp = (rawTimestamp) => {
+  if (!rawTimestamp) return null
+
+  const timestamp = String(rawTimestamp).trim()
+  if (!timestamp) return null
+
+  const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(timestamp)
+  const normalizedTimestamp = hasTimezone ? timestamp : `${timestamp}Z`
+  const parsedDate = new Date(normalizedTimestamp)
+
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
 }
 
 const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
+  const date = parseApiTimestamp(dateStr)
+  if (!date) return ''
+
   const now = new Date()
-  const isToday = date.toDateString() === now.toDateString()
-  
-  if (isToday) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  } else {
-    return date.toLocaleDateString([], { month: 'short', day: 'numeric' })
-  }
+  const isSameYear = date.getFullYear() === now.getFullYear()
+
+  const dateOptions = isSameYear
+    ? { month: 'short', day: 'numeric' }
+    : { year: 'numeric', month: 'short', day: 'numeric' }
+
+  const calendarDate = date.toLocaleDateString([], dateOptions)
+  const timeOfDay = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
+  return `${calendarDate}, ${timeOfDay}`
 }
 
 const formatSummary = (summary) => {
@@ -134,7 +247,48 @@ const formatSummary = (summary) => {
     .trim()
 }
 
-defineExpose({ refresh: fetchHistory })
+const formatSessionSummary = (session) => {
+  const summary = formatSummary(session.summary)
+  if (summary) return summary
+
+  if (session.source && session.source !== 'web') {
+    return `Started from ${formatStatus(session.source)}`
+  }
+
+  return ''
+}
+
+const formatStatus = (status) => {
+  if (!status) return 'Active'
+  return status
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+const getSessionDisplayStatus = (session) => {
+  if (session?.is_archived) return 'archived'
+
+  const status = String(session?.status || '').trim().toLowerCase()
+  if (!status || status === 'active') return null
+
+  return status
+}
+
+const statusClass = (status) => {
+  switch (status) {
+    case 'completed':
+      return 'status-chip-complete'
+    case 'error':
+    case 'failed':
+      return 'status-chip-error'
+    case 'archived':
+      return 'status-chip-archived'
+    default:
+      return 'status-chip-active'
+  }
+}
+
+defineExpose({ refresh: refreshSidebar })
 </script>
 
 <style scoped>
@@ -229,6 +383,97 @@ defineExpose({ refresh: fetchHistory })
   flex-direction: column;
 }
 
+.new-session-btn {
+  width: 100%;
+  min-height: 40px;
+  margin-bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid rgba(var(--primary-rgb), 0.16);
+  border-radius: 10px;
+  background: rgba(var(--primary-rgb), 0.08);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.new-session-btn:hover {
+  background: rgba(var(--primary-rgb), 0.12);
+  border-color: rgba(var(--primary-rgb), 0.24);
+  transform: translateY(-1px);
+}
+
+.sidebar-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-section-secondary {
+  padding-top: 2px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.section-toggle {
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.section-header-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.section-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.section-empty {
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 /* Custom Scrollbar */
 .sidebar-content::-webkit-scrollbar { width: 6px; }
 .sidebar-content::-webkit-scrollbar-track { background: transparent; }
@@ -268,25 +513,126 @@ defineExpose({ refresh: fetchHistory })
   box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05);
 }
 
-.history-row.is-favorite {
+.history-row.is-selected {
+  border-color: rgba(var(--primary-rgb), 0.22);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.history-row.session-row {
+  background: rgba(15, 23, 42, 0.025);
+}
+
+.history-row.session-row.is-pinned {
   border-color: rgba(var(--primary-rgb), 0.24);
-  background: rgba(var(--primary-rgb), 0.09);
+  background: rgba(var(--primary-rgb), 0.07);
+}
+
+.history-row.session-row.is-archived {
+  opacity: 0.8;
 }
 
 .row-main {
   min-width: 0;
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .row-copy {
   min-width: 0;
+  flex: 1;
+}
+
+.row-status-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.pin-toggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--primary-rgb), 0.12);
+  background: rgba(var(--primary-rgb), 0.04);
+  color: #4d678a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
+}
+
+.pin-toggle:hover:not(:disabled) {
+  background: rgba(var(--primary-rgb), 0.1);
+  border-color: rgba(var(--primary-rgb), 0.22);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.pin-toggle.is-active {
+  background: rgba(var(--primary-rgb), 0.12);
+  border-color: rgba(var(--primary-rgb), 0.24);
+  color: var(--primary);
+}
+
+.pin-toggle:disabled {
+  cursor: wait;
+  opacity: 0.82;
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--text-muted);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.status-chip-active {
+  color: #245ea8;
+  border-color: rgba(36, 94, 168, 0.18);
+  background: rgba(36, 94, 168, 0.08);
+}
+
+.status-chip-complete {
+  color: #1d4ed8;
+  border-color: rgba(29, 78, 216, 0.16);
+  background: rgba(29, 78, 216, 0.08);
+}
+
+.status-chip-error {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.18);
+  background: rgba(180, 35, 24, 0.08);
+}
+
+.status-chip-archived {
+  color: #6b7280;
+  border-color: rgba(107, 114, 128, 0.18);
+  background: rgba(107, 114, 128, 0.08);
+}
+
+.status-chip-pin {
+  color: var(--primary);
+  border-color: rgba(var(--primary-rgb), 0.18);
+  background: rgba(var(--primary-rgb), 0.08);
 }
 
 .row-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: #334155;
-  line-height: 1.45;
+  font-size: 12px;
+  font-weight: 550;
+  color: #183552;
+  line-height: 1.4;
   letter-spacing: -0.01em;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -299,7 +645,7 @@ defineExpose({ refresh: fetchHistory })
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted);
   line-height: 1.35;
   overflow: hidden;
@@ -315,7 +661,7 @@ defineExpose({ refresh: fetchHistory })
   border-radius: 0;
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: #4e647f;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -323,8 +669,8 @@ defineExpose({ refresh: fetchHistory })
 
 .row-summary {
   max-width: 100%;
-  color: var(--text-secondary);
-  font-size: 11px;
+  color: #415873;
+  font-size: 10px;
   line-height: 1.45;
   padding-left: 10px;
   position: relative;
@@ -346,55 +692,8 @@ defineExpose({ refresh: fetchHistory })
   background: rgba(15, 23, 42, 0.22);
 }
 
-/* Row actions - hover reveal */
-.row-actions {
-  display: flex;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(15, 23, 42, 0.08);
-  box-shadow: none;
-}
-
-.row-btn {
-  min-width: 0;
-  height: 28px;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: #ffffff;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background 0.12s, color 0.12s, border-color 0.12s;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.row-btn:hover {
-  background: var(--surface-muted);
-  border-color: rgba(15, 23, 42, 0.18);
-  color: var(--text-primary);
-}
-
-.row-btn.active {
-  color: var(--primary);
-  border-color: rgba(var(--primary-rgb), 0.28);
-  background: rgba(var(--primary-rgb), 0.06);
-}
-
-.row-btn span {
-  white-space: nowrap;
-}
-
 .history-row:hover .row-title {
-  color: var(--text-primary);
+  color: #102a44;
 }
 
 /* Empty/Loading States */
@@ -452,8 +751,28 @@ defineExpose({ refresh: fetchHistory })
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 8px;
   padding-top: 8px;
   cursor: pointer;
+}
+
+.collapsed-action-btn {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
+  border-radius: 8px;
+  background: rgba(var(--primary-rgb), 0.08);
+  color: var(--primary);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.collapsed-action-btn:hover {
+  background: rgba(var(--primary-rgb), 0.12);
+  border-color: rgba(var(--primary-rgb), 0.24);
 }
 
 .collapsed-icon-wrapper {
