@@ -199,6 +199,7 @@
                         <article
                             v-for="turn in conversationTurns"
                             :key="turn.key"
+                            :ref="(element) => setTranscriptTurnElement(turn.key, element)"
                             class="transcript-turn"
                             :class="{ 'is-active': turn.isActive }"
                         >
@@ -540,6 +541,47 @@ const activeTurnKey = ref(null)
 const sessionHydrationLoaded = ref(0)
 const sessionHydrationTotal = ref(0)
 let sessionLoadRequestId = 0
+const transcriptTurnElements = new Map()
+let activeTurnScrollFrameId = null
+
+const setTranscriptTurnElement = (turnKey, element) => {
+    if (!turnKey) {
+        return
+    }
+
+    if (element instanceof HTMLElement) {
+        transcriptTurnElements.set(turnKey, element)
+        return
+    }
+
+    transcriptTurnElements.delete(turnKey)
+}
+
+const scrollToTurn = (turnKey, behavior = 'smooth') => {
+    if (!turnKey) {
+        return
+    }
+
+    void nextTick(() => {
+        if (activeTurnScrollFrameId !== null) {
+            window.cancelAnimationFrame(activeTurnScrollFrameId)
+        }
+
+        activeTurnScrollFrameId = window.requestAnimationFrame(() => {
+            activeTurnScrollFrameId = null
+            const turnElement = transcriptTurnElements.get(turnKey)
+            if (!turnElement) {
+                return
+            }
+
+            turnElement.scrollIntoView({
+                behavior,
+                block: 'end',
+                inline: 'nearest'
+            })
+        })
+    })
+}
 
 const sessionHydrationProgress = computed(() => {
     if (sessionHydrationTotal.value <= 0) {
@@ -751,6 +793,7 @@ const registerActiveTurn = (queryText, source = 'user') => {
 
     activeTurnKey.value = turn.key
     hasResults.value = true
+    scrollToTurn(turn.key, 'smooth')
     return turn
 }
 
@@ -809,6 +852,7 @@ const syncActiveTurnFromStream = () => {
 
     activeTurnKey.value = updatedTurn.key
     hasResults.value = true
+    scrollToTurn(updatedTurn.key, updatedTurn.isActive ? 'auto' : 'smooth')
 }
 
 const prepareSessionTurnsForHydration = (turns) => turns.map((turnLike) => {
@@ -1096,6 +1140,11 @@ onBeforeUnmount(() => {
     clearComposerAnimationTimer()
     clearHomeRevealTimer()
     cleanupComposerAnimation()
+    if (activeTurnScrollFrameId !== null) {
+        window.cancelAnimationFrame(activeTurnScrollFrameId)
+        activeTurnScrollFrameId = null
+    }
+    transcriptTurnElements.clear()
     window.removeEventListener('tako:select-history', handleSidebarSelectEvent)
     window.removeEventListener('tako:new-session', handleNewSessionEvent)
 })
