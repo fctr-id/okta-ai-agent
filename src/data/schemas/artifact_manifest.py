@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
-SourceSpecialist = Literal["sql", "api", "special", "processor", "synthesis", "unknown"]
+SourceSpecialist = Literal["sql", "api", "special", "processor", "analysis", "synthesis", "unknown"]
 DerivationKind = Literal["initial", "filter", "enrichment", "join", "aggregation", "subset", "unknown"]
 ResultSetStatus = Literal["available", "empty", "partial", "error"]
 DelegationResultMode = Literal[
@@ -383,9 +383,16 @@ def _materialize_result_set(
     entity_type = _infer_entity_type(artifact)
     records = extract_records(payload)
     inspection = inspect_records(records, entity_type=entity_type)
-    result_set_id = f"rs_{source_specialist}_{sequence_in_turn:04d}_{_safe_id_part(artifact_key)}"
+    turn_number, run_id, session_id = _infer_runtime_identity(results_dir / "placeholder.json")
+    result_set_id = build_result_set_id(
+        prefix=f"rs_{source_specialist}",
+        sequence_in_turn=sequence_in_turn,
+        artifact_key=artifact_key,
+        session_id=session_id,
+        turn_number=turn_number,
+        run_id=run_id,
+    )
     storage_path = results_dir / f"{result_set_id}.json"
-    turn_number, run_id, session_id = _infer_runtime_identity(storage_path)
 
     result_ref = ResultSetRef(
         result_set_id=result_set_id,
@@ -448,12 +455,52 @@ def _write_json(path: Path, payload: Any) -> None:
         json.dump(payload, file_handle, indent=2, default=str)
 
 
+def build_result_set_id(
+    *,
+    prefix: str,
+    sequence_in_turn: int,
+    artifact_key: str,
+    session_id: Optional[str] = None,
+    turn_number: Optional[int] = None,
+    run_id: Optional[str] = None,
+) -> str:
+    scope_suffix = _runtime_scope_suffix(
+        session_id=session_id,
+        turn_number=turn_number,
+        run_id=run_id,
+    )
+    base_id = f"{prefix}_{sequence_in_turn:04d}"
+    if scope_suffix:
+        return f"{base_id}_{scope_suffix}"
+    return f"{base_id}_{_safe_id_part(artifact_key)}"
+
+
 def _safe_id_part(value: str) -> str:
     import hashlib
 
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip()).strip("._-") or "artifact"
     digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
     return f"{cleaned[:24]}_{digest}"
+
+
+def _runtime_scope_suffix(
+    *,
+    session_id: Optional[str],
+    turn_number: Optional[int],
+    run_id: Optional[str],
+) -> str:
+    import hashlib
+
+    scope_seed = "::".join(
+        [
+            str(session_id or ""),
+            str(turn_number or ""),
+            str(run_id or ""),
+        ]
+    ).strip(":")
+    if not scope_seed:
+        return ""
+    return hashlib.sha1(scope_seed.encode("utf-8")).hexdigest()[:8]
 
 
 def _infer_entity_type(artifact: Dict[str, Any]) -> Optional[str]:
@@ -468,6 +515,23 @@ def _infer_entity_type(artifact: Dict[str, Any]) -> Optional[str]:
 
 
 def _infer_runtime_identity(storage_path: Path) -> tuple[Optional[int], Optional[str], Optional[str]]:
+    turn_metadata_file = storage_path.parent.parent / "turn_metadata.json"
+    if turn_metadata_file.exists():
+        try:
+            with open(turn_metadata_file, "r", encoding="utf-8") as file_handle:
+                metadata = json.load(file_handle)
+            if isinstance(metadata, dict):
+                turn_number = metadata.get("turn_number")
+                run_id = metadata.get("run_id")
+                session_id = metadata.get("session_id")
+                return (
+                    int(turn_number) if isinstance(turn_number, (int, str)) and str(turn_number).isdigit() else None,
+                    str(run_id) if run_id else None,
+                    str(session_id) if session_id else None,
+                )
+        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+            pass
+
     parts = storage_path.parts
     turn_number = None
     run_id = None
@@ -497,6 +561,7 @@ __all__ = [
     "SourceSpecialist",
     "append_artifacts_to_file",
     "append_artifacts_with_result_sets",
+    "build_result_set_id",
     "build_artifact_prompt_context",
     "extract_records",
     "find_artifact_by_key",

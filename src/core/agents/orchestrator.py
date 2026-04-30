@@ -18,6 +18,7 @@ import time
 import json
 import os
 
+from src.config.settings import settings
 from src.utils.logging import get_logger
 
 # Import agents
@@ -47,6 +48,7 @@ from src.core.agents.special_tools_handler import (
     get_special_tool_capability_summary,
     handle_special_query,
 )
+from src.core.okta.sync.operations import DatabaseOperations
 from src.data.schemas.artifact_manifest import (
     DelegationResult,
     append_artifacts_to_file,
@@ -58,6 +60,7 @@ from src.data.schemas.result_set_processor import (
     ResultSetProcessingRequest,
     process_result_set_ref,
 )
+from src.data.schemas.result_analysis_agent import execute_result_analysis
 from src.data.schemas.runtime_storage import RUNTIME_ROOT
 
 logger = get_logger("okta_ai_agent")
@@ -124,15 +127,19 @@ class _NextTargetTransition:
     pending_api_request: Optional[List[str]] = None
     pending_sql_request: Optional[List[str]] = None
     pending_processor_source: Optional[DelegationResult] = None
+    pending_analysis_source: Optional[DelegationResult] = None
     pending_special_request: bool = False
     should_stop: bool = False
     repeated: bool = False
 
-    def pending_requests(self) -> tuple[Optional[List[str]], Optional[List[str]], Optional[DelegationResult], bool]:
+    def pending_requests(
+        self,
+    ) -> tuple[Optional[List[str]], Optional[List[str]], Optional[DelegationResult], Optional[DelegationResult], bool]:
         return (
             self.pending_api_request,
             self.pending_sql_request,
             self.pending_processor_source,
+            self.pending_analysis_source,
             self.pending_special_request,
         )
 
@@ -149,7 +156,7 @@ class _RuntimeStepResult:
 @dataclass
 class _DiscoveryValidationResult:
     should_stop: bool
-    processor_succeeded: bool = False
+    post_processing_succeeded: bool = False
 
 
 NO_DATA_FAILURE_HINTS = (
@@ -247,8 +254,8 @@ def _load_api_endpoints() -> List[Dict[str, Any]]:
     return endpoints
 
 
-def _load_artifacts_by_category(artifacts_file: Path, category: str) -> Optional[str]:
-    """Load compact artifact context for a category without full payloads."""
+def _load_artifacts_by_category(artifacts_file: Path, category: str | List[str]) -> Optional[str]:
+    """Load compact artifact context for one or more categories without full payloads."""
     try:
         resolved_artifacts_file = artifacts_file.resolve()
         allowed_roots = [Path("logs").resolve(), RUNTIME_ROOT.resolve()]
@@ -262,11 +269,30 @@ def _load_artifacts_by_category(artifacts_file: Path, category: str) -> Optional
         return None
 
     try:
-        context = build_artifact_prompt_context(artifacts_file, categories=[category])
+        categories = [category] if isinstance(category, str) else list(category)
+        context = build_artifact_prompt_context(artifacts_file, categories=categories)
         return context if context != "[]" else None
     except Exception as error:
         logger.warning(f"Failed to load {category} artifacts: {error}")
         return None
+
+
+async def _hydrate_session_result_set_context(
+    correlation_id: str,
+    artifacts_file: Path,
+) -> int:
+    """Seed prior session result-set refs into the current turn runtime files for follow-up routing."""
+    try:
+        db_ops = DatabaseOperations()
+        await db_ops.init_db()
+        return await db_ops.hydrate_session_result_set_context_for_run(
+            tenant_id=settings.tenant_id,
+            run_id=correlation_id,
+            artifacts_file=artifacts_file,
+        )
+    except Exception as error:
+        logger.warning(f"[{correlation_id}] Failed to hydrate prior session result-set context: {error}")
+        return 0
 
 
 def _set_result_outcome(
@@ -393,14 +419,33 @@ def _apply_followup_supervisor_decision(
     return "STOP"
 
 
+def _merge_supervisor_evidence_into_delegation(
+    delegation: DelegationResult,
+    decision: SupervisorDecision,
+) -> None:
+    """Preserve supervisor-selected evidence refs for deterministic follow-up steps."""
+    if decision.target not in {"PROCESSOR", "RESULT_ANALYSIS"}:
+        return
+
+    for artifact_key in decision.evidence_artifact_keys:
+        if artifact_key not in delegation.artifact_keys:
+            delegation.artifact_keys.append(artifact_key)
+
+    for result_set_ref in decision.evidence_result_set_refs:
+        if result_set_ref not in delegation.result_set_refs:
+            delegation.result_set_refs.append(result_set_ref)
+
+
 def _discovery_degraded_reasons(
     result: OrchestratorResult,
-    processor_delegation: Optional[DelegationResult],
+    post_processing_delegation: Optional[DelegationResult],
 ) -> List[str]:
     has_success = bool(
         (result.sql_result and result.sql_result.success)
         or (result.api_result and result.api_result.success)
-        or (processor_delegation and processor_delegation.success)
+        or (post_processing_delegation and post_processing_delegation.success)
+        or _has_successful_delegation(result, "processor")
+        or _has_successful_delegation(result, "analysis")
         or _has_successful_delegation(result, "special")
     )
     if not has_success:
@@ -411,8 +456,9 @@ def _discovery_degraded_reasons(
         reasons.append(f"SQL: {result.sql_result.error or result.sql_result.reasoning or 'failed'}")
     if result.api_result and not result.api_result.success:
         reasons.append(f"API: {result.api_result.error or result.api_result.reasoning or 'failed'}")
-    if processor_delegation and not processor_delegation.success:
-        reasons.append(f"PROCESSOR: {processor_delegation.error or processor_delegation.summary}")
+    if post_processing_delegation and not post_processing_delegation.success:
+        source_label = str(post_processing_delegation.source_specialist or "processor").upper()
+        reasons.append(f"{source_label}: {post_processing_delegation.error or post_processing_delegation.summary}")
     return reasons
 
 
@@ -559,6 +605,10 @@ def _build_workflow_state(
 
 def _processor_requirements(delegation: DelegationResult) -> List[str]:
     return list(delegation.result_set_refs or delegation.artifact_keys or ["processor"])
+
+
+def _analysis_requirements(delegation: DelegationResult) -> List[str]:
+    return list(delegation.result_set_refs or delegation.artifact_keys or ["analysis"])
 
 
 def _infer_result_set_operation(user_query: str) -> ResultSetOperation:
@@ -722,7 +772,10 @@ def _sql_context_for_api(
             else result.sql_result.needs_api
         )
         context["sql_found_data"] = _delegation_evidence(latest_sql_delegation, result.sql_result.found_data)
-        context["sql_discovered_data"] = _load_artifacts_by_category(artifacts_file, "sql_results")
+        context["sql_discovered_data"] = _load_artifacts_by_category(
+            artifacts_file,
+            ["sql_results", "session_result_refs"],
+        )
         if context["sql_discovered_data"]:
             logger.info(f"Passing SQL discovered data to API agent ({len(context['sql_discovered_data'])} chars)")
     elif result.sql_result:
@@ -746,7 +799,10 @@ def _api_context_for_sql(
     else:
         api_reasoning = f"API agent needs base entities: {', '.join(pending_sql_request)}"
 
-    api_discovered_data = _load_artifacts_by_category(artifacts_file, "api_results")
+    api_discovered_data = _load_artifacts_by_category(
+        artifacts_file,
+        ["api_results", "session_result_refs"],
+    )
     if api_discovered_data:
         logger.info(f"Passing API discovered data to SQL agent ({len(api_discovered_data)} chars)")
 
@@ -800,6 +856,15 @@ def _next_target_transition(
         transition.pending_processor_source = source_delegation
         logger.info(f"Supervisor delegates from {source_label} to result-set processor: {candidate_request}")
 
+    if next_target == "RESULT_ANALYSIS":
+        candidate_request = _analysis_requirements(source_delegation)
+        if not _record_requirement_step(seen_requirement_steps, "analysis", candidate_request):
+            logger.warning(f"Stopping repeated result analysis requirement loop: {candidate_request}")
+            transition.repeated = True
+            return transition
+        transition.pending_analysis_source = source_delegation
+        logger.info(f"Supervisor delegates from {source_label} to result analysis: {candidate_request}")
+
     if next_target == "SPECIAL":
         candidate_request = _delegation_requirements(source_delegation, "special")
         if not _record_requirement_step(seen_requirement_steps, "special", candidate_request):
@@ -832,7 +897,8 @@ class EventAggregator:
             'sql': 0,     # Steps 1-5
             'api': 5,     # Steps 6-10
             'processor': 10,
-            'synthesis': 10  # Steps 11-12
+            'analysis': 15,
+            'synthesis': 20
         }
         self.current_phase = None
     
@@ -973,6 +1039,8 @@ async def _ask_supervisor_after_delegation(
     result.supervisor_decisions.append(supervisor_decision.model_dump())
     _add_usage_to_result(result, supervisor_usage)
 
+    _merge_supervisor_evidence_into_delegation(latest_delegation, supervisor_decision)
+
     return _apply_followup_supervisor_decision(result, supervisor_decision)
 
 
@@ -1005,6 +1073,40 @@ async def _run_processor_loop_step(
     result.delegation_results.append(processor_delegation.model_dump())
     next_target = await supervisor_next_target(processor_delegation)
     return processor_delegation, next_target
+
+
+async def _run_analysis_loop_step(
+    *,
+    result: OrchestratorResult,
+    user_query: str,
+    correlation_id: str,
+    artifacts_file: Path,
+    aggregator: EventAggregator,
+    source_delegation: Optional[DelegationResult],
+    iteration_count: int,
+    max_iterations: int,
+    supervisor_next_target: Callable[[DelegationResult], Any],
+) -> tuple[DelegationResult, Optional[str]]:
+    logger.info(f"Running Result Analysis Agent (iteration {iteration_count}/{max_iterations})")
+    aggregator.set_phase('analysis')
+    result.phases_executed.append('analysis')
+
+    await aggregator.step_start({
+        "title": "Result Analysis",
+        "text": "Analyzing saved result-set references from prior turns",
+        "timestamp": time.time()
+    })
+
+    analysis_delegation, analysis_usage = await execute_result_analysis(
+        user_query,
+        correlation_id=correlation_id,
+        artifacts_file=artifacts_file,
+        preferred_result_set_refs=list(source_delegation.result_set_refs or []) if source_delegation else None,
+    )
+    _add_usage_to_result(result, analysis_usage)
+    result.delegation_results.append(analysis_delegation.model_dump())
+    next_target = await supervisor_next_target(analysis_delegation)
+    return analysis_delegation, next_target
 
 
 async def _run_special_loop_step(
@@ -1281,6 +1383,7 @@ async def _run_discovery_loop(
     pending_api_request = None
     pending_sql_request = None
     pending_processor_source: Optional[DelegationResult] = None
+    pending_analysis_source: Optional[DelegationResult] = None
     pending_special_request = False
     latest_sql_delegation: Optional[DelegationResult] = None
     latest_api_delegation: Optional[DelegationResult] = None
@@ -1322,7 +1425,7 @@ async def _run_discovery_loop(
         )
         if transition.should_stop or transition.repeated:
             return latest_processor_delegation, True
-        pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+        pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
     logger.info(f"Starting multi-step discovery loop (max {max_iterations} phases)")
 
@@ -1330,16 +1433,19 @@ async def _run_discovery_loop(
         should_run_api = phase == "API" or pending_api_request is not None
         should_run_sql = pending_sql_request is not None
         should_run_processor = phase == "PROCESSOR" or pending_processor_source is not None
+        should_run_analysis = phase == "RESULT_ANALYSIS" or pending_analysis_source is not None
         should_run_special = phase == "SPECIAL" or pending_special_request
 
-        if not should_run_api and not should_run_sql and not should_run_processor and not should_run_special:
+        if not should_run_api and not should_run_sql and not should_run_processor and not should_run_analysis and not should_run_special:
             logger.info(f"Discovery loop complete: No more phases needed (iterations: {iteration_count})")
             break
 
         processor_source = pending_processor_source
+        analysis_source = pending_analysis_source
         pending_api_request = None
         pending_sql_request = None
         pending_processor_source = None
+        pending_analysis_source = None
         pending_special_request = False
 
         if should_run_special:
@@ -1374,7 +1480,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
         if should_run_processor:
             iteration_count += 1
@@ -1403,10 +1509,46 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
             await aggregator.step_end({
                 "title": "Result Processing Complete",
+                "text": latest_processor_delegation.summary,
+                "timestamp": time.time()
+            })
+
+        if should_run_analysis:
+            iteration_count += 1
+            source_delegation = analysis_source or latest_api_delegation or latest_sql_delegation or latest_processor_delegation
+            latest_processor_delegation, next_target = await _run_analysis_loop_step(
+                result=result,
+                user_query=user_query,
+                correlation_id=correlation_id,
+                artifacts_file=artifacts_file,
+                aggregator=aggregator,
+                source_delegation=source_delegation,
+                iteration_count=iteration_count,
+                max_iterations=max_iterations,
+                supervisor_next_target=supervisor_next_target,
+            )
+
+            if phase == "RESULT_ANALYSIS":
+                phase = None
+
+            transition = _next_target_transition(
+                next_target=next_target,
+                source_label="analysis",
+                source_delegation=latest_processor_delegation,
+                seen_requirement_steps=seen_requirement_steps,
+            )
+            if transition.should_stop:
+                return latest_processor_delegation, True
+            if transition.repeated:
+                break
+            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
+
+            await aggregator.step_end({
+                "title": "Result Analysis Complete",
                 "text": latest_processor_delegation.summary,
                 "timestamp": time.time()
             })
@@ -1449,7 +1591,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
         if pending_sql_request is not None:
             iteration_count += 1
@@ -1487,7 +1629,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
             await aggregator.step_end({
                 "title": "SQL Discovery Complete",
@@ -1519,10 +1661,16 @@ async def _validate_discovery_before_synthesis(
 ) -> _DiscoveryValidationResult:
     sql_succeeded = result.sql_result and result.sql_result.success
     api_succeeded = result.api_result and result.api_result.success
-    processor_succeeded = latest_processor_delegation and latest_processor_delegation.success
+    processor_succeeded = _has_successful_delegation(result, "processor")
+    analysis_succeeded = _has_successful_delegation(result, "analysis")
+    post_processing_succeeded = bool(
+        (latest_processor_delegation and latest_processor_delegation.success)
+        or processor_succeeded
+        or analysis_succeeded
+    )
     special_succeeded = _has_successful_delegation(result, "special")
 
-    if not sql_succeeded and not api_succeeded and not processor_succeeded and not special_succeeded:
+    if not sql_succeeded and not api_succeeded and not post_processing_succeeded and not special_succeeded:
         if _is_no_data_discovery_failure(result.sql_result) or _is_no_data_discovery_failure(result.api_result):
             logger.info("Discovery completed with no matching data")
             result.success = True
@@ -1533,7 +1681,7 @@ async def _validate_discovery_before_synthesis(
                 reason=getattr(no_data_result, "reasoning", None) or getattr(no_data_result, "error", None),
                 user_message="No matching data was found for this request.",
             )
-            return _DiscoveryValidationResult(True, bool(processor_succeeded))
+            return _DiscoveryValidationResult(True, bool(post_processing_succeeded))
 
         error_details = []
         if result.sql_result and not result.sql_result.success:
@@ -1557,7 +1705,7 @@ async def _validate_discovery_before_synthesis(
             reason="Discovery failed before any usable evidence was produced.",
             user_message=error_msg,
         )
-        return _DiscoveryValidationResult(True, bool(processor_succeeded))
+        return _DiscoveryValidationResult(True, bool(post_processing_succeeded))
 
     logger.info(f"Discovery validation passed (SQL: {sql_succeeded}, API: {api_succeeded})")
 
@@ -1574,11 +1722,11 @@ async def _validate_discovery_before_synthesis(
                 reason="Discovery completed with zero artifacts.",
                 user_message="No matching data was found for this request.",
             )
-            return _DiscoveryValidationResult(True, bool(processor_succeeded))
+            return _DiscoveryValidationResult(True, bool(post_processing_succeeded))
     except Exception as error:
         logger.warning(f"Failed to check artifact count: {error}")
 
-    return _DiscoveryValidationResult(False, bool(processor_succeeded))
+    return _DiscoveryValidationResult(False, bool(post_processing_succeeded))
 
 
 async def _run_synthesis_phase(
@@ -1589,7 +1737,7 @@ async def _run_synthesis_phase(
     artifacts_file: Path,
     aggregator: EventAggregator,
     latest_processor_delegation: Optional[DelegationResult],
-    processor_succeeded: bool,
+    post_processing_succeeded: bool,
     cli_mode: bool,
 ) -> None:
     logger.info("Running Synthesis Agent")
@@ -1647,6 +1795,7 @@ async def _run_synthesis_phase(
     sql_succeeded = result.sql_result and result.sql_result.success
     api_succeeded = result.api_result and result.api_result.success
     special_succeeded = _has_successful_delegation(result, "special")
+    analysis_succeeded = _has_successful_delegation(result, "analysis")
 
     if sql_succeeded and api_succeeded:
         result.data_source_type = "hybrid"
@@ -1654,8 +1803,10 @@ async def _run_synthesis_phase(
         result.data_source_type = "sql"
     elif api_succeeded:
         result.data_source_type = "api"
-    elif processor_succeeded:
-        result.data_source_type = "processor"
+    elif post_processing_succeeded and latest_processor_delegation:
+        result.data_source_type = str(latest_processor_delegation.source_specialist)
+    elif analysis_succeeded:
+        result.data_source_type = "analysis"
     elif special_succeeded:
         result.data_source_type = "special"
 
@@ -1698,8 +1849,9 @@ async def execute_multi_agent_query(
     1. Execute based on the supervisor decision:
          - delegate + SQL: Start in SQL Discovery
          - delegate + API: Start in API Discovery
-         - delegate + SPECIAL: Run special tool handling
+            - delegate + SPECIAL: Run special tool handling
             - delegate + PROCESSOR: Process an existing result-set ref deterministically
+            - delegate + RESULT_ANALYSIS: Analyze saved result-set refs from prior turns
          - clarify: Return a clarification message
          - fail: Return an error message
     2. Run Synthesis Agent (always, for any data workflow)
@@ -1743,6 +1895,12 @@ async def execute_multi_agent_query(
     })
     
     try:
+        hydrated_session_result_sets = await _hydrate_session_result_set_context(correlation_id, artifacts_file)
+        if hydrated_session_result_sets:
+            logger.info(
+                f"[{correlation_id}] Hydrated {hydrated_session_result_sets} prior session result-set refs for follow-up resolution"
+            )
+
         # ====================================================================
         # PHASE 0: Supervisor Decision (Control Plane)
         # ====================================================================
@@ -1756,6 +1914,8 @@ async def execute_multi_agent_query(
             workflow_state={
                 "completed_steps": [],
                 "step_count": 0,
+                "has_prior_session_result_sets": hydrated_session_result_sets > 0,
+                "hydrated_session_result_set_refs": hydrated_session_result_sets,
                 "remaining_tool_calls": max_tool_calls,
                 "max_tool_calls": max_tool_calls,
             },
@@ -1830,7 +1990,7 @@ async def execute_multi_agent_query(
             artifacts_file=artifacts_file,
             aggregator=aggregator,
             latest_processor_delegation=latest_processor_delegation,
-            processor_succeeded=validation.processor_succeeded,
+            post_processing_succeeded=validation.post_processing_succeeded,
             cli_mode=cli_mode,
         )
         

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     # Database settings with sensible defaults
     DB_DIR: str = str(os.getenv("DB_DIR", str(BASE_DIR / "sqlite_db")))
     DB_FILENAME: str = os.getenv("DB_FILENAME", "okta_sync.db")
+    CHAT_SESSIONS_DIR: str = str(os.getenv("CHAT_SESSIONS_DIR", str(BASE_DIR / "chat_sessions")))
     
     # No longer needed in .env - computed from DB_DIR and DB_FILENAME
     DATABASE_URL: Optional[str] = None  
@@ -83,6 +84,7 @@ class Settings(BaseSettings):
         
         # Create database directory if it doesn't exist
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        os.makedirs(self.CHAT_SESSIONS_DIR, exist_ok=True)
         
         # Set both database URLs to the same location for consistency
         self.SQLITE_PATH = str(db_path)
@@ -94,6 +96,7 @@ class Settings(BaseSettings):
             import logging
             logger = logging.getLogger(__name__)
             logger.debug(f"Database location: {db_path}")
+            logger.debug(f"Chat session runtime location: {self.CHAT_SESSIONS_DIR}")
             
         # Validate deprovisioned user sync settings
         self._validate_deprovisioned_user_settings()

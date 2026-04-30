@@ -10,6 +10,8 @@ Input: All artifacts from previous phases
 Output: SynthesisResult with script code
 """
 
+import ast
+
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, UsageLimits
 from pydantic import BaseModel, Field
 from typing import Optional, Callable, Awaitable, List
@@ -105,6 +107,12 @@ def validate_synthesis_output(result: SynthesisResult) -> SynthesisResult:
             raise ModelRetry("Synthesis output must return raw Python code without markdown fences")
         if result.display_type not in {"table", "markdown"}:
             raise ModelRetry("display_type must be 'table' or 'markdown'")
+        try:
+            ast.parse(script_code)
+        except SyntaxError as exc:
+            raise ModelRetry(
+                f"Synthesis output must be valid Python syntax: {exc.msg} at line {exc.lineno}"
+            ) from exc
         return result
 
     if not result.error:

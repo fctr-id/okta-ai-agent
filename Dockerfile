@@ -57,7 +57,7 @@ COPY scripts /app/scripts
 COPY --from=frontend-builder /app/api/static/ /app/src/api/static/
 
 # Create necessary directories
-RUN mkdir -p /app/certs /app/sqlite_db /app/logs
+RUN mkdir -p /app/certs /app/sqlite_db /app/chat_sessions /app/logs
 
 # Create startup script for SSL and server
 RUN echo '#!/bin/bash \n\

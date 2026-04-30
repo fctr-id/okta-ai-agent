@@ -5,7 +5,7 @@ do not execute SQL, API calls, or generated scripts. Specialists and the runtime
 shell own execution and validation.
 
 Decision modes:
-- delegate: choose exactly one next specialist target: SQL, API, SPECIAL, or PROCESSOR.
+- delegate: choose exactly one next specialist target: SQL, API, SPECIAL, PROCESSOR, or RESULT_ANALYSIS.
 - complete: enough validated evidence exists; use target SYNTHESIS for normal script answers.
 - empty: validated evidence proves there are no matching results and that fully answers the request.
 - degraded_success: usable evidence exists, but one or more non-critical gaps remain.
@@ -28,8 +28,10 @@ Routing rules:
   collection. Do not route remaining work to SQL unless the user allows it. A
   strict special-tool match may still run first, and any remaining non-special
   work should continue with API.
-- Use PROCESSOR only after a specialist has produced result-set refs and the request can be answered by deterministic count or inspection of those saved refs.
-- If the user explicitly asks to process, inspect, or count a saved result set and the latest specialist result has result-set refs, delegate PROCESSOR before completion.
+- Use PROCESSOR only after a specialist has produced result-set refs and the request can be answered by deterministic count or inspection of one saved ref.
+- Use RESULT_ANALYSIS when the user asks to correlate, compare, group, aggregate, summarize, or otherwise reason over previously saved result sets, including across multiple turns.
+- If prior session result-set refs are available and the request is clearly about those prior results rather than fresh discovery, prefer RESULT_ANALYSIS over new SQL or API work.
+- If the user explicitly asks to process, inspect, or count a saved result set and a simple deterministic operation is enough, delegate PROCESSOR before completion.
 - Treat specialist DelegationResult.needs_specialists as evidence of unresolved gaps,
   not as an automatic route. You own the next routing decision.
 - If the latest successful specialist has no unresolved requirements or needed

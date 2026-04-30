@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from src.data.schemas.artifact_manifest import (
     DelegationResult,
     ResultSetRef,
+    build_result_set_id,
     extract_records,
     inspect_records,
 )
@@ -154,7 +155,14 @@ def _write_derived_result_set(
     summary: str,
 ) -> ResultSetRef:
     index = _load_json_list(index_file)
-    result_set_id = f"rs_processor_{len(index) + 1:04d}_{_safe_id_part(request.operation)}"
+    result_set_id = build_result_set_id(
+        prefix="rs_processor",
+        sequence_in_turn=len(index) + 1,
+        artifact_key=request.operation,
+        session_id=source_ref.session_id,
+        turn_number=source_ref.turn_number,
+        run_id=source_ref.run_id,
+    )
     storage_path = index_file.parent / f"{result_set_id}.json"
     derived_ref = ResultSetRef(
         result_set_id=result_set_id,

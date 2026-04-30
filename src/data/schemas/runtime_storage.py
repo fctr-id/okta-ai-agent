@@ -14,8 +14,10 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from src.config.settings import settings
 
-RUNTIME_ROOT = Path("src/data/runtime")
+
+RUNTIME_ROOT = Path(settings.CHAT_SESSIONS_DIR)
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,7 @@ def create_runtime_turn_paths(
     user_id: str,
     run_id: str,
     session_id: Optional[str] = None,
+    turn_number: Optional[int] = None,
     root: Path = RUNTIME_ROOT,
 ) -> RuntimeTurnPaths:
     """Create the runtime folder structure for one user turn/run."""
@@ -64,14 +67,14 @@ def create_runtime_turn_paths(
 
     session_dir = root / "sessions" / f"{safe_user_id}-{safe_session_id}"
     turns_dir = session_dir / "turns"
-    turn_number = _next_turn_number(turns_dir)
-    turn_dir = turns_dir / f"{turn_number:04d}-{safe_run_id}"
+    resolved_turn_number = turn_number if turn_number is not None else _next_turn_number(turns_dir)
+    turn_dir = turns_dir / f"{resolved_turn_number:04d}-{safe_run_id}"
 
     paths = RuntimeTurnPaths(
         user_id=safe_user_id,
         session_id=safe_session_id,
         run_id=safe_run_id,
-        turn_number=turn_number,
+        turn_number=resolved_turn_number,
         session_dir=session_dir,
         turn_dir=turn_dir,
         artifacts_dir=turn_dir / "artifacts",

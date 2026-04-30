@@ -153,6 +153,47 @@ ALLOWED_PYTHON_METHODS = {
 # Allowed HTTP methods (GET only for security)
 ALLOWED_HTTP_METHODS = {'GET'}
 
+# Narrower security surface for local result-analysis code.
+# This path is intentionally stricter than generated API scripts: no imports,
+# no network, no file I/O, and only safe in-memory data operations.
+RESULT_ANALYSIS_BLOCKED_PATTERNS = [
+    r'os\.system\s*\(',
+    r'subprocess\.',
+    r'exec\s*\(',
+    r'eval\s*\(',
+    r'__import__\s*\(',
+    r'open\s*\(',
+    r'input\s*\(',
+    r'compile\s*\(',
+    r'globals\s*\(',
+    r'locals\s*\(',
+    r'__.*__\s*\(',
+]
+
+RESULT_ANALYSIS_ALLOWED_BUILTINS: Set[str] = {
+    'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'tuple', 'set',
+    'range', 'enumerate', 'zip', 'sorted', 'reversed', 'sum', 'min', 'max',
+    'abs', 'round', 'any', 'all', 'iter', 'next', 'map', 'filter',
+    'isinstance', 'type', 'repr', 'format',
+    'Counter', 'defaultdict',
+}
+
+RESULT_ANALYSIS_ALLOWED_METHODS: Set[str] = {
+    'append', 'extend', 'insert', 'pop', 'clear', 'copy', 'count', 'index', 'sort', 'reverse',
+    'add', 'discard', 'union', 'intersection', 'issubset', 'issuperset',
+    'items', 'keys', 'values', 'get', 'update', 'setdefault',
+    'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
+    'startswith', 'endswith', 'replace', 'format',
+    'most_common',
+    'dumps', 'loads',
+}
+
+RESULT_ANALYSIS_BLOCKED_NAMES: Set[str] = {
+    'os', 'sys', 'subprocess', 'pathlib', 'open', 'input', 'eval', 'exec',
+    'compile', '__import__', 'socket', 'aiohttp', 'httpx', 'requests',
+    'sqlite3', 'base_okta_api_client', 'OktaAPIClient',
+}
+
 # ------------------------------------------------------------------------
 # Code Preprocessing Utilities
 # ------------------------------------------------------------------------
@@ -280,6 +321,103 @@ class EnhancedSecurityValidator:
         
         is_valid = len(violations) == 0
         return SecurityValidationResult(is_valid, violations, blocked_patterns, risk_level)
+
+
+class ResultAnalysisSecurityValidator:
+    """AST-based validator for local result-analysis code execution."""
+
+    _BLOCKED_NODE_TYPES = (
+        ast.Import,
+        ast.ImportFrom,
+        ast.With,
+        ast.AsyncWith,
+        ast.Try,
+        ast.Raise,
+        ast.Delete,
+        ast.ClassDef,
+        ast.Lambda,
+        ast.Global,
+        ast.Nonlocal,
+    )
+
+    def __init__(self):
+        self.blocked_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in RESULT_ANALYSIS_BLOCKED_PATTERNS]
+        self.allowed_builtins = RESULT_ANALYSIS_ALLOWED_BUILTINS
+        self.allowed_methods = RESULT_ANALYSIS_ALLOWED_METHODS
+        self.blocked_names = RESULT_ANALYSIS_BLOCKED_NAMES
+
+    def validate_python_code(self, code: str) -> SecurityValidationResult:
+        violations: List[str] = []
+        blocked_patterns: List[str] = []
+        risk_level = 'LOW'
+
+        parsed_code = code
+
+        try:
+            try:
+                tree = ast.parse(parsed_code)
+            except SyntaxError:
+                parsed_code = preprocess_llm_generated_code(code)
+                tree = ast.parse(parsed_code)
+
+            for pattern in self.blocked_patterns:
+                if pattern.search(parsed_code):
+                    violations.append(f"Blocked pattern detected: {pattern.pattern}")
+                    blocked_patterns.append(pattern.pattern)
+                    risk_level = 'HIGH'
+
+            defined_functions = {
+                node.name
+                for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+
+            for node in ast.walk(tree):
+                if isinstance(node, self._BLOCKED_NODE_TYPES):
+                    violations.append(f"Blocked syntax detected: {type(node).__name__}")
+                    risk_level = 'HIGH'
+                    continue
+
+                if isinstance(node, ast.Name) and node.id in self.blocked_names:
+                    violations.append(f"Blocked name used: {node.id}")
+                    risk_level = 'HIGH'
+                    continue
+
+                if isinstance(node, ast.Attribute) and node.attr.startswith('__'):
+                    violations.append(f"Blocked dunder attribute access: {node.attr}")
+                    risk_level = 'HIGH'
+                    continue
+
+                if not isinstance(node, ast.Call):
+                    continue
+
+                if isinstance(node.func, ast.Name):
+                    func_name = node.func.id
+                    if func_name in self.blocked_names:
+                        violations.append(f"Blocked function call: {func_name}")
+                        risk_level = 'HIGH'
+                    elif func_name not in self.allowed_builtins and func_name not in defined_functions:
+                        violations.append(f"Unauthorized function call: {func_name}")
+                        risk_level = 'MEDIUM' if risk_level == 'LOW' else risk_level
+
+                elif isinstance(node.func, ast.Attribute):
+                    attr_name = node.func.attr
+                    if attr_name.startswith('__'):
+                        violations.append(f"Blocked dunder method call: {attr_name}")
+                        risk_level = 'HIGH'
+                    elif attr_name not in self.allowed_methods:
+                        violations.append(f"Unauthorized method call: {attr_name}")
+                        risk_level = 'MEDIUM' if risk_level == 'LOW' else risk_level
+
+        except SyntaxError as e:
+            violations.append(f"Syntax error in code: {e}")
+            risk_level = 'HIGH'
+        except Exception as e:
+            violations.append(f"Code validation error: {e}")
+            risk_level = 'MEDIUM'
+
+        is_valid = len(violations) == 0
+        return SecurityValidationResult(is_valid, violations, blocked_patterns, risk_level)
     
     def validate_http_method(self, method: str) -> SecurityValidationResult:
         """Validate HTTP method is allowed"""
@@ -338,6 +476,7 @@ class EnhancedSecurityValidator:
 
 # Create global validator instance
 enhanced_security_validator = EnhancedSecurityValidator()
+result_analysis_security_validator = ResultAnalysisSecurityValidator()
 
 def validate_generated_code(code: str, allow_polars: bool = False) -> SecurityValidationResult:
     """
@@ -359,6 +498,11 @@ def validate_http_method(method: str) -> SecurityValidationResult:
 def validate_api_endpoint(endpoint_data: Dict[str, Any]) -> SecurityValidationResult:
     """Validate API endpoint configuration"""
     return enhanced_security_validator.validate_api_endpoint(endpoint_data)
+
+
+def validate_result_analysis_code(code: str) -> SecurityValidationResult:
+    """Validate restricted local analysis code for saved result-set execution."""
+    return result_analysis_security_validator.validate_python_code(code)
 
 # ------------------------------------------------------------------------
 # Legacy Compatibility Functions

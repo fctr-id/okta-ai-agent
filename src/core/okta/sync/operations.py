@@ -9,19 +9,327 @@ Key features:
 - Sync history tracking
 """
 
+import json
+import shutil
+from pathlib import Path
+from types import SimpleNamespace
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import select, and_, not_, or_, update, func, text, delete, desc
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
-from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice, QueryHistory
+
+from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice, QueryHistory, ConversationSession, ConversationTurn, ConversationResultSet, ConversationResultSetParent
 from src.core.security.password_hasher import hash_password, verify_password, check_password_needs_rehash, calculate_lockout_time
 from src.config.settings import settings
+from src.data.schemas.runtime_storage import RUNTIME_ROOT, sanitize_path_part
 from src.utils.logging import logger
 import asyncio
 
 
 ModelType = TypeVar('ModelType', bound=Base)
+_HYDRATED_SESSION_RESULT_REF_MARKER = "hydrated_session_result_ref"
+_DEFAULT_COMPACT_KEEP_RECENT_TURNS = 10
+_DEFAULT_COMPACT_SUMMARY_TURNS = 12
+_DEFAULT_ARCHIVE_AFTER_DAYS = 30
+_DEFAULT_PURGE_AFTER_DAYS = 90
+_DEFAULT_UNPINNED_SESSION_LIMIT = 100
+_COMPACTED_TURN_SUMMARY_PREFIX = "Compacted earlier turns ("
+
+
+def _load_json_file(path: Optional[Union[str, Path]], default: Any) -> Any:
+    if not path:
+        return default
+
+    file_path = Path(path)
+    if not file_path.exists():
+        return default
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as file_handle:
+            return json.load(file_handle)
+    except (OSError, json.JSONDecodeError):
+        return default
+
+
+def _write_json_file(path: Union[str, Path], payload: Any) -> None:
+    file_path = Path(path)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as file_handle:
+        json.dump(payload, file_handle, indent=2, default=str)
+
+
+def _resolve_result_index_file(artifacts_file: Union[str, Path]) -> Path:
+    artifacts_path = Path(artifacts_file)
+    if artifacts_path.parent.name == "artifacts":
+        return artifacts_path.parent.parent / "results" / "index.json"
+    return artifacts_path.parent / "results" / "index.json"
+
+
+def _result_set_status(result_set_row: Any) -> str:
+    if getattr(result_set_row, "is_empty", False):
+        return "empty"
+    if getattr(result_set_row, "is_partial", False):
+        return "partial"
+    return "available"
+
+
+def _result_set_summary(result_set_row: Any) -> str:
+    entity_type = str(getattr(result_set_row, "entity_type", None) or "records")
+    row_count = getattr(result_set_row, "row_count", None)
+    key_columns = list(getattr(result_set_row, "key_columns_json", None) or [])
+    user_facing_label = getattr(result_set_row, "user_facing_label", None)
+    turn_number = getattr(result_set_row, "turn_number", None)
+    filter_summary = getattr(result_set_row, "filter_summary", None)
+
+    prefix = f"{user_facing_label}: " if user_facing_label else ""
+    if row_count is None:
+        summary = f"{prefix}Saved prior-session {entity_type} result set"
+    else:
+        summary = f"{prefix}Saved prior-session result set with {row_count} {entity_type}"
+
+    if turn_number:
+        summary += f" from turn {turn_number}"
+    summary += "."
+
+    if key_columns:
+        summary += f" Key columns: {', '.join(key_columns[:6])}."
+    if filter_summary:
+        summary += f" Filter: {filter_summary}."
+    return summary
+
+
+def _hydrated_result_set_metadata(result_set_row: Any) -> Dict[str, Any]:
+    metadata = dict(getattr(result_set_row, "metadata_json", None) or {})
+    metadata[_HYDRATED_SESSION_RESULT_REF_MARKER] = True
+    metadata["source_turn_number"] = getattr(result_set_row, "turn_number", None)
+    metadata["source_run_id"] = getattr(result_set_row, "run_id", None)
+    metadata["source_session_id"] = getattr(result_set_row, "session_id", None)
+    return metadata
+
+
+def _load_hydrated_result_set_inspection(result_set_row: Any) -> Dict[str, Any]:
+    row_count = int(getattr(result_set_row, "row_count", None) or 0)
+    key_columns = list(getattr(result_set_row, "key_columns_json", None) or [])
+    fallback_inspection = {
+        "summary": _result_set_summary(result_set_row),
+        "row_count": row_count,
+        "key_columns": key_columns,
+        "sample_rows": [],
+        "entity_type": str(getattr(result_set_row, "entity_type", None) or "records"),
+    }
+
+    stored_payload = _load_json_file(getattr(result_set_row, "storage_path", None), {})
+    if not isinstance(stored_payload, dict):
+        return fallback_inspection
+
+    stored_inspection = stored_payload.get("inspection")
+    if not isinstance(stored_inspection, dict):
+        return fallback_inspection
+
+    merged_inspection = dict(stored_inspection)
+    merged_inspection.setdefault("summary", fallback_inspection["summary"])
+    merged_inspection.setdefault("row_count", fallback_inspection["row_count"])
+    merged_inspection.setdefault("key_columns", fallback_inspection["key_columns"])
+    merged_inspection.setdefault("sample_rows", fallback_inspection["sample_rows"])
+    merged_inspection.setdefault("entity_type", fallback_inspection["entity_type"])
+    return merged_inspection
+
+
+def _build_hydrated_result_set_ref(result_set_row: Any) -> Dict[str, Any]:
+    key_columns = list(getattr(result_set_row, "key_columns_json", None) or [])
+    created_at = getattr(result_set_row, "created_at", None)
+    created_at_value = created_at.timestamp() if isinstance(created_at, datetime) else None
+
+    return {
+        "result_set_id": str(result_set_row.result_set_id),
+        "storage_path": str(result_set_row.storage_path),
+        "row_count": int(result_set_row.row_count or 0),
+        "entity_type": str(result_set_row.entity_type or "records"),
+        "key_columns": key_columns,
+        "source_specialist": str(result_set_row.source_specialist or "unknown"),
+        "derivation_kind": str(result_set_row.derivation_kind or "initial"),
+        "status": _result_set_status(result_set_row),
+        "parent_result_set_ids": [],
+        "artifact_keys": [f"session_result_ref_{result_set_row.result_set_id}"],
+        "user_facing_label": result_set_row.user_facing_label,
+        "session_id": result_set_row.session_id,
+        "run_id": result_set_row.run_id,
+        "turn_number": result_set_row.turn_number,
+        "sequence_in_turn": result_set_row.sequence_in_turn,
+        "filter_summary": result_set_row.filter_summary,
+        "created_at": created_at_value,
+        "metadata": _hydrated_result_set_metadata(result_set_row),
+    }
+
+
+def _build_hydrated_result_set_artifact(result_set_row: Any) -> Dict[str, Any]:
+    artifact_key = f"session_result_ref_{result_set_row.result_set_id}"
+    key_columns = list(getattr(result_set_row, "key_columns_json", None) or [])
+    summary = _result_set_summary(result_set_row)
+    created_at = getattr(result_set_row, "created_at", None)
+    created_at_value = created_at.timestamp() if isinstance(created_at, datetime) else None
+    metadata = _hydrated_result_set_metadata(result_set_row)
+    inspection = _load_hydrated_result_set_inspection(result_set_row)
+
+    return {
+        "key": artifact_key,
+        "category": "session_result_refs",
+        "notes": summary,
+        "result_set_refs": [str(result_set_row.result_set_id)],
+        "result_set_inspection": inspection,
+        "artifact_manifest": {
+            "artifact_key": artifact_key,
+            "category": "session_result_refs",
+            "storage_path": str(result_set_row.storage_path),
+            "summary": summary,
+            "source_specialist": str(result_set_row.source_specialist or "unknown"),
+            "row_count": getattr(result_set_row, "row_count", None),
+            "entity_type": str(result_set_row.entity_type or "records"),
+            "key_columns": key_columns,
+            "result_set_refs": [str(result_set_row.result_set_id)],
+            "created_at": created_at_value,
+            "metadata": metadata,
+        },
+    }
+
+
+def _is_hydrated_session_result_artifact(artifact: Dict[str, Any]) -> bool:
+    artifact_manifest = artifact.get("artifact_manifest") if isinstance(artifact.get("artifact_manifest"), dict) else {}
+    metadata = artifact_manifest.get("metadata") if isinstance(artifact_manifest.get("metadata"), dict) else {}
+    return bool(metadata.get(_HYDRATED_SESSION_RESULT_REF_MARKER))
+
+
+def _is_hydrated_session_result_ref(result_ref: Dict[str, Any]) -> bool:
+    metadata = result_ref.get("metadata") if isinstance(result_ref.get("metadata"), dict) else {}
+    return bool(metadata.get(_HYDRATED_SESSION_RESULT_REF_MARKER))
+
+
+def _to_utc_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+
+    return None
+
+
+def _derive_completion_mode(status: Optional[str], summary: Dict[str, Any]) -> Optional[str]:
+    outcome = summary.get("outcome") if isinstance(summary.get("outcome"), dict) else {}
+    result_mode = str(outcome.get("result_mode") or "").strip().lower()
+
+    if status == "error":
+        return "fail"
+    if summary.get("is_special_tool"):
+        return "direct_answer"
+    if result_mode == "empty":
+        return "empty"
+    if result_mode == "degraded_success":
+        return "degraded_success"
+    if result_mode == "needs_clarification":
+        return "clarify"
+    if status == "completed":
+        return "script"
+    return None
+
+
+def _truncate_compaction_text(value: Any, max_length: int) -> Optional[str]:
+    if value is None:
+        return None
+
+    text = " ".join(str(value).split()).strip()
+    if not text:
+        return None
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3].rstrip() + "..."
+
+
+def _build_turn_compaction_summary(turn: ConversationTurn) -> Optional[str]:
+    query_text = _truncate_compaction_text(turn.query_text, 120)
+    response_summary = _truncate_compaction_text(turn.final_response_summary, 180)
+    parts = [f"Turn {turn.turn_number}"]
+
+    if query_text:
+        parts.append(f"query={query_text}")
+    if turn.status:
+        parts.append(f"status={turn.status}")
+    if turn.completion_mode:
+        parts.append(f"mode={turn.completion_mode}")
+    if turn.result_count is not None:
+        parts.append(f"results={turn.result_count}")
+    if response_summary:
+        parts.append(f"summary={response_summary}")
+
+    return "; ".join(parts) if len(parts) > 1 else None
+
+
+def _serialize_recent_turn_summary(turn: ConversationTurn) -> Dict[str, Any]:
+    return {
+        "turn_number": turn.turn_number,
+        "query_text": _truncate_compaction_text(turn.query_text, 160),
+        "status": turn.status,
+        "completion_mode": turn.completion_mode,
+        "display_type": turn.display_type,
+        "final_response_summary": _truncate_compaction_text(turn.final_response_summary, 220),
+        "result_count": turn.result_count,
+        "is_partial_result": turn.is_partial_result,
+        "started_at": turn.started_at.isoformat() if isinstance(turn.started_at, datetime) else None,
+        "completed_at": turn.completed_at.isoformat() if isinstance(turn.completed_at, datetime) else None,
+    }
+
+
+def _extract_base_session_summary(session_summary: Optional[str]) -> Optional[str]:
+    summary_text = _truncate_compaction_text(session_summary, 600)
+    if not summary_text:
+        return None
+
+    if summary_text.startswith(_COMPACTED_TURN_SUMMARY_PREFIX):
+        return None
+
+    split_marker = f"\n\n{_COMPACTED_TURN_SUMMARY_PREFIX}"
+    if split_marker in summary_text:
+        summary_text = summary_text.split(split_marker, 1)[0].rstrip()
+
+    return summary_text or None
+
+
+def _build_session_compaction_summary(
+    session_summary: Optional[str],
+    older_turns: List[ConversationTurn],
+    *,
+    max_summary_turns: int,
+) -> Optional[str]:
+    summary_parts: List[str] = []
+    base_summary = _extract_base_session_summary(session_summary)
+    if base_summary:
+        summary_parts.append(base_summary)
+
+    older_turn_summaries = [
+        turn_summary
+        for turn_summary in (
+            _build_turn_compaction_summary(turn)
+            for turn in older_turns[-max_summary_turns:]
+        )
+        if turn_summary
+    ]
+    if older_turn_summaries:
+        summary_parts.append(
+            f"{_COMPACTED_TURN_SUMMARY_PREFIX}{len(older_turns)} total): " + " | ".join(older_turn_summaries)
+        )
+
+    if not summary_parts:
+        return None
+
+    return "\n\n".join(summary_parts)
+
+
+def _conversation_runtime_session_dir(user_id: str, session_id: str) -> Path:
+    safe_user_id = sanitize_path_part(user_id, fallback="user")
+    safe_session_id = sanitize_path_part(session_id, fallback="session")
+    return RUNTIME_ROOT / "sessions" / f"{safe_user_id}-{safe_session_id}"
 
 class DatabaseOperations:
     """Singleton database operations class with shared engine and connection pool."""
@@ -29,6 +337,8 @@ class DatabaseOperations:
     _initialized = False  # Class-level flag (shared across all instances)
     _engine = None  # Shared engine (expensive resource)
     _SessionLocal = None  # Shared session factory
+    _retention_cleanup_tasks: set[asyncio.Task] = set()
+    _retention_cleanup_inflight_keys: set[tuple[str, str]] = set()
     
     def __init__(self):
         """Initialize async database engine with WAL mode (reuses existing engine if available)."""
@@ -117,6 +427,7 @@ class DatabaseOperations:
                     return inspector.get_table_names()
                 
                 tables = await conn.run_sync(get_tables)
+
                 if 'query_history' not in tables:
                     logger.info("Creating query_history table...")
                     from sqlalchemy.schema import CreateTable
@@ -965,6 +1276,1123 @@ class DatabaseOperations:
         except Exception as e:
             logger.error(f"Failed to save query history: {e}", exc_info=True)
             return None
+
+    async def create_conversation_session(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        source: str = "web",
+        title: Optional[str] = None,
+        summary: Optional[str] = None,
+        status: str = "active",
+        parent_session_id: Optional[str] = None,
+        handoff_reason: Optional[str] = None,
+        started_from_query_history_id: Optional[int] = None,
+    ) -> Optional[ConversationSession]:
+        """Create or return an existing conversation session for a user."""
+        try:
+            async with self.get_session() as session:
+                stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == session_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                    )
+                )
+                result = await session.execute(stmt)
+                existing = result.scalar_one_or_none()
+                if existing:
+                    return existing
+
+                new_session = ConversationSession(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    session_id=session_id,
+                    source=source,
+                    title=title,
+                    summary=summary,
+                    status=status,
+                    last_activity_at=datetime.now(timezone.utc),
+                    parent_session_id=parent_session_id,
+                    handoff_reason=handoff_reason,
+                    started_from_query_history_id=started_from_query_history_id,
+                )
+                session.add(new_session)
+                await session.commit()
+                await session.refresh(new_session)
+                await self._schedule_conversation_retention_cleanup_if_needed(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+                return new_session
+        except Exception as e:
+            logger.error(f"Failed to create conversation session {session_id}: {e}", exc_info=True)
+            return None
+
+    async def _schedule_conversation_retention_cleanup_if_needed(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        unpinned_session_limit: int = _DEFAULT_UNPINNED_SESSION_LIMIT,
+    ) -> bool:
+        """Schedule a best-effort cleanup task after session creation when the threshold is exceeded."""
+        try:
+            async with self.get_session() as session:
+                count_stmt = select(func.count(ConversationSession.id)).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                        ConversationSession.is_pinned == False,
+                    )
+                )
+                count_result = await session.execute(count_stmt)
+                unpinned_session_count = int(count_result.scalar_one() or 0)
+        except Exception as error:
+            logger.warning(f"Failed to count sessions for retention cleanup scheduling: {error}")
+            return False
+
+        if unpinned_session_count <= unpinned_session_limit:
+            return False
+
+        cleanup_key = (tenant_id, user_id.lower())
+        if cleanup_key in DatabaseOperations._retention_cleanup_inflight_keys:
+            return False
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return False
+
+        async def _run_cleanup() -> None:
+            await self.enforce_conversation_retention(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                archive_after_days=_DEFAULT_ARCHIVE_AFTER_DAYS,
+                purge_after_days=_DEFAULT_PURGE_AFTER_DAYS,
+                unpinned_session_limit=unpinned_session_limit,
+            )
+
+        task = loop.create_task(_run_cleanup())
+        DatabaseOperations._retention_cleanup_inflight_keys.add(cleanup_key)
+        DatabaseOperations._retention_cleanup_tasks.add(task)
+
+        def _cleanup_done(completed_task: asyncio.Task) -> None:
+            DatabaseOperations._retention_cleanup_tasks.discard(completed_task)
+            DatabaseOperations._retention_cleanup_inflight_keys.discard(cleanup_key)
+            try:
+                completed_task.result()
+            except Exception as cleanup_error:
+                logger.error(
+                    f"Retention cleanup task failed for {user_id}: {cleanup_error}",
+                    exc_info=True,
+                )
+
+        task.add_done_callback(_cleanup_done)
+        return True
+
+    async def _conversation_session_has_blocking_turn_state(
+        self,
+        session: AsyncSession,
+        *,
+        tenant_id: str,
+        session_id: str,
+    ) -> bool:
+        blocking_turn_stmt = select(func.count(ConversationTurn.id)).where(
+            and_(
+                ConversationTurn.tenant_id == tenant_id,
+                ConversationTurn.session_id == session_id,
+                or_(
+                    ConversationTurn.status.in_(["created", "executing", "running"]),
+                    ConversationTurn.approval_state == "pending",
+                    ConversationTurn.deferred_execution_state == "deferred",
+                ),
+            )
+        )
+        blocking_turn_result = await session.execute(blocking_turn_stmt)
+        return bool(blocking_turn_result.scalar_one() or 0)
+
+    async def enforce_conversation_retention(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        archive_after_days: int = _DEFAULT_ARCHIVE_AFTER_DAYS,
+        purge_after_days: int = _DEFAULT_PURGE_AFTER_DAYS,
+        unpinned_session_limit: int = _DEFAULT_UNPINNED_SESSION_LIMIT,
+    ) -> Dict[str, int]:
+        """Archive and purge eligible sessions for a user using age-based retention rules."""
+        now = datetime.now(timezone.utc)
+        archive_cutoff = now - timedelta(days=archive_after_days)
+        purge_cutoff = now - timedelta(days=purge_after_days)
+        retention_stats = {
+            "checked_unpinned_sessions": 0,
+            "archived_sessions": 0,
+            "purged_sessions": 0,
+            "skipped_sessions": 0,
+            "unpinned_session_limit": unpinned_session_limit,
+        }
+
+        try:
+            async with self.get_session() as session:
+                unpinned_count_stmt = select(func.count(ConversationSession.id)).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                        ConversationSession.is_pinned == False,
+                    )
+                )
+                unpinned_count_result = await session.execute(unpinned_count_stmt)
+                retention_stats["checked_unpinned_sessions"] = int(unpinned_count_result.scalar_one() or 0)
+
+                archive_candidates_stmt = (
+                    select(ConversationSession)
+                    .where(
+                        and_(
+                            ConversationSession.tenant_id == tenant_id,
+                            func.lower(ConversationSession.user_id) == func.lower(user_id),
+                            ConversationSession.is_pinned == False,
+                            ConversationSession.is_archived == False,
+                            ConversationSession.last_activity_at <= archive_cutoff,
+                        )
+                    )
+                    .order_by(ConversationSession.last_activity_at.asc())
+                )
+                archive_candidates_result = await session.execute(archive_candidates_stmt)
+                archive_candidates = list(archive_candidates_result.scalars().all())
+
+                for archive_candidate in archive_candidates:
+                    if await self._conversation_session_has_blocking_turn_state(
+                        session,
+                        tenant_id=tenant_id,
+                        session_id=archive_candidate.session_id,
+                    ):
+                        retention_stats["skipped_sessions"] += 1
+                        continue
+
+                    archive_candidate.is_archived = True
+                    archive_candidate.archived_at = archive_candidate.archived_at or now
+                    archive_candidate.status = "archived"
+                    archive_candidate.updated_at = now
+                    retention_stats["archived_sessions"] += 1
+
+                purge_candidates_stmt = (
+                    select(ConversationSession)
+                    .where(
+                        and_(
+                            ConversationSession.tenant_id == tenant_id,
+                            func.lower(ConversationSession.user_id) == func.lower(user_id),
+                            ConversationSession.is_pinned == False,
+                            ConversationSession.is_archived == True,
+                            or_(
+                                and_(
+                                    ConversationSession.archived_at.is_not(None),
+                                    ConversationSession.archived_at <= purge_cutoff,
+                                ),
+                                and_(
+                                    ConversationSession.archived_at.is_(None),
+                                    ConversationSession.last_activity_at <= purge_cutoff,
+                                ),
+                            ),
+                        )
+                    )
+                    .order_by(ConversationSession.last_activity_at.asc())
+                )
+                purge_candidates_result = await session.execute(purge_candidates_stmt)
+                purge_candidates = list(purge_candidates_result.scalars().all())
+
+                runtime_session_dirs: List[Path] = []
+                for purge_candidate in purge_candidates:
+                    if await self._conversation_session_has_blocking_turn_state(
+                        session,
+                        tenant_id=tenant_id,
+                        session_id=purge_candidate.session_id,
+                    ):
+                        retention_stats["skipped_sessions"] += 1
+                        continue
+
+                    runtime_session_dirs.append(
+                        _conversation_runtime_session_dir(purge_candidate.user_id, purge_candidate.session_id)
+                    )
+                    await session.delete(purge_candidate)
+                    retention_stats["purged_sessions"] += 1
+
+                await session.commit()
+
+            for runtime_session_dir in runtime_session_dirs:
+                try:
+                    if runtime_session_dir.exists():
+                        shutil.rmtree(runtime_session_dir, ignore_errors=True)
+                except Exception as runtime_delete_error:
+                    logger.warning(f"Failed to remove runtime session directory {runtime_session_dir}: {runtime_delete_error}")
+
+            return retention_stats
+        except Exception as error:
+            logger.error(f"Failed to enforce conversation retention for {user_id}: {error}", exc_info=True)
+            return retention_stats
+
+    async def rebuild_session_index(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+    ) -> Dict[str, int]:
+        """Rebuild lightweight SQL indexes for a session from runtime files."""
+        rebuild_stats = {
+            "discovered_turns": 0,
+            "recovered_turn_rows": 0,
+            "mirrored_turns": 0,
+            "skipped_turns": 0,
+        }
+
+        try:
+            async with self.get_session() as session:
+                session_stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == session_id,
+                    )
+                )
+                session_result = await session.execute(session_stmt)
+                conversation_session = session_result.scalar_one_or_none()
+                if not conversation_session:
+                    return rebuild_stats
+
+                runtime_session_dir = _conversation_runtime_session_dir(
+                    conversation_session.user_id,
+                    conversation_session.session_id,
+                )
+                conversation_index_file = runtime_session_dir / "conversation_index.json"
+                conversation_index = _load_json_file(conversation_index_file, [])
+                if not isinstance(conversation_index, list):
+                    conversation_index = []
+
+                turns_stmt = (
+                    select(ConversationTurn)
+                    .where(
+                        and_(
+                            ConversationTurn.tenant_id == tenant_id,
+                            ConversationTurn.session_id == session_id,
+                        )
+                    )
+                    .order_by(ConversationTurn.turn_number.asc())
+                )
+                turns_result = await session.execute(turns_stmt)
+                existing_turns = list(turns_result.scalars().all())
+                turns_by_run_id = {turn.run_id: turn for turn in existing_turns}
+                turns_by_number = {turn.turn_number: turn for turn in existing_turns}
+
+                existing_result_ids_stmt = select(ConversationResultSet.result_set_id).where(
+                    and_(
+                        ConversationResultSet.tenant_id == tenant_id,
+                        ConversationResultSet.session_id == session_id,
+                    )
+                )
+                existing_result_ids_result = await session.execute(existing_result_ids_stmt)
+                existing_result_ids = [row[0] for row in existing_result_ids_result.all()]
+                if existing_result_ids:
+                    await session.execute(
+                        delete(ConversationResultSetParent).where(
+                            or_(
+                                ConversationResultSetParent.child_result_set_id.in_(existing_result_ids),
+                                ConversationResultSetParent.parent_result_set_id.in_(existing_result_ids),
+                            )
+                        )
+                    )
+                await session.execute(
+                    delete(ConversationResultSet).where(
+                        and_(
+                            ConversationResultSet.tenant_id == tenant_id,
+                            ConversationResultSet.session_id == session_id,
+                        )
+                    )
+                )
+
+                runtime_path_entries: List[tuple[str, Any]] = []
+                latest_activity_at = _to_utc_datetime(conversation_session.last_activity_at) or datetime.now(timezone.utc)
+                normalized_entries = sorted(
+                    [entry for entry in conversation_index if isinstance(entry, dict)],
+                    key=lambda entry: int(entry.get("turn_number") or 0),
+                )
+                rebuild_stats["discovered_turns"] = len(normalized_entries)
+
+                for entry in normalized_entries:
+                    turn_number = int(entry.get("turn_number") or 0)
+                    if turn_number <= 0:
+                        rebuild_stats["skipped_turns"] += 1
+                        continue
+
+                    turn_dir = Path(entry.get("turn_dir") or runtime_session_dir / "turns" / f"{turn_number:04d}")
+                    turn_metadata_file = Path(entry.get("turn_metadata_file") or (turn_dir / "turn_metadata.json"))
+                    turn_summary_file = Path(entry.get("turn_summary_file") or (turn_dir / "turn_summary.json"))
+                    artifacts_file = turn_dir / "artifacts" / "artifacts.json"
+                    result_index_file = turn_dir / "results" / "index.json"
+
+                    turn_metadata = _load_json_file(turn_metadata_file, {})
+                    if not isinstance(turn_metadata, dict):
+                        turn_metadata = {}
+                    turn_summary = _load_json_file(turn_summary_file, {})
+                    if not isinstance(turn_summary, dict):
+                        turn_summary = {}
+
+                    run_id = str(turn_metadata.get("run_id") or entry.get("run_id") or "").strip()
+                    if not run_id:
+                        rebuild_stats["skipped_turns"] += 1
+                        continue
+
+                    conversation_turn = turns_by_run_id.get(run_id) or turns_by_number.get(turn_number)
+                    if not conversation_turn:
+                        conversation_turn = ConversationTurn(
+                            tenant_id=tenant_id,
+                            session_id=session_id,
+                            run_id=run_id,
+                            turn_number=turn_number,
+                            query_text=str(turn_summary.get("user_query") or f"Recovered turn {turn_number}"),
+                            source=str(turn_summary.get("source") or "user"),
+                            status=str(turn_metadata.get("status") or turn_summary.get("status") or "created"),
+                            display_type=turn_summary.get("display_type"),
+                            final_response_summary=turn_summary.get("final_response_summary"),
+                            result_count=turn_summary.get("result_count"),
+                            token_usage_json=turn_summary.get("token_usage"),
+                            turn_dir=turn_dir.as_posix(),
+                            artifact_file=str(turn_summary.get("artifact_file") or artifacts_file.as_posix()),
+                            started_at=_to_utc_datetime(turn_metadata.get("created_at")),
+                            completed_at=_to_utc_datetime(turn_metadata.get("completed_at")),
+                            created_at=_to_utc_datetime(turn_metadata.get("created_at")) or datetime.now(timezone.utc),
+                            updated_at=datetime.now(timezone.utc),
+                        )
+                        session.add(conversation_turn)
+                        rebuild_stats["recovered_turn_rows"] += 1
+                    else:
+                        conversation_turn.turn_number = turn_number
+                        conversation_turn.query_text = str(turn_summary.get("user_query") or conversation_turn.query_text)
+                        conversation_turn.status = str(turn_metadata.get("status") or turn_summary.get("status") or conversation_turn.status)
+                        conversation_turn.display_type = turn_summary.get("display_type") or conversation_turn.display_type
+                        conversation_turn.final_response_summary = (
+                            turn_summary.get("final_response_summary") or conversation_turn.final_response_summary
+                        )
+                        conversation_turn.result_count = turn_summary.get("result_count") if turn_summary.get("result_count") is not None else conversation_turn.result_count
+                        conversation_turn.token_usage_json = turn_summary.get("token_usage") or conversation_turn.token_usage_json
+                        conversation_turn.turn_dir = turn_dir.as_posix()
+                        conversation_turn.artifact_file = str(turn_summary.get("artifact_file") or artifacts_file.as_posix())
+                        conversation_turn.started_at = _to_utc_datetime(turn_metadata.get("created_at")) or conversation_turn.started_at
+                        conversation_turn.completed_at = _to_utc_datetime(turn_metadata.get("completed_at")) or conversation_turn.completed_at
+                        conversation_turn.updated_at = datetime.now(timezone.utc)
+
+                    turns_by_run_id[run_id] = conversation_turn
+                    turns_by_number[turn_number] = conversation_turn
+                    candidate_activity_at = (
+                        _to_utc_datetime(turn_metadata.get("completed_at"))
+                        or _to_utc_datetime(turn_metadata.get("created_at"))
+                        or latest_activity_at
+                    )
+                    if candidate_activity_at > latest_activity_at:
+                        latest_activity_at = candidate_activity_at
+
+                    runtime_path_entries.append(
+                        (
+                            run_id,
+                            SimpleNamespace(
+                                turn_dir=turn_dir,
+                                turn_metadata_file=turn_metadata_file,
+                                turn_summary_file=turn_summary_file,
+                                artifacts_file=artifacts_file,
+                                result_index_file=result_index_file,
+                            ),
+                        )
+                    )
+
+                conversation_session.last_activity_at = latest_activity_at
+                conversation_session.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+
+            for run_id, runtime_paths in runtime_path_entries:
+                mirrored = await self.mirror_runtime_turn_state(
+                    tenant_id=tenant_id,
+                    run_id=run_id,
+                    runtime_paths=runtime_paths,
+                )
+                if mirrored:
+                    rebuild_stats["mirrored_turns"] += 1
+                else:
+                    rebuild_stats["skipped_turns"] += 1
+
+            return rebuild_stats
+        except Exception as error:
+            logger.error(f"Failed to rebuild session index for {session_id}: {error}", exc_info=True)
+            return rebuild_stats
+
+    async def get_conversation_session(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+    ) -> Optional[ConversationSession]:
+        """Fetch a conversation session owned by a user."""
+        try:
+            async with self.get_session() as session:
+                stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == session_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                    )
+                )
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Failed to get conversation session {session_id}: {e}", exc_info=True)
+            return None
+
+    async def list_conversation_sessions(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        limit: int = 10,
+        include_archived: bool = False,
+    ) -> List[ConversationSession]:
+        """List recent conversation sessions for a user."""
+        try:
+            async with self.get_session() as session:
+                conditions = [
+                    ConversationSession.tenant_id == tenant_id,
+                    func.lower(ConversationSession.user_id) == func.lower(user_id),
+                ]
+                if not include_archived:
+                    conditions.append(ConversationSession.is_archived == False)
+
+                stmt = select(ConversationSession).where(
+                    and_(*conditions)
+                ).order_by(
+                    desc(ConversationSession.is_pinned),
+                    desc(ConversationSession.last_activity_at),
+                ).limit(limit)
+
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+        except Exception as e:
+            logger.error(f"Failed to list conversation sessions for {user_id}: {e}", exc_info=True)
+            return []
+
+    async def update_conversation_session(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        updates: Dict[str, Any],
+    ) -> Optional[ConversationSession]:
+        """Update mutable fields on a conversation session owned by a user."""
+        allowed_fields = {
+            "title",
+            "summary",
+            "status",
+            "last_activity_at",
+            "parent_session_id",
+            "handoff_reason",
+            "is_pinned",
+            "is_archived",
+            "archived_at",
+        }
+        safe_updates = {key: value for key, value in updates.items() if key in allowed_fields}
+
+        try:
+            async with self.get_session() as session:
+                stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == session_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                    )
+                )
+                result = await session.execute(stmt)
+                conversation_session = result.scalar_one_or_none()
+                if not conversation_session:
+                    return None
+
+                for key, value in safe_updates.items():
+                    setattr(conversation_session, key, value)
+
+                conversation_session.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+                await session.refresh(conversation_session)
+                return conversation_session
+        except Exception as e:
+            logger.error(f"Failed to update conversation session {session_id}: {e}", exc_info=True)
+            return None
+
+    async def create_conversation_turn(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        run_id: str,
+        query_text: str,
+        source: str = "user",
+        query_history_id: Optional[int] = None,
+        status: str = "created",
+        completion_mode: Optional[str] = None,
+        approval_state: Optional[str] = None,
+        deferred_execution_state: Optional[str] = None,
+        display_type: Optional[str] = None,
+        final_response_summary: Optional[str] = None,
+        result_count: Optional[int] = None,
+        is_partial_result: bool = False,
+        token_usage_json: Optional[Dict[str, Any]] = None,
+        turn_dir: Optional[str] = None,
+        artifact_file: Optional[str] = None,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+    ) -> Optional[ConversationTurn]:
+        """Create or return a persisted turn placeholder for a conversation session."""
+        try:
+            async with self.get_session() as session:
+                existing_stmt = select(ConversationTurn).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.run_id == run_id,
+                    )
+                )
+                existing_result = await session.execute(existing_stmt)
+                existing_turn = existing_result.scalar_one_or_none()
+                if existing_turn:
+                    return existing_turn
+
+                session_stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == session_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                    )
+                )
+                session_result = await session.execute(session_stmt)
+                conversation_session = session_result.scalar_one_or_none()
+                if not conversation_session:
+                    return None
+
+                max_turn_stmt = select(func.max(ConversationTurn.turn_number)).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.session_id == session_id,
+                    )
+                )
+                max_turn_result = await session.execute(max_turn_stmt)
+                next_turn_number = (max_turn_result.scalar() or 0) + 1
+
+                new_turn = ConversationTurn(
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    turn_number=next_turn_number,
+                    query_text=query_text,
+                    source=source,
+                    query_history_id=query_history_id,
+                    status=status,
+                    completion_mode=completion_mode,
+                    approval_state=approval_state,
+                    deferred_execution_state=deferred_execution_state,
+                    display_type=display_type,
+                    final_response_summary=final_response_summary,
+                    result_count=result_count,
+                    is_partial_result=is_partial_result,
+                    token_usage_json=token_usage_json,
+                    turn_dir=turn_dir,
+                    artifact_file=artifact_file,
+                    started_at=started_at,
+                    completed_at=completed_at,
+                )
+                session.add(new_turn)
+                conversation_session.last_activity_at = datetime.now(timezone.utc)
+                conversation_session.updated_at = datetime.now(timezone.utc)
+                await session.commit()
+                await session.refresh(new_turn)
+                return new_turn
+        except Exception as e:
+            logger.error(f"Failed to create conversation turn for session {session_id}: {e}", exc_info=True)
+            return None
+
+    async def get_conversation_turn(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        turn_number: int,
+    ) -> Optional[ConversationTurn]:
+        """Fetch a turn that belongs to a user-owned conversation session."""
+        try:
+            async with self.get_session() as session:
+                stmt = select(ConversationTurn).join(
+                    ConversationSession,
+                    ConversationTurn.session_id == ConversationSession.session_id,
+                ).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.session_id == session_id,
+                        ConversationTurn.turn_number == turn_number,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                    )
+                )
+                result = await session.execute(stmt)
+                return result.scalar_one_or_none()
+        except Exception as e:
+            logger.error(f"Failed to get conversation turn {session_id}/{turn_number}: {e}", exc_info=True)
+            return None
+
+    async def list_conversation_turns(
+        self,
+        *,
+        tenant_id: str,
+        user_id: str,
+        session_id: str,
+        limit: int = 100,
+    ) -> List[ConversationTurn]:
+        """List turns for a user-owned conversation session in turn order."""
+        try:
+            async with self.get_session() as session:
+                stmt = select(ConversationTurn).join(
+                    ConversationSession,
+                    ConversationTurn.session_id == ConversationSession.session_id,
+                ).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.session_id == session_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                    )
+                ).order_by(
+                    ConversationTurn.turn_number.asc()
+                ).limit(limit)
+                result = await session.execute(stmt)
+                return list(result.scalars().all())
+        except Exception as e:
+            logger.error(f"Failed to list conversation turns for session {session_id}: {e}", exc_info=True)
+            return []
+
+    async def update_conversation_turn_by_run_id(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        updates: Dict[str, Any],
+    ) -> Optional[ConversationTurn]:
+        """Update mutable fields on a conversation turn identified by run id."""
+        allowed_fields = {
+            "status",
+            "completion_mode",
+            "approval_state",
+            "deferred_execution_state",
+            "display_type",
+            "final_response_summary",
+            "result_count",
+            "is_partial_result",
+            "token_usage_json",
+            "turn_dir",
+            "artifact_file",
+            "started_at",
+            "completed_at",
+        }
+        safe_updates = {key: value for key, value in updates.items() if key in allowed_fields}
+
+        try:
+            async with self.get_session() as session:
+                stmt = select(ConversationTurn).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.run_id == run_id,
+                    )
+                )
+                result = await session.execute(stmt)
+                conversation_turn = result.scalar_one_or_none()
+                if not conversation_turn:
+                    return None
+
+                for key, value in safe_updates.items():
+                    setattr(conversation_turn, key, value)
+
+                conversation_turn.updated_at = datetime.now(timezone.utc)
+
+                session_stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == conversation_turn.session_id,
+                    )
+                )
+                session_result = await session.execute(session_stmt)
+                conversation_session = session_result.scalar_one_or_none()
+                if conversation_session:
+                    conversation_session.last_activity_at = datetime.now(timezone.utc)
+                    conversation_session.updated_at = datetime.now(timezone.utc)
+
+                await session.commit()
+                await session.refresh(conversation_turn)
+                return conversation_turn
+        except Exception as e:
+            logger.error(f"Failed to update conversation turn {run_id}: {e}", exc_info=True)
+            return None
+
+    async def mirror_runtime_turn_state(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        runtime_paths: Any,
+    ) -> bool:
+        """Mirror runtime turn metadata, artifacts, and result-set refs into SQL rows."""
+        try:
+            async with self.get_session() as session:
+                turn_stmt = select(ConversationTurn).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.run_id == run_id,
+                    )
+                )
+                turn_result = await session.execute(turn_stmt)
+                conversation_turn = turn_result.scalar_one_or_none()
+                if not conversation_turn:
+                    return False
+
+                session_stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == conversation_turn.session_id,
+                    )
+                )
+                session_result = await session.execute(session_stmt)
+                conversation_session = session_result.scalar_one_or_none()
+
+                turn_metadata = _load_json_file(runtime_paths.turn_metadata_file, {})
+                turn_summary = _load_json_file(runtime_paths.turn_summary_file, {})
+                artifacts = _load_json_file(runtime_paths.artifacts_file, [])
+                result_refs = _load_json_file(runtime_paths.result_index_file, [])
+
+                if not isinstance(turn_metadata, dict):
+                    turn_metadata = {}
+                if not isinstance(turn_summary, dict):
+                    turn_summary = {}
+                if not isinstance(artifacts, list):
+                    artifacts = []
+                if not isinstance(result_refs, list):
+                    result_refs = []
+
+                current_status = str(turn_metadata.get("status") or conversation_turn.status or "created")
+                completion_mode = _derive_completion_mode(current_status, turn_summary)
+                completed_at = _to_utc_datetime(turn_metadata.get("completed_at"))
+                started_at = _to_utc_datetime(turn_metadata.get("created_at"))
+                token_usage = turn_summary.get("token_usage")
+                result_count = turn_summary.get("result_count")
+                outcome = turn_summary.get("outcome") if isinstance(turn_summary.get("outcome"), dict) else {}
+
+                conversation_turn.status = current_status
+                if completion_mode:
+                    conversation_turn.completion_mode = completion_mode
+                if turn_summary.get("display_type"):
+                    conversation_turn.display_type = str(turn_summary.get("display_type"))
+                if turn_summary.get("final_response_summary"):
+                    conversation_turn.final_response_summary = str(turn_summary.get("final_response_summary"))
+                if result_count is not None:
+                    conversation_turn.result_count = int(result_count)
+                if token_usage is not None:
+                    conversation_turn.token_usage_json = token_usage
+                conversation_turn.turn_dir = runtime_paths.turn_dir.as_posix()
+                conversation_turn.artifact_file = str(
+                    turn_summary.get("artifact_file") or runtime_paths.artifacts_file.as_posix()
+                )
+                if started_at:
+                    conversation_turn.started_at = started_at
+                if completed_at:
+                    conversation_turn.completed_at = completed_at
+                conversation_turn.is_partial_result = bool(
+                    outcome.get("is_degraded_success")
+                    or any(isinstance(ref, dict) and ref.get("status") == "partial" for ref in result_refs)
+                )
+                conversation_turn.updated_at = datetime.now(timezone.utc)
+
+                if conversation_session:
+                    conversation_session.last_activity_at = conversation_turn.completed_at or datetime.now(timezone.utc)
+                    if conversation_turn.status == "error":
+                        conversation_session.status = "error"
+                    elif not conversation_session.is_archived:
+                        conversation_session.status = "active"
+                    conversation_session.updated_at = datetime.now(timezone.utc)
+
+                existing_result_sets_stmt = select(ConversationResultSet).where(
+                    and_(
+                        ConversationResultSet.tenant_id == tenant_id,
+                        ConversationResultSet.session_id == conversation_turn.session_id,
+                        ConversationResultSet.turn_number == conversation_turn.turn_number,
+                    )
+                )
+                existing_result_sets_result = await session.execute(existing_result_sets_stmt)
+                existing_result_sets = {
+                    row.result_set_id: row for row in existing_result_sets_result.scalars().all()
+                }
+
+                result_set_ids_to_refresh: List[str] = []
+                parent_rows: List[ConversationResultSetParent] = []
+                for index, result_ref in enumerate(result_refs, start=1):
+                    if not isinstance(result_ref, dict):
+                        continue
+                    result_set_id = result_ref.get("result_set_id")
+                    storage_path = result_ref.get("storage_path")
+                    if not result_set_id or not storage_path:
+                        continue
+                    status_value = str(result_ref.get("status") or "available")
+                    row_count = result_ref.get("row_count")
+                    created_at = _to_utc_datetime(result_ref.get("created_at")) or datetime.now(timezone.utc)
+                    metadata_json = result_ref.get("metadata") if isinstance(result_ref.get("metadata"), dict) else {}
+                    if _is_hydrated_session_result_ref(result_ref):
+                        continue
+
+                    result_set_id_str = str(result_set_id)
+                    result_set_row = existing_result_sets.get(result_set_id_str)
+                    if not result_set_row:
+                        result_set_row = ConversationResultSet(
+                            tenant_id=tenant_id,
+                            session_id=conversation_turn.session_id,
+                            run_id=str(result_ref.get("run_id") or conversation_turn.run_id),
+                            turn_number=int(result_ref.get("turn_number") or conversation_turn.turn_number),
+                            sequence_in_turn=int(result_ref.get("sequence_in_turn") or index),
+                            result_set_id=result_set_id_str,
+                            storage_path=str(storage_path),
+                            source_specialist=str(result_ref.get("source_specialist") or "unknown"),
+                            entity_type=str(result_ref.get("entity_type") or "records"),
+                            derivation_kind=str(result_ref.get("derivation_kind") or "initial"),
+                            user_facing_label=result_ref.get("user_facing_label"),
+                            filter_summary=result_ref.get("filter_summary"),
+                            row_count=int(row_count) if row_count is not None else None,
+                            is_empty=bool(status_value == "empty" or row_count == 0),
+                            is_partial=bool(status_value == "partial" or result_ref.get("is_partial")),
+                            key_columns_json=result_ref.get("key_columns"),
+                            metadata_json=metadata_json,
+                            created_at=created_at,
+                        )
+                        session.add(result_set_row)
+                    else:
+                        result_set_row.run_id = str(result_ref.get("run_id") or conversation_turn.run_id)
+                        result_set_row.turn_number = int(result_ref.get("turn_number") or conversation_turn.turn_number)
+                        result_set_row.sequence_in_turn = int(result_ref.get("sequence_in_turn") or index)
+                        result_set_row.storage_path = str(storage_path)
+                        result_set_row.source_specialist = str(result_ref.get("source_specialist") or "unknown")
+                        result_set_row.entity_type = str(result_ref.get("entity_type") or "records")
+                        result_set_row.derivation_kind = str(result_ref.get("derivation_kind") or "initial")
+                        result_set_row.user_facing_label = result_ref.get("user_facing_label")
+                        result_set_row.filter_summary = result_ref.get("filter_summary")
+                        result_set_row.row_count = int(row_count) if row_count is not None else None
+                        result_set_row.is_empty = bool(status_value == "empty" or row_count == 0)
+                        result_set_row.is_partial = bool(status_value == "partial" or result_ref.get("is_partial"))
+                        result_set_row.key_columns_json = result_ref.get("key_columns")
+                        result_set_row.metadata_json = metadata_json
+                        result_set_row.created_at = created_at
+
+                    result_set_ids_to_refresh.append(result_set_id_str)
+
+                    for parent_result_set_id in result_ref.get("parent_result_set_ids") or []:
+                        parent_rows.append(
+                            ConversationResultSetParent(
+                                child_result_set_id=result_set_id_str,
+                                parent_result_set_id=str(parent_result_set_id),
+                            )
+                        )
+
+                if result_set_ids_to_refresh:
+                    await session.execute(
+                        delete(ConversationResultSetParent).where(
+                            ConversationResultSetParent.child_result_set_id.in_(result_set_ids_to_refresh)
+                        )
+                    )
+                if parent_rows:
+                    session.add_all(parent_rows)
+
+                await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Failed to mirror runtime turn state for {run_id}: {e}", exc_info=True)
+            return False
+
+    async def hydrate_session_result_set_context_for_run(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        artifacts_file: Union[str, Path],
+        max_result_sets: int = 12,
+    ) -> int:
+        """Seed a new turn runtime folder with prior session result-set refs for follow-up processing."""
+        try:
+            runtime_artifacts_file = Path(artifacts_file)
+            result_index_file = _resolve_result_index_file(runtime_artifacts_file)
+
+            async with self.get_session() as session:
+                turn_stmt = select(ConversationTurn).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.run_id == run_id,
+                    )
+                )
+                turn_result = await session.execute(turn_stmt)
+                conversation_turn = turn_result.scalar_one_or_none()
+                if not conversation_turn:
+                    return 0
+
+                result_sets_stmt = (
+                    select(ConversationResultSet)
+                    .where(
+                        and_(
+                            ConversationResultSet.tenant_id == tenant_id,
+                            ConversationResultSet.session_id == conversation_turn.session_id,
+                            ConversationResultSet.turn_number < conversation_turn.turn_number,
+                            ConversationResultSet.is_empty.is_(False),
+                        )
+                    )
+                    .order_by(
+                        desc(ConversationResultSet.turn_number),
+                        desc(ConversationResultSet.sequence_in_turn),
+                    )
+                    .limit(max_result_sets)
+                )
+                result_sets_result = await session.execute(result_sets_stmt)
+                prior_result_sets = list(result_sets_result.scalars().all())
+
+            if not prior_result_sets:
+                return 0
+
+            existing_artifacts = _load_json_file(runtime_artifacts_file, [])
+            if not isinstance(existing_artifacts, list):
+                existing_artifacts = []
+
+            existing_result_index = _load_json_file(result_index_file, [])
+            if not isinstance(existing_result_index, list):
+                existing_result_index = []
+
+            existing_artifact_keys = {
+                str(artifact.get("key") or artifact.get("artifact_key"))
+                for artifact in existing_artifacts
+                if isinstance(artifact, dict) and (artifact.get("key") or artifact.get("artifact_key"))
+            }
+            existing_result_set_ids = {
+                str(entry.get("result_set_id"))
+                for entry in existing_result_index
+                if isinstance(entry, dict) and entry.get("result_set_id")
+            }
+
+            hydrated_artifacts: List[Dict[str, Any]] = []
+            hydrated_result_refs: List[Dict[str, Any]] = []
+
+            for result_set_row in prior_result_sets:
+                if not result_set_row.storage_path or not Path(result_set_row.storage_path).exists():
+                    continue
+
+                artifact_key = f"session_result_ref_{result_set_row.result_set_id}"
+                if artifact_key not in existing_artifact_keys:
+                    hydrated_artifacts.append(_build_hydrated_result_set_artifact(result_set_row))
+                    existing_artifact_keys.add(artifact_key)
+
+                if str(result_set_row.result_set_id) not in existing_result_set_ids:
+                    hydrated_result_refs.append(_build_hydrated_result_set_ref(result_set_row))
+                    existing_result_set_ids.add(str(result_set_row.result_set_id))
+
+            if hydrated_artifacts:
+                existing_artifacts.extend(hydrated_artifacts)
+                _write_json_file(runtime_artifacts_file, existing_artifacts)
+
+            if hydrated_result_refs:
+                existing_result_index.extend(hydrated_result_refs)
+                _write_json_file(result_index_file, existing_result_index)
+
+            return len(hydrated_result_refs)
+        except Exception as e:
+            logger.error(f"Failed to hydrate session result-set context for run {run_id}: {e}", exc_info=True)
+            return 0
+
+    async def get_compacted_conversation_context_for_run(
+        self,
+        *,
+        tenant_id: str,
+        run_id: str,
+        keep_recent_turns: int = _DEFAULT_COMPACT_KEEP_RECENT_TURNS,
+        max_summary_turns: int = _DEFAULT_COMPACT_SUMMARY_TURNS,
+    ) -> Dict[str, Any]:
+        """Load structured conversation context without replaying raw LLM transcript history."""
+        try:
+            async with self.get_session() as session:
+                turn_stmt = select(ConversationTurn).where(
+                    and_(
+                        ConversationTurn.tenant_id == tenant_id,
+                        ConversationTurn.run_id == run_id,
+                    )
+                )
+                turn_result = await session.execute(turn_stmt)
+                conversation_turn = turn_result.scalar_one_or_none()
+                if not conversation_turn:
+                    return {
+                        "message_history": [],
+                        "session_summary": None,
+                        "recent_turn_summaries": [],
+                        "compaction_applied": False,
+                        "trimmed_turn_count": 0,
+                    }
+
+                session_stmt = select(ConversationSession).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        ConversationSession.session_id == conversation_turn.session_id,
+                    )
+                )
+                session_result = await session.execute(session_stmt)
+                conversation_session = session_result.scalar_one_or_none()
+
+                turns_stmt = (
+                    select(ConversationTurn)
+                    .where(
+                        and_(
+                            ConversationTurn.tenant_id == tenant_id,
+                            ConversationTurn.session_id == conversation_turn.session_id,
+                            ConversationTurn.turn_number <= conversation_turn.turn_number,
+                        )
+                    )
+                    .order_by(ConversationTurn.turn_number.asc())
+                )
+                turns_result = await session.execute(turns_stmt)
+                session_turns = list(turns_result.scalars().all())
+
+                keep_recent_count = max(0, keep_recent_turns)
+                recent_turns = session_turns[-keep_recent_count:] if keep_recent_count else []
+                older_turns = session_turns[:-keep_recent_count] if keep_recent_count else session_turns
+
+                compacted_session_summary = _build_session_compaction_summary(
+                    conversation_session.summary if conversation_session else None,
+                    older_turns,
+                    max_summary_turns=max_summary_turns,
+                )
+                if conversation_session and conversation_session.summary != compacted_session_summary:
+                    conversation_session.summary = compacted_session_summary
+                    conversation_session.updated_at = datetime.now(timezone.utc)
+                    await session.commit()
+
+                return {
+                    "message_history": [],
+                    "session_summary": compacted_session_summary,
+                    "recent_turn_summaries": [
+                        _serialize_recent_turn_summary(turn)
+                        for turn in recent_turns
+                    ],
+                    "compaction_applied": bool(older_turns),
+                    "trimmed_turn_count": len(older_turns),
+                }
+        except Exception as e:
+            logger.error(f"Failed to load compacted conversation context for run {run_id}: {e}", exc_info=True)
+            return {
+                "message_history": [],
+                "session_summary": None,
+                "recent_turn_summaries": [],
+                "compaction_applied": False,
+                "trimmed_turn_count": 0,
+            }
 
     async def get_slack_query_history(
         self,

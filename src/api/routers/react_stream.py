@@ -26,6 +26,7 @@ import sqlite3
 import time
 import uuid
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, AsyncGenerator, Optional
 
@@ -89,6 +90,9 @@ class ScriptExecuteRequest(BaseModel):
 class QueryResponse(BaseModel):
     """Response with process ID for SSE connection"""
     process_id: str
+    session_id: str
+    run_id: str
+    turn_number: int
     message: str
 
 
@@ -100,6 +104,59 @@ class CancelRequest(BaseModel):
 # ============================================================================
 # Helper Functions for Script Execution
 # ============================================================================
+
+def _derive_session_title(query: str, *, max_length: int = 120) -> str:
+    """Create a compact default session title from the first query."""
+    cleaned = " ".join(query.split()).strip()
+    if len(cleaned) <= max_length:
+        return cleaned or "New conversation"
+    return cleaned[: max_length - 3].rstrip() + "..."
+
+
+async def _bootstrap_conversation_process(
+    *,
+    correlation_id: str,
+    query: str,
+    requested_session_id: Optional[str],
+    user_id: str,
+    source: str,
+) -> tuple[str, int]:
+    """Create or reuse the session, then preallocate the turn identity before streaming."""
+    db_ops = DatabaseOperations()
+    await db_ops.init_db()
+
+    session_id = requested_session_id or correlation_id
+    conversation_session = await db_ops.create_conversation_session(
+        tenant_id=settings.tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        source=source,
+        title=_derive_session_title(query),
+        status="active",
+    )
+    if not conversation_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if requested_session_id else status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Conversation session could not be created or accessed.",
+        )
+
+    conversation_turn = await db_ops.create_conversation_turn(
+        tenant_id=settings.tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        run_id=correlation_id,
+        query_text=query,
+        source=source,
+        status="created",
+        started_at=datetime.now(timezone.utc),
+    )
+    if not conversation_turn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Conversation turn could not be created.",
+        )
+
+    return session_id, conversation_turn.turn_number
 
 def _write_temp_script(process_id: str, code: str) -> str:
     """Write code to temporary Python file"""
@@ -390,21 +447,38 @@ async def start_react_process(
         username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
         logger.info(f"[{correlation_id}] Starting ReAct process for user: {username}")
         logger.info(f"[{correlation_id}] Query: {request.query}")
+
+        session_id, turn_number = await _bootstrap_conversation_process(
+            correlation_id=correlation_id,
+            query=request.query,
+            requested_session_id=request.session_id,
+            user_id=username,
+            source="web",
+        )
         
         # Create process tracking entry
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
-            "session_id": request.session_id or correlation_id,
-            "user_id": current_user.username,
+            "session_id": session_id,
+            "run_id": correlation_id,
+            "turn_number": turn_number,
+            "user_id": username,
             "created_at": time.time(),
-            "cancelled": False
+            "cancelled": False,
+            "source": "web",
         }
         
         return QueryResponse(
             process_id=correlation_id,
+            session_id=session_id,
+            run_id=correlation_id,
+            turn_number=turn_number,
             message="ReAct process started. Connect to /stream-react-updates to receive events."
         )
+
+    except HTTPException:
+        raise
         
     except Exception as e:
         logger.error(f"[{correlation_id}] Failed to start process: {e}", exc_info=True)
@@ -431,23 +505,40 @@ async def execute_script_directly(
     try:
         username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
         logger.info(f"[{correlation_id}] Starting direct script execution for user: {username}")
+
+        session_id, turn_number = await _bootstrap_conversation_process(
+            correlation_id=correlation_id,
+            query=request.query,
+            requested_session_id=request.session_id,
+            user_id=username,
+            source="saved_script",
+        )
         
         # Create process tracking entry with pre-generated script
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
             "script_code": request.script_code,  # Pre-generated script
-            "session_id": request.session_id or correlation_id,
-            "user_id": current_user.username,
+            "session_id": session_id,
+            "run_id": correlation_id,
+            "turn_number": turn_number,
+            "user_id": username,
             "created_at": time.time(),
             "cancelled": False,
-            "skip_discovery": True  # Flag to skip orchestrator
+            "skip_discovery": True,  # Flag to skip orchestrator
+            "source": "saved_script",
         }
         
         return QueryResponse(
             process_id=correlation_id,
+            session_id=session_id,
+            run_id=correlation_id,
+            turn_number=turn_number,
             message="Script execution started. Connect to /stream-react-updates to receive events."
         )
+
+    except HTTPException:
+        raise
         
     except Exception as e:
         logger.error(f"[{correlation_id}] Failed to start direct execution: {e}", exc_info=True)
@@ -497,6 +588,22 @@ async def stream_react_updates(
         okta_client = None
         orchestrator_task = None
         stream_started = False  # Track if stream actually started
+
+        async def mirror_runtime_state() -> None:
+            if not runtime_paths:
+                return
+
+            try:
+                db_ops = DatabaseOperations()
+                mirrored = await db_ops.mirror_runtime_turn_state(
+                    tenant_id=settings.tenant_id,
+                    run_id=process_id,
+                    runtime_paths=runtime_paths,
+                )
+                if not mirrored:
+                    logger.warning(f"[{process_id}] Runtime-to-SQL mirror skipped because the turn row was not found")
+            except Exception as mirror_error:
+                logger.error(f"[{process_id}] Failed to mirror runtime turn state: {mirror_error}", exc_info=True)
         
         try:
             # Update status
@@ -512,6 +619,7 @@ async def stream_react_updates(
                 status="executing",
                 user_query=process["query"],
             )
+            await mirror_runtime_state()
             
             # Create Okta client
             okta_client = OktaClient()
@@ -662,6 +770,7 @@ async def stream_react_updates(
                     "outcome": result.outcome_metadata(),
                 })
                 update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+                await mirror_runtime_state()
 
                 # Save history before closing the stream so the frontend follows the normal success path.
                 try:
@@ -701,6 +810,7 @@ async def stream_react_updates(
                 yield f"data: {json.dumps(error_event)}\n\n"
                 logger.error(f"[{process_id}] Multi-agent orchestrator failed: {result.error}")
                 update_turn_metadata(runtime_paths, status="error", error=result.error, completed_at=time.time())
+                await mirror_runtime_state()
                 process["status"] = "error"
                 return
             
@@ -761,6 +871,7 @@ async def stream_react_updates(
                     "outcome": result.outcome_metadata(),
                 })
                 update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+                await mirror_runtime_state()
                 
                 # CRITICAL: Save history BEFORE DONE
                 # Shield from cancellation
@@ -813,6 +924,7 @@ async def stream_react_updates(
                     error=error_event["error"],
                     completed_at=time.time(),
                 )
+                await mirror_runtime_state()
                 
                 # Send DONE event to close stream
                 done_event = {
@@ -860,6 +972,7 @@ async def stream_react_updates(
                     error=error_event["error"],
                     completed_at=time.time(),
                 )
+                await mirror_runtime_state()
                 process["status"] = "error"
                 return
             
@@ -941,6 +1054,7 @@ async def stream_react_updates(
                 },
             })
             update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+            await mirror_runtime_state()
             
             logger.info(f"[{process_id}] Phase 3 complete: Script executed successfully")
             
@@ -1009,6 +1123,7 @@ async def stream_react_updates(
             logger.info(f"[{process_id}] Process cancelled by user")
             if runtime_paths:
                 update_turn_metadata(runtime_paths, status="cancelled", completed_at=time.time())
+                await mirror_runtime_state()
             error_data = {
                 "type": "ERROR",
                 "error": "Process cancelled by user",
@@ -1021,6 +1136,7 @@ async def stream_react_updates(
             process["status"] = "error"
             if runtime_paths:
                 update_turn_metadata(runtime_paths, status="error", error=str(e), completed_at=time.time())
+                await mirror_runtime_state()
             
             error_data = {
                 "type": "ERROR",
@@ -1126,7 +1242,8 @@ async def _create_runtime_turn_paths(correlation_id: str, process: Dict[str, Any
     runtime_paths = create_runtime_turn_paths(
         user_id=process.get("user_id", "localadmin"),
         session_id=process.get("session_id") or correlation_id,
-        run_id=correlation_id,
+        run_id=process.get("run_id") or correlation_id,
+        turn_number=process.get("turn_number"),
     )
     logger.info(f"[{correlation_id}] Created runtime turn folder: {runtime_paths.turn_dir}")
     logger.info(f"[{correlation_id}] Created artifacts file: {runtime_paths.artifacts_file}")

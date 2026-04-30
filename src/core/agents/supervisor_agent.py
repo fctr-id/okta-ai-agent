@@ -17,6 +17,8 @@ from pydantic_ai import RunContext, UsageLimits
 
 from src.core.agents import build_agent
 from src.core.models.model_picker import ModelType
+from src.core.okta.sync.operations import DatabaseOperations
+from src.config.settings import settings
 from src.data.schemas.artifact_manifest import DelegationResult, build_artifact_prompt_context
 from src.data.schemas.shared_schema import get_okta_database_schema
 from src.utils.logging import get_logger
@@ -25,7 +27,7 @@ logger = get_logger("okta_ai_agent")
 
 
 SupervisorMode = Literal["delegate", "complete", "empty", "degraded_success", "clarify", "fail"]
-SupervisorTarget = Literal["SQL", "API", "SPECIAL", "PROCESSOR", "SYNTHESIS", "NONE"]
+SupervisorTarget = Literal["SQL", "API", "SPECIAL", "PROCESSOR", "RESULT_ANALYSIS", "SYNTHESIS", "NONE"]
 SupervisorResultMode = Literal[
     "continue",
     "synthesis_ready",
@@ -38,7 +40,7 @@ SupervisorResultMode = Literal[
 SupervisorConfidence = Literal["low", "medium", "high"]
 
 
-_DELEGATE_TARGETS = {"SQL", "API", "SPECIAL", "PROCESSOR"}
+_DELEGATE_TARGETS = {"SQL", "API", "SPECIAL", "PROCESSOR", "RESULT_ANALYSIS"}
 _COMPLETION_TARGETS = {"SYNTHESIS", "NONE"}
 _FINAL_MODES = {"complete", "empty", "degraded_success"}
 _CONFIDENCE_LEVELS = {"low", "medium", "high"}
@@ -141,7 +143,7 @@ class SupervisorDecision(BaseModel):
     @model_validator(mode="after")
     def validate_decision(self) -> "SupervisorDecision":
         if self.mode == "delegate" and self.target not in _DELEGATE_TARGETS:
-            raise ValueError("Delegate decisions must target SQL, API, SPECIAL, or PROCESSOR")
+            raise ValueError("Delegate decisions must target SQL, API, SPECIAL, PROCESSOR, or RESULT_ANALYSIS")
 
         if self.mode == "delegate":
             self.result_mode = "continue"
@@ -194,6 +196,9 @@ class SupervisorDeps:
     workflow_state: Dict[str, Any] = field(default_factory=dict)
     delegation_results: List[Dict[str, Any]] = field(default_factory=list)
     latest_delegation_result: Optional[Dict[str, Any]] = None
+    session_summary: Optional[str] = None
+    recent_turn_summaries: List[Dict[str, Any]] = field(default_factory=list)
+    compaction_details: Dict[str, Any] = field(default_factory=dict)
     step_start_callback: Optional[callable] = None
 
 
@@ -270,6 +275,15 @@ SPECIAL TOOL CAPABILITIES:
 WORKFLOW STATE:
 {json.dumps(deps.workflow_state or {}, indent=2, default=str)}
 
+SESSION SUMMARY:
+{deps.session_summary or "(none)"}
+
+RECENT TURN SUMMARIES:
+{json.dumps(deps.recent_turn_summaries or [], indent=2, default=str)}
+
+COMPACTION DETAILS:
+{json.dumps(deps.compaction_details or {}, indent=2, default=str)}
+
 LATEST SPECIALIST RESULT:
 {json.dumps(deps.latest_delegation_result or {}, indent=2, default=str)}
 
@@ -279,6 +293,25 @@ ALL SPECIALIST RESULTS SO FAR:
 COMPACT ARTIFACT CONTEXT:
 {artifact_context}
 """
+
+
+async def _load_supervisor_conversation_context(correlation_id: str) -> Dict[str, Any]:
+    try:
+        db_ops = DatabaseOperations()
+        await db_ops.init_db()
+        return await db_ops.get_compacted_conversation_context_for_run(
+            tenant_id=settings.tenant_id,
+            run_id=correlation_id,
+        )
+    except Exception as exc:
+        logger.warning(f"Failed to load supervisor conversation context for {correlation_id}: {exc}")
+        return {
+            "message_history": [],
+            "session_summary": None,
+            "recent_turn_summaries": [],
+            "compaction_applied": False,
+            "trimmed_turn_count": 0,
+        }
 
 
 async def supervise_query(
@@ -293,6 +326,7 @@ async def supervise_query(
 ) -> tuple[SupervisorDecision, Any]:
     """Choose the first specialist or completion mode for a user request."""
     logger.info(f"Running supervisor initial decision for query: {user_query}")
+    conversation_context = await _load_supervisor_conversation_context(correlation_id)
     deps = SupervisorDeps(
         correlation_id=correlation_id,
         phase="initial",
@@ -300,6 +334,12 @@ async def supervise_query(
         db_runtime_summary=db_runtime_summary or {},
         special_tool_capabilities=special_tool_capabilities or {},
         workflow_state=workflow_state or {},
+        session_summary=conversation_context.get("session_summary"),
+        recent_turn_summaries=conversation_context.get("recent_turn_summaries") or [],
+        compaction_details={
+            "compaction_applied": bool(conversation_context.get("compaction_applied")),
+            "trimmed_turn_count": int(conversation_context.get("trimmed_turn_count") or 0),
+        },
         step_start_callback=step_start_callback,
     )
     try:
@@ -336,6 +376,7 @@ async def supervise_next_step(
 ) -> tuple[SupervisorDecision, Any]:
     """Choose the next step after a specialist returns a DelegationResult."""
     latest = latest_delegation_result.model_dump()
+    conversation_context = await _load_supervisor_conversation_context(correlation_id)
     deps = SupervisorDeps(
         correlation_id=correlation_id,
         phase="after_delegation",
@@ -345,6 +386,12 @@ async def supervise_next_step(
         workflow_state=workflow_state or {},
         delegation_results=delegation_results,
         latest_delegation_result=latest,
+        session_summary=conversation_context.get("session_summary"),
+        recent_turn_summaries=conversation_context.get("recent_turn_summaries") or [],
+        compaction_details={
+            "compaction_applied": bool(conversation_context.get("compaction_applied")),
+            "trimmed_turn_count": int(conversation_context.get("trimmed_turn_count") or 0),
+        },
         step_start_callback=step_start_callback,
     )
     try:
@@ -576,6 +623,7 @@ def _specialist_to_target(specialist: str) -> Optional[SupervisorTarget]:
         "api": "API",
         "special": "SPECIAL",
         "processor": "PROCESSOR",
+        "analysis": "RESULT_ANALYSIS",
         "synthesis": "SYNTHESIS",
     }
     return mapping.get(str(specialist).lower())
