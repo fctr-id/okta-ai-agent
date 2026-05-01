@@ -338,6 +338,9 @@ def _apply_initial_terminal_decision(
     if decision.mode == "delegate":
         return False
 
+    if decision.mode in {"complete", "degraded_success"}:
+        return False
+
     if decision.mode == "fail":
         result.error = decision.user_message or "NOT-OKTA-RELATED"
         _set_result_outcome(
@@ -358,16 +361,6 @@ def _apply_initial_terminal_decision(
         )
         return True
 
-    if decision.mode == "complete":
-        result.error = decision.user_message or "Supervisor completed before any data specialist ran"
-        _set_result_outcome(
-            result,
-            "fail",
-            reason=decision.reasoning,
-            user_message=result.error,
-        )
-        return True
-
     if decision.mode == "empty":
         result.success = True
         _set_result_outcome(
@@ -378,17 +371,11 @@ def _apply_initial_terminal_decision(
         )
         return True
 
-    if decision.mode == "degraded_success":
-        result.error = decision.user_message or "Supervisor reported degraded success before any data specialist ran"
-        _set_result_outcome(
-            result,
-            "fail",
-            reason=decision.reasoning,
-            user_message=result.error,
-        )
-        return True
-
     return False
+
+
+def _should_run_initial_synthesis_direct(decision: SupervisorDecision) -> bool:
+    return decision.target == "SYNTHESIS" and decision.mode in {"complete", "degraded_success"}
 
 
 def _apply_followup_supervisor_decision(
@@ -2041,6 +2028,27 @@ async def execute_multi_agent_query(
         logger.info(f"Supervisor decision mode: {decision_mode}")
         logger.info(f"Supervisor decision target: {phase}")
         logger.info(f"Supervisor reasoning: {reasoning}")
+
+        if _should_run_initial_synthesis_direct(result.initial_supervisor_decision):
+            if decision_mode == "degraded_success":
+                _set_result_outcome(
+                    result,
+                    "degraded_success",
+                    reason=reasoning,
+                    user_message=result.initial_supervisor_decision.user_message,
+                )
+
+            await _run_synthesis_phase(
+                result=result,
+                user_query=user_query,
+                correlation_id=correlation_id,
+                artifacts_file=artifacts_file,
+                aggregator=aggregator,
+                latest_processor_delegation=None,
+                post_processing_succeeded=False,
+                cli_mode=cli_mode,
+            )
+            return result
         
         if _apply_initial_terminal_decision(result, result.initial_supervisor_decision):
             return result
