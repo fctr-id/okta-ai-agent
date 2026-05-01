@@ -62,6 +62,8 @@ class SyncOrchestrator:
         self.db = db or DatabaseOperations()
         self._initialized = False
         self.cancellation_flag = cancellation_flag
+        self._pending_group_relationships: List[Dict[str, Any]] = []
+        self._pending_application_policy_links: List[Dict[str, str]] = []
 
     async def _initialize(self) -> None:
         if not self._initialized:
@@ -276,6 +278,71 @@ class SyncOrchestrator:
             
         except Exception as e:
             logger.error(f"Error processing group relationships: {str(e)}")
+            raise
+
+    async def _flush_group_relationships(self) -> None:
+        """Replay staged group-to-application assignments after applications exist."""
+        if not self._pending_group_relationships:
+            return
+
+        try:
+            async with self.db.get_session() as session:
+                for relationship_payload in self._pending_group_relationships:
+                    await self._process_group_relationships(session, relationship_payload)
+
+            logger.debug(
+                f"Processed staged application assignments for {len(self._pending_group_relationships)} groups"
+            )
+            self._pending_group_relationships = []
+        except Exception:
+            self._pending_group_relationships = []
+            raise
+
+    async def _flush_application_policy_links(self) -> None:
+        """Replay staged application-to-policy links after policies exist."""
+        if not self._pending_application_policy_links:
+            return
+
+        try:
+            async with self.db.get_session() as session:
+                for policy_link in self._pending_application_policy_links:
+                    result = await session.execute(
+                        text("""
+                            UPDATE applications
+                            SET policy_id = :policy_id,
+                                updated_at = :updated_at
+                            WHERE tenant_id = :tenant_id
+                            AND okta_id = :application_okta_id
+                            AND EXISTS (
+                                SELECT 1
+                                FROM policies
+                                WHERE tenant_id = :tenant_id
+                                AND okta_id = :policy_id
+                            )
+                        """),
+                        {
+                            'tenant_id': str(self.tenant_id),
+                            'application_okta_id': policy_link['application_okta_id'],
+                            'policy_id': policy_link['policy_id'],
+                            'updated_at': datetime.now(timezone.utc),
+                        }
+                    )
+
+                    if result.rowcount == 0:
+                        logger.warning(
+                            "Skipped application policy link for app %s because policy %s was not present after Policy sync",
+                            policy_link['application_okta_id'],
+                            policy_link['policy_id'],
+                        )
+
+                await session.commit()
+
+            logger.debug(
+                f"Processed staged policy links for {len(self._pending_application_policy_links)} applications"
+            )
+            self._pending_application_policy_links = []
+        except Exception:
+            self._pending_application_policy_links = []
             raise
 
     async def _process_app_relationships(
@@ -527,6 +594,8 @@ class SyncOrchestrator:
             import time
             overall_start_time = time.time()
             await self._initialize()
+            self._pending_group_relationships = []
+            self._pending_application_policy_links = []
             
             # Pass the cancellation flag to the OktaClientWrapper
             async with OktaClientWrapper(self.tenant_id, self.cancellation_flag) as okta:
@@ -553,6 +622,7 @@ class SyncOrchestrator:
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     logger.info("Step 3: Syncing Applications")
                     await self.sync_model_streaming(Application, okta.list_applications)
+                    await self._flush_group_relationships()
                 else:
                     logger.info("Sync cancelled - skipping remaining steps")
                     return
@@ -583,6 +653,7 @@ class SyncOrchestrator:
                 if not self.cancellation_flag or (hasattr(self.cancellation_flag, 'is_set') and not self.cancellation_flag.is_set()):
                     logger.info("Step 6: Syncing Policies")
                     await self.sync_model_streaming(Policy, okta.list_policies)
+                    await self._flush_application_policy_links()
                     
                     # Check if there were authentication errors
                     if okta.auth_errors:
@@ -622,13 +693,59 @@ class SyncOrchestrator:
             return 0
             
         try:
+            if model == User:
+                relationship_payloads = []
+                for record in batch:
+                    relationship_payloads.append({
+                        'okta_id': record['okta_id'],
+                        'group_memberships': record.pop('group_memberships', []),
+                        'factors': record.pop('factors', []),
+                    })
+
+                await self.db.bulk_upsert(session, model, batch, self.tenant_id)
+                await session.flush()
+
+                for relationship_payload in relationship_payloads:
+                    await self._process_user_relationships(session, relationship_payload)
+
+                return len(batch)
+
+            if model == Group:
+                for record in batch:
+                    self._pending_group_relationships.append({
+                        'okta_id': record['okta_id'],
+                        'applications': record.pop('applications', []),
+                    })
+
+                await self.db.bulk_upsert(session, model, batch, self.tenant_id)
+                return len(batch)
+
+            if model == Application:
+                relationship_payloads = []
+                for record in batch:
+                    policy_id = record.pop('policy_id', None)
+                    if policy_id:
+                        self._pending_application_policy_links.append({
+                            'application_okta_id': record['okta_id'],
+                            'policy_id': str(policy_id),
+                        })
+
+                    relationship_payloads.append({
+                        'okta_id': record['okta_id'],
+                        'user_assignments': record.pop('user_assignments', []),
+                    })
+
+                await self.db.bulk_upsert(session, model, batch, self.tenant_id)
+                await session.flush()
+
+                for relationship_payload in relationship_payloads:
+                    await self._process_app_relationships(session, relationship_payload)
+
+                return len(batch)
+
             # Process relationships for users and groups
             for record in batch:
-                if model == User:
-                    await self._process_user_relationships(session, record)
-                elif model == Group:
-                    await self._process_group_relationships(session, record)
-                elif model == Application:
+                if model == Application:
                     await self._process_app_relationships(session, record)                    
     
             # Process main records

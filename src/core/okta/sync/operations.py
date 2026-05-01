@@ -34,6 +34,13 @@ _DEFAULT_COMPACT_KEEP_RECENT_TURNS = 10
 _DEFAULT_COMPACT_SUMMARY_TURNS = 12
 _DEFAULT_UNPINNED_SESSION_LIMIT = 10
 _COMPACTED_TURN_SUMMARY_PREFIX = "Compacted earlier turns ("
+_SQLITE_OKTA_ID_UNIQUE_INDEXES = (
+    ("users", "uix_users_okta_id"),
+    ("groups", "uix_groups_okta_id"),
+    ("applications", "uix_applications_okta_id"),
+    ("policies", "uix_policies_okta_id"),
+    ("devices", "uix_devices_okta_id"),
+)
 
 
 def _build_async_engine(database_url: str):
@@ -57,6 +64,31 @@ def _build_async_engine(database_url: str):
             cursor.close()
 
     return engine
+
+
+async def _ensure_sqlite_okta_id_unique_indexes(conn) -> None:
+    for table_name, index_name in _SQLITE_OKTA_ID_UNIQUE_INDEXES:
+        duplicate_row = (
+            await conn.execute(
+                text(
+                    f"SELECT okta_id, COUNT(*) AS duplicate_count "
+                    f"FROM {table_name} "
+                    "WHERE okta_id IS NOT NULL "
+                    "GROUP BY okta_id "
+                    "HAVING COUNT(*) > 1 "
+                    "LIMIT 1"
+                )
+            )
+        ).first()
+        if duplicate_row:
+            raise RuntimeError(
+                f"Cannot enforce unique {table_name}.okta_id because duplicate okta_id "
+                f"'{duplicate_row[0]}' exists {duplicate_row[1]} times."
+            )
+
+        await conn.execute(
+            text(f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} ON {table_name}(okta_id)")
+        )
 
 
 def _load_json_file(path: Optional[Union[str, Path]], default: Any) -> Any:
@@ -369,6 +401,77 @@ def _conversation_runtime_session_dir(user_id: str, session_id: str) -> Path:
     safe_session_id = sanitize_path_part(session_id, fallback="session")
     return RUNTIME_ROOT / "sessions" / f"{safe_user_id}-{safe_session_id}"
 
+
+def _resolve_path_within_directory(path: Path, directory: Path) -> Path:
+    resolved_directory = directory.resolve()
+    resolved_path = path.resolve()
+    resolved_path.relative_to(resolved_directory)
+    return resolved_path
+
+
+def _user_runtime_session_dir_prefix(user_id: str) -> str:
+    safe_user_id = sanitize_path_part(user_id, fallback="user")
+    return f"{safe_user_id}-"
+
+
+def _list_user_runtime_session_dirs(user_id: str, sessions_root: Path) -> List[Path]:
+    resolved_sessions_root = sessions_root.resolve()
+    if not resolved_sessions_root.exists():
+        return []
+
+    user_dir_prefix = _user_runtime_session_dir_prefix(user_id)
+    user_runtime_session_dirs: List[Path] = []
+    for child in resolved_sessions_root.iterdir():
+        if not child.is_dir() or not child.name.startswith(user_dir_prefix):
+            continue
+        try:
+            user_runtime_session_dirs.append(_resolve_path_within_directory(child, resolved_sessions_root))
+        except ValueError:
+            logger.warning("Skipped runtime session directory outside sessions root during sweep: %s", child)
+    return user_runtime_session_dirs
+
+
+def _remove_runtime_session_dir(session_label: str, runtime_session_dir: Path, sessions_root: Path, *, context: str) -> None:
+    try:
+        resolved_runtime_session_dir = _resolve_path_within_directory(runtime_session_dir, sessions_root)
+        if resolved_runtime_session_dir.exists():
+            shutil.rmtree(resolved_runtime_session_dir)
+            logger.info(
+                "Removed runtime session directory for %s %s at %s",
+                context,
+                session_label,
+                resolved_runtime_session_dir,
+            )
+        else:
+            logger.info(
+                "No runtime session directory found for %s %s at %s",
+                context,
+                session_label,
+                resolved_runtime_session_dir,
+            )
+    except ValueError:
+        logger.warning(
+            "Skipped runtime session directory cleanup for %s %s because path escaped sessions root: %s",
+            context,
+            session_label,
+            runtime_session_dir,
+        )
+    except FileNotFoundError:
+        logger.info(
+            "No runtime session directory found for %s %s at %s",
+            context,
+            session_label,
+            runtime_session_dir,
+        )
+    except Exception as runtime_delete_error:
+        logger.warning(
+            "Failed to remove runtime session directory %s for %s %s: %s",
+            runtime_session_dir,
+            context,
+            session_label,
+            runtime_delete_error,
+        )
+
 class DatabaseOperations:
     """Singleton database operations class with shared engine and connection pool."""
     _init_lock = asyncio.Lock()  # Class-level lock for thread-safe initialization
@@ -443,6 +546,7 @@ class DatabaseOperations:
                 await conn.execute(text("PRAGMA synchronous=NORMAL"))
                 # Create tables
                 await conn.run_sync(Base.metadata.create_all)
+                await _ensure_sqlite_okta_id_unique_indexes(conn)
                 
                 # Ensure query_history table exists (for existing databases)
                 from sqlalchemy import inspect
@@ -1362,7 +1466,7 @@ class DatabaseOperations:
         user_id: str,
         unpinned_session_limit: int = _DEFAULT_UNPINNED_SESSION_LIMIT,
     ) -> bool:
-        """Schedule a best-effort cleanup task after session creation when the threshold is exceeded."""
+        """Schedule a best-effort retention/orphan sweep task after session creation."""
         try:
             async with self.get_session() as session:
                 count_stmt = select(func.count(ConversationSession.id)).where(
@@ -1376,9 +1480,6 @@ class DatabaseOperations:
                 unpinned_session_count = int(count_result.scalar_one() or 0)
         except Exception as error:
             logger.warning(f"Failed to count sessions for retention cleanup scheduling: {error}")
-            return False
-
-        if unpinned_session_count <= unpinned_session_limit:
             return False
 
         cleanup_key = (tenant_id, user_id.lower())
@@ -1413,6 +1514,19 @@ class DatabaseOperations:
                 )
 
         task.add_done_callback(_cleanup_done)
+        if unpinned_session_count > unpinned_session_limit:
+            logger.info(
+                "Scheduled retention cleanup for %s after session count reached %s (limit %s)",
+                user_id,
+                unpinned_session_count,
+                unpinned_session_limit,
+            )
+        else:
+            logger.debug(
+                "Scheduled runtime orphan sweep for %s with %s unpinned sessions",
+                user_id,
+                unpinned_session_count,
+            )
         return True
 
     async def _conversation_session_has_blocking_turn_state(
@@ -1452,6 +1566,7 @@ class DatabaseOperations:
             "skipped_sessions": 0,
             "unpinned_session_limit": unpinned_session_limit,
         }
+        remaining_session_ids: List[str] = []
 
         try:
             async with self.get_session() as session:
@@ -1534,23 +1649,44 @@ class DatabaseOperations:
 
                 await session.commit()
 
+                remaining_sessions_stmt = select(ConversationSession.session_id).where(
+                    and_(
+                        ConversationSession.tenant_id == tenant_id,
+                        func.lower(ConversationSession.user_id) == func.lower(user_id),
+                    )
+                )
+                remaining_sessions_result = await session.execute(remaining_sessions_stmt)
+                remaining_session_ids = [
+                    str(session_id)
+                    for session_id in remaining_sessions_result.scalars().all()
+                    if session_id
+                ]
+
+            sessions_root = (RUNTIME_ROOT / "sessions").resolve()
             for purged_session_id, runtime_session_dir in runtime_session_dirs:
-                try:
-                    if runtime_session_dir.exists():
-                        shutil.rmtree(runtime_session_dir, ignore_errors=True)
-                        logger.info(
-                            "Removed runtime session directory for purged conversation session %s at %s",
-                            purged_session_id,
-                            runtime_session_dir,
-                        )
-                    else:
-                        logger.info(
-                            "No runtime session directory found for purged conversation session %s at %s",
-                            purged_session_id,
-                            runtime_session_dir,
-                        )
-                except Exception as runtime_delete_error:
-                    logger.warning(f"Failed to remove runtime session directory {runtime_session_dir}: {runtime_delete_error}")
+                _remove_runtime_session_dir(
+                    purged_session_id,
+                    runtime_session_dir,
+                    sessions_root,
+                    context="purged conversation session",
+                )
+
+            expected_runtime_session_dirs = {
+                _resolve_path_within_directory(
+                    _conversation_runtime_session_dir(user_id, session_id),
+                    sessions_root,
+                )
+                for session_id in remaining_session_ids
+            }
+            for runtime_session_dir in _list_user_runtime_session_dirs(user_id, sessions_root):
+                if runtime_session_dir in expected_runtime_session_dirs:
+                    continue
+                _remove_runtime_session_dir(
+                    runtime_session_dir.name,
+                    runtime_session_dir,
+                    sessions_root,
+                    context="orphaned conversation session directory",
+                )
 
             if retention_stats["overflow_purged_sessions"] or retention_stats["purged_sessions"]:
                 logger.info(

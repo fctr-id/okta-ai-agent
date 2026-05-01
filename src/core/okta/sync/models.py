@@ -157,6 +157,7 @@ class User(BaseModel):
         Index('idx_user_name_search', 'tenant_id', 'first_name', 'last_name'),
         Index('idx_user_status_filter', 'tenant_id', 'status', 'is_deleted'),
         Index('idx_user_status_changed', 'tenant_id', 'status_changed_at'),
+        UniqueConstraint('okta_id', name='uix_users_okta_id'),
         {'extend_existing': True}
     )
 
@@ -175,6 +176,7 @@ class Group(BaseModel):
 
     __table_args__ = (
         Index('idx_group_tenant_name', 'tenant_id', 'name'),
+        UniqueConstraint('okta_id', name='uix_groups_okta_id'),
         {'extend_existing': True}
     )
 
@@ -252,6 +254,7 @@ class Application(BaseModel):
         Index('idx_app_policy', 'policy_id'),
         Index('idx_app_label', 'label'),
         Index('idx_app_attrs', 'attribute_statements', sqlite_where=text("json_valid(attribute_statements)")),
+        UniqueConstraint('okta_id', name='uix_applications_okta_id'),
         {'extend_existing': True}
     )
      
@@ -287,6 +290,7 @@ class Policy(BaseModel):
         Index('idx_policy_tenant_name', 'tenant_id', 'name'),
         Index('idx_policy_okta_id', 'okta_id'),
         Index('idx_policy_type', 'type'),
+        UniqueConstraint('okta_id', name='uix_policies_okta_id'),
         {'extend_existing': True}
     )
     
@@ -423,6 +427,7 @@ class Device(BaseModel):
         Index('idx_device_manufacturer', 'tenant_id', 'manufacturer'),
         Index('idx_device_serial', 'tenant_id', 'serial_number'),
         Index('idx_device_udid', 'tenant_id', 'udid'),
+        UniqueConstraint('okta_id', name='uix_devices_okta_id'),
         {'extend_existing': True}
     )
 
