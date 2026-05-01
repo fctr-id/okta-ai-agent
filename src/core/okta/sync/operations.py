@@ -15,9 +15,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy import select, and_, not_, or_, update, func, text, delete, desc
+from sqlalchemy import select, and_, not_, or_, update, func, text, delete, desc, event
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import List, Type, TypeVar, Optional, Dict, Any, AsyncGenerator, Union
 
 from .models import Base, User, UserFactor, group_application_assignments, AuthUser, UserRole, SyncHistory, SyncStatus, Device, UserDevice, QueryHistory, ConversationSession, ConversationTurn, ConversationResultSet, ConversationResultSetParent
@@ -32,10 +32,31 @@ ModelType = TypeVar('ModelType', bound=Base)
 _HYDRATED_SESSION_RESULT_REF_MARKER = "hydrated_session_result_ref"
 _DEFAULT_COMPACT_KEEP_RECENT_TURNS = 10
 _DEFAULT_COMPACT_SUMMARY_TURNS = 12
-_DEFAULT_ARCHIVE_AFTER_DAYS = 30
-_DEFAULT_PURGE_AFTER_DAYS = 90
-_DEFAULT_UNPINNED_SESSION_LIMIT = 100
+_DEFAULT_UNPINNED_SESSION_LIMIT = 10
 _COMPACTED_TURN_SUMMARY_PREFIX = "Compacted earlier turns ("
+
+
+def _build_async_engine(database_url: str):
+    engine = create_async_engine(
+        database_url,
+        connect_args={
+            "timeout": 30,
+            "check_same_thread": False,
+        },
+        pool_size=5,
+        max_overflow=10,
+        pool_pre_ping=True,
+    )
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, _connection_record):
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=ON")
+        finally:
+            cursor.close()
+
+    return engine
 
 
 def _load_json_file(path: Optional[Union[str, Path]], default: Any) -> Any:
@@ -107,6 +128,23 @@ def _hydrated_result_set_metadata(result_set_row: Any) -> Dict[str, Any]:
     metadata["source_run_id"] = getattr(result_set_row, "run_id", None)
     metadata["source_session_id"] = getattr(result_set_row, "session_id", None)
     return metadata
+
+
+def _result_set_artifact_category(metadata: Any) -> Optional[str]:
+    if not isinstance(metadata, dict):
+        return None
+    category = str(metadata.get("artifact_category") or "").strip().lower()
+    return category or None
+
+
+def _is_cross_turn_referenceable_result_ref(result_ref: Dict[str, Any]) -> bool:
+    metadata = result_ref.get("metadata") if isinstance(result_ref.get("metadata"), dict) else {}
+    return _result_set_artifact_category(metadata) == "turn_output"
+
+
+def _is_cross_turn_referenceable_result_set_row(result_set_row: Any) -> bool:
+    metadata = getattr(result_set_row, "metadata_json", None)
+    return _result_set_artifact_category(metadata) == "turn_output"
 
 
 def _load_hydrated_result_set_inspection(result_set_row: Any) -> Dict[str, Any]:
@@ -343,16 +381,7 @@ class DatabaseOperations:
     def __init__(self):
         """Initialize async database engine with WAL mode (reuses existing engine if available)."""
         if DatabaseOperations._engine is None:
-            DatabaseOperations._engine = create_async_engine(
-                settings.DATABASE_URL,
-                connect_args={
-                    "timeout": 30,
-                    "check_same_thread": False,
-                },
-                pool_size=5,
-                max_overflow=10,
-                pool_pre_ping=True
-            )
+            DatabaseOperations._engine = _build_async_engine(settings.DATABASE_URL)
             DatabaseOperations._SessionLocal = async_sessionmaker(
                 DatabaseOperations._engine,
                 expire_on_commit=False
@@ -403,18 +432,13 @@ class DatabaseOperations:
                     
                     # Re-create engine if path changed
                     await self.close()
-                    self.engine = create_async_engine(
-                        settings.DATABASE_URL,
-                        connect_args={"timeout": 30, "check_same_thread": False},
-                        pool_size=5,
-                        max_overflow=10,
-                        pool_pre_ping=True
-                    )
+                    self.engine = _build_async_engine(settings.DATABASE_URL)
                     self.SessionLocal = async_sessionmaker(self.engine, expire_on_commit=False)
 
             async with self.engine.begin() as conn:
                 # Enable WAL mode
                 await conn.execute(text("PRAGMA journal_mode=WAL"))
+                await conn.execute(text("PRAGMA foreign_keys=ON"))
                 # Set synchronous mode for better performance
                 await conn.execute(text("PRAGMA synchronous=NORMAL"))
                 # Create tables
@@ -1370,8 +1394,6 @@ class DatabaseOperations:
             await self.enforce_conversation_retention(
                 tenant_id=tenant_id,
                 user_id=user_id,
-                archive_after_days=_DEFAULT_ARCHIVE_AFTER_DAYS,
-                purge_after_days=_DEFAULT_PURGE_AFTER_DAYS,
                 unpinned_session_limit=unpinned_session_limit,
             )
 
@@ -1419,18 +1441,14 @@ class DatabaseOperations:
         *,
         tenant_id: str,
         user_id: str,
-        archive_after_days: int = _DEFAULT_ARCHIVE_AFTER_DAYS,
-        purge_after_days: int = _DEFAULT_PURGE_AFTER_DAYS,
         unpinned_session_limit: int = _DEFAULT_UNPINNED_SESSION_LIMIT,
     ) -> Dict[str, int]:
-        """Archive and purge eligible sessions for a user using age-based retention rules."""
-        now = datetime.now(timezone.utc)
-        archive_cutoff = now - timedelta(days=archive_after_days)
-        purge_cutoff = now - timedelta(days=purge_after_days)
+        """Keep only the newest unpinned conversation sessions for a user."""
         retention_stats = {
             "checked_unpinned_sessions": 0,
-            "archived_sessions": 0,
             "purged_sessions": 0,
+            "overflow_target_sessions": 0,
+            "overflow_purged_sessions": 0,
             "skipped_sessions": 0,
             "unpinned_session_limit": unpinned_session_limit,
         }
@@ -1447,86 +1465,99 @@ class DatabaseOperations:
                 unpinned_count_result = await session.execute(unpinned_count_stmt)
                 retention_stats["checked_unpinned_sessions"] = int(unpinned_count_result.scalar_one() or 0)
 
-                archive_candidates_stmt = (
-                    select(ConversationSession)
-                    .where(
-                        and_(
-                            ConversationSession.tenant_id == tenant_id,
-                            func.lower(ConversationSession.user_id) == func.lower(user_id),
-                            ConversationSession.is_pinned == False,
-                            ConversationSession.is_archived == False,
-                            ConversationSession.last_activity_at <= archive_cutoff,
-                        )
-                    )
-                    .order_by(ConversationSession.last_activity_at.asc())
+                overflow_sessions_to_purge = max(
+                    0,
+                    retention_stats["checked_unpinned_sessions"] - unpinned_session_limit,
                 )
-                archive_candidates_result = await session.execute(archive_candidates_stmt)
-                archive_candidates = list(archive_candidates_result.scalars().all())
+                retention_stats["overflow_target_sessions"] = overflow_sessions_to_purge
+                runtime_session_dirs: List[tuple[str, Path]] = []
 
-                for archive_candidate in archive_candidates:
-                    if await self._conversation_session_has_blocking_turn_state(
-                        session,
-                        tenant_id=tenant_id,
-                        session_id=archive_candidate.session_id,
-                    ):
-                        retention_stats["skipped_sessions"] += 1
-                        continue
-
-                    archive_candidate.is_archived = True
-                    archive_candidate.archived_at = archive_candidate.archived_at or now
-                    archive_candidate.status = "archived"
-                    archive_candidate.updated_at = now
-                    retention_stats["archived_sessions"] += 1
-
-                purge_candidates_stmt = (
-                    select(ConversationSession)
-                    .where(
-                        and_(
-                            ConversationSession.tenant_id == tenant_id,
-                            func.lower(ConversationSession.user_id) == func.lower(user_id),
-                            ConversationSession.is_pinned == False,
-                            ConversationSession.is_archived == True,
-                            or_(
-                                and_(
-                                    ConversationSession.archived_at.is_not(None),
-                                    ConversationSession.archived_at <= purge_cutoff,
-                                ),
-                                and_(
-                                    ConversationSession.archived_at.is_(None),
-                                    ConversationSession.last_activity_at <= purge_cutoff,
-                                ),
-                            ),
+                if overflow_sessions_to_purge > 0:
+                    overflow_candidates_stmt = (
+                        select(ConversationSession)
+                        .where(
+                            and_(
+                                ConversationSession.tenant_id == tenant_id,
+                                func.lower(ConversationSession.user_id) == func.lower(user_id),
+                                ConversationSession.is_pinned == False,
+                            )
                         )
+                        .order_by(ConversationSession.last_activity_at.asc())
                     )
-                    .order_by(ConversationSession.last_activity_at.asc())
-                )
-                purge_candidates_result = await session.execute(purge_candidates_stmt)
-                purge_candidates = list(purge_candidates_result.scalars().all())
+                    overflow_candidates_result = await session.execute(overflow_candidates_stmt)
+                    overflow_candidates = list(overflow_candidates_result.scalars().all())
 
-                runtime_session_dirs: List[Path] = []
-                for purge_candidate in purge_candidates:
-                    if await self._conversation_session_has_blocking_turn_state(
-                        session,
-                        tenant_id=tenant_id,
-                        session_id=purge_candidate.session_id,
-                    ):
-                        retention_stats["skipped_sessions"] += 1
-                        continue
+                    for overflow_candidate in overflow_candidates:
+                        if overflow_sessions_to_purge <= 0:
+                            break
 
-                    runtime_session_dirs.append(
-                        _conversation_runtime_session_dir(purge_candidate.user_id, purge_candidate.session_id)
-                    )
-                    await session.delete(purge_candidate)
-                    retention_stats["purged_sessions"] += 1
+                        if await self._conversation_session_has_blocking_turn_state(
+                            session,
+                            tenant_id=tenant_id,
+                            session_id=overflow_candidate.session_id,
+                        ):
+                            retention_stats["skipped_sessions"] += 1
+                            logger.info(
+                                "Skipping overflow purge for conversation session %s because it still has blocking turn state",
+                                overflow_candidate.session_id,
+                            )
+                            continue
+
+                        logger.info(
+                            "Purging overflow conversation session %s to enforce unpinned session limit %s",
+                            overflow_candidate.session_id,
+                            unpinned_session_limit,
+                        )
+                        runtime_session_dirs.append(
+                            (
+                                overflow_candidate.session_id,
+                                _conversation_runtime_session_dir(
+                                    overflow_candidate.user_id,
+                                    overflow_candidate.session_id,
+                                ),
+                            )
+                        )
+                        await session.delete(overflow_candidate)
+                        retention_stats["purged_sessions"] += 1
+                        retention_stats["overflow_purged_sessions"] += 1
+                        overflow_sessions_to_purge -= 1
+
+                    if retention_stats["overflow_purged_sessions"] > 0:
+                        await session.flush()
+
+                    if overflow_sessions_to_purge > 0:
+                        logger.warning(
+                            "Conversation retention could not purge %s overflow sessions for user %s because remaining candidates were blocked",
+                            overflow_sessions_to_purge,
+                            user_id,
+                        )
 
                 await session.commit()
 
-            for runtime_session_dir in runtime_session_dirs:
+            for purged_session_id, runtime_session_dir in runtime_session_dirs:
                 try:
                     if runtime_session_dir.exists():
                         shutil.rmtree(runtime_session_dir, ignore_errors=True)
+                        logger.info(
+                            "Removed runtime session directory for purged conversation session %s at %s",
+                            purged_session_id,
+                            runtime_session_dir,
+                        )
+                    else:
+                        logger.info(
+                            "No runtime session directory found for purged conversation session %s at %s",
+                            purged_session_id,
+                            runtime_session_dir,
+                        )
                 except Exception as runtime_delete_error:
                     logger.warning(f"Failed to remove runtime session directory {runtime_session_dir}: {runtime_delete_error}")
+
+            if retention_stats["overflow_purged_sessions"] or retention_stats["purged_sessions"]:
+                logger.info(
+                    "Conversation retention summary for %s: %s",
+                    user_id,
+                    retention_stats,
+                )
 
             return retention_stats
         except Exception as error:
@@ -2141,12 +2172,14 @@ class DatabaseOperations:
                     storage_path = result_ref.get("storage_path")
                     if not result_set_id or not storage_path:
                         continue
+                    if _is_hydrated_session_result_ref(result_ref):
+                        continue
+                    if not _is_cross_turn_referenceable_result_ref(result_ref):
+                        continue
                     status_value = str(result_ref.get("status") or "available")
                     row_count = result_ref.get("row_count")
                     created_at = _to_utc_datetime(result_ref.get("created_at")) or datetime.now(timezone.utc)
                     metadata_json = result_ref.get("metadata") if isinstance(result_ref.get("metadata"), dict) else {}
-                    if _is_hydrated_session_result_ref(result_ref):
-                        continue
 
                     result_set_id_str = str(result_set_id)
                     result_set_row = existing_result_sets.get(result_set_id_str)
@@ -2256,7 +2289,11 @@ class DatabaseOperations:
                     .limit(max_result_sets)
                 )
                 result_sets_result = await session.execute(result_sets_stmt)
-                prior_result_sets = list(result_sets_result.scalars().all())
+                prior_result_sets = [
+                    result_set_row
+                    for result_set_row in result_sets_result.scalars().all()
+                    if _is_cross_turn_referenceable_result_set_row(result_set_row)
+                ][:max_result_sets]
 
             if not prior_result_sets:
                 return 0

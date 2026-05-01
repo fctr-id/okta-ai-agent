@@ -28,7 +28,7 @@ import uuid
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, AsyncGenerator, Optional
+from typing import Dict, Any, AsyncGenerator, Optional, List
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, status
