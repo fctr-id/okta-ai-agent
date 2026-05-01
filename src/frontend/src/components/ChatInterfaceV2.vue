@@ -1,6 +1,6 @@
 <template>
     <AppLayout contentClass="chat-content" ref="appLayoutRef">
-        <main class="content-area" :class="{ 'has-results': hasResults }">
+        <main class="content-area" :class="{ 'has-results': hasResults }" :style="contentAreaStyle">
             <!-- Search Container with Animated Position -->
             <div class="search-container">
                 <!-- Hero title -->
@@ -14,7 +14,7 @@
                 </div>
 
                 <!-- Modern integrated search - Plain CSS Card -->
-                <div :class="['composer-shell', hasResults ? 'moved' : '']">
+                <div ref="composerShellRef" :class="['composer-shell', hasResults ? 'moved' : '']">
                     <div ref="searchWrapperRef" class="search-wrapper">
                         <div class="query-card" :class="{ 'is-focused': isFocused }">
                         
@@ -214,27 +214,29 @@
 
                             <div v-if="showLivePanelsForTurn(turn)" class="react-panels mb-4 transcript-react-panels">
                                 <DiscoveryPanel
-                                    :steps="reactSteps"
-                                    :isThinking="reactLoading && reactSteps.length === 0"
-                                    :isComplete="reactDiscoveryComplete"
-                                    :error="reactError"
-                                    :executionStarted="reactExecutionStarted"
+                                        :steps="turn.steps"
+                                        :isThinking="turn.isActive && turn.steps.length === 0 && !turn.discoveryComplete && !turn.error"
+                                        :isComplete="turn.discoveryComplete"
+                                        :error="turn.error"
+                                        :executionStarted="turn.executionStarted"
+                                    :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
                                 />
 
                                 <ExecutionPanel
-                                    v-if="(reactDiscoveryComplete && reactGeneratedScript) || reactExecutionStarted"
-                                    :validationStep="reactValidationStep"
-                                    :executionStarted="reactExecutionStarted"
-                                    :isExecuting="reactIsExecuting"
-                                    :isComplete="!reactLoading && !reactProcessing && reactResults !== null"
-                                    :executionError="reactError"
-                                    :executionMessage="reactExecutionMessage"
-                                    :progressValue="reactExecutionProgress"
-                                    :subprocessProgress="reactSubprocessProgress"
-                                    :resultCount="reactResults?.metadata?.count || 0"
-                                    :tokenUsage="reactTokenUsage"
-                                    :rateLimitWarning="reactRateLimitWarning"
-                                    :generatedScript="reactGeneratedScript"
+                                        v-if="showExecutionPanelForTurn(turn)"
+                                        :validationStep="turn.validationStep"
+                                        :executionStarted="turn.executionStarted"
+                                        :isExecuting="turn.isExecuting"
+                                        :isComplete="turn.status === 'completed' && !turn.error"
+                                        :executionError="turn.error"
+                                        :executionMessage="turn.executionMessage"
+                                        :progressValue="turn.executionProgress"
+                                        :subprocessProgress="turn.subprocessProgress"
+                                        :resultCount="turn.results?.metadata?.count || turn.resultCount || 0"
+                                        :tokenUsage="turn.tokenUsage"
+                                        :rateLimitWarning="turn.rateLimitWarning"
+                                        :generatedScript="turn.generatedScript"
+                                        :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
                                 />
                             </div>
 
@@ -268,7 +270,7 @@
                                 <v-progress-linear indeterminate color="primary" rounded height="6" />
                             </div>
 
-                            <div v-else-if="!turn.results" class="turn-summary-card">
+                            <div v-else-if="shouldShowTurnSummary(turn)" class="turn-summary-card">
                                 <div class="turn-summary-meta">
                                     <span class="turn-status-pill" :class="turnStatusClass(turn)">
                                         {{ formatTurnStatus(turn) }}
@@ -383,6 +385,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
  */
 const userInput = ref('') // Current text in the input field
 const searchTextarea = ref(null) // Ref for native textarea
+const composerShellRef = ref(null) // Ref for the docked composer shell
 const searchWrapperRef = ref(null) // Ref for the moving composer wrapper
 const isLoading = ref(false) // Loading state for API calls
 const lastQuestion = ref('') // Stores the last question that was asked
@@ -391,9 +394,47 @@ const hasResults = ref(false) // Whether there are results to display
 const isReturningHome = ref(false) // Keeps the home shell hidden during reverse motion
 const auth = useAuth()
 const router = useRouter()
+const composerClearance = ref(176)
 
 let composerCleanupTimerId = null
 let homeRevealTimerId = null
+let composerClearanceFrameId = null
+let composerResizeObserver = null
+
+const contentAreaStyle = computed(() => (
+    hasResults.value
+        ? { '--composer-clearance': `${composerClearance.value}px` }
+        : undefined
+))
+
+const measureComposerClearance = () => {
+    const composerShell = composerShellRef.value
+    if (!composerShell || !hasResults.value || !composerShell.classList.contains('moved')) {
+        return 176
+    }
+
+    const rect = composerShell.getBoundingClientRect()
+    const overlayHeight = Math.max(0, window.innerHeight - rect.top)
+    return Math.max(176, Math.ceil(overlayHeight + 20))
+}
+
+const syncComposerClearance = () => {
+    composerClearance.value = measureComposerClearance()
+}
+
+const scheduleComposerClearanceSync = () => {
+    if (composerClearanceFrameId !== null) {
+        window.cancelAnimationFrame(composerClearanceFrameId)
+        composerClearanceFrameId = null
+    }
+
+    void nextTick(() => {
+        composerClearanceFrameId = window.requestAnimationFrame(() => {
+            composerClearanceFrameId = null
+            syncComposerClearance()
+        })
+    })
+}
 
 /**
  * Auto-resize textarea to fit content
@@ -403,6 +444,7 @@ const autoResizeTextarea = () => {
     if (textarea) {
         textarea.style.height = 'auto'
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+        scheduleComposerClearanceSync()
     }
 }
 
@@ -1072,6 +1114,10 @@ watch([
     syncActiveTurnFromStream()
 }, { deep: true })
 
+watch(hasResults, () => {
+    scheduleComposerClearanceSync()
+})
+
 // Watch for query completion to refresh history
 let lastQuery = null
 watch([reactProcessing, reactResults], ([processing, results]) => {
@@ -1140,6 +1186,12 @@ onBeforeUnmount(() => {
     clearComposerAnimationTimer()
     clearHomeRevealTimer()
     cleanupComposerAnimation()
+    if (composerClearanceFrameId !== null) {
+        window.cancelAnimationFrame(composerClearanceFrameId)
+        composerClearanceFrameId = null
+    }
+    composerResizeObserver?.disconnect()
+    composerResizeObserver = null
     if (activeTurnScrollFrameId !== null) {
         window.cancelAnimationFrame(activeTurnScrollFrameId)
         activeTurnScrollFrameId = null
@@ -1147,6 +1199,7 @@ onBeforeUnmount(() => {
     transcriptTurnElements.clear()
     window.removeEventListener('tako:select-history', handleSidebarSelectEvent)
     window.removeEventListener('tako:new-session', handleNewSessionEvent)
+    window.removeEventListener('resize', scheduleComposerClearanceSync)
 })
 
 /**
@@ -1256,7 +1309,40 @@ const getTurnSummary = (turn) => {
 }
 
 const showLivePanelsForTurn = (turn) => {
-    return turn.isActive && isReActMode.value && (reactLoading.value || reactSteps.value.length > 0 || reactExecutionStarted.value)
+    if (!isReActMode.value) {
+        return false
+    }
+
+    return Boolean(
+        turn.isActive ||
+        turn.steps.length > 0 ||
+        turn.discoveryComplete ||
+        turn.executionStarted ||
+        turn.validationStep ||
+        turn.generatedScript ||
+        (Array.isArray(turn.subprocessProgress) && turn.subprocessProgress.length > 0)
+    )
+}
+
+const showExecutionPanelForTurn = (turn) => {
+    return Boolean(
+        turn.validationStep ||
+        turn.executionStarted ||
+        turn.generatedScript ||
+        (Array.isArray(turn.subprocessProgress) && turn.subprocessProgress.length > 0)
+    )
+}
+
+const shouldShowTurnSummary = (turn) => {
+    if (turn.results || turn.isHydratingResults) {
+        return false
+    }
+
+    return !(turn.isActive && showLivePanelsForTurn(turn))
+}
+
+const shouldAutoCollapseTurnPanels = (turn) => {
+    return Boolean(turn.status === 'completed' && turn.results && !turn.error)
 }
 
 const turnStatusClass = (turn) => {
@@ -1756,6 +1842,17 @@ onMounted(() => {
         document.querySelector('.chat-content')?.classList.add('small-screen')
     }
 
+    composerResizeObserver = new ResizeObserver(() => {
+        scheduleComposerClearanceSync()
+    })
+
+    if (composerShellRef.value) {
+        composerResizeObserver.observe(composerShellRef.value)
+    }
+
+    window.addEventListener('resize', scheduleComposerClearanceSync)
+    scheduleComposerClearanceSync()
+
     // Auto-focus the textarea on load
     nextTick(() => {
         if (searchTextarea.value) {
@@ -1971,7 +2068,7 @@ onMounted(() => {
 
 .content-area.has-results {
     padding-top: 60px;
-    padding-bottom: 60px;
+    padding-bottom: var(--composer-clearance, 176px);
 }
 
 /* Modern integrated search - Plain CSS Card */
@@ -2219,7 +2316,7 @@ onMounted(() => {
     --turn-content-max-width: 900px;
     max-width: var(--max-width);
     width: calc(100% - 40px);
-    margin: 0 auto 176px;
+    margin: 0 auto var(--composer-clearance, 176px);
     position: relative;
     isolation: isolate;
     min-height: 280px;
@@ -2382,6 +2479,7 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    scroll-margin-bottom: var(--composer-clearance, 176px);
 }
 
 .transcript-turn.is-active {

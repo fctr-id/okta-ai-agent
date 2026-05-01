@@ -148,17 +148,19 @@ const props = defineProps({
   resultCount: { type: Number, default: 0 },
   tokenUsage: { type: Object, default: null },
   rateLimitWarning: { type: Number, default: 0 },
-  generatedScript: { type: String, default: null }
+  generatedScript: { type: String, default: null },
+  shouldAutoCollapse: { type: Boolean, default: false }
 })
 
 const isExpanded = ref(true)
 const isScriptExpanded = ref(false)
 const showCopied = ref(false)
 
-// Collapse when complete
-watch(() => props.isComplete, (val) => {
-  if (val) isExpanded.value = false
-})
+watch(() => props.shouldAutoCollapse, (shouldAutoCollapse) => {
+  if (shouldAutoCollapse) {
+    isExpanded.value = false
+  }
+}, { immediate: true })
 
 const scriptLength = computed(() => props.generatedScript?.length || 0)
 

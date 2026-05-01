@@ -115,18 +115,20 @@ const props = defineProps({
   executionStarted: {
     type: Boolean,
     default: false
+  },
+  shouldAutoCollapse: {
+    type: Boolean,
+    default: false
   }
 })
 
 const isExpanded = ref(true)
 
-watch([() => props.isThinking, () => props.isComplete], ([thinking, complete]) => {
-  if (thinking || (props.steps.length > 0 && !complete)) {
-    isExpanded.value = true
-  } else if (complete) {
+watch(() => props.shouldAutoCollapse, (shouldAutoCollapse) => {
+  if (shouldAutoCollapse) {
     isExpanded.value = false
   }
-})
+}, { immediate: true })
 
 const formatToolName = (name) => {
   return name.replace(/_/g, ' ').replace(/^okta /, '')

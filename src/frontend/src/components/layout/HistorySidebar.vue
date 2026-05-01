@@ -4,7 +4,7 @@
     <div class="sidebar-header" @click="isCollapsed = !isCollapsed">
       <div v-if="!isCollapsed" class="sidebar-title">
         <v-icon icon="mdi-history" size="15" class="title-icon" />
-        <span>Activity</span>
+        <span>Sessions</span>
         <span class="count-pill">{{ sessions.length }}</span>
       </div>
       <div class="header-spacer"></div>

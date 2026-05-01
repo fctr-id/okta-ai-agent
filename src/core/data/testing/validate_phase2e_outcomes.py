@@ -43,6 +43,8 @@ from src.core.agents.special_tools_handler import (
 from src.core.agents.sql_discovery_agent import SQLDiscoveryResult
 from src.core.agents.supervisor_agent import (
     SupervisorDecision,
+    _build_followup_workflow_state,
+    _is_referential_followup_query,
     _normalize_after_delegation_decision,
 )
 from src.data.schemas.artifact_manifest import (
@@ -394,6 +396,44 @@ def test_clarify_and_failure_decisions() -> None:
     assert failure_decision.result_mode == "failed"
 
 
+def test_generic_followup_reference_heuristic() -> None:
+    assert _is_referential_followup_query("fetch their app labels") is True
+    assert _is_referential_followup_query("what about group names") is True
+    assert _is_referential_followup_query("and role assignments too") is True
+    assert _is_referential_followup_query("same devices but include compliance state") is True
+    assert _is_referential_followup_query("show all system log events") is False
+    assert _is_referential_followup_query("and list all groups") is False
+    assert _is_referential_followup_query("now show all applications") is False
+
+
+def test_followup_workflow_state_prefers_analysis_for_entity_agnostic_followups() -> None:
+    workflow_state = _build_followup_workflow_state(
+        {"hydrated_session_result_set_count": 2},
+        [
+            {
+                "turn_number": 1,
+                "query_text": "List all applications",
+                "status": "completed",
+                "result_count": 42,
+                "completion_mode": "success",
+            },
+            {
+                "turn_number": 2,
+                "query_text": "also include profile.login",
+                "status": "created",
+            },
+        ],
+        {"trimmed_turn_count": 0},
+        "also include profile.login",
+    )
+
+    assert workflow_state["is_initial_turn"] is False
+    assert workflow_state["previous_turn_had_results"] is True
+    assert workflow_state["has_prior_result_context"] is True
+    assert workflow_state["referential_followup_query"] is True
+    assert workflow_state["prefer_result_analysis_for_followup"] is True
+
+
 def test_initial_terminal_decision_helper() -> None:
     empty_result = OrchestratorResult()
     empty_decision = SupervisorDecision(
@@ -701,6 +741,8 @@ def main() -> None:
         test_special_tool_fallback_selection_for_access_query,
         test_special_tool_fallback_stays_out_without_required_params,
         test_clarify_and_failure_decisions,
+        test_generic_followup_reference_heuristic,
+        test_followup_workflow_state_prefers_analysis_for_entity_agnostic_followups,
         test_initial_terminal_decision_helper,
         test_followup_supervisor_decision_helper,
         test_initial_sql_fallback_helper,
