@@ -8,6 +8,7 @@ continue to own domain execution and validation.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
@@ -44,6 +45,35 @@ _DELEGATE_TARGETS = {"SQL", "API", "SPECIAL", "PROCESSOR", "RESULT_ANALYSIS"}
 _COMPLETION_TARGETS = {"SYNTHESIS", "NONE"}
 _FINAL_MODES = {"complete", "empty", "degraded_success"}
 _CONFIDENCE_LEVELS = {"low", "medium", "high"}
+_REFERENTIAL_FOLLOWUP_PATTERN = re.compile(
+    r"\b(their|them|those|these|same|previous|prior|earlier|returned|above|former)\b",
+    re.IGNORECASE,
+)
+_REFERENTIAL_FOLLOWUP_PHRASES = (
+    "that result",
+    "that set",
+    "that list",
+    "same result",
+    "same set",
+)
+_FOLLOWUP_CONTINUATION_PREFIXES = (
+    "also ",
+    "what about ",
+    "how about ",
+    "what else ",
+    "how else ",
+)
+_FRESH_DISCOVERY_PREFIXES = (
+    "list ",
+    "show ",
+    "find ",
+    "search ",
+    "lookup ",
+    "get ",
+    "fetch ",
+    "retrieve ",
+)
+_FOLLOWUP_TRAILING_MARKERS = (" too", " as well")
 
 
 def _normalize_label(value: Any, *, uppercase: bool = False) -> Any:
@@ -103,6 +133,121 @@ def _clean_string_list(value: Any) -> Any:
                 cleaned.append(stripped)
         return cleaned
     return value
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().isdigit():
+        return int(value.strip())
+    return None
+
+
+def _is_referential_followup_query(user_query: str) -> bool:
+    normalized = " ".join(str(user_query or "").split()).strip().lower()
+    if not normalized:
+        return False
+
+    if _REFERENTIAL_FOLLOWUP_PATTERN.search(normalized):
+        return True
+
+    if any(phrase in normalized for phrase in _REFERENTIAL_FOLLOWUP_PHRASES):
+        return True
+
+    if normalized.startswith(_FOLLOWUP_CONTINUATION_PREFIXES):
+        return True
+
+    return normalized.endswith(_FOLLOWUP_TRAILING_MARKERS) and not normalized.startswith(
+        _FRESH_DISCOVERY_PREFIXES
+    )
+
+
+def _build_followup_workflow_state(
+    workflow_state: Optional[Dict[str, Any]],
+    recent_turn_summaries: List[Dict[str, Any]],
+    compaction_details: Optional[Dict[str, Any]],
+    user_query: str,
+) -> Dict[str, Any]:
+    enriched_state = dict(workflow_state or {})
+    ordered_turns = sorted(
+        (turn for turn in recent_turn_summaries if isinstance(turn, dict)),
+        key=lambda turn: (_coerce_int(turn.get("turn_number")) or 0, str(turn.get("started_at") or "")),
+    )
+
+    current_turn = ordered_turns[-1] if ordered_turns else None
+    previous_turn = ordered_turns[-2] if len(ordered_turns) > 1 else None
+    current_turn_number = _coerce_int(current_turn.get("turn_number")) if current_turn else None
+    previous_turn_number = _coerce_int(previous_turn.get("turn_number")) if previous_turn else None
+    previous_turn_result_count = _coerce_int(previous_turn.get("result_count")) if previous_turn else None
+
+    trimmed_turn_count = _coerce_int((compaction_details or {}).get("trimmed_turn_count")) or 0
+    hydrated_result_set_count = enriched_state.get("hydrated_session_result_set_count")
+    if hydrated_result_set_count is None:
+        hydrated_result_set_count = enriched_state.get("hydrated_session_result_set_refs")
+    hydrated_result_set_count = _coerce_int(hydrated_result_set_count) or 0
+
+    is_follow_up_turn = bool(
+        (current_turn_number and current_turn_number > 1)
+        or previous_turn is not None
+        or trimmed_turn_count > 0
+    )
+    referential_followup_query = _is_referential_followup_query(user_query)
+    has_prior_result_context = bool(hydrated_result_set_count > 0)
+    previous_turn_had_results = bool(previous_turn_result_count and previous_turn_result_count > 0)
+
+    enriched_state.update(
+        {
+            "current_turn_number": current_turn_number,
+            "current_turn_query_text": current_turn.get("query_text") if current_turn else None,
+            "current_turn_status": current_turn.get("status") if current_turn else None,
+            "is_initial_turn": not is_follow_up_turn,
+            "previous_turn_number": previous_turn_number,
+            "previous_turn_query_text": previous_turn.get("query_text") if previous_turn else None,
+            "previous_turn_result_count": previous_turn_result_count,
+            "previous_turn_completion_mode": previous_turn.get("completion_mode") if previous_turn else None,
+            "previous_turn_had_results": previous_turn_had_results,
+            "is_follow_up_turn": is_follow_up_turn,
+            "referential_followup_query": referential_followup_query,
+            "hydrated_session_result_set_count": hydrated_result_set_count,
+            "has_prior_result_context": has_prior_result_context,
+            "prefer_result_analysis_for_followup": bool(
+                is_follow_up_turn and referential_followup_query and has_prior_result_context
+            ),
+        }
+    )
+    return enriched_state
+
+
+def _should_redirect_initial_followup_to_analysis(
+    decision: "SupervisorDecision",
+    workflow_state: Dict[str, Any],
+) -> bool:
+    return bool(
+        decision.mode == "delegate"
+        and decision.target in {"SQL", "API"}
+        and workflow_state.get("prefer_result_analysis_for_followup")
+    )
+
+
+def _normalize_initial_decision(
+    decision: "SupervisorDecision",
+    workflow_state: Dict[str, Any],
+) -> "SupervisorDecision":
+    if not _should_redirect_initial_followup_to_analysis(decision, workflow_state):
+        return decision
+
+    return SupervisorDecision(
+        mode="delegate",
+        target="RESULT_ANALYSIS",
+        reasoning=(
+            "Runtime safety redirected this referential follow-up to RESULT_ANALYSIS because "
+            "prior session result-set refs are available and the request appears to refer to them."
+        ),
+        requested_data=decision.requested_data,
+        confidence=decision.confidence,
+    )
 
 
 class SupervisorDecision(BaseModel):
@@ -327,13 +472,22 @@ async def supervise_query(
     """Choose the first specialist or completion mode for a user request."""
     logger.info(f"Running supervisor initial decision for query: {user_query}")
     conversation_context = await _load_supervisor_conversation_context(correlation_id)
+    enriched_workflow_state = _build_followup_workflow_state(
+        workflow_state,
+        conversation_context.get("recent_turn_summaries") or [],
+        {
+            "compaction_applied": bool(conversation_context.get("compaction_applied")),
+            "trimmed_turn_count": int(conversation_context.get("trimmed_turn_count") or 0),
+        },
+        user_query,
+    )
     deps = SupervisorDeps(
         correlation_id=correlation_id,
         phase="initial",
         artifacts_file=artifacts_file,
         db_runtime_summary=db_runtime_summary or {},
         special_tool_capabilities=special_tool_capabilities or {},
-        workflow_state=workflow_state or {},
+        workflow_state=enriched_workflow_state,
         session_summary=conversation_context.get("session_summary"),
         recent_turn_summaries=conversation_context.get("recent_turn_summaries") or [],
         compaction_details={
@@ -348,7 +502,7 @@ async def supervise_query(
             deps=deps,
             usage_limits=SUPERVISOR_USAGE_LIMITS,
         )
-        decision = run_result.output
+        decision = _normalize_initial_decision(run_result.output, enriched_workflow_state)
         logger.info(
             f"Supervisor initial decision: mode={decision.mode}, target={decision.target} - {decision.reasoning}"
         )
@@ -377,13 +531,22 @@ async def supervise_next_step(
     """Choose the next step after a specialist returns a DelegationResult."""
     latest = latest_delegation_result.model_dump()
     conversation_context = await _load_supervisor_conversation_context(correlation_id)
+    enriched_workflow_state = _build_followup_workflow_state(
+        workflow_state,
+        conversation_context.get("recent_turn_summaries") or [],
+        {
+            "compaction_applied": bool(conversation_context.get("compaction_applied")),
+            "trimmed_turn_count": int(conversation_context.get("trimmed_turn_count") or 0),
+        },
+        user_query,
+    )
     deps = SupervisorDeps(
         correlation_id=correlation_id,
         phase="after_delegation",
         artifacts_file=artifacts_file,
         db_runtime_summary=db_runtime_summary or {},
         special_tool_capabilities=special_tool_capabilities or {},
-        workflow_state=workflow_state or {},
+        workflow_state=enriched_workflow_state,
         delegation_results=delegation_results,
         latest_delegation_result=latest,
         session_summary=conversation_context.get("session_summary"),

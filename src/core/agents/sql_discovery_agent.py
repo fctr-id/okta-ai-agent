@@ -72,6 +72,9 @@ class SQLDiscoveryDeps:
     api_discovered_data: Optional[str] = None  # JSON string of data API found (None if API phase skipped)
     api_needs_sql: Optional[List[str]] = None  # Structured list of entities to fetch via SQL
     api_found_data: Optional[List[str]] = None  # Structured list of entities already found via API
+    followup_scope_summary: Optional[str] = None  # Summary of prior saved result-set scope for follow-up turns
+    followup_scope_context: Optional[str] = None  # JSON string describing the anchored prior result-set scope
+    followup_result_set_refs: Optional[List[str]] = None  # Anchored prior result-set ids to preserve
     
     # Streaming callbacks
     step_start_callback: Optional[callable] = None
@@ -699,6 +702,28 @@ async def execute_sql_discovery(
         # Build dynamic prompt: base query + optional API context
         # Following same pattern as API agent: clean static prompt + dynamic extension
         full_prompt = user_query
+
+        if deps.followup_scope_summary and deps.followup_scope_context:
+            full_prompt = f"""{full_prompt}
+
+    ─────────────────────────────────────────
+    🔗 FOLLOW-UP RESULT-SET SCOPE
+    ─────────────────────────────────────────
+
+    Follow-up scope summary:
+    {deps.followup_scope_summary}
+
+    Anchored prior result-set context:
+    ```json
+    {deps.followup_scope_context}
+    ```
+
+    🚨 CRITICAL FOLLOW-UP RULES:
+    1. **Preserve the anchored population** - Treat these saved result-set refs as the source entity set
+    2. **Fetch only missing SQL fields or enrichments** - Do not widen to a fresh global discovery query
+    3. **Only widen scope if the user explicitly asks for new, fresh, or all data**
+    ─────────────────────────────────────────
+    """
         
         # Dynamically extend prompt ONLY if API phase ran first and found data
         # If API phase ran, inject its discovered data as context
@@ -707,7 +732,7 @@ async def execute_sql_discovery(
             needs_sql_str = str(deps.api_needs_sql) if deps.api_needs_sql else "[]"
             found_data_str = str(deps.api_found_data) if deps.api_found_data else "[]"
             
-            full_prompt = f"""{user_query}
+            full_prompt = f"""{full_prompt}
 
 ─────────────────────────────────────────
 📊 DATA ALREADY RETRIEVED FROM API

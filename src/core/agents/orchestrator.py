@@ -60,7 +60,7 @@ from src.data.schemas.result_set_processor import (
     ResultSetProcessingRequest,
     process_result_set_ref,
 )
-from src.data.schemas.result_analysis_agent import execute_result_analysis
+from src.core.agents.result_analysis_agent import execute_result_analysis
 from src.data.schemas.runtime_storage import RUNTIME_ROOT
 
 logger = get_logger("okta_ai_agent")
@@ -126,6 +126,8 @@ class OrchestratorResult:
 class _NextTargetTransition:
     pending_api_request: Optional[List[str]] = None
     pending_sql_request: Optional[List[str]] = None
+    pending_api_source: Optional[DelegationResult] = None
+    pending_sql_source: Optional[DelegationResult] = None
     pending_processor_source: Optional[DelegationResult] = None
     pending_analysis_source: Optional[DelegationResult] = None
     pending_special_request: bool = False
@@ -134,10 +136,20 @@ class _NextTargetTransition:
 
     def pending_requests(
         self,
-    ) -> tuple[Optional[List[str]], Optional[List[str]], Optional[DelegationResult], Optional[DelegationResult], bool]:
+    ) -> tuple[
+        Optional[List[str]],
+        Optional[List[str]],
+        Optional[DelegationResult],
+        Optional[DelegationResult],
+        Optional[DelegationResult],
+        Optional[DelegationResult],
+        bool,
+    ]:
         return (
             self.pending_api_request,
             self.pending_sql_request,
+            self.pending_api_source,
+            self.pending_sql_source,
             self.pending_processor_source,
             self.pending_analysis_source,
             self.pending_special_request,
@@ -522,6 +534,61 @@ def _delegation_evidence(delegation: Optional[DelegationResult], fallback: Optio
     return list(fallback or [])
 
 
+def _anchored_result_scope_from_delegation(
+    delegation: Optional[DelegationResult],
+) -> Optional[Dict[str, Any]]:
+    if not delegation:
+        return None
+
+    metadata = delegation.metadata if isinstance(delegation.metadata, dict) else {}
+    anchored_scope = metadata.get("anchored_result_scope") if isinstance(metadata, dict) else None
+    if isinstance(anchored_scope, dict):
+        scope = dict(anchored_scope)
+    else:
+        scope = {}
+
+    if delegation.result_set_refs and not scope.get("result_set_ids"):
+        scope["result_set_ids"] = list(delegation.result_set_refs)
+
+    if not scope:
+        return None
+
+    scope.setdefault("scope_preservation_required", bool(scope.get("result_set_ids")))
+    scope.setdefault("source_specialist", delegation.source_specialist)
+    return scope
+
+
+def _followup_scope_prompt_context(
+    source_delegation: Optional[DelegationResult],
+) -> Dict[str, Any]:
+    anchored_scope = _anchored_result_scope_from_delegation(source_delegation)
+    if not anchored_scope:
+        return {
+            "followup_scope_summary": None,
+            "followup_scope_context": None,
+            "followup_result_set_refs": None,
+        }
+
+    return {
+        "followup_scope_summary": source_delegation.summary if source_delegation else None,
+        "followup_scope_context": json.dumps(anchored_scope, indent=2, default=str),
+        "followup_result_set_refs": list(anchored_scope.get("result_set_ids") or []),
+    }
+
+
+def _inherit_anchored_result_scope(
+    delegation: DelegationResult,
+    source_delegation: Optional[DelegationResult],
+) -> DelegationResult:
+    anchored_scope = _anchored_result_scope_from_delegation(source_delegation)
+    if not anchored_scope:
+        return delegation
+
+    metadata = dict(delegation.metadata or {})
+    metadata.setdefault("anchored_result_scope", anchored_scope)
+    return delegation.model_copy(update={"metadata": metadata})
+
+
 def _requirement_signature(target: str, requirements: Optional[List[str]]) -> tuple[str, tuple[str, ...]]:
     normalized_requirements = tuple(
         sorted(
@@ -568,6 +635,7 @@ def _build_workflow_state(
     capability_gaps: List[str] = []
     failed_specialists: List[str] = []
     status_counts: Dict[str, int] = {}
+    latest_anchored_result_scope = _anchored_result_scope_from_delegation(latest_delegation)
 
     for delegation in result.delegation_results:
         source = str(delegation.get("source_specialist") or "unknown")
@@ -586,6 +654,7 @@ def _build_workflow_state(
         "latest_specialist": latest_delegation.source_specialist if latest_delegation else None,
         "latest_status": latest_delegation.status if latest_delegation else None,
         "latest_result_mode": latest_delegation.result_mode if latest_delegation else None,
+        "latest_anchored_result_scope": latest_anchored_result_scope,
         "evidence_artifact_keys": evidence_artifact_keys,
         "evidence_result_set_refs": evidence_result_set_refs,
         "unresolved_requirements": unresolved_requirements,
@@ -756,13 +825,19 @@ def _sql_context_for_api(
     result: OrchestratorResult,
     latest_sql_delegation: Optional[DelegationResult],
     artifacts_file: Path,
+    source_delegation: Optional[DelegationResult] = None,
 ) -> Dict[str, Any]:
     context = {
         "sql_reasoning": None,
         "sql_discovered_data": None,
         "sql_needs_api": None,
         "sql_found_data": None,
+        "followup_scope_summary": None,
+        "followup_scope_context": None,
+        "followup_result_set_refs": None,
     }
+
+    context.update(_followup_scope_prompt_context(source_delegation or latest_sql_delegation))
 
     if result.sql_result and result.sql_result.success:
         context["sql_reasoning"] = result.sql_result.reasoning
@@ -789,6 +864,7 @@ def _api_context_for_sql(
     latest_api_delegation: Optional[DelegationResult],
     pending_sql_request: List[str],
     artifacts_file: Path,
+    source_delegation: Optional[DelegationResult] = None,
 ) -> Dict[str, Any]:
     api_found_data = _delegation_evidence(
         latest_api_delegation,
@@ -806,12 +882,14 @@ def _api_context_for_sql(
     if api_discovered_data:
         logger.info(f"Passing API discovered data to SQL agent ({len(api_discovered_data)} chars)")
 
-    return {
+    context = {
         "api_reasoning": api_reasoning,
         "api_discovered_data": api_discovered_data,
         "api_needs_sql": pending_sql_request,
         "api_found_data": api_found_data,
     }
+    context.update(_followup_scope_prompt_context(source_delegation or latest_api_delegation))
+    return context
 
 
 def _next_target_transition(
@@ -834,6 +912,7 @@ def _next_target_transition(
             transition.repeated = True
             return transition
         transition.pending_api_request = candidate_request
+        transition.pending_api_source = source_delegation
         logger.info(f"Supervisor delegates from {source_label} to API: {candidate_request}")
         return transition
 
@@ -844,6 +923,7 @@ def _next_target_transition(
             transition.repeated = True
             return transition
         transition.pending_sql_request = candidate_request
+        transition.pending_sql_source = source_delegation
         logger.info(f"Supervisor delegates from {source_label} to SQL: {candidate_request}")
         return transition
 
@@ -1184,6 +1264,7 @@ async def _run_api_loop_step(
     cancellation_check: callable,
     aggregator: EventAggregator,
     latest_sql_delegation: Optional[DelegationResult],
+    source_delegation: Optional[DelegationResult],
     global_tool_calls_counter: int,
     max_tool_calls: int,
     iteration_count: int,
@@ -1193,7 +1274,12 @@ async def _run_api_loop_step(
     logger.info(f"Running API Discovery Agent (iteration {iteration_count}/{max_iterations})")
     aggregator.set_phase('api')
     result.phases_executed.append('api')
-    sql_context = _sql_context_for_api(result, latest_sql_delegation, artifacts_file)
+    sql_context = _sql_context_for_api(
+        result,
+        latest_sql_delegation,
+        artifacts_file,
+        source_delegation=source_delegation,
+    )
 
     await aggregator.step_start({
         "title": "API Discovery",
@@ -1209,6 +1295,9 @@ async def _run_api_loop_step(
         sql_discovered_data=sql_context["sql_discovered_data"],
         sql_needs_api=sql_context["sql_needs_api"],
         sql_found_data=sql_context["sql_found_data"],
+        followup_scope_summary=sql_context["followup_scope_summary"],
+        followup_scope_context=sql_context["followup_scope_context"],
+        followup_result_set_refs=sql_context["followup_result_set_refs"],
         okta_client=okta_client,
         cancellation_check=cancellation_check,
         step_start_callback=aggregator.step_start,
@@ -1225,6 +1314,7 @@ async def _run_api_loop_step(
 
     _add_usage_to_result(result, api_usage)
     api_delegation = _api_delegation_result(result.api_result, artifacts_file, api_usage)
+    api_delegation = _inherit_anchored_result_scope(api_delegation, source_delegation)
 
     if not result.api_result.success:
         error_msg = result.api_result.error or "API phase failed"
@@ -1284,6 +1374,7 @@ async def _run_sql_followup_loop_step(
     aggregator: EventAggregator,
     pending_sql_request: List[str],
     latest_api_delegation: Optional[DelegationResult],
+    source_delegation: Optional[DelegationResult],
     db_runtime_summary: Dict[str, Any],
     global_tool_calls_counter: int,
     max_tool_calls: int,
@@ -1308,7 +1399,13 @@ async def _run_sql_followup_loop_step(
         "timestamp": time.time()
     })
 
-    api_context = _api_context_for_sql(result, latest_api_delegation, pending_sql_request, artifacts_file)
+    api_context = _api_context_for_sql(
+        result,
+        latest_api_delegation,
+        pending_sql_request,
+        artifacts_file,
+        source_delegation=source_delegation,
+    )
 
     sql_deps = SQLDiscoveryDeps(
         correlation_id=correlation_id,
@@ -1319,6 +1416,9 @@ async def _run_sql_followup_loop_step(
         api_discovered_data=api_context["api_discovered_data"],
         api_needs_sql=api_context["api_needs_sql"],
         api_found_data=api_context["api_found_data"],
+        followup_scope_summary=api_context["followup_scope_summary"],
+        followup_scope_context=api_context["followup_scope_context"],
+        followup_result_set_refs=api_context["followup_result_set_refs"],
         step_start_callback=aggregator.step_start,
         step_end_callback=aggregator.step_end,
         tool_call_callback=aggregator.tool_call,
@@ -1333,6 +1433,7 @@ async def _run_sql_followup_loop_step(
 
     _add_usage_to_result(result, sql_usage)
     sql_delegation = _sql_delegation_result(result.sql_result, artifacts_file, sql_usage)
+    sql_delegation = _inherit_anchored_result_scope(sql_delegation, source_delegation)
 
     if not result.sql_result.success:
         error_msg = result.sql_result.error or "SQL phase failed"
@@ -1382,6 +1483,8 @@ async def _run_discovery_loop(
     iteration_count = 0
     pending_api_request = None
     pending_sql_request = None
+    pending_api_source: Optional[DelegationResult] = None
+    pending_sql_source: Optional[DelegationResult] = None
     pending_processor_source: Optional[DelegationResult] = None
     pending_analysis_source: Optional[DelegationResult] = None
     pending_special_request = False
@@ -1425,7 +1528,7 @@ async def _run_discovery_loop(
         )
         if transition.should_stop or transition.repeated:
             return latest_processor_delegation, True
-        pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
+        pending_api_request, pending_sql_request, pending_api_source, pending_sql_source, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
     logger.info(f"Starting multi-step discovery loop (max {max_iterations} phases)")
 
@@ -1442,8 +1545,12 @@ async def _run_discovery_loop(
 
         processor_source = pending_processor_source
         analysis_source = pending_analysis_source
+        api_source = pending_api_source
+        sql_source = pending_sql_source
         pending_api_request = None
         pending_sql_request = None
+        pending_api_source = None
+        pending_sql_source = None
         pending_processor_source = None
         pending_analysis_source = None
         pending_special_request = False
@@ -1480,7 +1587,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_api_source, pending_sql_source, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
         if should_run_processor:
             iteration_count += 1
@@ -1509,7 +1616,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_api_source, pending_sql_source, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
             await aggregator.step_end({
                 "title": "Result Processing Complete",
@@ -1545,7 +1652,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_api_source, pending_sql_source, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
             await aggregator.step_end({
                 "title": "Result Analysis Complete",
@@ -1565,6 +1672,7 @@ async def _run_discovery_loop(
                 cancellation_check=cancellation_check,
                 aggregator=aggregator,
                 latest_sql_delegation=latest_sql_delegation,
+                source_delegation=api_source or latest_sql_delegation,
                 global_tool_calls_counter=global_tool_calls_counter,
                 max_tool_calls=max_tool_calls,
                 iteration_count=iteration_count,
@@ -1591,7 +1699,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_api_source, pending_sql_source, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
         if pending_sql_request is not None:
             iteration_count += 1
@@ -1605,6 +1713,7 @@ async def _run_discovery_loop(
                 aggregator=aggregator,
                 pending_sql_request=pending_sql_request,
                 latest_api_delegation=latest_api_delegation,
+                source_delegation=sql_source or latest_api_delegation,
                 db_runtime_summary=db_runtime_summary,
                 global_tool_calls_counter=global_tool_calls_counter,
                 max_tool_calls=max_tool_calls,
@@ -1629,7 +1738,7 @@ async def _run_discovery_loop(
                 return latest_processor_delegation, True
             if transition.repeated:
                 break
-            pending_api_request, pending_sql_request, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
+            pending_api_request, pending_sql_request, pending_api_source, pending_sql_source, pending_processor_source, pending_analysis_source, pending_special_request = transition.pending_requests()
 
             await aggregator.step_end({
                 "title": "SQL Discovery Complete",
@@ -1916,6 +2025,7 @@ async def execute_multi_agent_query(
                 "step_count": 0,
                 "has_prior_session_result_sets": hydrated_session_result_sets > 0,
                 "hydrated_session_result_set_refs": hydrated_session_result_sets,
+                "hydrated_session_result_set_count": hydrated_session_result_sets,
                 "remaining_tool_calls": max_tool_calls,
                 "max_tool_calls": max_tool_calls,
             },

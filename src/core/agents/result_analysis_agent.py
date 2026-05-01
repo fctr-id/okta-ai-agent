@@ -37,12 +37,17 @@ logger = get_logger("okta_ai_agent")
 ResultAnalysisMode = Literal["analyze", "request_specialist", "clarify"]
 AnalysisSpecialist = Literal["sql", "api", "special"]
 
+PROMPT_FILE = Path(__file__).parent / "prompts" / "result_analysis_prompt.txt"
+
 RESULT_ANALYSIS_USAGE_LIMITS = UsageLimits(
     request_limit=2,
 )
 
-BASE_RESULT_ANALYSIS_PROMPT = """
-You are the Tako result analysis specialist.
+try:
+        BASE_RESULT_ANALYSIS_PROMPT = PROMPT_FILE.read_text(encoding="utf-8")
+except FileNotFoundError:
+        logger.error(f"Result analysis prompt not found: {PROMPT_FILE}")
+        BASE_RESULT_ANALYSIS_PROMPT = """You are the Tako result analysis specialist.
 
 Your job is to analyze previously saved result sets from earlier turns.
 You do not fetch new data from SQL or API directly. If prior saved result sets are
@@ -50,6 +55,7 @@ not sufficient, ask for another specialist instead of guessing.
 
 When enough prior result data exists:
 - choose the minimum set of result_set_ids needed for the question
+- when the same prior turn contains both intermediate discovery samples and a canonical turn_output result set, treat the canonical turn_output as the authoritative user-visible cohort
 - reason over session summary, recent turn summaries, lineage, metadata, and tiny samples
 - write restricted Python code that analyzes the provided result_sets in memory
 - correlate across multiple selected result sets when needed
@@ -62,13 +68,13 @@ Code rules:
 - use only the provided variables: result_sets, result_metadata, selected_result_set_ids, user_query
 - assign the final output to analysis_result
 - analysis_result must be a dict with:
-  - summary: required short explanation of what was found
-  - answer: optional direct human-facing answer
-  - rows: optional list[dict] for derived reusable data
-  - entity_type: optional entity label for derived rows
-  - persist_result: optional boolean
-  - derivation_kind: optional one of initial/filter/enrichment/join/aggregation/subset/unknown
-  - metadata: optional dict with compact structured facts
+    - summary: required short explanation of what was found
+    - answer: optional direct human-facing answer
+    - rows: optional list[dict] for derived reusable data
+    - entity_type: optional entity label for derived rows
+    - persist_result: optional boolean
+    - derivation_kind: optional one of initial/filter/enrichment/join/aggregation/subset/unknown
+    - metadata: optional dict with compact structured facts
 
 If prior results are not enough:
 - use mode=request_specialist
@@ -267,6 +273,9 @@ async def execute_result_analysis(
 
     plan = run_result.output
     usage = run_result.usage()
+    selected_result_set_ids = list(plan.selected_result_set_ids)
+    selected_candidates = _select_candidate_result_sets(candidate_result_sets, selected_result_set_ids)
+    anchored_result_scope = _build_anchored_result_scope(selected_candidates)
 
     if plan.mode == "request_specialist":
         return (
@@ -277,10 +286,12 @@ async def execute_result_analysis(
                 summary=plan.reasoning,
                 needs_specialists=plan.needs_specialists,
                 unresolved_requirements=plan.unresolved_requirements or [plan.reasoning],
-                result_set_refs=plan.selected_result_set_ids,
+                result_set_refs=selected_result_set_ids,
                 metadata={
                     "analysis_mode": plan.mode,
-                    "selected_result_set_ids": plan.selected_result_set_ids,
+                    "selected_result_set_ids": selected_result_set_ids,
+                    "llm_selected_result_set_ids": plan.selected_result_set_ids,
+                    "anchored_result_scope": anchored_result_scope,
                 },
             ),
             usage,
@@ -294,17 +305,18 @@ async def execute_result_analysis(
                 result_mode="needs_clarification",
                 summary=plan.user_message or plan.reasoning,
                 error=plan.user_message or plan.reasoning,
-                result_set_refs=plan.selected_result_set_ids,
+                result_set_refs=selected_result_set_ids,
                 metadata={
                     "analysis_mode": plan.mode,
-                    "selected_result_set_ids": plan.selected_result_set_ids,
+                    "selected_result_set_ids": selected_result_set_ids,
+                    "llm_selected_result_set_ids": plan.selected_result_set_ids,
+                    "anchored_result_scope": anchored_result_scope,
                 },
             ),
             usage,
         )
 
-    selected_candidates = _select_candidate_result_sets(candidate_result_sets, plan.selected_result_set_ids)
-    if len(selected_candidates) != len(plan.selected_result_set_ids):
+    if len(selected_candidates) != len(selected_result_set_ids):
         return (
             DelegationResult(
                 success=False,
@@ -313,7 +325,8 @@ async def execute_result_analysis(
                 summary="Result analysis selected invalid result-set refs.",
                 error="One or more selected result-set ids were not available in the current turn context.",
                 metadata={
-                    "selected_result_set_ids": plan.selected_result_set_ids,
+                    "selected_result_set_ids": selected_result_set_ids,
+                    "llm_selected_result_set_ids": plan.selected_result_set_ids,
                 },
             ),
             usage,
@@ -341,7 +354,7 @@ async def execute_result_analysis(
             user_query=user_query,
             python_code=plan.python_code or "",
             selected_candidates=selected_candidates,
-            selected_result_set_ids=plan.selected_result_set_ids,
+            selected_result_set_ids=selected_result_set_ids,
         )
     except Exception as exc:
         logger.error(f"Result analysis execution failed: {exc}", exc_info=True)
@@ -353,7 +366,8 @@ async def execute_result_analysis(
                 summary="Result analysis execution failed.",
                 error=str(exc),
                 metadata={
-                    "selected_result_set_ids": plan.selected_result_set_ids,
+                    "selected_result_set_ids": selected_result_set_ids,
+                    "llm_selected_result_set_ids": plan.selected_result_set_ids,
                 },
             ),
             usage,
@@ -365,6 +379,7 @@ async def execute_result_analysis(
         plan=plan,
         execution_output=execution_output,
         selected_candidates=selected_candidates,
+        selected_result_set_ids=selected_result_set_ids,
     )
 
     return (
@@ -375,10 +390,12 @@ async def execute_result_analysis(
             summary=execution_output.summary,
             artifact_keys=[artifact_key],
             result_set_refs=result_set_refs,
-            evidence_found=[f"analysis:{result_set_id}" for result_set_id in plan.selected_result_set_ids],
+            evidence_found=[f"analysis:{result_set_id}" for result_set_id in selected_result_set_ids],
             metadata={
                 "analysis_mode": plan.mode,
-                "selected_result_set_ids": plan.selected_result_set_ids,
+                "selected_result_set_ids": selected_result_set_ids,
+                "llm_selected_result_set_ids": plan.selected_result_set_ids,
+                "anchored_result_scope": anchored_result_scope,
                 "answer": execution_output.answer,
                 "result_row_count": len(execution_output.rows),
                 **execution_output.metadata,
@@ -493,9 +510,10 @@ def _persist_analysis_artifacts(
     plan: ResultAnalysisPlan,
     execution_output: ResultAnalysisExecutionOutput,
     selected_candidates: Dict[str, Dict[str, Any]],
+    selected_result_set_ids: List[str],
 ) -> tuple[str, List[str]]:
     artifact_key = f"analysis_{_safe_id_part(user_query)}"
-    result_set_refs = list(plan.selected_result_set_ids)
+    result_set_refs = list(selected_result_set_ids)
     entity_type = (
         execution_output.entity_type
         or plan.result_entity_type
@@ -513,7 +531,7 @@ def _persist_analysis_artifacts(
             user_facing_label=plan.result_user_facing_label,
             rows=execution_output.rows,
             summary=execution_output.summary,
-            selected_result_set_ids=plan.selected_result_set_ids,
+            selected_result_set_ids=selected_result_set_ids,
             derivation_kind=execution_output.derivation_kind,
             metadata=execution_output.metadata,
         )
@@ -525,7 +543,8 @@ def _persist_analysis_artifacts(
     content_payload = {
         "summary": execution_output.summary,
         "answer": execution_output.answer,
-        "selected_result_set_ids": plan.selected_result_set_ids,
+        "selected_result_set_ids": selected_result_set_ids,
+        "llm_selected_result_set_ids": plan.selected_result_set_ids,
         "sample_rows": preview_rows,
         "metadata": execution_output.metadata,
     }
@@ -645,6 +664,49 @@ def _infer_selected_entity_type(selected_candidates: Dict[str, Dict[str, Any]]) 
     return None
 
 
+def _build_anchored_result_scope(selected_candidates: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not selected_candidates:
+        return None
+
+    result_sets: List[Dict[str, Any]] = []
+    entity_types: List[str] = []
+    source_turn_numbers: List[int] = []
+
+    for result_set_id, candidate in selected_candidates.items():
+        entity_type = str(candidate.get("entity_type") or "").strip()
+        turn_number = candidate.get("turn_number")
+        if entity_type and entity_type not in entity_types:
+            entity_types.append(entity_type)
+        if isinstance(turn_number, int) and turn_number not in source_turn_numbers:
+            source_turn_numbers.append(turn_number)
+
+        result_sets.append(
+            {
+                "result_set_id": result_set_id,
+                "entity_type": candidate.get("entity_type"),
+                "row_count": candidate.get("row_count"),
+                "key_columns": list(candidate.get("key_columns") or []),
+                "artifact_category": candidate.get("artifact_category"),
+                "is_canonical_turn_output": bool(candidate.get("is_canonical_turn_output")),
+                "user_facing_label": candidate.get("user_facing_label"),
+                "filter_summary": candidate.get("filter_summary"),
+                "source_specialist": candidate.get("source_specialist"),
+                "turn_number": candidate.get("turn_number"),
+                "run_id": candidate.get("run_id"),
+                "session_id": candidate.get("session_id"),
+            }
+        )
+
+    return {
+        "scope_preservation_required": True,
+        "result_set_ids": list(selected_candidates.keys()),
+        "primary_entity_type": entity_types[0] if len(entity_types) == 1 else None,
+        "entity_types": entity_types,
+        "source_turn_numbers": source_turn_numbers,
+        "result_sets": result_sets,
+    }
+
+
 def _load_candidate_result_sets(
     artifacts_file: Path,
     *,
@@ -678,6 +740,7 @@ def _build_candidate_result_set_context(entry: Dict[str, Any]) -> Dict[str, Any]
         inspection = {}
 
     metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    artifact_category = str(metadata.get("artifact_category") or "").strip().lower() or None
     return {
         "result_set_id": result_set_id,
         "storage_path": storage_path,
@@ -693,6 +756,9 @@ def _build_candidate_result_set_context(entry: Dict[str, Any]) -> Dict[str, Any]
         "turn_number": entry.get("turn_number"),
         "run_id": entry.get("run_id"),
         "session_id": entry.get("session_id"),
+        "created_at": entry.get("created_at"),
+        "artifact_category": artifact_category,
+        "is_canonical_turn_output": artifact_category == "turn_output",
         "inspection_summary": inspection.get("summary"),
         "sample_rows": inspection.get("sample_rows") or [],
         "metadata": metadata,
