@@ -991,20 +991,27 @@ async def _execute_script_for_slack(
     """
     import shutil
 
+    def _resolve_path_within_directory(path: Path, directory: Path, *, error_message: str) -> Path:
+        resolved_directory = directory.resolve()
+        resolved_path = path.resolve()
+        try:
+            resolved_path.relative_to(resolved_directory)
+        except ValueError as exc:
+            raise ValueError(error_message) from exc
+        return resolved_path
+
     script_path = None
+    temp_dir = None
     try:
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = Path(__file__).parent.parent.parent.parent.resolve()
         temp_dir = (project_root / "generated_scripts").resolve()
         temp_dir.mkdir(parents=True, exist_ok=True)
 
-        script_path = temp_dir / f"slack_execution_{correlation_id}.py"
-
-        # Security check — prevent path traversal
-        import os
-        normalized_script = os.path.normpath(str(script_path))
-        normalized_temp = os.path.normpath(str(temp_dir))
-        if not normalized_script.startswith(normalized_temp + os.sep):
-            raise ValueError("Invalid script path - potential path traversal")
+        script_path = _resolve_path_within_directory(
+            temp_dir / f"slack_execution_{correlation_id}.py",
+            temp_dir,
+            error_message="Invalid script path - potential path traversal",
+        )
 
         # Copy API client helper if needed
         if "base_okta_api_client" in script_code or "OktaAPIClient" in script_code:
@@ -1090,10 +1097,18 @@ async def _execute_script_for_slack(
     finally:
         # Generated scripts are execution staging, not durable conversation memory.
         try:
+            if script_path is not None and temp_dir is not None:
+                script_path = _resolve_path_within_directory(
+                    script_path,
+                    temp_dir,
+                    error_message="Invalid script cleanup path - potential path traversal",
+                )
             if script_path and script_path.exists():
                 script_path.unlink()
                 logger.debug(f"[{correlation_id}] Cleaned up temp script: {script_path}")
-        except Exception:
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError):
             pass
 
 

@@ -21,7 +21,6 @@ Event Types:
 
 import asyncio
 import json
-import os
 import sqlite3
 import time
 import uuid
@@ -138,6 +137,16 @@ def _build_turn_output_summary(complete_event: Optional[Dict[str, Any]]) -> str:
         return f"Returned {count} results."
 
     return "Completed with structured results."
+
+
+def _resolve_path_within_directory(path: Path, directory: Path, *, error_message: str) -> Path:
+    resolved_directory = directory.resolve()
+    resolved_path = path.resolve()
+    try:
+        resolved_path.relative_to(resolved_directory)
+    except ValueError as exc:
+        raise ValueError(error_message) from exc
+    return resolved_path
 
 
 def _build_turn_output_artifact_payload(
@@ -270,17 +279,15 @@ async def _bootstrap_conversation_process(
 
 def _write_temp_script(process_id: str, code: str) -> str:
     """Write code to temporary Python file"""
-    project_root = Path(__file__).parent.parent.parent.parent
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
     temp_dir = (project_root / "generated_scripts").resolve()
     temp_dir.mkdir(parents=True, exist_ok=True)
-    
-    script_path = temp_dir / f"react_execution_{process_id}.py"
-    
-    # Security check
-    normalized_script = os.path.normpath(str(script_path))
-    normalized_temp = os.path.normpath(str(temp_dir))
-    if not normalized_script.startswith(normalized_temp + os.sep):
-        raise ValueError("Invalid script path - potential path traversal")
+
+    script_path = _resolve_path_within_directory(
+        temp_dir / f"react_execution_{process_id}.py",
+        temp_dir,
+        error_message="Invalid script path - potential path traversal",
+    )
     
     # Copy base_okta_api_client.py ONLY if script actually needs it (API-based queries)
     if "base_okta_api_client" in code or "OktaAPIClient" in code:
@@ -299,11 +306,11 @@ def _write_temp_script(process_id: str, code: str) -> str:
     modified_code = prepare_runtime_script_code(code)
     
     # Write script directly without repr() to avoid escaping quotes
-    with open(normalized_script, "w", encoding="utf-8", newline='\n') as f:
+    with open(script_path, "w", encoding="utf-8", newline='\n') as f:
         f.write(modified_code)
-    
-    logger.debug(f"[{process_id}] Script written to: {normalized_script}")
-    return normalized_script
+
+    logger.debug(f"[{process_id}] Script written to: {script_path}")
+    return str(script_path)
 
 
 async def _execute_script(
@@ -317,8 +324,13 @@ async def _execute_script(
     venv_python = Path("venv/Scripts/python.exe")
     python_exe = str(venv_python) if venv_python.exists() else "python"
     
-    project_root = Path(__file__).parent.parent.parent.parent
-    script_path_obj = Path(script_path).resolve()
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    temp_dir = (project_root / "generated_scripts").resolve()
+    script_path_obj = _resolve_path_within_directory(
+        Path(script_path),
+        temp_dir,
+        error_message="Invalid script path - potential path traversal",
+    )
     
     # Create subprocess
     # COMMENTED: Reduces log noise during script execution
@@ -479,7 +491,9 @@ async def _execute_script(
         try:
             if script_path_obj.exists():
                 script_path_obj.unlink()
-        except Exception:
+        except FileNotFoundError:
+            pass
+        except OSError:
             logger.debug(f"[{process_id}] Failed to clean up temp script: {script_path_obj}")
 
 
