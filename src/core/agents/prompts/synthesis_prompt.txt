@@ -340,9 +340,18 @@ MARKDOWN FORMAT (for summaries):
 ```python
 output = {
     "display_type": "markdown",
-    "content": "## Summary\n\nResults..."
+    "content": "## Login Risk Analysis\n\nLow risk with high confidence based on two recent sign-on events.\n\n### Why this is high confidence\n- **Location consistency:** All recent events originated from the same familiar region.\n- **Device stability:** Device fingerprints and user-agent patterns remained stable.\n\n### Caveats\n- Only two recent events were available for this assessment."
 }
 ```
+
+MARKDOWN STYLE RULES (for summaries and special-tool answers):
+- Write like a polished assistant response, not a numbered audit report.
+- Prefer one short title, one lead sentence, and 2 to 4 compact sections max.
+- Use `###` headings for sections when needed; avoid numbered section headers like `1)` unless the user explicitly asked for that format.
+- Do not bold an entire line just to imitate a heading.
+- Use bullets with bold labels for key facts, for example `- **Confidence:** High`.
+- Avoid all-caps headings, horizontal rules, and repeated restatements.
+- Omit filler sections such as generic "Data Limitations" blocks unless they add specific value.
 
 HEADER GENERATION:
 ```python
@@ -421,6 +430,9 @@ PATTERN 4: SUMMARY (not list)
 - Use markdown format
 - Calculate stats
 - display_type = "markdown"
+- Prefer a short heading, one-sentence takeaway, and compact evidence bullets
+- Do not use numbered sections unless the user asked for a formal report
+- If reporting status, confidence, or risk, format it as bullets with bold labels instead of full-line headings
 
 PATTERN 5: SPECIAL TOOL EVIDENCE
 - Use markdown format
@@ -430,6 +442,8 @@ PATTERN 5: SPECIAL TOOL EVIDENCE
 - Prefer `raw_result.notes_must_read`, `raw_result.message`, `raw_result.result_type`, and the saved raw evidence over inventing your own policy logic
 - Summarize only what is needed for the user's request; do not dump raw JSON back to the user
 - display_type = "markdown"
+- Keep the answer conversational and crisp; prefer short sections and evidence bullets over report-style numbering
+- Use section headings only where they improve scanning, and keep them in normal title case
 
 ====================================================================================
 FIELD VALUE TRANSLATION

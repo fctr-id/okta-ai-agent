@@ -14,7 +14,7 @@ import ast
 
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, UsageLimits
 from pydantic import BaseModel, Field
-from typing import Optional, Callable, Awaitable, List
+from typing import Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass, field
 from pathlib import Path
 import time
@@ -108,11 +108,30 @@ def validate_synthesis_output(result: SynthesisResult) -> SynthesisResult:
         if result.display_type not in {"table", "markdown"}:
             raise ModelRetry("display_type must be 'table' or 'markdown'")
         try:
-            ast.parse(script_code)
+            parsed = ast.parse(script_code)
         except SyntaxError as exc:
             raise ModelRetry(
                 f"Synthesis output must be valid Python syntax: {exc.msg} at line {exc.lineno}"
             ) from exc
+
+        executable_nodes = [
+            node
+            for node in parsed.body
+            if not (
+                isinstance(node, ast.Expr)
+                and isinstance(getattr(node, "value", None), ast.Constant)
+                and isinstance(getattr(node.value, "value", None), str)
+            )
+        ]
+        if not executable_nodes:
+            raise ModelRetry(
+                "Synthesis output must contain executable Python statements, not only comments or a docstring"
+            )
+
+        if "QUERY RESULTS" not in script_code:
+            raise ModelRetry(
+                "Synthesis output must print JSON between the exact 'QUERY RESULTS' markers expected by the runtime parser"
+            )
         return result
 
     if not result.error:
@@ -131,7 +150,7 @@ def validate_synthesis_output(result: SynthesisResult) -> SynthesisResult:
 async def execute_synthesis(
     user_query: str,
     deps: SynthesisDeps
-) -> SynthesisResult:
+) -> tuple[SynthesisResult, Any]:
     """
     Execute synthesis phase - generate final script.
     
@@ -173,7 +192,7 @@ async def execute_synthesis(
             return SynthesisResult(
                 success=False,
                 error="No artifacts found from previous phases"
-            )
+            ), None
         
         # Notify: Loading artifacts
         if deps.tool_call_callback:
@@ -307,4 +326,4 @@ db_path = next((p for p in possible_paths if p.exists()), None)
         return SynthesisResult(
             success=False,
             error=str(e)
-        )
+        ), None

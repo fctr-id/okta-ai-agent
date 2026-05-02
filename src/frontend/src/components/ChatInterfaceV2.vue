@@ -2684,7 +2684,7 @@ onMounted(() => {
 
 .compact-results {
     width: 100%;
-    max-width: 900px;
+    max-width: none;
     margin-left: auto;
     margin-right: auto;
     background: transparent;

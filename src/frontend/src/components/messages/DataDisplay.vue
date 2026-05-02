@@ -1,7 +1,9 @@
 <template>
     <div class="data-display">
         <!-- Text Message Display -->
-        <div v-if="isTextData" class="markdown-content" v-html="renderedMarkdown"></div>
+        <div v-if="isTextData" class="markdown-shell">
+            <div class="markdown-content" v-html="renderedMarkdown"></div>
+        </div>
 
         <!-- JSON Data Display -->
         <div v-else-if="isJsonData" class="json-content">
@@ -123,12 +125,15 @@ const renderedMarkdown = computed(() => {
   
   // Process the content to fix line breaks in paragraphs while preserving formatting
   const processedContent = props.content
+        // Preserve heading boundaries so heading styling does not absorb the next paragraph.
+        .replace(/^(#{1,6}[ \t]+.+)\n(?=\S)/gm, '$1__MD_HEADING_BREAK__')
     // Fix line breaks in the middle of sentences (before lists and sections)
     .replace(/([a-zA-Z0-9.,:;)"])\n\n([0-9]+\.\s+)/g, '$1\n\n$2')
     // Fix line breaks in the middle of paragraphs
     .replace(/([a-zA-Z0-9.,;:)])(\n)([a-zA-Z0-9(])/g, '$1 $3')
     // Fix extra line breaks between list items
-    .replace(/\n{3,}/g, '\n\n');
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/__MD_HEADING_BREAK__/g, '\n');
     
   return marked.parse(processedContent);
 });
@@ -865,19 +870,49 @@ const downloadCSV = () => {
 }
 
 /* Compact markdown styling - text-first results */
-.markdown-content {
-    padding: 22px 24px;
-    line-height: 1.7;
-    font-size: 14.5px;
-    color: #1e293b;
+.markdown-shell {
     width: 100%;
-    max-width: 900px;
-    overflow-wrap: break-word;
-    background-color: rgba(255, 255, 255, 0.96);
-    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.96);
     border: 1px solid var(--border-color);
+    border-radius: 14px;
     box-shadow: none;
-    animation: fade-in-up 0.5s ease-out;
+    padding: 24px 28px;
+    font-family: var(--font-family-body);
+}
+
+.markdown-content {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    line-height: 1.78;
+    font-size: 15px;
+    color: #0f172a;
+    overflow-wrap: anywhere;
+    background: transparent;
+    border-radius: 0;
+    border: 0;
+    box-shadow: none;
+    animation: fade-in-up 0.4s ease-out;
+    font-family: inherit;
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4),
+.markdown-content :deep(p),
+.markdown-content :deep(ul),
+.markdown-content :deep(ol),
+.markdown-content :deep(li),
+.markdown-content :deep(strong),
+.markdown-content :deep(em),
+.markdown-content :deep(blockquote),
+.markdown-content :deep(a),
+.markdown-content :deep(table),
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+    font-family: inherit;
 }
 
 @keyframes fade-in-up {
@@ -885,15 +920,32 @@ const downloadCSV = () => {
     to { opacity: 1; transform: translateY(0); }
 }
 
-/* Headings with modern styling */
-.markdown-content :deep(h1), 
-.markdown-content :deep(h2), 
-.markdown-content :deep(h3), 
+/* Markdown answers should read like assistant prose, not boxed reports */
+.markdown-content :deep(h1),
+.markdown-content :deep(h2) {
+    margin: 0 0 0.9rem;
+    font-weight: 650;
+    color: #0f172a;
+    line-height: 1.15;
+    letter-spacing: -0.025em;
+}
+
+.markdown-content :deep(h1) {
+    font-size: 1.7rem;
+}
+
+.markdown-content :deep(h2) {
+    font-size: 1.45rem;
+}
+
+.markdown-content :deep(h3),
 .markdown-content :deep(h4) {
-  margin: 1rem 0 0.5rem;
-  font-weight: 500;
-  color: #1f2937;
-  line-height: 1.3;
+    margin: 1.35rem 0 0.45rem;
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: #475569;
+    line-height: 1.35;
+    letter-spacing: 0.08em;
 }
 
 .markdown-content :deep(h1:first-child),
@@ -904,73 +956,72 @@ const downloadCSV = () => {
     margin-top: 0;
 }
 
-.markdown-content :deep(h3) {
-  font-size: 1.15rem;
-  padding-bottom: 0.4rem;
-  border-bottom: 1px solid #e5e7eb;
+.markdown-content :deep(h1 + p),
+.markdown-content :deep(h2 + p) {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    font-size: 1.04rem;
+    line-height: 1.75;
+    color: #334155;
 }
 
 /* Tighter paragraph and list spacing */
-.markdown-content :deep(p), 
-.markdown-content :deep(ul), 
+.markdown-content :deep(p),
+.markdown-content :deep(ul),
 .markdown-content :deep(ol) {
-  margin-bottom: 0.6rem;
-  margin-top: 0.4rem;
+    margin: 0.72rem 0;
 }
 
 /* Compact lists without extra spacing */
-.markdown-content :deep(ul), 
+.markdown-content :deep(ul),
 .markdown-content :deep(ol) {
-  padding-left: 1.25rem;
-  margin-top: 0.3rem;
-  margin-bottom: 0.5rem;
+    padding-left: 1.15rem;
 }
 
-/* Fix spacing between main list items (users) */
-.markdown-content :deep(ul > li) {
-  margin-top: 0.5rem;
-  margin-bottom: 0.5rem;
+.markdown-content :deep(li) {
+    margin: 0.34rem 0;
+    padding-left: 0.15rem;
+    line-height: 1.65;
 }
 
-/* First user shouldn't have top margin */
-.markdown-content :deep(ul > li:first-child) {
-  margin-top: 0;
+.markdown-content :deep(li::marker) {
+    color: #64748b;
 }
 
-/* Fix nested list spacing */
 .markdown-content :deep(ul ul),
 .markdown-content :deep(ul ol) {
-  margin-top: 0.1rem;
+    margin-top: 0.2rem;
   margin-bottom: 0;
   padding-left: 1rem;
 }
 
-/* Reduce spacing in nested list items */
 .markdown-content :deep(li li) {
-  margin: 0.1rem 0;
-}
-
-/* Default list item spacing */
-.markdown-content :deep(li) {
-  margin-bottom: 0.2rem;
-  line-height: 1.4;
+    margin: 0.18rem 0;
 }
 
 .markdown-content :deep(li:last-child) {
   margin-bottom: 0;
 }
 
-/* User listing specific styling */
+.markdown-content :deep(strong) {
+    font-weight: 650;
+    color: #0f172a;
+}
+
+/* Keep bold labels inline so they do not render as fake report headings */
+.markdown-content :deep(p strong),
 .markdown-content :deep(li strong) {
-  display: inline-block;
-  padding-bottom: 0.1rem;
+    display: inline;
+    padding: 0;
+    margin: 0;
+    border: 0;
 }
 
 /* Modern code styling - slightly darker background to stand out */
 .markdown-content :deep(code) {
-  background: #f1f5f9;
-  padding: 0.2em 0.4em;
-  border-radius: 4px;
+    background: #f8fafc;
+    padding: 0.18em 0.42em;
+    border-radius: 6px;
   font-family: 'SF Mono', 'Courier New', monospace;
   font-size: 0.9em;
     color: var(--primary);
@@ -978,63 +1029,72 @@ const downloadCSV = () => {
 }
 
 .markdown-content :deep(pre) {
-  background: #f1f5f9;
-  padding: 0.8em;
-  border-radius: 8px;
+    background: #f8fafc;
+    padding: 0.95em 1rem;
+    border-radius: 12px;
   overflow-x: auto;
-  margin: 0.8em 0;
-  border: 1px solid #e2e8f0;
+    margin: 1em 0;
+    border: 1px solid rgba(148, 163, 184, 0.2);
     box-shadow: none;
 }
 
 /* Enhanced table styling */
 .markdown-content :deep(table) {
-  border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
   width: 100%;
-  margin: 0.8em 0;
+    margin: 1em 0;
   font-size: 0.95em;
     box-shadow: none;
-  border-radius: 8px;
+    border-radius: 12px;
   overflow: hidden;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: #ffffff;
 }
 
 .markdown-content :deep(th) {
-  background-color: #f1f5f9;
-  font-weight: 500;
-  color: #4b5563;
-  border: 1px solid #e5e7eb;
-  padding: 8px 10px;
+    background-color: #f8fafc;
+    font-weight: 600;
+    color: #475569;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+    padding: 10px 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.72rem;
 }
 
 .markdown-content :deep(td) {
-  border: 1px solid #e5e7eb;
-  padding: 8px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+    padding: 10px 12px;
   background-color: #fff;
+}
+
+.markdown-content :deep(tr:last-child td) {
+    border-bottom: 0;
 }
 
 /* Remove special background for first paragraph */
 .markdown-content :deep(p):first-of-type {
-  font-weight: 500;
+    font-weight: 400;
   padding: 0;
   margin-bottom: 1rem;
   border: none;
   background-color: transparent;
 }
 
-.markdown-content :deep(p) strong {
-  font-weight: 600;
-  color: #1f2937;
-  display: block;
-  margin-top: 0.8rem;
-  margin-bottom: 0.3rem;
-  padding-bottom: 0.2rem;
-  border-bottom: 1px solid #e5e7eb;
+/* Fix adjacent list spacing */
+.markdown-content :deep(ul + p),
+.markdown-content :deep(ol + p) {
+    margin-top: 0.8rem;
 }
 
-/* Fix adjacent list spacing */
-.markdown-content :deep(ul) + :deep(p),
-.markdown-content :deep(ol) + :deep(p) {
-  margin-top: 0.6rem;
+.markdown-content :deep(blockquote) {
+    margin: 1rem 0;
+    padding: 0.15rem 0 0.15rem 1rem;
+    border-left: 2px solid rgba(var(--primary-rgb), 0.2);
+    color: #334155;
+    background: rgba(var(--primary-rgb), 0.04);
+    border-radius: 0 10px 10px 0;
 }
 
 /* Clean links */
@@ -1050,8 +1110,8 @@ const downloadCSV = () => {
 }
 
 /* Container when inside cards or boxes */
-.final-results .markdown-content {
-    padding: 22px 24px;
+.final-results .markdown-shell {
+    padding: 24px 28px;
 }
 
 /* Responsive adjustments */
@@ -1072,8 +1132,26 @@ const downloadCSV = () => {
 }
 
 @media (max-width: 768px) {
+    .markdown-shell {
+        padding: 20px 18px;
+    }
+
     .right-section {
         flex-direction: row-reverse;
+    }
+
+    .markdown-content {
+        max-width: 100%;
+        font-size: 14.25px;
+        line-height: 1.72;
+    }
+
+    .markdown-content :deep(h1) {
+        font-size: 1.48rem;
+    }
+
+    .markdown-content :deep(h2) {
+        font-size: 1.28rem;
     }
 
     .search-field {
@@ -1083,6 +1161,11 @@ const downloadCSV = () => {
 }
 
 @media (max-width: 480px) {
+    .markdown-shell {
+        padding: 18px 14px;
+        border-radius: 12px;
+    }
+
     .left-section {
         flex-wrap: wrap;
         gap: 8px;
