@@ -59,58 +59,6 @@ Tako is a harness-engineered agentic system for Okta, built to make identity wor
 
 *Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download*
 
-### 🔧 CLI Tools for Automation
-
-Tako includes command-line tools designed for non-interactive scenarios:
-
-**Tako CLI (`tako-cli.py`)**
-
-**Local Installation:**
-```bash
-# Run queries from command line
-python scripts/tako-cli.py "list all users created in last 30 days"
-
-# Generate reusable scripts
-python scripts/tako-cli.py "show suspended users" --scriptonly
-
-# Export results as CSV
-python scripts/tako-cli.py "find users with MFA enabled" --csv
-```
-
-**Docker Installation:**
-```bash
-# Run queries from command line
-docker exec okta-ai-agent python scripts/tako-cli.py "list all users created in last 30 days"
-
-# Generate reusable scripts
-docker exec okta-ai-agent python scripts/tako-cli.py "show suspended users" --scriptonly
-
-# Export results as CSV
-docker exec okta-ai-agent python scripts/tako-cli.py "find users with MFA enabled" --csv
-```
-> **Note:** The ".env file not found" warning when using `docker exec` is harmless - environment variables are already loaded by docker-compose.
-**Sync CLI (`sync_okta_to_db.py`)**
-
-**Local Installation:**
-```bash
-# Scheduled database sync for automation
-python scripts/sync_okta_to_db.py
-```
-
-**Docker Installation:**
-```bash
-docker exec okta-ai-agent python scripts/sync_okta_to_db.py
-```
-
-**Use Cases:**
-- **Cron Jobs** - Schedule daily/weekly reports or data syncs
-- **Scheduled Tasks** - Automate compliance checks and audits
-- **Script Generation** - Generate portable Python scripts for recurring queries
-- **CI/CD Integration** - Embed Okta data validation in pipelines
-- **Batch Processing** - Process large datasets without UI interaction
-
-All generated scripts are self-contained and portable within the project structure.
-
 ## 🆕 What Makes Tako Different?
 
 ### **Harness Engineering for Agentic Systems**
@@ -263,6 +211,60 @@ docker compose logs -f
 # Open browser
 https://localhost:8001
 ```
+
+## 🔧 CLI Tools for Automation
+
+Tako includes command-line tools designed for non-interactive scenarios once your environment is already set up.
+
+**Tako CLI (`tako-cli.py`)**
+
+**Local Installation:**
+```bash
+# Run queries from command line
+python scripts/tako-cli.py "list all users created in last 30 days"
+
+# Generate reusable scripts
+python scripts/tako-cli.py "show suspended users" --scriptonly
+
+# Export results as CSV
+python scripts/tako-cli.py "find users with MFA enabled" --csv
+```
+
+**Docker Installation:**
+```bash
+# Run queries from command line
+docker exec okta-ai-agent python scripts/tako-cli.py "list all users created in last 30 days"
+
+# Generate reusable scripts
+docker exec okta-ai-agent python scripts/tako-cli.py "show suspended users" --scriptonly
+
+# Export results as CSV
+docker exec okta-ai-agent python scripts/tako-cli.py "find users with MFA enabled" --csv
+```
+
+> **Note:** The ".env file not found" warning when using `docker exec` is harmless - environment variables are already loaded by docker-compose.
+
+**Sync CLI (`sync_okta_to_db.py`)**
+
+**Local Installation:**
+```bash
+# Scheduled database sync for automation
+python scripts/sync_okta_to_db.py
+```
+
+**Docker Installation:**
+```bash
+docker exec okta-ai-agent python scripts/sync_okta_to_db.py
+```
+
+**Use Cases:**
+- **Cron Jobs** - Schedule daily/weekly reports or data syncs
+- **Scheduled Tasks** - Automate compliance checks and audits
+- **Script Generation** - Generate portable Python scripts for recurring queries
+- **CI/CD Integration** - Embed Okta data validation in pipelines
+- **Batch Processing** - Process large datasets without UI interaction
+
+All generated scripts are self-contained and portable within the project structure.
 
 ## 💬 Slack Bot Integration
 
