@@ -1163,6 +1163,50 @@ async def stream_react_updates(
                     execution_succeeded = True
                     final_execution_event = execution_event
 
+                if execution_event.get("type") == "ERROR":
+                    final_execution_event = execution_event
+
+            if not execution_succeeded or not final_execution_event:
+                failure_reason = (
+                    result.error
+                    or "Generated script finished without producing parseable query results."
+                )
+                logger.error(f"[{process_id}] Phase 3 failed: {failure_reason}")
+
+                execution_error = {
+                    "type": "STEP-END",
+                    "step": "execution",
+                    "title": "Execution Failed",
+                    "text": failure_reason,
+                    "success": False,
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(execution_error)}\n\n"
+
+                error_event = {
+                    "type": "ERROR",
+                    "error": failure_reason,
+                    **result.outcome_metadata(),
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+
+                process["status"] = "error"
+                update_turn_metadata(
+                    runtime_paths,
+                    status="error",
+                    error=failure_reason,
+                    completed_at=time.time(),
+                )
+                await mirror_runtime_state()
+
+                done_event = {
+                    "type": "DONE",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
+                return
+
             # Note: Cleanup disabled - scripts kept in generated_scripts/ for debugging
             logger.debug(f"[{process_id}] Script retained for debugging: {script_path}")
             
