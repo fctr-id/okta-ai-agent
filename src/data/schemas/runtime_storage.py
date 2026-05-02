@@ -8,6 +8,7 @@ and should not be part of the long-lived turn contract by default.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import asdict, dataclass
@@ -52,6 +53,18 @@ def sanitize_path_part(value: str, *, fallback: str = "unknown") -> str:
     return cleaned[:96] or fallback
 
 
+def _resolve_path_within_root(root: Path, *parts: str) -> Path:
+    """Resolve a runtime path and ensure it stays within the configured root."""
+    resolved_root = Path(os.path.realpath(root))
+    candidate = Path(os.path.realpath(resolved_root.joinpath(*parts)))
+    try:
+        if os.path.commonpath([str(resolved_root), str(candidate)]) != str(resolved_root):
+            raise ValueError("Invalid runtime path - potential path traversal")
+    except ValueError as exc:
+        raise ValueError("Invalid runtime path - potential path traversal") from exc
+    return candidate
+
+
 def create_runtime_turn_paths(
     *,
     user_id: str,
@@ -65,10 +78,19 @@ def create_runtime_turn_paths(
     safe_session_id = sanitize_path_part(session_id or run_id, fallback="session")
     safe_run_id = sanitize_path_part(run_id, fallback="run")
 
-    session_dir = root / "sessions" / f"{safe_user_id}-{safe_session_id}"
-    turns_dir = session_dir / "turns"
+    session_key = f"{safe_user_id}-{safe_session_id}"
+    session_parts = ("sessions", session_key)
+    turns_parts = session_parts + ("turns",)
+
+    session_dir = _resolve_path_within_root(root, *session_parts)
+    turns_dir = _resolve_path_within_root(root, *turns_parts)
     resolved_turn_number = turn_number if turn_number is not None else _next_turn_number(turns_dir)
-    turn_dir = turns_dir / f"{resolved_turn_number:04d}-{safe_run_id}"
+    turn_key = f"{resolved_turn_number:04d}-{safe_run_id}"
+    turn_parts = turns_parts + (turn_key,)
+    artifacts_parts = turn_parts + ("artifacts",)
+    results_parts = turn_parts + ("results",)
+
+    turn_dir = _resolve_path_within_root(root, *turn_parts)
 
     paths = RuntimeTurnPaths(
         user_id=safe_user_id,
@@ -77,14 +99,14 @@ def create_runtime_turn_paths(
         turn_number=resolved_turn_number,
         session_dir=session_dir,
         turn_dir=turn_dir,
-        artifacts_dir=turn_dir / "artifacts",
-        results_dir=turn_dir / "results",
-        session_metadata_file=session_dir / "session_metadata.json",
-        conversation_index_file=session_dir / "conversation_index.json",
-        turn_metadata_file=turn_dir / "turn_metadata.json",
-        turn_summary_file=turn_dir / "turn_summary.json",
-        artifacts_file=turn_dir / "artifacts" / "artifacts.json",
-        result_index_file=turn_dir / "results" / "index.json",
+        artifacts_dir=_resolve_path_within_root(root, *artifacts_parts),
+        results_dir=_resolve_path_within_root(root, *results_parts),
+        session_metadata_file=_resolve_path_within_root(root, *session_parts, "session_metadata.json"),
+        conversation_index_file=_resolve_path_within_root(root, *session_parts, "conversation_index.json"),
+        turn_metadata_file=_resolve_path_within_root(root, *turn_parts, "turn_metadata.json"),
+        turn_summary_file=_resolve_path_within_root(root, *turn_parts, "turn_summary.json"),
+        artifacts_file=_resolve_path_within_root(root, *artifacts_parts, "artifacts.json"),
+        result_index_file=_resolve_path_within_root(root, *results_parts, "index.json"),
     )
 
     for directory in (

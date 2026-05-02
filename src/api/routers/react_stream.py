@@ -21,6 +21,7 @@ Event Types:
 
 import asyncio
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -140,10 +141,11 @@ def _build_turn_output_summary(complete_event: Optional[Dict[str, Any]]) -> str:
 
 
 def _resolve_path_within_directory(path: Path, directory: Path, *, error_message: str) -> Path:
-    resolved_directory = directory.resolve()
-    resolved_path = path.resolve()
+    resolved_directory = Path(os.path.realpath(directory))
+    resolved_path = Path(os.path.realpath(path))
     try:
-        resolved_path.relative_to(resolved_directory)
+        if os.path.commonpath([str(resolved_directory), str(resolved_path)]) != str(resolved_directory):
+            raise ValueError(error_message)
     except ValueError as exc:
         raise ValueError(error_message) from exc
     return resolved_path
@@ -282,9 +284,10 @@ def _write_temp_script(process_id: str, code: str) -> str:
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
     temp_dir = (project_root / "generated_scripts").resolve()
     temp_dir.mkdir(parents=True, exist_ok=True)
+    script_filename = f"react_execution_{uuid.uuid4().hex}.py"
 
     script_path = _resolve_path_within_directory(
-        temp_dir / f"react_execution_{process_id}.py",
+        temp_dir / script_filename,
         temp_dir,
         error_message="Invalid script path - potential path traversal",
     )

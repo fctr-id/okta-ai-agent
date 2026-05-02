@@ -476,10 +476,8 @@ def build_result_set_id(
 
 
 def _safe_id_part(value: str) -> str:
-    import hashlib
-
     cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip()).strip("._-") or "artifact"
-    digest = hashlib.sha1(cleaned.encode("utf-8")).hexdigest()[:8]
+    digest = _short_stable_digest(cleaned)
     return f"{cleaned[:24]}_{digest}"
 
 
@@ -500,7 +498,13 @@ def _runtime_scope_suffix(
     ).strip(":")
     if not scope_seed:
         return ""
-    return hashlib.sha1(scope_seed.encode("utf-8")).hexdigest()[:8]
+    return _short_stable_digest(scope_seed)
+
+
+def _short_stable_digest(value: str, *, length: int = 12) -> str:
+    import hashlib
+
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:length]
 
 
 def _infer_entity_type(artifact: Dict[str, Any]) -> Optional[str]:
