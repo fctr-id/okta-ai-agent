@@ -1,42 +1,49 @@
 <div align="center">
   <a href="https://fctr.io">
-    <img src="./media/fctr-wordmark.svg" alt="fctr.io" width="180" height="auto">
+    <img src="./media/fctr-stacked-logo.png" alt="Fctr" width="72">
   </a>
 
-  <br />
-
-  [![Python](https://img.shields.io/badge/python-3.11+-blue.svg?style=flat-square&logo=python&logoColor=white)](https://python.org)
-  [![Docker](https://img.shields.io/badge/docker-ready-blue.svg?style=flat-square&logo=docker&logoColor=white)](docker-compose.yml)
-  [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](http://makeapullrequest.com)
-  [![Stars](https://img.shields.io/github/stars/fctr-id/okta-ai-agent?style=social)](https://github.com/fctr-id/okta-ai-agent/stargazers)
-
-  <br />
-  
+  <h1>TAKO AI Agent for Okta</h1>
   <p><em>Built by the Fctr Identity team • Not affiliated with Okta</em></p>
-  <br/>
-  
-  <h1>Tako AI Agent for Okta (v2.2-beta)</h1>
-  
-  <p><a href="VERSION.md">📋 Changelog →</a></p>
 
-  <br/>
+  <p>
+    <a href="VERSION.md">
+      <img src="https://img.shields.io/badge/NEW%20in%20v3.0--alpha-Dynamic%20Routing%20%2B%20Multi--Turn%20Harness-0F766E?style=for-the-badge" alt="New in v3.0-alpha: Dynamic Routing and Multi-Turn Harness" />
+    </a>
+  </p>
 
-  <a href="https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide">
-    <img src="https://img.shields.io/badge/%F0%9F%92%AC%20NEW%20in%20v2.2-Slack%20Bot%20Integration-4A154B?style=for-the-badge&logo=slack&logoColor=white" alt="New: Slack Bot Integration" />
-  </a>
+  <p>
+    <a href="https://python.org">
+      <img src="https://img.shields.io/badge/python-3.11+-blue.svg?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
+    </a>
+    <a href="docker-compose.yml">
+      <img src="https://img.shields.io/badge/docker-ready-blue.svg?style=flat-square&logo=docker&logoColor=white" alt="Docker Ready">
+    </a>
+    <a href="http://makeapullrequest.com">
+      <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square" alt="PRs Welcome">
+    </a>
+    <a href="https://github.com/fctr-id/okta-ai-agent/stargazers">
+      <img src="https://img.shields.io/github/stars/fctr-id/okta-ai-agent?style=flat-square&label=stars" alt="GitHub Stars">
+    </a>
+  </p>
 
 </div>
 
 ## What is Tako?
 
-The world's first Autonomous AI Engineer for Okta. Built on the ReAct (Reason and Act) pattern, Tako doesn't just answer questions—it thinks, writes code, and self-heals errors in real-time to deliver deterministic, production-ready results.
+Tako is a harness-engineered agentic system for Okta, built to make identity work feel a lot more natural. You ask a question in plain English, and Tako figures out the best way to answer it, whether that means using synced data, calling the API, running a special tool, or building on something you already asked.
+
+**New in v3.0-alpha: Harness the Vibe**
+
+- 🧭 **Dynamic Agent Routing** - A supervisor-led control plane now routes each turn across SQL Discovery, API Discovery, Special Tools, Result Analysis, and Synthesis instead of forcing every request through a fixed chain.
+- 🧠 **Multi-Turn Conversation** - Session-scoped runtime state and persisted result-set references let follow-up turns reuse prior artifacts, preserve anchored context, and continue the same investigation without rediscovery.
+- ✨ **UI Overhaul** - The interface was rebuilt around wider markdown, cleaner tables, clearer progress updates, and more readable synthesis output for longer multi-step workflows.
 
 ---
 
 ### Key Features
 
 - 🗣️ **Natural Language Queries** - Ask questions in plain English, get instant results
-- 🤖 **Multi-Agent Committee** - Specialized agents working in concert for accurate results
 - 💬 **Slack Bot Integration** - Query Okta from any Slack channel via `/tako`. Opt-in — disabled by default. ([Setup guide →](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide))
 - 📜 **Query History & Favorites** - Access last 10 queries and save favorites for quick reuse
 - 🔧 **CLI Tools for Automation** - Enables unattended runs, cron jobs, and script generation
@@ -44,7 +51,8 @@ The world's first Autonomous AI Engineer for Okta. Built on the ReAct (Reason an
 - 🛡️ Multi-layer security - Security validation at every code generation point
 - 🐳 Easy deployment - Docker support for AMD64 and ARM64 platforms
 
-> **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected. 
+> **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected.
+
 ### See Tako in Action (click image below)
 
 [![Tako AI Agent Demo](https://img.youtube.com/vi/TCzJEAvLYpM/0.jpg)](https://www.youtube.com/watch?v=TCzJEAvLYpM)
@@ -105,11 +113,23 @@ All generated scripts are self-contained and portable within the project structu
 
 ## 🆕 What Makes Tako Different?
 
+### **Harness Engineering for Agentic Systems**
+Tako now does a better job of choosing how to answer each request. Instead of always following the same path, it looks at the question, the available context, and any earlier results before deciding what to do next.
+
 ### **Self-Healing Code**
 Tako auto-corrects syntax errors, validates API parameters against Okta's spec, and retries intelligently when issues occur. Built-in circuit breakers prevent runaway loops, while automatic error tracking reports exactly what failed and why - eliminating trial-and-error cycles.
 
 ### **Cost-Effective Intelligence**
-Run on lightweight, low-cost models (Gemini 3 Flash, Claude 4.5 Haiku, GPT-4.1) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's structured multi-agent workflow.
+Run on lightweight, low-cost models (Gemini 3 Flash, Claude Haiku 4.5, GPT-5.4 mini) and reduce AI costs by 10-50x compared to premium models, while maintaining enterprise-grade accuracy through Tako's structured agentic harness.
+
+### **Current Agentic System**
+- **Supervisor** - Dynamic control plane for turn-by-turn routing and completion decisions
+- **SQL Discovery** - Pulls grounded evidence from the synced SQLite dataset
+- **API Discovery** - Fetches live Okta data when SQL is insufficient or real-time answers are required
+- **Special Tools** - Runs targeted workflows such as access analysis and login-risk analysis
+- **Result Analysis** - Interprets prior artifacts and anchored follow-up scope for multi-turn conversations
+- **Synthesis** - Produces final markdown, scripts, and portable outputs from validated artifacts
+- **Router Agent Retired** - The legacy Router agent has been deprecated in favor of supervisor-led dynamic routing
 
 ### **Flexible Data Access**
 - **API Mode** - Real-time Okta API calls (no database sync required)
@@ -246,7 +266,7 @@ https://localhost:8001
 
 ## 💬 Slack Bot Integration
 
-Tako v2.2 brings your Okta AI agent directly into Slack. Query your entire Okta tenant in plain English from any channel — no context switching, no extra tabs.
+Tako also works in Slack, so you can query your Okta tenant from any channel without switching back to the web app.
 
 > **Opt-in feature** — disabled by default. Set `ENABLE_SLACK_BOT=true` in your `.env` to activate.
 
@@ -280,9 +300,9 @@ Tako v2.2 brings your Okta AI agent directly into Slack. Query your entire Okta 
 
 ---
 
-## 🔄 Migration from v1.x
+## 🔄 Migration Notes
 
-**v2.0.0 includes complete architecture rewrite and schema changes that require database recreation:**
+**If you are upgrading from v1.x to any v2.x or v3.x build, the v2.0 database recreation step still applies:**
 
 ```bash
 # 1. Stop the running container
@@ -301,8 +321,8 @@ docker compose up -d
 # https://localhost:8001 → Click "Sync" button
 ```
 
-**What changed:**
-- **Complete architecture rewrite**: New multi-agent committee system
+**What changed at that boundary:**
+- **Architecture foundation**: The original multi-agent system introduced in v2.0 has now evolved into the v3.0-alpha supervisor-led harness with SQL, API, special-tools, result-analysis, and synthesis specialists
 - **App assignment overhaul**: `user_application_assignments` schema redesigned with group attribution
 - **New fields**: `assignment_type`, `group_name`, `group_okta_id`, `assignment_status`
 - **Sync order**: Groups → Users → Apps
@@ -326,7 +346,7 @@ docker compose up -d
 
 ### Supported Providers
 
-OpenAI, Google Vertex AI, Anthropic, Azure OpenAI, AWS Bedrock, Ollama (local), and OpenAI-compatible APIs.
+OpenAI, Google AI Studio, Google Vertex AI, Anthropic, Azure OpenAI, AWS Bedrock, Ollama (local), and OpenAI-compatible APIs.
 
 **Dual Model Architecture:** Use separate models for reasoning and code generation to optimize costs.
 
@@ -334,19 +354,18 @@ OpenAI, Google Vertex AI, Anthropic, Azure OpenAI, AWS Bedrock, Ollama (local), 
 
 These model classes have been validated for stability and cost/performance trade-offs (you can still use others):
 
-**Coding Models **
-- Claude Hailu 4.5
+**Coding Models**
+- Claude Haiku 4.5
 - **Gemini Flash 3**
-- **Gemini Flash 2.5**
-- GPT-4.1
+- GPT-5.4 mini
 - Claude Sonnet 4
 - Gemini 2.5 Pro
 - OpenAI GPT-OSS 120B
 
-**Reasoning Models (Sumarization for certain tools)**
-- **GPT-o4-mini** - (preferred)
+**Reasoning Models (Summarization for certain tools)**
+- **GPT-5.4** -
 - OpenAI GPT-OSS 120B
-- Claude Sonnet 4
+- Claude Sonnet 4.6
 - Gemini 3 Pro
 - Gemini 2.5 Pro
 - O3 - Advanced reasoning capabilities (very expensive)
@@ -355,7 +374,7 @@ These model classes have been validated for stability and cost/performance trade
 
 
 **Notes:**
-- **React pattern models**: Start with smaller lighter models and move up if those don't work for you
+- **ReAct pattern models**: Start with smaller lighter models and move up if those don't work for you
 - **Provider variability**: slight output format differences are normal
 - You can override any pairing via environment variables
 
@@ -422,8 +441,7 @@ When using Database Mode, Tako syncs these entities to local SQLite:
 - 📋 [Version History](VERSION.md)
 
 ### Current Status
-- **Beta Release** - Not for production use
-- **Minimum Version** - Use v1.3-beta or above
+- **Alpha Release** - Preview quality, not for production use
 - **Requirements** - Okta Identity Engine, single tenant
 - **Note** - Large tenants may see longer initial sync times in Database Mode
 

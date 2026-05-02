@@ -1,5 +1,28 @@
 # Version History
 
+## v3.0.0-alpha - "Harness the Vibe"
+
+**Release Date**: May 2, 2026
+
+**Major Themes:**
+- **Dynamic Agent Routing Harness**: Replaced the legacy static router flow with a supervisor-led control plane that decides between SQL, API, special tools, result analysis, and synthesis on each turn.
+- **Multi-Turn Conversation Harness**: Added persisted turn runtime storage, canonical turn outputs, hydrated prior result sets, anchored follow-up scope, and session retention so follow-up questions can build on prior evidence safely.
+- **UI Overhaul**: Reworked the chat experience with cleaner layout, improved scrolling, more polished markdown and table rendering, and clearer progress visibility for long-running workflows.
+
+**Architecture Changes:**
+- **Current agentic system**: Supervisor, SQL Discovery, API Discovery, Special Tools, Result Analysis, and Synthesis
+- **Router agent deprecated**: The legacy Router agent has been retired in favor of supervisor-led dynamic routing
+- **Result analysis promoted**: Result Analysis is now a core specialist for referential follow-ups and artifact-aware multi-turn reasoning
+- **Special tools through synthesis**: Special-tool outputs now flow through the same final synthesis contract as the rest of the system
+
+**Reliability Improvements:**
+- Hardened runtime output parsing, edge-case handling, and failure surfacing
+- Added deterministic orchestration validation and follow-up routing regression coverage
+- Improved canonical turn persistence, session retention, and result hydration behavior
+- Strengthened SQLite sync stability with foreign-key enforcement and follow-up cleanup work
+
+---
+
 ## v2.2.0-beta - "Channel Surfer"
 
 **Release Date**: February 19, 2026
@@ -34,7 +57,7 @@
 - **Execution Analytics**: Track how often favorites are run.
 - **Library Updates**: Updated core dependencies for better stability.
 
-## Current latest: v2.0.5-beta - "Swarm Surge"
+## v2.0.5-beta - "Swarm Surge"
 
 **Release Date**: February 1, 2026
 
