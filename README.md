@@ -8,7 +8,7 @@
 
   <p>
     <a href="VERSION.md">
-      <img src="https://img.shields.io/badge/NEW%20in%20v3.0--alpha-Dynamic%20Routing%20%2B%20Multi--Turn%20Harness-0F766E?style=for-the-badge" alt="New in v3.0-alpha: Dynamic Routing and Multi-Turn Harness" />
+      <img src="https://img.shields.io/badge/NEW%20in%20v3.0--beta-Dynamic%20Routing%20%2B%20Multi--Turn%20Harness-0F766E?style=for-the-badge" alt="New in v3.0-beta: Dynamic Routing and Multi-Turn Harness" />
     </a>
   </p>
 
@@ -33,7 +33,7 @@
 
 Tako is a harness-engineered agentic system for Okta, built to make identity work feel a lot more natural. You ask a question in plain English, and Tako figures out the best way to answer it, whether that means using synced data, calling the API, running a special tool, or building on something you already asked.
 
-**New in v3.0-alpha: Harness the Vibe**
+**New in v3.0-beta: Harness the Vibe**
 
 - 🧭 **Dynamic Agent Routing** - A supervisor-led control plane now routes each turn across SQL Discovery, API Discovery, Special Tools, Result Analysis, and Synthesis instead of forcing every request through a fixed chain.
 - 🧠 **Multi-Turn Conversation** - Session-scoped runtime state and persisted result-set references let follow-up turns reuse prior artifacts, preserve anchored context, and continue the same investigation without rediscovery.
@@ -322,7 +322,7 @@ docker compose up -d
 ```
 
 **What changed at that boundary:**
-- **Architecture foundation**: The original multi-agent system introduced in v2.0 has now evolved into the v3.0-alpha supervisor-led harness with SQL, API, special-tools, result-analysis, and synthesis specialists
+- **Architecture foundation**: The original multi-agent system introduced in v2.0 has now evolved into the v3.0-beta supervisor-led harness with SQL, API, special-tools, result-analysis, and synthesis specialists
 - **App assignment overhaul**: `user_application_assignments` schema redesigned with group attribution
 - **New fields**: `assignment_type`, `group_name`, `group_okta_id`, `assignment_status`
 - **Sync order**: Groups → Users → Apps

@@ -1,25 +1,29 @@
 # Version History
 
-## v3.0.0-alpha - "Harness the Vibe"
+## v3.0.0-beta - "Harness the Vibe"
 
 **Release Date**: May 2, 2026
 
-**Major Themes:**
+This release introduces Tako's new harness-engineered runtime: supervisor-led dynamic routing, durable multi-turn conversation flow, and a cleaner interface for longer investigations. It is the biggest architectural shift since v2.0 and sets the foundation for deeper follow-up analysis without losing context.
+
+🚀 New Features
+
 - **Dynamic Agent Routing Harness**: Replaced the legacy static router flow with a supervisor-led control plane that decides between SQL, API, special tools, result analysis, and synthesis on each turn.
 - **Multi-Turn Conversation Harness**: Added persisted turn runtime storage, canonical turn outputs, hydrated prior result sets, anchored follow-up scope, and session retention so follow-up questions can build on prior evidence safely.
+- **Result Analysis Specialist**: Promoted result analysis into a core specialist for artifact-aware follow-ups and deeper reasoning over prior saved outputs.
+
+🎨 UI Enhancements
+
 - **UI Overhaul**: Reworked the chat experience with cleaner layout, improved scrolling, more polished markdown and table rendering, and clearer progress visibility for long-running workflows.
+- **Clearer Long-Form Output**: Improved synthesis readability for wider markdown, denser tables, and longer multi-step responses.
 
-**Architecture Changes:**
-- **Current agentic system**: Supervisor, SQL Discovery, API Discovery, Special Tools, Result Analysis, and Synthesis
-- **Router agent deprecated**: The legacy Router agent has been retired in favor of supervisor-led dynamic routing
-- **Result analysis promoted**: Result Analysis is now a core specialist for referential follow-ups and artifact-aware multi-turn reasoning
-- **Special tools through synthesis**: Special-tool outputs now flow through the same final synthesis contract as the rest of the system
+🔧 Improvements
 
-**Reliability Improvements:**
-- Hardened runtime output parsing, edge-case handling, and failure surfacing
-- Added deterministic orchestration validation and follow-up routing regression coverage
-- Improved canonical turn persistence, session retention, and result hydration behavior
-- Strengthened SQLite sync stability with foreign-key enforcement and follow-up cleanup work
+- **Router Agent Retired**: The legacy Router agent has been deprecated in favor of supervisor-led dynamic routing.
+- **Unified Synthesis Path**: Special-tool outputs now flow through the same final synthesis contract as the rest of the system.
+- **Runtime Hardening**: Improved final-result parsing, error surfacing, and edge-case handling across the orchestration flow.
+- **Session Reliability**: Strengthened canonical turn persistence, session retention, result hydration, and follow-up continuity.
+- **Sync Stability**: Tightened SQLite sync behavior with foreign-key enforcement fixes and cleanup around follow-up data handling.
 
 ---
 
