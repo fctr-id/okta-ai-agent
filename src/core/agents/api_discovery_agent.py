@@ -11,7 +11,7 @@ Input: SQLDiscoveryResult reasoning + artifacts from SQL phase
 Output: APIDiscoveryResult with success status
 """
 
-from pydantic_ai import Agent, RunContext, FunctionToolset, ToolReturn
+from pydantic_ai import RunContext, FunctionToolset, ModelRetry, ToolReturn, UsageLimits
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -29,11 +29,30 @@ from src.core.agents.agent_callbacks import (
     notify_step_start_to_user,
     notify_step_end_to_user
 )
+from src.core.agents import DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS, build_agent
+from src.core.models.model_picker import ModelType
+from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 
 # Import schema function for database context
 from src.data.schemas.shared_schema import get_okta_database_schema
 
 logger = get_logger("okta_ai_agent")
+
+API_USAGE_LIMITS = UsageLimits(
+    request_limit=12,
+    tool_calls_limit=10,
+)
+
+EVENT_LOOKUP_HINTS = (
+    "system log",
+    "logs",
+    "logins",
+    "login",
+    "events",
+    "event",
+    "authentication",
+    "session",
+)
 
 # Load Okta event types for system log queries
 EVENT_TYPES_PATH = Path("src/data/schemas/Okta_eventTypes.json")
@@ -75,6 +94,9 @@ class APIDiscoveryDeps:
     sql_discovered_data: Optional[str] = None  # JSON string of data SQL found (None if SQL phase skipped)
     sql_needs_api: Optional[List[str]] = None  # Structured list of entities to fetch via API
     sql_found_data: Optional[List[str]] = None  # Structured list of entities already found in SQL
+    followup_scope_summary: Optional[str] = None  # Summary of prior saved result-set scope for follow-up turns
+    followup_scope_context: Optional[str] = None  # JSON string describing the anchored prior result-set scope
+    followup_result_set_refs: Optional[List[str]] = None  # Anchored prior result-set ids to preserve
     okta_client: Any = None  # OktaClient instance
     cancellation_check: callable = None
     endpoints: List[Dict[str, Any]] = None  # Full endpoint details (injected like one_react_agent)
@@ -96,6 +118,7 @@ class APIDiscoveryDeps:
     current_step: int = 5  # Starts after SQL (steps 1-5)
     current_tools: List[Dict[str, str]] = None  # Track tools used in current step
     artifacts: List[Dict] = None  # Artifact storage (shared with orchestrator)
+    allow_event_type_lookup: bool = False
     
     def __post_init__(self):
         """Initialize mutable defaults"""
@@ -189,28 +212,33 @@ def load_lightweight_endpoints() -> Dict[str, Any]:
     return generate_lightweight_onereact_json()
 
 
+def should_allow_event_type_lookup(user_query: str, deps: APIDiscoveryDeps) -> bool:
+    """Only expose event taxonomy lookup when the query or handoff context is log-oriented."""
+    hint_text = " ".join(
+        part
+        for part in [
+            user_query,
+            deps.sql_reasoning or "",
+            " ".join(deps.sql_needs_api or []),
+            " ".join(deps.sql_found_data or []),
+        ]
+        if part
+    ).lower()
+    return any(hint in hint_text for hint in EVENT_LOOKUP_HINTS)
+
+
+def prepare_api_tools(ctx: RunContext[APIDiscoveryDeps], tool_defs: list[Any]) -> list[Any]:
+    """Hide the event taxonomy helper unless the current run is clearly log-oriented."""
+    if ctx.deps.allow_event_type_lookup:
+        return tool_defs
+
+    return [tool_def for tool_def in tool_defs if getattr(tool_def, "name", "") != "get_detailed_events_from_keys"]
+
+
 async def dump_artifacts_to_file(artifacts_file: Path, artifacts: List[dict]):
     """Append to existing artifacts file"""
     try:
-        # Load existing
-        if artifacts_file.exists():
-            with open(artifacts_file, 'r', encoding='utf-8') as f:
-                existing = json.load(f)
-                # Handle both list and dict formats (SQL agent might save dict)
-                if isinstance(existing, dict):
-                    existing = [existing]
-                elif not isinstance(existing, list):
-                    existing = []
-        else:
-            existing = []
-        
-        # Append new
-        existing.extend(artifacts)
-        
-        # Save (pretty-printed for human readability)
-        with open(artifacts_file, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, indent=2, default=str)
-        
+        append_artifacts_with_result_sets(artifacts_file, artifacts, source_specialist="api")
         logger.debug(f"Artifacts updated: {artifacts_file}")
     except Exception as e:
         logger.error(f"Failed to update artifacts: {e}")
@@ -231,23 +259,51 @@ except FileNotFoundError:
 Filter endpoints, generate API code, test calls, save results."""
 
 
-# Model selection
-try:
-    from src.core.models.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.CODING)
-except ImportError:
-    import os
-    model = os.getenv('LLM_MODEL', 'openai:gpt-4o-mini')
-
-
 # Create agent
-api_discovery_agent = Agent(
-    model,
+api_discovery_agent = build_agent(
+    ModelType.CODING,
+    name="api_discovery_agent",
     instructions=BASE_SYSTEM_PROMPT,
     output_type=APIDiscoveryResult,
     deps_type=APIDiscoveryDeps,
-    retries=0
+    prepare_tools=prepare_api_tools,
 )
+
+
+@api_discovery_agent.output_validator
+def validate_api_discovery_output(
+    ctx: RunContext[APIDiscoveryDeps],
+    result: APIDiscoveryResult,
+) -> APIDiscoveryResult:
+    """Reject contradictory outputs and require artifacts when API data was actually retrieved."""
+    artifacts = getattr(ctx.deps, "artifacts", []) or []
+
+    if result.needs_sql == []:
+        result.needs_sql = None
+
+    if result.found_data and not result.api_data_retrieved:
+        result.api_data_retrieved = True
+
+    if result.success:
+        if result.error:
+            raise ModelRetry("Successful API discovery output cannot include an error")
+        if result.api_data_retrieved and not artifacts:
+            raise ModelRetry(
+                "Successful API discovery must save at least one artifact when API data is retrieved"
+            )
+        if not result.api_data_retrieved and not result.needs_sql:
+            raise ModelRetry(
+                "Successful API discovery must either retrieve API data or explicitly request SQL handoff"
+            )
+        return result
+
+    if not result.error:
+        raise ModelRetry("Failed API discovery output must include an error message")
+
+    if result.api_data_retrieved and not artifacts:
+        raise ModelRetry("Failed API discovery with retrieved API data must save an artifact before finishing")
+
+    return result
 
 
 # ============================================================================
@@ -445,7 +501,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         logger.info(f"[{deps.correlation_id}] Executing API test #{deps.api_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, api_tests: {deps.api_tests_executed}/10)")
         
         # Log the generated API code
-        logger.info(f"[{deps.correlation_id}] 📝 Generated API code:\n{code}")
+        logger.info(f"[{deps.correlation_id}] Generated API code:\n{code}")
         
         # SECURITY VALIDATION: Check Python code for dangerous patterns
         validation_result = validate_generated_code(code)
@@ -498,8 +554,13 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             
             func_name = func_match.group(1)
             
-            # Check if the code already assigns results
-            has_results_assignment = 'results = await' in code or 'results=await' in code
+            # Only treat results assignment as pre-executed if it happens at the top level.
+            # Nested assignments inside the generated async function should not change wrapper behavior.
+            has_results_assignment = any(
+                re.match(r'^results\s*=\s*await\b', line) is not None
+                for line in code.splitlines()
+                if line and not line.startswith((' ', '\t'))
+            )
             
             if has_results_assignment:
                 # Code already calls the function and assigns to 'results'
@@ -524,16 +585,21 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             # LLM will explicitly call save_artifact() tool when results are validated
             # This allows LLM to test multiple times and only save final validated code+results
             
-            result_summary = f"API call successful, returned data"
+            empty_result = result == [] or result == {} or result is None
+            result_summary = "API call successful, returned no data" if empty_result else "API call successful, returned data"
             await notify_step_end(
                 f"API Test #{deps.api_tests_executed} Complete",
                 result_summary
             )
             
             return ToolReturn(
-                return_value=f"✅ API executed successfully",
+                return_value=(
+                    "✅ API executed successfully but returned no data"
+                    if empty_result else
+                    "✅ API executed successfully"
+                ),
                 content=json.dumps(result, separators=(',', ':'), default=str)[:4000],
-                metadata={'success': True}
+                metadata={'success': True, 'empty_result': empty_result}
             )
             
         except Exception as e:
@@ -631,11 +697,24 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         )
     
     # Register tools
-    toolset.tool(load_comprehensive_api_endpoints)
-    toolset.tool(filter_endpoints_by_operations)
-    toolset.tool(execute_test_query)
-    toolset.tool(save_artifact)
-    toolset.tool(get_detailed_events_from_keys)
+    toolset.add_function(
+        load_comprehensive_api_endpoints,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
+    toolset.add_function(
+        filter_endpoints_by_operations,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
+    toolset.add_function(execute_test_query)
+    toolset.add_function(
+        save_artifact,
+        retries=1,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
+    toolset.add_function(
+        get_detailed_events_from_keys,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
     
     return toolset
 
@@ -683,6 +762,8 @@ async def execute_api_discovery(
                 "timestamp": time.time()
             })
     
+    deps.allow_event_type_lookup = should_allow_event_type_lookup(user_query, deps)
+
     # Create toolset for this run (following one_react_agent pattern)
     toolset = create_api_toolset(deps)
     
@@ -705,12 +786,34 @@ async def execute_api_discovery(
 - If you need base entities (users, groups, apps) → check schema → if in schema, set needs_sql: ["users", "groups"]
 - Example: Query asks for "roles for all users" but you have no user IDs → needs_sql: ["users"]
 - Example: You have user IDs, need groups → check schema → groups in okta_groups → needs_sql: ["user_group_memberships"]
-- This provides a safety net if Router made the wrong routing decision
+- This provides a safety net if the supervisor delegated API first but SQL base entities are still required
 ─────────────────────────────────────────
 """
         
         # Build dynamic prompt: base query + schema + optional SQL context
         full_prompt = user_query + "\n" + schema_context
+
+        if deps.followup_scope_summary and deps.followup_scope_context:
+            full_prompt = f"""{full_prompt}
+
+    ─────────────────────────────────────────
+    🔗 FOLLOW-UP RESULT-SET SCOPE
+    ─────────────────────────────────────────
+
+    Follow-up scope summary:
+    {deps.followup_scope_summary}
+
+    Anchored prior result-set context:
+    ```json
+    {deps.followup_scope_context}
+    ```
+
+    🚨 CRITICAL FOLLOW-UP RULES:
+    1. **Preserve the anchored population** - Treat these saved result-set refs as the source entity set
+    2. **Fetch only missing API fields or live enrichments** - Do not widen to a fresh search query
+    3. **Only widen scope if the user explicitly asks for new, fresh, or all data**
+    ─────────────────────────────────────────
+    """
         
         # If SQL phase ran, extend prompt with SQL context
         if deps.sql_reasoning and deps.sql_discovered_data:
@@ -718,7 +821,7 @@ async def execute_api_discovery(
             needs_api_str = str(deps.sql_needs_api) if deps.sql_needs_api else "[]"
             found_data_str = str(deps.sql_found_data) if deps.sql_found_data else "[]"
             
-            full_prompt = f"""{user_query}
+            full_prompt = f"""{full_prompt}
 
 ─────────────────────────────────────────
 📊 DATA ALREADY RETRIEVED FROM SQL DATABASE
@@ -733,14 +836,14 @@ async def execute_api_discovery(
 SQL Agent Analysis:
 {deps.sql_reasoning}
 
-Entities Found in Database (with IDs):
+Compact SQL Artifact Context (manifests, result refs, tiny samples):
 ```json
 {deps.sql_discovered_data}
 ```
 
 🚨 CRITICAL RULES:
 1. **ONLY fetch entities listed in YOUR SCOPE** - If it says ['roles'], fetch ONLY roles
-2. **EXTRACT IDs from JSON** - Check "okta_id" fields in the JSON above
+2. **USE RESULT REFS AND SAMPLES** - Check `result_set_refs`, `key_columns`, and sample `okta_id` fields in the JSON above
 3. **DO NOT search for anything in ALREADY FOUND list** - No /api/v1/users?q=..., no /api/v1/groups?q=...
 4. **USE path parameter endpoints** - Example: /api/v1/users/{{user_id}}/roles (not search endpoints)
 5. **One test per entity type** - If scope says ['roles'], make 1 test for roles, that's it
@@ -753,7 +856,8 @@ Entities Found in Database (with IDs):
         result = await api_discovery_agent.run(
             full_prompt,
             deps=deps,
-            toolsets=[toolset]
+            toolsets=[toolset],
+            usage_limits=API_USAGE_LIMITS,
         )
         
         logger.info(f"[{deps.correlation_id}] API discovery complete: success={result.output.success}")
@@ -777,7 +881,7 @@ Entities Found in Database (with IDs):
             usage = result.usage()
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
-                f"[{deps.correlation_id}] 📊 API Agent Token Usage: "
+                f"[{deps.correlation_id}] API Agent Token Usage: "
                 f"{usage.input_tokens:,} input, {usage.output_tokens:,} output, "
                 f"{usage.total_tokens:,} total (across {usage.requests} API calls, "
                 f"avg {avg_per_call:,.0f} input/call)"

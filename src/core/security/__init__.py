@@ -24,6 +24,7 @@ Usage:
 # Import main validation functions from consolidated security_config
 from ...utils.security_config import (
     validate_generated_code,
+    validate_result_analysis_code,
     validate_http_method,
     validate_api_endpoint,
     SecurityValidationResult,
@@ -47,6 +48,7 @@ from .oauth2_client import (
 __all__ = [
     # Method whitelisting (consolidated into security_config)
     'validate_generated_code',
+    'validate_result_analysis_code',
     'validate_http_method', 
     'validate_api_endpoint',
     'EnhancedSecurityValidator',

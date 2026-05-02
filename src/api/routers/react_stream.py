@@ -26,8 +26,9 @@ import sqlite3
 import time
 import uuid
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, AsyncGenerator
+from typing import Dict, Any, AsyncGenerator, Optional, List
 
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, status
@@ -41,6 +42,14 @@ from src.core.okta.sync.models import AuthUser, QueryHistory
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.agents.orchestrator import execute_multi_agent_query, OrchestratorResult
 from src.core.okta.client import OktaClient
+from src.data.schemas.runtime_storage import (
+    RuntimeTurnPaths,
+    create_runtime_turn_paths,
+    prepare_runtime_script_code,
+    update_turn_metadata,
+    write_turn_summary,
+)
+from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 
 # Track background tasks to prevent memory leaks
 background_tasks: set = set()
@@ -69,17 +78,22 @@ active_processes: Dict[str, Any] = {}
 class QueryRequest(BaseModel):
     """Request body for ReAct query"""
     query: str
+    session_id: Optional[str] = None
 
 
 class ScriptExecuteRequest(BaseModel):
     """Request body for direct script execution"""
     query: str
     script_code: str
+    session_id: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
     """Response with process ID for SSE connection"""
     process_id: str
+    session_id: str
+    run_id: str
+    turn_number: int
     message: str
 
 
@@ -92,19 +106,191 @@ class CancelRequest(BaseModel):
 # Helper Functions for Script Execution
 # ============================================================================
 
+def _derive_session_title(query: str, *, max_length: int = 120) -> str:
+    """Create a compact default session title from the first query."""
+    cleaned = " ".join(query.split()).strip()
+    if len(cleaned) <= max_length:
+        return cleaned or "New conversation"
+    return cleaned[: max_length - 3].rstrip() + "..."
+
+
+def _build_turn_output_summary(complete_event: Optional[Dict[str, Any]]) -> str:
+    if not complete_event:
+        return "Completed successfully."
+
+    display_type = str(complete_event.get("display_type") or "markdown")
+    if display_type == "markdown":
+        markdown = str(complete_event.get("content") or "").strip()
+        compact_markdown = " ".join(markdown.replace("#", " ").split())
+        if len(compact_markdown) <= 240:
+            return compact_markdown or "Completed with markdown response."
+        return f"{compact_markdown[:237].rstrip()}..."
+
+    metadata = complete_event.get("metadata") if isinstance(complete_event.get("metadata"), dict) else {}
+    summary_text = str(metadata.get("summary") or "").strip()
+    if summary_text:
+        return summary_text
+
+    count = complete_event.get("count")
+    if count == 0:
+        return "No matching data was found for this turn."
+    if isinstance(count, int):
+        return f"Returned {count} results."
+
+    return "Completed with structured results."
+
+
+def _resolve_path_within_directory(path: Path, directory: Path, *, error_message: str) -> Path:
+    resolved_directory = Path(os.path.realpath(directory))
+    resolved_path = Path(os.path.realpath(path))
+    try:
+        if os.path.commonpath([str(resolved_directory), str(resolved_path)]) != str(resolved_directory):
+            raise ValueError(error_message)
+    except ValueError as exc:
+        raise ValueError(error_message) from exc
+    return resolved_path
+
+
+def _build_turn_output_artifact_payload(
+    complete_event: Dict[str, Any],
+    *,
+    include_results: bool = True,
+    result_set_refs: Optional[List[str]] = None,
+) -> str:
+    display_type = str(complete_event.get("display_type") or "markdown")
+    if display_type == "markdown":
+        return str(complete_event.get("content") or "")
+
+    metadata = complete_event.get("metadata") if isinstance(complete_event.get("metadata"), dict) else {}
+    results: List[Any] = []
+    if include_results:
+        raw_results = complete_event.get("results")
+        if raw_results is None and isinstance(complete_event.get("content"), list):
+            raw_results = complete_event.get("content")
+        if isinstance(raw_results, list):
+            results = raw_results
+
+    if not isinstance(results, list):
+        results = []
+
+    headers = complete_event.get("headers") if isinstance(complete_event.get("headers"), list) else []
+    payload = {
+        "display_type": display_type,
+        "results": results,
+        "headers": headers,
+        "count": complete_event.get("count", len(results)),
+        "metadata": metadata,
+    }
+    if result_set_refs:
+        payload["result_set_refs"] = result_set_refs
+        payload["content_omitted"] = True
+    return json.dumps(payload, indent=2, default=str)
+
+
+def _persist_turn_output_artifact(
+    *,
+    artifacts_file: Optional[Path],
+    complete_event: Optional[Dict[str, Any]],
+) -> None:
+    if not artifacts_file or not complete_event:
+        return
+
+    display_type = str(complete_event.get("display_type") or "markdown")
+    artifact_summary = _build_turn_output_summary(complete_event)
+    metadata = complete_event.get("metadata") if isinstance(complete_event.get("metadata"), dict) else {}
+
+    artifact_payload = {
+        "key": "turn_output_final",
+        "category": "turn_output",
+        "display_type": display_type,
+        "content": _build_turn_output_artifact_payload(complete_event),
+        "notes": artifact_summary[:500],
+        "canonical_turn_output": True,
+        "row_count": complete_event.get("count"),
+        "entity_type": metadata.get("entity_type"),
+        "metadata": metadata,
+    }
+
+    saved_artifacts, result_refs = append_artifacts_with_result_sets(
+        artifacts_file,
+        [artifact_payload],
+        source_specialist="unknown",
+    )
+
+    if display_type != "markdown" and result_refs:
+        result_set_ids = [result_ref.result_set_id for result_ref in result_refs]
+        compact_payload = _build_turn_output_artifact_payload(
+            complete_event,
+            include_results=False,
+            result_set_refs=result_set_ids,
+        )
+        for saved_artifact in reversed(saved_artifacts):
+            if saved_artifact.get("key") == "turn_output_final" and saved_artifact.get("category") == "turn_output":
+                saved_artifact["content"] = compact_payload
+                saved_artifact["content_omitted"] = True
+                break
+
+        with open(artifacts_file, "w", encoding="utf-8") as file_handle:
+            json.dump(saved_artifacts, file_handle, indent=2, default=str)
+
+
+async def _bootstrap_conversation_process(
+    *,
+    correlation_id: str,
+    query: str,
+    requested_session_id: Optional[str],
+    user_id: str,
+    source: str,
+) -> tuple[str, int]:
+    """Create or reuse the session, then preallocate the turn identity before streaming."""
+    db_ops = DatabaseOperations()
+    await db_ops.init_db()
+
+    session_id = requested_session_id or correlation_id
+    conversation_session = await db_ops.create_conversation_session(
+        tenant_id=settings.tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        source=source,
+        title=_derive_session_title(query),
+        status="active",
+    )
+    if not conversation_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND if requested_session_id else status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Conversation session could not be created or accessed.",
+        )
+
+    conversation_turn = await db_ops.create_conversation_turn(
+        tenant_id=settings.tenant_id,
+        user_id=user_id,
+        session_id=session_id,
+        run_id=correlation_id,
+        query_text=query,
+        source=source,
+        status="created",
+        started_at=datetime.now(timezone.utc),
+    )
+    if not conversation_turn:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Conversation turn could not be created.",
+        )
+
+    return session_id, conversation_turn.turn_number
+
 def _write_temp_script(process_id: str, code: str) -> str:
     """Write code to temporary Python file"""
-    project_root = Path(__file__).parent.parent.parent.parent
-    temp_dir = project_root / "generated_scripts"
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    temp_dir = (project_root / "generated_scripts").resolve()
     temp_dir.mkdir(parents=True, exist_ok=True)
-    
-    script_path = temp_dir / f"react_execution_{process_id}.py"
-    
-    # Security check
-    normalized_script = os.path.normpath(str(script_path))
-    normalized_temp = os.path.normpath(str(temp_dir))
-    if not normalized_script.startswith(normalized_temp + os.sep):
-        raise ValueError("Invalid script path - potential path traversal")
+    script_filename = f"react_execution_{uuid.uuid4().hex}.py"
+
+    script_path = _resolve_path_within_directory(
+        temp_dir / script_filename,
+        temp_dir,
+        error_message="Invalid script path - potential path traversal",
+    )
     
     # Copy base_okta_api_client.py ONLY if script actually needs it (API-based queries)
     if "base_okta_api_client" in code or "OktaAPIClient" in code:
@@ -120,29 +306,34 @@ def _write_temp_script(process_id: str, code: str) -> str:
     else:
         logger.debug(f"[{process_id}] Script is SQL-only, skipping API client copy")
     
-    # Modify code to use local import
-    modified_code = code.replace(
-        "from src.core.okta.client.base_okta_api_client import OktaAPIClient",
-        "from base_okta_api_client import OktaAPIClient"
-    )
+    modified_code = prepare_runtime_script_code(code)
     
     # Write script directly without repr() to avoid escaping quotes
-    with open(normalized_script, "w", encoding="utf-8", newline='\n') as f:
+    with open(script_path, "w", encoding="utf-8", newline='\n') as f:
         f.write(modified_code)
-    
-    logger.debug(f"[{process_id}] Script written to: {normalized_script}")
-    return normalized_script
+
+    logger.debug(f"[{process_id}] Script written to: {script_path}")
+    return str(script_path)
 
 
-async def _execute_script(process_id: str, script_path: str, check_cancelled: callable, orchestrator_result: 'OrchestratorResult' = None) -> AsyncGenerator[Dict[str, Any], None]:
+async def _execute_script(
+    process_id: str,
+    script_path: str,
+    check_cancelled: callable,
+    orchestrator_result: 'OrchestratorResult' = None,
+) -> AsyncGenerator[Dict[str, Any], None]:
     """Execute script and stream results"""
     # Get Python executable
     venv_python = Path("venv/Scripts/python.exe")
     python_exe = str(venv_python) if venv_python.exists() else "python"
     
-    script_path_obj = Path(script_path)
-    script_dir = script_path_obj.parent
-    script_filename = script_path_obj.name
+    project_root = Path(__file__).parent.parent.parent.parent.resolve()
+    temp_dir = (project_root / "generated_scripts").resolve()
+    script_path_obj = _resolve_path_within_directory(
+        Path(script_path),
+        temp_dir,
+        error_message="Invalid script path - potential path traversal",
+    )
     
     # Create subprocess
     # COMMENTED: Reduces log noise during script execution
@@ -151,10 +342,10 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
     proc = await asyncio.create_subprocess_exec(
         python_exe,
         "-u",
-        script_filename,
+        str(script_path_obj),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        cwd=str(script_dir),
+        cwd=str(project_root),
         limit=1024*1024
     )
     # logger.debug(f"[{process_id}] Subprocess created with PID: {proc.pid}")
@@ -241,6 +432,7 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
         
         results_data = _parse_script_output(stdout)
         logger.debug(f"[{process_id}] Parse result: {results_data is not None}")
+        outcome_payload = orchestrator_result.outcome_metadata() if orchestrator_result else {}
         
         if results_data:
             # Check if script returned markdown format (for summaries/special responses)
@@ -251,17 +443,20 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
                     "success": True,
                     "display_type": "markdown",
                     "content": results_data.get("content", ""),
+                    **outcome_payload,
                     "timestamp": time.time()
                 }
             # Check if results are empty (no data found)
             elif results_data.get("count", 0) == 0:
                 logger.info(f"[{process_id}] Script returned zero results - sending empty results message")
+                script_empty_payload = {**outcome_payload, "outcome": "empty", "result_mode": "empty"}
                 # Send markdown message instead of empty table
                 yield {
                     "type": "COMPLETE",
                     "success": True,
                     "display_type": "markdown",
                     "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                    **script_empty_payload,
                     "timestamp": time.time()
                 }
             else:
@@ -279,6 +474,7 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
                             metadata["last_sync"] = {"last_sync": orchestrator_result.last_sync_time}
                         
                         logger.info(f"[{process_id}] Metadata: {metadata}")
+                    metadata.update(outcome_payload)
                 
                 yield {
                     "type": "COMPLETE",
@@ -295,6 +491,13 @@ async def _execute_script(process_id: str, script_path: str, check_cancelled: ca
         # Ensure process is terminated
         if proc.returncode is None:
             proc.kill()
+        try:
+            if script_path_obj.exists():
+                script_path_obj.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.debug(f"[{process_id}] Failed to clean up temp script: {script_path_obj}")
 
 
 def _parse_script_output(stdout: str) -> Dict[str, Any]:
@@ -371,20 +574,38 @@ async def start_react_process(
         username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
         logger.info(f"[{correlation_id}] Starting ReAct process for user: {username}")
         logger.info(f"[{correlation_id}] Query: {request.query}")
+
+        session_id, turn_number = await _bootstrap_conversation_process(
+            correlation_id=correlation_id,
+            query=request.query,
+            requested_session_id=request.session_id,
+            user_id=username,
+            source="web",
+        )
         
         # Create process tracking entry
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
-            "user_id": current_user.username,
+            "session_id": session_id,
+            "run_id": correlation_id,
+            "turn_number": turn_number,
+            "user_id": username,
             "created_at": time.time(),
-            "cancelled": False
+            "cancelled": False,
+            "source": "web",
         }
         
         return QueryResponse(
             process_id=correlation_id,
+            session_id=session_id,
+            run_id=correlation_id,
+            turn_number=turn_number,
             message="ReAct process started. Connect to /stream-react-updates to receive events."
         )
+
+    except HTTPException:
+        raise
         
     except Exception as e:
         logger.error(f"[{correlation_id}] Failed to start process: {e}", exc_info=True)
@@ -411,22 +632,40 @@ async def execute_script_directly(
     try:
         username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
         logger.info(f"[{correlation_id}] Starting direct script execution for user: {username}")
+
+        session_id, turn_number = await _bootstrap_conversation_process(
+            correlation_id=correlation_id,
+            query=request.query,
+            requested_session_id=request.session_id,
+            user_id=username,
+            source="saved_script",
+        )
         
         # Create process tracking entry with pre-generated script
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
             "script_code": request.script_code,  # Pre-generated script
-            "user_id": current_user.username,
+            "session_id": session_id,
+            "run_id": correlation_id,
+            "turn_number": turn_number,
+            "user_id": username,
             "created_at": time.time(),
             "cancelled": False,
-            "skip_discovery": True  # Flag to skip orchestrator
+            "skip_discovery": True,  # Flag to skip orchestrator
+            "source": "saved_script",
         }
         
         return QueryResponse(
             process_id=correlation_id,
+            session_id=session_id,
+            run_id=correlation_id,
+            turn_number=turn_number,
             message="Script execution started. Connect to /stream-react-updates to receive events."
         )
+
+    except HTTPException:
+        raise
         
     except Exception as e:
         logger.error(f"[{correlation_id}] Failed to start direct execution: {e}", exc_info=True)
@@ -472,17 +711,43 @@ async def stream_react_updates(
     async def event_generator() -> AsyncGenerator[str, None]:
         """Generate SSE events from Multi-Agent Orchestrator execution"""
         artifacts_file = None
+        runtime_paths = None
         okta_client = None
         orchestrator_task = None
         stream_started = False  # Track if stream actually started
+        auto_save_legacy_query_history = process.get("source") not in {"web", "saved_script"}
+
+        async def mirror_runtime_state() -> None:
+            if not runtime_paths:
+                return
+
+            try:
+                db_ops = DatabaseOperations()
+                mirrored = await db_ops.mirror_runtime_turn_state(
+                    tenant_id=settings.tenant_id,
+                    run_id=process_id,
+                    runtime_paths=runtime_paths,
+                )
+                if not mirrored:
+                    logger.warning(f"[{process_id}] Runtime-to-SQL mirror skipped because the turn row was not found")
+            except Exception as mirror_error:
+                logger.error(f"[{process_id}] Failed to mirror runtime turn state: {mirror_error}", exc_info=True)
         
         try:
             # Update status
             process["status"] = "executing"
             stream_started = True  # Mark that we successfully started streaming
             
-            # Create artifacts file
-            artifacts_file = await _create_artifacts_file(process_id)
+            # Create session/turn runtime folder and artifacts file
+            runtime_paths = await _create_runtime_turn_paths(process_id, process)
+            process["runtime_paths"] = runtime_paths
+            artifacts_file = runtime_paths.artifacts_file
+            update_turn_metadata(
+                runtime_paths,
+                status="executing",
+                user_query=process["query"],
+            )
+            await mirror_runtime_state()
             
             # Create Okta client
             okta_client = OktaClient()
@@ -614,25 +879,73 @@ async def stream_react_updates(
             # Check if discovery succeeded but found no data (0 artifacts)
             if result.no_data_found:
                 logger.info(f"[{process_id}] Discovery succeeded but found no data")
+                no_data_message = result.user_message or "Your query completed successfully, but no matching data was found."
                 complete_event = {
                     "type": "COMPLETE",
                     "success": True,
                     "display_type": "markdown",
-                    "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                    "content": f"## No Results Found\n\n{no_data_message}",
+                    **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
-                process["status"] = "completed"
+                _persist_turn_output_artifact(
+                    artifacts_file=artifacts_file,
+                    complete_event=complete_event,
+                )
+                write_turn_summary(runtime_paths, {
+                    "status": "completed",
+                    "user_query": process["query"],
+                    "final_response_summary": _build_turn_output_summary(complete_event),
+                    "display_type": "markdown",
+                    "result_count": 0,
+                    "artifact_file": artifacts_file.as_posix(),
+                    "outcome": result.outcome_metadata(),
+                })
+                update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+                await mirror_runtime_state()
+
+                if auto_save_legacy_query_history:
+                    try:
+                        logger.debug(f"[{process_id}] Starting no-data history save...")
+                        db_ops = DatabaseOperations()
+                        await asyncio.shield(
+                            db_ops.save_query_history(
+                                tenant_id=settings.tenant_id,
+                                user_id=process.get("user_id", "localadmin"),
+                                query_text=process["query"],
+                                final_script="",
+                                results_summary=no_data_message
+                            )
+                        )
+                        logger.info(f"[{process_id}] ✅ No-data query history saved")
+                    except asyncio.CancelledError:
+                        logger.warning(f"[{process_id}] No-data history save cancelled")
+                    except Exception as e:
+                        logger.error(f"[{process_id}] Failed to save no-data query history: {e}", exc_info=True)
+                else:
+                    logger.debug(f"[{process_id}] Skipping legacy query history auto-save for conversation-backed web run")
+
+                process["status"] = "complete"
+
+                done_event = {
+                    "type": "DONE",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
                 return
             
             if not result.success:
                 error_event = {
                     "type": "ERROR",
                     "error": result.error or "Orchestrator failed",
+                    **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"
                 logger.error(f"[{process_id}] Multi-agent orchestrator failed: {result.error}")
+                update_turn_metadata(runtime_paths, status="error", error=result.error, completed_at=time.time())
+                await mirror_runtime_state()
                 process["status"] = "error"
                 return
             
@@ -662,6 +975,7 @@ async def stream_react_updates(
                     "type": "SCRIPT-GENERATED",
                     "script_code": result.script_code,
                     "script_length": script_length,
+                    **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(script_event)}\n\n"
@@ -678,31 +992,48 @@ async def stream_react_updates(
                     "display_type": result.display_type or "markdown",
                     "content": result.script_code,  # Contains the llm_summary
                     "timestamp": time.time(),
-                    "is_special_tool": True
+                    "is_special_tool": True,
+                    **result.outcome_metadata(),
                 }
                 yield f"data: {json.dumps(complete_event)}\n\n"
+                _persist_turn_output_artifact(
+                    artifacts_file=artifacts_file,
+                    complete_event=complete_event,
+                )
+                write_turn_summary(runtime_paths, {
+                    "status": "completed",
+                    "user_query": process["query"],
+                    "final_response_summary": _build_turn_output_summary(complete_event),
+                    "display_type": result.display_type or "markdown",
+                    "artifact_file": artifacts_file.as_posix(),
+                    "is_special_tool": True,
+                    "outcome": result.outcome_metadata(),
+                })
+                update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+                await mirror_runtime_state()
                 
-                # CRITICAL: Save history BEFORE DONE
-                # Shield from cancellation
-                try:
-                    logger.debug(f"[{process_id}] Starting special tool history save...")
-                    db_ops = DatabaseOperations()
-                    summary = (result.script_code[:100] + "...") if result.script_code else "Special tool result"
-                    
-                    await asyncio.shield(
-                        db_ops.save_query_history(
-                            tenant_id=settings.tenant_id,
-                            user_id=process.get("user_id", "localadmin"),
-                            query_text=process["query"],
-                            final_script="",  # Special tools don't have a script
-                            results_summary=summary
+                if auto_save_legacy_query_history:
+                    try:
+                        logger.debug(f"[{process_id}] Starting special tool history save...")
+                        db_ops = DatabaseOperations()
+                        summary = (result.script_code[:100] + "...") if result.script_code else "Special tool result"
+
+                        await asyncio.shield(
+                            db_ops.save_query_history(
+                                tenant_id=settings.tenant_id,
+                                user_id=process.get("user_id", "localadmin"),
+                                query_text=process["query"],
+                                final_script="",  # Special tools don't have a script
+                                results_summary=summary
+                            )
                         )
-                    )
-                    logger.info(f"[{process_id}] ✅ Special tool history saved")
-                except asyncio.CancelledError:
-                    logger.warning(f"[{process_id}] Special tool history save cancelled")
-                except Exception as e:
-                    logger.error(f"[{process_id}] Failed to save special tool history: {e}", exc_info=True)
+                        logger.info(f"[{process_id}] ✅ Special tool history saved")
+                    except asyncio.CancelledError:
+                        logger.warning(f"[{process_id}] Special tool history save cancelled")
+                    except Exception as e:
+                        logger.error(f"[{process_id}] Failed to save special tool history: {e}", exc_info=True)
+                else:
+                    logger.debug(f"[{process_id}] Skipping legacy query history auto-save for conversation-backed web run")
                 
                 # Send DONE after save completes
                 done_event = {
@@ -727,6 +1058,13 @@ async def stream_react_updates(
                 yield f"data: {json.dumps(error_event)}\n\n"
                 
                 process["status"] = "error"
+                update_turn_metadata(
+                    runtime_paths,
+                    status="error",
+                    error=error_event["error"],
+                    completed_at=time.time(),
+                )
+                await mirror_runtime_state()
                 
                 # Send DONE event to close stream
                 done_event = {
@@ -768,6 +1106,13 @@ async def stream_react_updates(
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"
+                update_turn_metadata(
+                    runtime_paths,
+                    status="error",
+                    error=error_event["error"],
+                    completed_at=time.time(),
+                )
+                await mirror_runtime_state()
                 process["status"] = "error"
                 return
             
@@ -821,6 +1166,50 @@ async def stream_react_updates(
                     execution_succeeded = True
                     final_execution_event = execution_event
 
+                if execution_event.get("type") == "ERROR":
+                    final_execution_event = execution_event
+
+            if not execution_succeeded or not final_execution_event:
+                failure_reason = (
+                    result.error
+                    or "Generated script finished without producing parseable query results."
+                )
+                logger.error(f"[{process_id}] Phase 3 failed: {failure_reason}")
+
+                execution_error = {
+                    "type": "STEP-END",
+                    "step": "execution",
+                    "title": "Execution Failed",
+                    "text": failure_reason,
+                    "success": False,
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(execution_error)}\n\n"
+
+                error_event = {
+                    "type": "ERROR",
+                    "error": failure_reason,
+                    **result.outcome_metadata(),
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(error_event)}\n\n"
+
+                process["status"] = "error"
+                update_turn_metadata(
+                    runtime_paths,
+                    status="error",
+                    error=failure_reason,
+                    completed_at=time.time(),
+                )
+                await mirror_runtime_state()
+
+                done_event = {
+                    "type": "DONE",
+                    "timestamp": time.time()
+                }
+                yield f"data: {json.dumps(done_event)}\n\n"
+                return
+
             # Note: Cleanup disabled - scripts kept in generated_scripts/ for debugging
             logger.debug(f"[{process_id}] Script retained for debugging: {script_path}")
             
@@ -833,13 +1222,33 @@ async def stream_react_updates(
                 "timestamp": time.time()
             }
             yield f"data: {json.dumps(execution_success)}\n\n"
+            _persist_turn_output_artifact(
+                artifacts_file=artifacts_file,
+                complete_event=final_execution_event,
+            )
+            write_turn_summary(runtime_paths, {
+                "status": "completed",
+                "user_query": process["query"],
+                "final_response_summary": _build_turn_output_summary(final_execution_event),
+                "display_type": final_execution_event.get("display_type") if final_execution_event else result.display_type,
+                "result_count": final_execution_event.get("count") if final_execution_event else None,
+                "artifact_file": artifacts_file.as_posix(),
+                "outcome": result.outcome_metadata(),
+                "token_usage": {
+                    "input_tokens": result.total_input_tokens,
+                    "output_tokens": result.total_output_tokens,
+                    "total_tokens": result.total_tokens,
+                    "requests": result.total_requests,
+                },
+            })
+            update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+            await mirror_runtime_state()
             
             logger.info(f"[{process_id}] Phase 3 complete: Script executed successfully")
             
-            # CRITICAL: Save history BEFORE DONE event
-            # Shield from cancellation - we want this to complete even if client disconnects
-            logger.debug(f"[{process_id}] History save check: execution_succeeded={execution_succeeded}, has_event={final_execution_event is not None}")
-            if execution_succeeded and final_execution_event:
+            # Legacy QueryHistory auto-save is intentionally disabled for conversation-backed web runs.
+            logger.debug(f"[{process_id}] History save check: execution_succeeded={execution_succeeded}, has_event={final_execution_event is not None}, auto_save_legacy_query_history={auto_save_legacy_query_history}")
+            if auto_save_legacy_query_history and execution_succeeded and final_execution_event:
                 try:
                     logger.debug(f"[{process_id}] Starting history save...")
                     db_ops = DatabaseOperations()
@@ -876,6 +1285,8 @@ async def stream_react_updates(
                         logger.error(f"[{process_id}] Failed to save history on retry: {retry_err}", exc_info=True)
                 except Exception as e:
                     logger.error(f"[{process_id}] Failed to save query history: {e}", exc_info=True)
+            elif execution_succeeded and final_execution_event:
+                logger.debug(f"[{process_id}] Skipping legacy query history auto-save for conversation-backed web run")
             
             # Log token usage summary at end for visibility
             if result.total_tokens > 0:
@@ -899,6 +1310,9 @@ async def stream_react_updates(
             
         except asyncio.CancelledError:
             logger.info(f"[{process_id}] Process cancelled by user")
+            if runtime_paths:
+                update_turn_metadata(runtime_paths, status="cancelled", completed_at=time.time())
+                await mirror_runtime_state()
             error_data = {
                 "type": "ERROR",
                 "error": "Process cancelled by user",
@@ -909,6 +1323,9 @@ async def stream_react_updates(
         except Exception as e:
             logger.error(f"[{process_id}] Stream error: {e}", exc_info=True)
             process["status"] = "error"
+            if runtime_paths:
+                update_turn_metadata(runtime_paths, status="error", error=str(e), completed_at=time.time())
+                await mirror_runtime_state()
             
             error_data = {
                 "type": "ERROR",
@@ -1004,34 +1421,22 @@ async def cancel_react_process(
 # Helper Functions
 # ============================================================================
 
-async def _create_artifacts_file(correlation_id: str) -> Path:
-    """
-    Create artifacts file for multi-agent orchestrator.
-    
-    Returns path to artifacts file.
-    """
-    # Validate correlation_id is a valid UUID to prevent path traversal attacks
+async def _create_runtime_turn_paths(correlation_id: str, process: Dict[str, Any]) -> RuntimeTurnPaths:
+    """Create runtime session/turn folders for one web request."""
     try:
         uuid.UUID(correlation_id, version=4)
     except ValueError as exc:
         raise ValueError(f"Invalid correlation_id format; expected UUID v4, got: {correlation_id}") from exc
-    
-    artifacts_dir = Path("logs").resolve()
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
-    artifacts_file = (artifacts_dir / f"artifacts_{correlation_id}.json").resolve()
-    
-    # Ensure the resolved artifacts_file is contained within the logs directory
-    try:
-        artifacts_file.relative_to(artifacts_dir)
-    except ValueError as exc:
-        raise ValueError(f"Unsafe artifacts file path derived from correlation_id: {correlation_id}") from exc
-    
-    # Initialize empty artifacts file as flat array
-    with open(artifacts_file, 'w', encoding='utf-8') as f:
-        json.dump([], f)
-    
-    logger.info(f"[{correlation_id}] Created artifacts file: {artifacts_file}")
-    return artifacts_file
+
+    runtime_paths = create_runtime_turn_paths(
+        user_id=process.get("user_id", "localadmin"),
+        session_id=process.get("session_id") or correlation_id,
+        run_id=process.get("run_id") or correlation_id,
+        turn_number=process.get("turn_number"),
+    )
+    logger.info(f"[{correlation_id}] Created runtime turn folder: {runtime_paths.turn_dir}")
+    logger.info(f"[{correlation_id}] Created artifacts file: {runtime_paths.artifacts_file}")
+    return runtime_paths
 
 
 # ============================================================================

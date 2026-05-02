@@ -1,5 +1,32 @@
 # Version History
 
+## v3.0.0-beta - "Harness the Vibe"
+
+**Release Date**: May 2, 2026
+
+This release introduces Tako's new harness-engineered runtime: supervisor-led dynamic routing, durable multi-turn conversation flow, and a cleaner interface for longer investigations. It is the biggest architectural shift since v2.0 and sets the foundation for deeper follow-up analysis without losing context.
+
+🚀 New Features
+
+- **Dynamic Agent Routing Harness**: Replaced the legacy static router flow with a supervisor-led control plane that decides between SQL, API, special tools, result analysis, and synthesis on each turn.
+- **Multi-Turn Conversation Harness**: Added persisted turn runtime storage, canonical turn outputs, hydrated prior result sets, anchored follow-up scope, and session retention so follow-up questions can build on prior evidence safely.
+- **Result Analysis Specialist**: Promoted result analysis into a core specialist for artifact-aware follow-ups and deeper reasoning over prior saved outputs.
+
+🎨 UI Enhancements
+
+- **UI Overhaul**: Reworked the chat experience with cleaner layout, improved scrolling, more polished markdown and table rendering, and clearer progress visibility for long-running workflows.
+- **Clearer Long-Form Output**: Improved synthesis readability for wider markdown, denser tables, and longer multi-step responses.
+
+🔧 Improvements
+
+- **Router Agent Retired**: The legacy Router agent has been deprecated in favor of supervisor-led dynamic routing.
+- **Unified Synthesis Path**: Special-tool outputs now flow through the same final synthesis contract as the rest of the system.
+- **Runtime Hardening**: Improved final-result parsing, error surfacing, and edge-case handling across the orchestration flow.
+- **Session Reliability**: Strengthened canonical turn persistence, session retention, result hydration, and follow-up continuity.
+- **Sync Stability**: Tightened SQLite sync behavior with foreign-key enforcement fixes and cleanup around follow-up data handling.
+
+---
+
 ## v2.2.0-beta - "Channel Surfer"
 
 **Release Date**: February 19, 2026
@@ -34,7 +61,7 @@
 - **Execution Analytics**: Track how often favorites are run.
 - **Library Updates**: Updated core dependencies for better stability.
 
-## Current latest: v2.0.5-beta - "Swarm Surge"
+## v2.0.5-beta - "Swarm Surge"
 
 **Release Date**: February 1, 2026
 

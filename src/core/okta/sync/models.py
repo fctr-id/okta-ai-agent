@@ -157,6 +157,7 @@ class User(BaseModel):
         Index('idx_user_name_search', 'tenant_id', 'first_name', 'last_name'),
         Index('idx_user_status_filter', 'tenant_id', 'status', 'is_deleted'),
         Index('idx_user_status_changed', 'tenant_id', 'status_changed_at'),
+        UniqueConstraint('okta_id', name='uix_users_okta_id'),
         {'extend_existing': True}
     )
 
@@ -175,6 +176,7 @@ class Group(BaseModel):
 
     __table_args__ = (
         Index('idx_group_tenant_name', 'tenant_id', 'name'),
+        UniqueConstraint('okta_id', name='uix_groups_okta_id'),
         {'extend_existing': True}
     )
 
@@ -252,6 +254,7 @@ class Application(BaseModel):
         Index('idx_app_policy', 'policy_id'),
         Index('idx_app_label', 'label'),
         Index('idx_app_attrs', 'attribute_statements', sqlite_where=text("json_valid(attribute_statements)")),
+        UniqueConstraint('okta_id', name='uix_applications_okta_id'),
         {'extend_existing': True}
     )
      
@@ -287,6 +290,7 @@ class Policy(BaseModel):
         Index('idx_policy_tenant_name', 'tenant_id', 'name'),
         Index('idx_policy_okta_id', 'okta_id'),
         Index('idx_policy_type', 'type'),
+        UniqueConstraint('okta_id', name='uix_policies_okta_id'),
         {'extend_existing': True}
     )
     
@@ -423,6 +427,7 @@ class Device(BaseModel):
         Index('idx_device_manufacturer', 'tenant_id', 'manufacturer'),
         Index('idx_device_serial', 'tenant_id', 'serial_number'),
         Index('idx_device_udid', 'tenant_id', 'udid'),
+        UniqueConstraint('okta_id', name='uix_devices_okta_id'),
         {'extend_existing': True}
     )
 
@@ -510,5 +515,109 @@ class QueryHistory(Base):
 
     def __repr__(self):
         return f"<QueryHistory id={self.id}, query={self.query_text[:50]}...>"
+
+
+class ConversationSession(Base):
+    """Conversation session metadata for multi-turn chat history."""
+    __tablename__ = "conversation_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    user_id = Column(String(255), nullable=False, index=True)
+    session_id = Column(String(255), nullable=False, unique=True, index=True)
+    source = Column(String(32), nullable=False, default="web")
+    title = Column(Text, nullable=True)
+    summary = Column(Text, nullable=True)
+    status = Column(String(32), nullable=False, default="active")
+    last_activity_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now, nullable=False)
+    slack_thread_ts = Column(String(255), nullable=True)
+    parent_session_id = Column(String(255), ForeignKey('conversation_sessions.session_id', ondelete='SET NULL'), nullable=True)
+    handoff_reason = Column(String(64), nullable=True)
+    is_pinned = Column(Boolean, default=False, nullable=False)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    started_from_query_history_id = Column(Integer, ForeignKey('query_history.id', ondelete='SET NULL'), nullable=True)
+
+    __table_args__ = (
+        Index('idx_conversation_sessions_user_activity', 'tenant_id', 'user_id', 'last_activity_at'),
+        Index('idx_conversation_sessions_user_status', 'tenant_id', 'user_id', 'status'),
+    )
+
+
+class ConversationTurn(Base):
+    """One persisted turn within a conversation session."""
+    __tablename__ = "conversation_turns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    session_id = Column(String(255), ForeignKey('conversation_sessions.session_id', ondelete='CASCADE'), nullable=False)
+    run_id = Column(String(255), nullable=False, unique=True, index=True)
+    turn_number = Column(Integer, nullable=False)
+    query_text = Column(Text, nullable=False)
+    source = Column(String(32), nullable=False, default="user")
+    query_history_id = Column(Integer, ForeignKey('query_history.id', ondelete='SET NULL'), nullable=True)
+    status = Column(String(32), nullable=False, default="created")
+    completion_mode = Column(String(32), nullable=True)
+    approval_state = Column(String(32), nullable=True)
+    deferred_execution_state = Column(String(32), nullable=True)
+    display_type = Column(String(64), nullable=True)
+    final_response_summary = Column(Text, nullable=True)
+    result_count = Column(Integer, nullable=True)
+    is_partial_result = Column(Boolean, default=False, nullable=False)
+    token_usage_json = Column(JSON, nullable=True)
+    turn_dir = Column(Text, nullable=True)
+    artifact_file = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=get_utc_now, onupdate=get_utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('session_id', 'turn_number', name='uix_conversation_turn_session_turn'),
+        Index('idx_conversation_turns_session_created', 'tenant_id', 'session_id', 'created_at'),
+        Index('idx_conversation_turns_completion_mode', 'tenant_id', 'completion_mode'),
+    )
+
+
+class ConversationResultSet(Base):
+    """Reusable result-set metadata for follow-up resolution."""
+    __tablename__ = "conversation_result_sets"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    session_id = Column(String(255), ForeignKey('conversation_sessions.session_id', ondelete='CASCADE'), nullable=False, index=True)
+    run_id = Column(String(255), nullable=False, index=True)
+    turn_number = Column(Integer, nullable=False)
+    sequence_in_turn = Column(Integer, nullable=False)
+    result_set_id = Column(String(255), nullable=False, unique=True, index=True)
+    storage_path = Column(Text, nullable=False)
+    source_specialist = Column(String(32), nullable=False)
+    entity_type = Column(String(64), nullable=False, index=True)
+    derivation_kind = Column(String(32), nullable=False, default='initial', index=True)
+    user_facing_label = Column(String(255), nullable=True, index=True)
+    filter_summary = Column(Text, nullable=True)
+    row_count = Column(Integer, nullable=True)
+    is_empty = Column(Boolean, default=False, nullable=False)
+    is_partial = Column(Boolean, default=False, nullable=False)
+    key_columns_json = Column(JSON, nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint('session_id', 'turn_number', 'sequence_in_turn', name='uix_conversation_result_set_sequence'),
+        Index('idx_conversation_result_sets_entity', 'tenant_id', 'session_id', 'entity_type', 'created_at'),
+        Index('idx_conversation_result_sets_label', 'tenant_id', 'session_id', 'user_facing_label', 'created_at'),
+    )
+
+
+class ConversationResultSetParent(Base):
+    """Lineage links between derived result sets and parents."""
+    __tablename__ = "conversation_result_set_parents"
+
+    child_result_set_id = Column(String(255), ForeignKey('conversation_result_sets.result_set_id', ondelete='CASCADE'), primary_key=True)
+    parent_result_set_id = Column(String(255), ForeignKey('conversation_result_sets.result_set_id', ondelete='CASCADE'), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
 
         

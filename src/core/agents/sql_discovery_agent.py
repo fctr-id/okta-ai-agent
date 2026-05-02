@@ -10,7 +10,7 @@ Responsibilities:
 Output: SQLDiscoveryResult with found_data, needs_api, reasoning
 """
 
-from pydantic_ai import Agent, RunContext, FunctionToolset, ToolReturn
+from pydantic_ai import RunContext, FunctionToolset, ModelRetry, ToolReturn, UsageLimits
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Any, Dict
 from dataclasses import dataclass
@@ -22,8 +22,16 @@ import asyncio
 
 from src.utils.logging import get_logger
 from src.core.security.sql_security_validator import validate_user_sql
+from src.core.agents import DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS, build_agent
+from src.core.models.model_picker import ModelType
+from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 
 logger = get_logger("okta_ai_agent")
+
+SQL_USAGE_LIMITS = UsageLimits(
+    request_limit=10,
+    tool_calls_limit=8,
+)
 
 # ============================================================================
 # Output Models
@@ -64,6 +72,9 @@ class SQLDiscoveryDeps:
     api_discovered_data: Optional[str] = None  # JSON string of data API found (None if API phase skipped)
     api_needs_sql: Optional[List[str]] = None  # Structured list of entities to fetch via SQL
     api_found_data: Optional[List[str]] = None  # Structured list of entities already found via API
+    followup_scope_summary: Optional[str] = None  # Summary of prior saved result-set scope for follow-up turns
+    followup_scope_context: Optional[str] = None  # JSON string describing the anchored prior result-set scope
+    followup_result_set_refs: Optional[List[str]] = None  # Anchored prior result-set ids to preserve
     
     # Streaming callbacks
     step_start_callback: Optional[callable] = None
@@ -98,30 +109,142 @@ def get_sqlite_schema_description() -> str:
     return get_okta_database_schema()
 
 
+def find_sqlite_db_path() -> Optional[Path]:
+    """Return the first available Okta SQLite database path."""
+    for db_path in (
+        Path("sqlite_db/okta_sync.db"),
+        Path("okta_sync.db"),
+        Path("../sqlite_db/okta_sync.db"),
+        Path("/app/sqlite_db/okta_sync.db"),
+    ):
+        if db_path.exists():
+            return db_path
+    return None
+
+
+def get_last_sync_timestamp() -> Optional[str]:
+    """Get the last successful sync timestamp from the SQL database."""
+    try:
+        db_path = find_sqlite_db_path()
+        if not db_path:
+            return None
+
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='sync_history'")
+            if not cursor.fetchone():
+                return None
+
+            cursor.execute("""
+                SELECT end_time
+                FROM sync_history
+                WHERE success = 1 AND end_time IS NOT NULL
+                ORDER BY end_time DESC
+                LIMIT 1
+            """)
+            row = cursor.fetchone()
+            if not row or not row[0]:
+                return None
+
+            timestamp_str = row[0]
+            if "T" not in timestamp_str:
+                timestamp_str = timestamp_str.replace(" ", "T") + "Z"
+            return timestamp_str
+    except Exception as e:
+        logger.debug(f"Could not retrieve last sync timestamp: {e}")
+        return None
+
+
+def get_database_runtime_summary() -> Dict[str, Any]:
+    """Return compact DB availability and population details for supervisor routing."""
+    summary: Dict[str, Any] = {
+        "available": False,
+        "usable_for_sql": False,
+        "db_path": None,
+        "table_counts": {},
+        "missing_key_tables": [],
+        "last_sync_time": None,
+        "reason": None,
+    }
+
+    key_tables = (
+        "users",
+        "groups",
+        "applications",
+        "user_group_memberships",
+        "user_application_assignments",
+        "group_application_assignments",
+    )
+
+    try:
+        db_path = find_sqlite_db_path()
+        if not db_path:
+            summary["reason"] = "Database file not found in expected locations."
+            return summary
+
+        summary["available"] = True
+        summary["db_path"] = str(db_path)
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            existing_tables = {row[0] for row in cursor.fetchall()}
+
+            table_counts: Dict[str, int] = {}
+            missing_tables: List[str] = []
+            for table_name in key_tables:
+                if table_name not in existing_tables:
+                    missing_tables.append(table_name)
+                    continue
+                cursor.execute(f"SELECT COUNT(*) FROM {table_name}")
+                table_counts[table_name] = int(cursor.fetchone()[0])
+
+            summary["table_counts"] = table_counts
+            summary["missing_key_tables"] = missing_tables
+            summary["usable_for_sql"] = table_counts.get("users", 0) > 0
+            summary["last_sync_time"] = get_last_sync_timestamp()
+            if not summary["usable_for_sql"]:
+                summary["reason"] = "Users table is missing or empty."
+            else:
+                summary["reason"] = "Database has populated local Okta entities."
+
+            return summary
+    except Exception as e:
+        summary["reason"] = f"Database summary failed: {e}"
+        return summary
+
+
+def check_database_health() -> bool:
+    """Return True when the local SQL database is usable for discovery."""
+    try:
+        db_path = find_sqlite_db_path()
+        if not db_path:
+            logger.warning("Database file not found in any expected location - Skipping SQL phase")
+            return False
+
+        with sqlite3.connect(db_path, timeout=5) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
+            if not cursor.fetchone():
+                logger.warning("Users table not found in database - Skipping SQL phase")
+                return False
+
+            cursor.execute("SELECT COUNT(*) FROM users")
+            user_count = cursor.fetchone()[0]
+            if user_count < 1:
+                logger.warning("Database has no users - Skipping SQL phase")
+                return False
+
+            logger.info(f"Database health check passed: Found {user_count} users")
+            return True
+    except Exception as e:
+        logger.warning(f"Database health check failed: {e} - Skipping SQL phase")
+        return False
+
+
 async def dump_artifacts_to_file(artifacts_file: Path, artifacts: List[dict]):
     """Append artifacts to JSON file (not overwrite)"""
     try:
-        # Load existing artifacts
-        existing = []
-        if artifacts_file.exists():
-            try:
-                with open(artifacts_file, 'r', encoding='utf-8') as f:
-                    existing = json.load(f)
-                    # Handle case where file contains dict instead of list
-                    if isinstance(existing, dict):
-                        existing = [existing]
-                    elif not isinstance(existing, list):
-                        existing = []
-            except json.JSONDecodeError:
-                logger.warning(f"Could not parse existing artifacts, starting fresh")
-                existing = []
-        
-        # Append new artifacts
-        existing.extend(artifacts)
-        
-        # Save combined list
-        with open(artifacts_file, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, indent=2, default=str)
+        append_artifacts_with_result_sets(artifacts_file, artifacts, source_specialist="sql")
         logger.debug(f"Artifacts appended to {artifacts_file}")
     except Exception as e:
         logger.error(f"Failed to save artifacts: {e}")
@@ -142,23 +265,46 @@ except FileNotFoundError:
 Generate queries to find data in the database, test them, and report findings."""
 
 
-# Model selection (use coding model)
-try:
-    from src.core.models.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.CODING)
-except ImportError:
-    import os
-    model = os.getenv('LLM_MODEL', 'openai:gpt-4o-mini')
-
-
 # Create agent
-sql_discovery_agent = Agent(
-    model,
+sql_discovery_agent = build_agent(
+    ModelType.CODING,
+    name="sql_discovery_agent",
     instructions=BASE_SYSTEM_PROMPT,
     output_type=SQLDiscoveryResult,
     deps_type=SQLDiscoveryDeps,
-    retries=0
 )
+
+
+@sql_discovery_agent.output_validator
+def validate_sql_discovery_output(
+    ctx: RunContext[SQLDiscoveryDeps],
+    result: SQLDiscoveryResult,
+) -> SQLDiscoveryResult:
+    """Reject contradictory outputs and require saved artifacts for successful discovery."""
+    artifacts = getattr(ctx.deps, "artifacts", []) or []
+
+    if result.needs_api == []:
+        result.needs_api = None
+
+    if result.success:
+        if result.error:
+            raise ModelRetry("Successful SQL discovery output cannot include an error")
+        if not artifacts:
+            raise ModelRetry(
+                "Successful SQL discovery must save at least one artifact with save_artifact before finishing"
+            )
+        return result
+
+    if not result.error:
+        raise ModelRetry("Failed SQL discovery output must include an error message")
+
+    if result.found_data:
+        raise ModelRetry("Failed SQL discovery output cannot claim found_data")
+
+    if result.needs_api:
+        raise ModelRetry("Failed SQL discovery output cannot request API handoff")
+
+    return result
 
 
 # ============================================================================
@@ -342,7 +488,7 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         
         # Log the generated SQL query
         sql_query = code.strip()
-        logger.info(f"[{deps.correlation_id}] 📝 Generated SQL:\n{sql_query}")
+        logger.info(f"[{deps.correlation_id}] Generated SQL:\n{sql_query}")
         
         # Security validation
         is_valid, error_msg = validate_user_sql(sql_query, deps.correlation_id)
@@ -369,12 +515,8 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
             import sqlite3
             from pathlib import Path
             
-            db_paths = [
-                Path("/app/sqlite_db/okta_sync.db"),
-                Path("sqlite_db/okta_sync.db")
-            ]
-            db_path = next((p for p in db_paths if p.exists()), None)
-            
+            db_path = find_sqlite_db_path()
+
             if not db_path:
                 return ToolReturn(
                     return_value="❌ Database not found",
@@ -483,7 +625,7 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
             artifact["sql_query"] = sql_query
         
         deps.artifacts.append(artifact)
-        await dump_artifacts_to_file(deps.artifacts_file, deps.artifacts)
+        await dump_artifacts_to_file(deps.artifacts_file, [artifact])
         
         logger.info(f"[{deps.correlation_id}] Saved artifact: {key} ({len(content)} chars)")
         
@@ -494,9 +636,19 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         )
     
     # Register tools
-    toolset.tool(get_sql_context)
-    toolset.tool(execute_test_query)
-    toolset.tool(save_artifact)
+    toolset.add_function(
+        get_sql_context,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
+    toolset.add_function(
+        execute_test_query,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
+    toolset.add_function(
+        save_artifact,
+        retries=1,
+        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
+    )
     
     return toolset
 
@@ -550,6 +702,28 @@ async def execute_sql_discovery(
         # Build dynamic prompt: base query + optional API context
         # Following same pattern as API agent: clean static prompt + dynamic extension
         full_prompt = user_query
+
+        if deps.followup_scope_summary and deps.followup_scope_context:
+            full_prompt = f"""{full_prompt}
+
+    ─────────────────────────────────────────
+    🔗 FOLLOW-UP RESULT-SET SCOPE
+    ─────────────────────────────────────────
+
+    Follow-up scope summary:
+    {deps.followup_scope_summary}
+
+    Anchored prior result-set context:
+    ```json
+    {deps.followup_scope_context}
+    ```
+
+    🚨 CRITICAL FOLLOW-UP RULES:
+    1. **Preserve the anchored population** - Treat these saved result-set refs as the source entity set
+    2. **Fetch only missing SQL fields or enrichments** - Do not widen to a fresh global discovery query
+    3. **Only widen scope if the user explicitly asks for new, fresh, or all data**
+    ─────────────────────────────────────────
+    """
         
         # Dynamically extend prompt ONLY if API phase ran first and found data
         # If API phase ran, inject its discovered data as context
@@ -558,7 +732,7 @@ async def execute_sql_discovery(
             needs_sql_str = str(deps.api_needs_sql) if deps.api_needs_sql else "[]"
             found_data_str = str(deps.api_found_data) if deps.api_found_data else "[]"
             
-            full_prompt = f"""{user_query}
+            full_prompt = f"""{full_prompt}
 
 ─────────────────────────────────────────
 📊 DATA ALREADY RETRIEVED FROM API
@@ -573,7 +747,7 @@ async def execute_sql_discovery(
 API Agent Analysis:
 {deps.api_reasoning}
 
-Entities Found via API:
+Compact API Artifact Context (manifests, result refs, tiny samples):
 ```json
 {deps.api_discovered_data}
 ```
@@ -590,7 +764,8 @@ Entities Found via API:
         result = await sql_discovery_agent.run(
             full_prompt,
             deps=deps,
-            toolsets=[toolset]
+            toolsets=[toolset],
+            usage_limits=SQL_USAGE_LIMITS,
         )
         
         logger.info(f"[{deps.correlation_id}] SQL discovery complete: found={result.output.found_data}, needs_api={result.output.needs_api}")
@@ -607,7 +782,7 @@ Entities Found via API:
             usage = result.usage()
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
-                f"[{deps.correlation_id}] 📊 SQL Agent Token Usage: "
+                f"[{deps.correlation_id}] SQL Agent Token Usage: "
                 f"{usage.input_tokens:,} input, {usage.output_tokens:,} output, "
                 f"{usage.total_tokens:,} total (across {usage.requests} API calls, "
                 f"avg {avg_per_call:,.0f} input/call)"

@@ -103,6 +103,7 @@ class OktaAPIClient:
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
             self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
         
         # Progress tracking state (for throttling entity progress updates)
         self._entity_progress_state = {}
@@ -210,6 +211,11 @@ class OktaAPIClient:
         else:
             # Return static headers for API token method
             return self.headers
+
+    async def close_session(self) -> None:
+        """Release any persistent authentication client state used by generated scripts."""
+        if self.oauth2_manager:
+            await self.oauth2_manager.close()
     
     def _calculate_rate_limit_wait_time(self, rate_limit_reset: Optional[str], is_concurrent: bool = False) -> int:
         """
@@ -473,7 +479,7 @@ class OktaAPIClient:
                 params = {}
             params['limit'] = 3
             max_results = 3
-            self.logger.info(f"🧪 TEST MODE: Enforcing limit=3 for {endpoint}")
+            self.logger.info(f"TEST MODE: Enforcing limit=3 for {endpoint}")
         
         # Emit structured progress events - only for max_results limit
         if max_results:

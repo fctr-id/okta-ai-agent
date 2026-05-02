@@ -10,12 +10,13 @@ Input: All artifacts from previous phases
 Output: SynthesisResult with script code
 """
 
-from pydantic_ai import Agent, RunContext, FunctionToolset
-from pydantic import BaseModel
-from typing import Optional, Callable, Awaitable
+import ast
+
+from pydantic_ai import RunContext, FunctionToolset, ModelRetry, UsageLimits
+from pydantic import BaseModel, Field
+from typing import Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass, field
 from pathlib import Path
-import json
 import time
 
 from src.utils.logging import get_logger
@@ -24,8 +25,15 @@ from src.core.agents.agent_callbacks import (
     notify_step_start_to_user,
     notify_step_end_to_user
 )
+from src.core.agents import build_agent
+from src.core.models.model_picker import ModelType
+from src.data.schemas.artifact_manifest import build_artifact_prompt_context, load_artifacts_file
 
 logger = get_logger("okta_ai_agent")
+
+SYNTHESIS_USAGE_LIMITS = UsageLimits(
+    request_limit=4,
+)
 
 # ============================================================================
 # Output Models
@@ -36,6 +44,9 @@ class SynthesisResult(BaseModel):
     success: bool
     script_code: Optional[str] = None
     display_type: str = "table"  # "table" or "markdown"
+    summary: Optional[str] = None
+    artifact_keys: List[str] = Field(default_factory=list)
+    result_set_refs: List[str] = Field(default_factory=list)
     error: Optional[str] = None
 
 
@@ -71,24 +82,65 @@ except FileNotFoundError:
 Read artifacts, generate production code using OktaAPIClient patterns."""
 
 
-# Model selection
-try:
-    from src.core.models.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.CODING)
-except ImportError:
-    import os
-    model = os.getenv('LLM_MODEL', 'openai:gpt-4o-mini')
-
-
 # Create agent (NO TOOLS - synthesis doesn't need progress reporting during generation)
 # Progress is reported by OktaAPIClient when the generated script EXECUTES
-synthesis_agent = Agent(
-    model,
+synthesis_agent = build_agent(
+    ModelType.CODING,
+    name="synthesis_agent",
     instructions=BASE_SYSTEM_PROMPT,
     output_type=SynthesisResult,
     deps_type=SynthesisDeps,
-    retries=0
 )
+
+
+@synthesis_agent.output_validator
+def validate_synthesis_output(result: SynthesisResult) -> SynthesisResult:
+    """Ensure synthesis returns executable code for success cases and honest failures otherwise."""
+    script_code = (result.script_code or "").strip()
+
+    if result.success:
+        if result.error:
+            raise ModelRetry("Successful synthesis output cannot include an error")
+        if not script_code:
+            raise ModelRetry("Successful synthesis output must include executable script_code")
+        if "```" in script_code:
+            raise ModelRetry("Synthesis output must return raw Python code without markdown fences")
+        if result.display_type not in {"table", "markdown"}:
+            raise ModelRetry("display_type must be 'table' or 'markdown'")
+        try:
+            parsed = ast.parse(script_code)
+        except SyntaxError as exc:
+            raise ModelRetry(
+                f"Synthesis output must be valid Python syntax: {exc.msg} at line {exc.lineno}"
+            ) from exc
+
+        executable_nodes = [
+            node
+            for node in parsed.body
+            if not (
+                isinstance(node, ast.Expr)
+                and isinstance(getattr(node, "value", None), ast.Constant)
+                and isinstance(getattr(node.value, "value", None), str)
+            )
+        ]
+        if not executable_nodes:
+            raise ModelRetry(
+                "Synthesis output must contain executable Python statements, not only comments or a docstring"
+            )
+
+        if "QUERY RESULTS" not in script_code:
+            raise ModelRetry(
+                "Synthesis output must print JSON between the exact 'QUERY RESULTS' markers expected by the runtime parser"
+            )
+        return result
+
+    if not result.error:
+        raise ModelRetry("Failed synthesis output must include an error message")
+
+    if script_code:
+        raise ModelRetry("Failed synthesis output cannot include script_code")
+
+    return result
 
 
 # ============================================================================
@@ -98,7 +150,7 @@ synthesis_agent = Agent(
 async def execute_synthesis(
     user_query: str,
     deps: SynthesisDeps
-) -> SynthesisResult:
+) -> tuple[SynthesisResult, Any]:
     """
     Execute synthesis phase - generate final script.
     
@@ -140,7 +192,7 @@ async def execute_synthesis(
             return SynthesisResult(
                 success=False,
                 error="No artifacts found from previous phases"
-            )
+            ), None
         
         # Notify: Loading artifacts
         if deps.tool_call_callback:
@@ -151,16 +203,20 @@ async def execute_synthesis(
                 "timestamp": time.time()
             })
         
-        with open(deps.artifacts_file, 'r', encoding='utf-8') as f:
-            artifacts = json.load(f)
-        
+        artifacts = load_artifacts_file(deps.artifacts_file)
+        artifact_context = build_artifact_prompt_context(deps.artifacts_file)
+
         logger.info(f"[{deps.correlation_id}] Loaded {len(artifacts)} artifacts")
         
         # Build context for agent
         context = f"""Original Query: {user_query}
 
-Artifacts from Discovery Phases:
-{json.dumps(artifacts, indent=2, default=str)}
+    Artifact manifests and result-set pointers from discovery phases:
+    {artifact_context}
+
+    Use exact sql_query and api_code values from the artifact entries when generating code.
+    Use result_set_refs, result_set_inspection, and artifact_manifest for row counts, key columns, field names, and tiny samples.
+    Full row payloads stay off-context in result-set sidecar files.
 
 Generate the final production Python script using the artifacts above.
 Follow all patterns from synthesis_prompt.txt."""
@@ -212,7 +268,11 @@ db_path = next((p for p in possible_paths if p.exists()), None)
             logger.info(f"CLI mode active - injected portability instructions")
         
         # Run agent
-        result = await synthesis_agent.run(context, deps=deps)
+        result = await synthesis_agent.run(
+            context,
+            deps=deps,
+            usage_limits=SYNTHESIS_USAGE_LIMITS,
+        )
         
         logger.info(f"[{deps.correlation_id}] Synthesis complete: success={result.output.success}")
         
@@ -226,21 +286,21 @@ db_path = next((p for p in possible_paths if p.exists()), None)
             script_length = len(result.output.script_code)
             script_lines = result.output.script_code.split('\n')
             total_lines = len(script_lines)
-            logger.info(f"[{deps.correlation_id}] ✅ SYNTHESIS COMPLETE: Generated final production code ({script_length} chars, {total_lines} lines)")
+            logger.info(f"[{deps.correlation_id}] SYNTHESIS COMPLETE: Generated final production code ({script_length} chars, {total_lines} lines)")
             
             # Log script preview (first 10 and last 10 lines)
             if total_lines > 20:
                 preview_lines = script_lines[:10] + ['...'] + script_lines[-10:]
-                logger.debug(f"[{deps.correlation_id}] 📝 Script preview:\n" + '\n'.join(preview_lines))
+                logger.debug(f"[{deps.correlation_id}] Script preview:\n" + '\n'.join(preview_lines))
             else:
-                logger.debug(f"[{deps.correlation_id}] 📝 Complete script:\n{result.output.script_code}")
+                logger.debug(f"[{deps.correlation_id}] Complete script:\n{result.output.script_code}")
         
         # Log token usage
         if result.usage():
             usage = result.usage()
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
-                f"[{deps.correlation_id}] 📊 Synthesis Agent Token Usage: "
+                f"[{deps.correlation_id}] Synthesis Agent Token Usage: "
                 f"{usage.input_tokens:,} input, {usage.output_tokens:,} output, "
                 f"{usage.total_tokens:,} total (across {usage.requests} API calls, "
                 f"avg {avg_per_call:,.0f} input/call)"
@@ -266,4 +326,4 @@ db_path = next((p for p in possible_paths if p.exists()), None)
         return SynthesisResult(
             success=False,
             error=str(e)
-        )
+        ), None

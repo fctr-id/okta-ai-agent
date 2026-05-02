@@ -3,8 +3,8 @@
         <v-menu v-model="showDropdown" :close-on-content-click="false" location="bottom end" max-width="320"
             transition="slide-y-transition" :offset="[10, 10]">
             <template v-slot:activator="{ props: menuProps }">
-                <v-btn v-bind="menuProps" class="sync-button" :class="{ 'px-2': $vuetify.display.smAndDown }"
-                    variant="tonal" color="primary" size="small">
+                <v-btn v-bind="menuProps" class="sync-button" :class="[{ 'px-2': $vuetify.display.smAndDown }, `status-${statusColor}`]"
+                    variant="text" size="small">
                     <div class="d-flex align-center">
                         <div class="status-indicator me-2" :class="statusColor"></div>
                         <span v-if="!$vuetify.display.smAndDown">{{ statusText }}</span>
@@ -142,19 +142,46 @@
 }
 
 .sync-button {
-    background: rgba(15, 23, 42, 0.06) !important;
-    color: #475569 !important;
+    background: #ffffff !important;
+    color: var(--text-primary) !important;
     box-shadow: none !important;
-    border: 1px solid rgba(148, 163, 184, 0.35) !important;
-    border-radius: 20px !important;
+    border: 1px solid var(--border-strong) !important;
+    border-radius: 8px !important;
     font-weight: 500 !important;
-    font-size: 13px !important;
+    font-size: 12.5px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 12px !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
 }
 
 .sync-button:hover {
-    background: rgba(15, 23, 42, 0.12) !important;
+    background: #ffffff !important;
+    border-color: rgba(var(--primary-rgb), 0.24) !important;
+    color: var(--text-primary) !important;
     transform: none !important;
     box-shadow: none !important;
+}
+
+.sync-button.status-green {
+    background: #f6fffa !important;
+    border-color: rgba(34, 197, 94, 0.24) !important;
+}
+
+.sync-button.status-orange {
+    background: #fffaf2 !important;
+    border-color: rgba(245, 158, 11, 0.26) !important;
+}
+
+.sync-button.status-red {
+    background: #fff7f7 !important;
+    border-color: rgba(239, 68, 68, 0.22) !important;
+}
+
+.sync-button.status-grey,
+.sync-button.status-blue {
+    background: #ffffff !important;
 }
 
 .sync-button .status-indicator {
@@ -187,7 +214,7 @@
 }
 
 .blue {
-    background: #4C64E2;
+    background: var(--primary);
 }
 
 @keyframes pulse {
@@ -206,11 +233,11 @@
 
 /* Minimal dropdown - 2026 style */
 .modern-dropdown {
-    background: linear-gradient(to bottom, #ffffff, #fafbff);
+    background: #ffffff;
     border-radius: 14px;
     overflow: hidden;
-    box-shadow: 0 8px 24px rgba(76, 100, 226, 0.12), 0 2px 8px rgba(0, 0, 0, 0.04);
-    border: 1px solid rgba(148, 163, 184, 0.2);
+    box-shadow: none;
+    border: 1px solid var(--border-strong);
     width: 300px;
 }
 
@@ -251,14 +278,14 @@
 }
 
 .action-btn.primary {
-    background: linear-gradient(135deg, #6366f1 0%, #4C64E2 100%);
+    background: var(--primary);
     color: white;
-    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.25);
+    box-shadow: none;
 }
 
 .action-btn.primary:hover:not(:disabled) {
-    background: linear-gradient(135deg, #4f46e5 0%, #3b50c4 100%);
-    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.35);
+    background: var(--primary-hover);
+    box-shadow: none;
     transform: translateY(-1px);
 }
 
@@ -270,12 +297,12 @@
 .action-btn.error {
     background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
     color: white;
-    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.25);
+    box-shadow: none;
 }
 
 .action-btn.error:hover {
     background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.35);
+    box-shadow: none;
     transform: translateY(-1px);
 }
 
@@ -350,13 +377,13 @@
 .progress-bar-background {
     position: absolute;
     inset: 0;
-    background: rgba(76, 100, 226, 0.12);
+    background: rgba(var(--primary-rgb), 0.12);
     border-radius: 10px;
 }
 
 .progress-bar-filled {
     height: 100%;
-    background: linear-gradient(90deg, var(--primary), #5e72e4, #7d4ce2);
+    background: var(--primary);
     border-radius: 10px;
     transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1);
     position: relative;
@@ -411,36 +438,36 @@
     background: rgba(255, 255, 255, 0.85);
     border-color: rgba(148, 163, 184, 0.15);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    box-shadow: none;
 }
 
-/* Subtle purple/pink tints for entity cards */
+/* Calm blue tints for entity cards */
 .entity-1 {
-    background: rgba(99, 102, 241, 0.04);
+    background: rgba(var(--primary-rgb), 0.04);
 }
 .entity-1:hover {
-    background: rgba(99, 102, 241, 0.08);
+    background: rgba(var(--primary-rgb), 0.08);
 }
 
 .entity-2 {
-    background: rgba(139, 92, 246, 0.04);
+    background: rgba(var(--primary-rgb), 0.05);
 }
 .entity-2:hover {
-    background: rgba(139, 92, 246, 0.08);
+    background: rgba(var(--primary-rgb), 0.09);
 }
 
 .entity-3 {
-    background: rgba(168, 85, 247, 0.04);
+    background: rgba(var(--primary-rgb), 0.06);
 }
 .entity-3:hover {
-    background: rgba(168, 85, 247, 0.08);
+    background: rgba(var(--primary-rgb), 0.1);
 }
 
 .entity-4 {
-    background: linear-gradient(135deg, rgba(192, 132, 252, 0.08) 0%, rgba(192, 132, 252, 0.04) 100%);
+    background: rgba(var(--primary-rgb), 0.07);
 }
 .entity-4:hover {
-    background: linear-gradient(135deg, rgba(192, 132, 252, 0.14) 0%, rgba(192, 132, 252, 0.08) 100%);
+    background: rgba(var(--primary-rgb), 0.11);
 }
 
 .entity-icon {
@@ -452,9 +479,9 @@
     border-radius: 10px;
     margin-right: 12px;
     flex-shrink: 0;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 250, 252, 0.9) 100%);
+    background: rgba(255, 255, 255, 0.92);
     border: 1px solid rgba(148, 163, 184, 0.2);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+    box-shadow: none;
 }
 
 .entity-icon :deep(.v-icon) {
@@ -557,7 +584,7 @@
     padding: 5px 10px;
     border-radius: 4px;
     opacity: 0.95;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
 }
 </style>
 

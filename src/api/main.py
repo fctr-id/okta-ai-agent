@@ -12,6 +12,7 @@ from src.utils.logging import logger
 from src.core.okta.sync.operations import DatabaseOperations
 from src.core.okta.sync.models import AuthUser
 from sqlalchemy import inspect, create_engine
+from src.config.settings import settings
 
 # Suppress specific Windows socket cleanup errors in asyncio
 class WindowsSocketErrorFilter(logging.Filter):
@@ -86,7 +87,9 @@ async def lifespan(app: FastAPI):
     
     await db.init_db()
     
-    from src.config.settings import settings
+    logger.info(
+        f"Conversation runtime storage: {settings.CHAT_SESSIONS_DIR} (created automatically if missing)"
+    )
     
     engine = create_engine(f"sqlite:///{settings.SQLITE_PATH}")
     inspector = inspect(engine)
@@ -158,6 +161,7 @@ app.include_router(auth.router)
 app.include_router(sync.router, prefix="/api")
 app.include_router(react_stream.router, prefix="/api")  # ReAct agent streaming
 app.include_router(history.router, prefix="/api")  # Query history and favorites
+app.include_router(history.sessions_router, prefix="/api")  # Conversation sessions and turns
 
 # Conditionally mount Slack bot routes
 if os.environ.get("ENABLE_SLACK_BOT", "false").lower() == "true":

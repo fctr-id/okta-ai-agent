@@ -1,16 +1,18 @@
 """
 Router Agent - Query Classification for Multi-Agent Orchestrator
 
-Decides which phase(s) to execute based on query analysis.
+Returns an explicit control-plane decision for the current static orchestrator shell.
 """
 
-from pydantic_ai import Agent, RunContext
-from pydantic import BaseModel
-from typing import Literal, Any
+from pydantic_ai import RunContext, UsageLimits
+from pydantic import BaseModel, model_validator
+from typing import Literal, Any, Optional
 from dataclasses import dataclass
 from pathlib import Path
 
 from src.utils.logging import get_logger
+from src.core.agents import build_agent
+from src.core.models.model_picker import ModelType
 
 logger = get_logger("okta_ai_agent")
 
@@ -36,9 +38,22 @@ def get_sqlite_schema_description() -> str:
 # ============================================================================
 
 class RouterDecision(BaseModel):
-    """Router decision for query execution path"""
-    phase: Literal["SQL", "API", "SPECIAL", "NOT_RELEVANT"]
+    """Control-plane routing decision for the current orchestrator shell."""
+    mode: Literal["delegate", "clarify", "fail"]
+    target: Literal["SQL", "API", "SPECIAL", "NONE"] = "NONE"
     reasoning: str
+    user_message: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_mode_and_target(self) -> "RouterDecision":
+        """Keep current control-plane decisions explicit and well-formed."""
+        if self.mode == "delegate" and self.target == "NONE":
+            raise ValueError("Delegate decisions must specify a target")
+
+        if self.mode in {"clarify", "fail"} and self.target != "NONE":
+            raise ValueError("Clarify/fail decisions cannot specify a delegation target")
+
+        return self
 
 
 # ============================================================================
@@ -64,25 +79,24 @@ try:
         BASE_SYSTEM_PROMPT = f.read()
 except FileNotFoundError:
     logger.error(f"Router prompt not found: {PROMPT_FILE}")
-    BASE_SYSTEM_PROMPT = """Classify Okta query into: SQL, API, SQL+API, SPECIAL, or NOT_RELEVANT."""
-
-
-# Model selection
-try:
-    from src.core.models.model_picker import ModelConfig, ModelType
-    model = ModelConfig.get_model(ModelType.CODING)
-except ImportError:
-    import os
-    model = os.getenv('LLM_MODEL', 'openai:gpt-4o-mini')
+    BASE_SYSTEM_PROMPT = (
+        "Return a RouterDecision with mode delegate/clarify/fail, "
+        "target SQL/API/SPECIAL/NONE, and concise routing reasoning for Okta queries."
+    )
 
 
 # Create agent with progress reporting tool
-router_agent = Agent(
-    model,
+router_agent = build_agent(
+    ModelType.CODING,
+    name="router_agent",
     instructions=BASE_SYSTEM_PROMPT,  # Static base instructions
     output_type=RouterDecision,
     deps_type=RouterDeps,
-    retries=0
+)
+
+ROUTER_USAGE_LIMITS = UsageLimits(
+    request_limit=2,
+    tool_calls_limit=1,
 )
 
 
@@ -100,7 +114,7 @@ async def notify_progress_to_user(
     Report progress to the user. Call this to keep users informed of your analysis.
     
     Args:
-        message: Progress message (e.g., "🎯 STARTING: Analyzing query structure")
+        message: Progress message (e.g., "STARTING: Analyzing query structure")
         details: Optional additional details
     
     Returns:
@@ -109,9 +123,9 @@ async def notify_progress_to_user(
     deps = ctx.deps
     
     # Log to server with full details
-    logger.info(f"[{deps.correlation_id}] 📊 Progress: {message}")
+    logger.info(f"[{deps.correlation_id}] Progress: {message}")
     if details:
-        logger.info(f"[{deps.correlation_id}] 📊 Details: {details}")
+        logger.info(f"[{deps.correlation_id}] Details: {details}")
     
     # Send to frontend via step_start callback (creates STEP-START events)
     if deps.step_start_callback:
@@ -121,7 +135,7 @@ async def notify_progress_to_user(
             "timestamp": __import__('time').time()
         })
     
-    return f"✅ Progress reported: {message}"
+    return f"Progress reported: {message}"
 
 
 @router_agent.instructions
@@ -169,15 +183,21 @@ async def route_query(user_query: str, correlation_id: str, progress_callback: c
     
     try:
         deps = RouterDeps(correlation_id=correlation_id, progress_callback=progress_callback, step_start_callback=step_start_callback)
-        result = await router_agent.run(user_query, deps=deps)
+        result = await router_agent.run(
+            user_query,
+            deps=deps,
+            usage_limits=ROUTER_USAGE_LIMITS,
+        )
         
-        logger.info(f"Route decision: {result.output.phase} - {result.output.reasoning}")
+        logger.info(
+            f"Route decision: mode={result.output.mode}, target={result.output.target} - {result.output.reasoning}"
+        )
         
         # Log token usage
         if result.usage():
             usage = result.usage()
             logger.info(
-                f"[{correlation_id}] 📊 Router Agent Token Usage: "
+                f"[{correlation_id}] Router Agent Token Usage: "
                 f"{usage.input_tokens:,} input, {usage.output_tokens:,} output, "
                 f"{usage.total_tokens:,} total"
             )
@@ -186,8 +206,9 @@ async def route_query(user_query: str, correlation_id: str, progress_callback: c
         
     except Exception as e:
         logger.error(f"Router failed: {e}", exc_info=True)
-        # Default to PROCEED on error (safe fallback - let SQL handle it)
+        # Default to delegate-on-SQL on router error; DB health checks can still fall back to API.
         return RouterDecision(
-            phase="PROCEED",
+            mode="delegate",
+            target="SQL",
             reasoning=f"Router error, proceeding to SQL phase: {str(e)}"
         ), None

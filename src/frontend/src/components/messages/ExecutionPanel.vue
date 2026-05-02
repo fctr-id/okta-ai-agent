@@ -2,31 +2,33 @@
   <div v-if="validationStep || executionStarted || subprocessProgress.length > 0" class="exec-glass">
     <!-- Minimal Header -->
     <button class="glass-header" @click="isExpanded = !isExpanded">
-      <svg 
-        class="chevron" 
-        :class="{ expanded: isExpanded }" 
-        width="14" height="14" 
-        viewBox="0 0 24 24" 
-        fill="none" 
-        stroke="currentColor" 
-        stroke-width="2.5"
-      >
-        <path d="M9 18l6-6-6-6"/>
-      </svg>
-      <span class="header-text">Running</span>
-      
-      <div class="header-spacer"></div>
-      
-      <!-- Result count -->
-      <span v-if="isComplete && resultCount > 0" class="result-badge">{{ resultCount.toLocaleString() }} records</span>
-      
-      <!-- Status badges - right aligned -->
-      <span v-if="isExecuting && !isComplete" class="status-badge processing">
-        <span class="badge-pulse"></span>
-        RUNNING
-      </span>
-      <span v-if="isComplete && !executionError" class="status-badge completed">COMPLETED</span>
-      <span v-if="executionError" class="status-badge error">ERROR</span>
+      <div class="header-main">
+        <svg 
+          class="chevron" 
+          :class="{ expanded: isExpanded }" 
+          width="14" height="14" 
+          viewBox="0 0 24 24" 
+          fill="none" 
+          stroke="currentColor" 
+          stroke-width="2.5"
+        >
+          <path d="M9 18l6-6-6-6"/>
+        </svg>
+        <span class="header-text">Security & Execution</span>
+      </div>
+
+      <div class="header-badges">
+        <!-- Result count -->
+        <span v-if="isComplete && resultCount > 0" class="result-badge">{{ resultCount.toLocaleString() }} records</span>
+
+        <!-- Status badges - right aligned -->
+        <span v-if="isExecuting && !isComplete" class="status-badge processing">
+          <span class="badge-pulse"></span>
+          RUNNING
+        </span>
+        <span v-if="isComplete && !executionError" class="status-badge completed">COMPLETED</span>
+        <span v-if="executionError" class="status-badge error">ERROR</span>
+      </div>
     </button>
 
     <!-- Content -->
@@ -34,29 +36,35 @@
       <div v-show="isExpanded" class="glass-content">
         <!-- Generated Script -->
         <div v-if="generatedScript" class="script-section">
-          <div class="script-toggle" @click="isScriptExpanded = !isScriptExpanded">
-            <svg 
-              class="chevron small" 
-              :class="{ expanded: isScriptExpanded }" 
-              width="12" height="12" 
-              viewBox="0 0 24 24" 
-              fill="none" 
-              stroke="currentColor" 
-              stroke-width="2"
-            >
-              <path d="M9 18l6-6-6-6"/>
-            </svg>
-            <span class="script-title">Generated script</span>
-            <span class="script-size">{{ scriptLength }} chars</span>
-            <span class="copy-btn" role="button" tabindex="0" @click.stop="copyScript" @keydown.enter.stop="copyScript" :title="showCopied ? 'Copied!' : 'Copy'">
-              <svg v-if="!showCopied" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          <div class="script-toggle" :class="{ expanded: isScriptExpanded }" @click="isScriptExpanded = !isScriptExpanded">
+            <div class="script-summary">
+              <svg 
+                class="chevron small" 
+                :class="{ expanded: isScriptExpanded }" 
+                width="12" height="12" 
+                viewBox="0 0 24 24" 
+                fill="none" 
+                stroke="currentColor" 
+                stroke-width="2"
+              >
+                <path d="M9 18l6-6-6-6"/>
               </svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-            </span>
+              <span class="script-title">Generated script</span>
+              <span class="script-size">{{ scriptLength }} chars</span>
+            </div>
+
+            <div class="script-actions">
+              <span class="script-hint">{{ isScriptExpanded ? 'Hide code' : 'Show code' }}</span>
+              <span class="copy-btn" role="button" tabindex="0" @click.stop="copyScript" @keydown.enter.stop="copyScript" :title="showCopied ? 'Copied!' : 'Copy'">
+                <svg v-if="!showCopied" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </span>
+            </div>
           </div>
           <div v-show="isScriptExpanded" class="script-code">
             <pre><code>{{ generatedScript }}</code></pre>
@@ -140,17 +148,19 @@ const props = defineProps({
   resultCount: { type: Number, default: 0 },
   tokenUsage: { type: Object, default: null },
   rateLimitWarning: { type: Number, default: 0 },
-  generatedScript: { type: String, default: null }
+  generatedScript: { type: String, default: null },
+  shouldAutoCollapse: { type: Boolean, default: false }
 })
 
 const isExpanded = ref(true)
 const isScriptExpanded = ref(false)
 const showCopied = ref(false)
 
-// Collapse when complete
-watch(() => props.isComplete, (val) => {
-  if (val) isExpanded.value = false
-})
+watch(() => props.shouldAutoCollapse, (shouldAutoCollapse) => {
+  if (shouldAutoCollapse) {
+    isExpanded.value = false
+  }
+}, { immediate: true })
 
 const scriptLength = computed(() => props.generatedScript?.length || 0)
 
@@ -185,38 +195,38 @@ const getExecutionClass = computed(() => {
 </script>
 
 <style scoped>
-/* Frosted glass container */
+/* Execution surface - structured and lined */
 .exec-glass {
   margin: 0.75rem auto;
   max-width: 900px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
+  box-shadow: none;
   overflow: hidden;
 }
 
-/* Header - more white */
 .glass-header {
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
   width: 100%;
-  padding: 14px 20px;
-  background: rgba(255, 255, 255, 0.85);
+  padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.18), rgba(var(--primary-rgb), 0.1));
   border: none;
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.18);
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background 0.15s ease;
 }
 
 .glass-header:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.22), rgba(var(--primary-rgb), 0.12));
 }
 
 .chevron {
-  color: #666;
+  color: var(--primary-dark);
   transition: transform 0.25s ease;
   flex-shrink: 0;
 }
@@ -230,15 +240,26 @@ const getExecutionClass = computed(() => {
   height: 12px;
 }
 
+.header-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
 .header-text {
   font-size: 13px;
   font-weight: 600;
-  color: #333;
-  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  letter-spacing: 0;
 }
 
-.header-spacer {
-  flex: 1;
+.header-badges {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* Status badges - right aligned with backgrounds */
@@ -248,23 +269,27 @@ const getExecutionClass = computed(() => {
   gap: 6px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.5px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
 }
 
 .status-badge.processing {
-  background: rgba(76, 100, 226, 0.12);
-  color: #4C64E2;
+  background: rgba(15, 23, 42, 0.035);
+  border-color: rgba(15, 23, 42, 0.08);
+  color: var(--text-secondary);
 }
 
 .status-badge.completed {
   background: rgba(34, 197, 94, 0.12);
-  color: #16a34a;
+  border-color: rgba(34, 197, 94, 0.24);
+  color: #166534;
 }
 
 .status-badge.error {
-  background: rgba(239, 68, 68, 0.12);
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.14);
   color: #dc2626;
 }
 
@@ -284,61 +309,97 @@ const getExecutionClass = computed(() => {
 .result-badge {
   font-size: 11px;
   font-weight: 500;
-  color: #666;
+  color: var(--primary-dark);
   padding: 3px 10px;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(var(--primary-rgb), 0.08);
+  border: 1px solid rgba(var(--primary-rgb), 0.16);
   border-radius: 20px;
   margin-right: 8px;
 }
 
 /* Content */
 .glass-content {
-  padding: 16px 20px;
+  padding: 0 16px 16px;
 }
 
 /* Script section */
 .script-section {
-  margin-bottom: 14px;
+  margin-top: 8px;
+  margin-bottom: 0;
+  border: 1px solid rgba(var(--primary-rgb), 0.14);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.5);
+  background: #ffffff;
   overflow: hidden;
 }
 
 .script-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
   width: 100%;
-  padding: 10px 14px;
+  padding: 12px 14px;
   background: transparent;
   border: none;
   cursor: pointer;
   font-size: 12px;
-  color: #666;
+  color: var(--primary-dark);
   transition: background 0.15s ease;
 }
 
 .script-toggle:hover {
-  background: rgba(255, 255, 255, 0.4);
+  background: rgba(15, 23, 42, 0.025);
+}
+
+.script-toggle.expanded {
+  background: rgba(15, 23, 42, 0.035);
 }
 
 .script-title {
   font-weight: 600;
-  color: #444;
+  color: var(--text-primary);
+}
+
+.script-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .script-size {
-  color: #888;
+  color: var(--primary-dark);
   font-size: 11px;
 }
 
-.copy-btn {
+.script-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-left: auto;
+}
+
+.script-hint {
+  margin-left: auto;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid rgba(var(--primary-rgb), 0.18);
+  color: var(--primary-dark);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.copy-btn {
+  margin-left: 0;
   background: none;
   border: none;
   cursor: pointer;
   padding: 4px;
-  color: #666;
+  color: var(--primary-dark);
   opacity: 0.6;
   transition: opacity 0.15s;
 }
@@ -347,21 +408,39 @@ const getExecutionClass = computed(() => {
   opacity: 1;
 }
 
+@media (max-width: 720px) {
+  .script-actions {
+    width: 100%;
+    justify-content: space-between;
+    margin-left: 0;
+  }
+
+  .header-badges {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 .script-code {
-  padding: 14px;
-  background: rgba(0, 0, 0, 0.03);
+  padding: 0 14px 14px;
+  background: transparent;
+  border-top: 1px solid rgba(var(--primary-rgb), 0.14);
   max-height: 300px;
   overflow-y: auto;
 }
 
 .script-code pre {
-  margin: 0;
+  margin: 12px 0 0;
   font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
   font-size: 11px;
   line-height: 1.6;
-  color: #333;
+  color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+  background: #fafafa;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 12px;
 }
 
 /* Steps list */
@@ -369,28 +448,57 @@ const getExecutionClass = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  margin-top: 10px;
 }
 
 .step-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.85);
+  padding: 14px 12px 14px 18px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 10px;
-  transition: all 0.2s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.step-row::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.28);
 }
 
 .step-row.active {
-  background: rgba(255, 255, 255, 0.95);
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.18);
+}
+
+.step-row.active::before {
+  background: rgba(15, 23, 42, 0.44);
 }
 
 .step-row.success {
-  background: rgba(34, 197, 94, 0.08);
+  background: rgba(34, 197, 94, 0.06);
+  border-color: rgba(34, 197, 94, 0.22);
+}
+
+.step-row.success::before {
+  background: rgba(34, 197, 94, 0.58);
 }
 
 .step-row.failed {
-  background: rgba(229, 57, 53, 0.08);
+  background: #ffffff;
+  border-color: rgba(239, 68, 68, 0.12);
+}
+
+.step-row.failed::before {
+  background: rgba(239, 68, 68, 0.68);
 }
 
 .step-indicator {
@@ -408,7 +516,7 @@ const getExecutionClass = computed(() => {
 }
 
 .indicator-dot.success {
-  background: #22c55e;
+  background: #16a34a;
 }
 
 .indicator-dot.error {
@@ -423,8 +531,8 @@ const getExecutionClass = computed(() => {
 .indicator-spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(76, 100, 226, 0.2);
-  border-top-color: #4C64E2;
+  border: 2px solid rgba(15, 23, 42, 0.14);
+  border-top-color: rgba(15, 23, 42, 0.55);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -442,16 +550,20 @@ const getExecutionClass = computed(() => {
 .step-label {
   flex: 1;
   font-size: 13px;
-  color: #444;
-  font-weight: 450;
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
 .step-row.active .step-label {
-  color: #222;
+  color: var(--text-primary);
 }
 
 .step-row.failed .step-label {
-  color: #c62828;
+  color: #b91c1c;
+}
+
+.step-row.success .step-label {
+  color: #166534;
 }
 
 /* Progress section */
@@ -459,24 +571,25 @@ const getExecutionClass = computed(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.5);
+  padding: 14px 12px 14px 18px;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
   border-radius: 10px;
 }
 
 .progress-track {
   flex: 1;
   height: 4px;
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(15, 23, 42, 0.08);
   border-radius: 2px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #4C64E2, #8B5CF6);
+  background: rgba(15, 23, 42, 0.56);
   border-radius: 99px;
-  box-shadow: 0 0 12px rgba(76, 100, 226, 0.3);
+  box-shadow: none;
   transition: width 0.3s ease;
 }
 
@@ -493,7 +606,7 @@ const getExecutionClass = computed(() => {
 
 .progress-pct {
   font-size: 11px;
-  color: #666;
+  color: var(--text-muted);
   font-weight: 500;
   min-width: 32px;
 }
@@ -503,8 +616,11 @@ const getExecutionClass = computed(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 4px;
-  padding-left: 20px;
+  padding: 12px 12px 2px 18px;
+  margin-top: 0;
+  background: #ffffff;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 10px;
 }
 
 .subprocess-row {
@@ -512,7 +628,8 @@ const getExecutionClass = computed(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #666;
+  color: var(--text-secondary);
+  padding-bottom: 10px;
 }
 
 .subprocess-indicator {
@@ -523,20 +640,21 @@ const getExecutionClass = computed(() => {
 }
 
 .subprocess-label {
-  color: #555;
+  color: var(--text-secondary);
 }
 
 .subprocess-note {
-  color: #999;
+  color: var(--text-muted);
   font-style: italic;
 }
 
 /* Error message */
 .error-msg {
   padding: 12px 16px;
-  background: rgba(229, 57, 53, 0.1);
-  color: #c62828;
-  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-radius: 10px;
   font-size: 12px;
   margin-top: 8px;
 }
@@ -545,14 +663,16 @@ const getExecutionClass = computed(() => {
 .token-footer {
   margin-top: 14px;
   padding-top: 14px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
-  font-size: 11px;
-  color: #888;
+  border-top: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
   text-align: center;
 }
 
 .token-breakdown {
-  color: #aaa;
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 /* Slide transition */

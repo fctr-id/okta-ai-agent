@@ -10,6 +10,9 @@ services:
     volumes:
       # Database directory - contains all SQLite data
       - ./sqlite_db:/app/sqlite_db
+
+      # Multi-turn conversation runtime storage
+      - ./chat_sessions:/app/chat_sessions
       
       # SSL certificates for HTTPS
       - ./certs:/app/src/backend/certs
@@ -22,6 +25,7 @@ services:
       # Database location inside container
       - DB_DIR=/app/sqlite_db
       - DB_FILENAME=okta_sync.db
+      - CHAT_SESSIONS_DIR=/app/chat_sessions
       
       # CORS settings
       - ALLOWED_ORIGINS=https://localhost:*,https://127.0.0.1:*

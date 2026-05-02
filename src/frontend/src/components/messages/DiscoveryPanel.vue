@@ -13,7 +13,7 @@
       >
         <path d="M9 18l6-6-6-6"/>
       </svg>
-      <span class="header-text">Thinking</span>
+      <span class="header-text">Planning & Tools</span>
       
       <div class="header-spacer"></div>
       
@@ -115,18 +115,20 @@ const props = defineProps({
   executionStarted: {
     type: Boolean,
     default: false
+  },
+  shouldAutoCollapse: {
+    type: Boolean,
+    default: false
   }
 })
 
 const isExpanded = ref(true)
 
-watch([() => props.isThinking, () => props.isComplete], ([thinking, complete]) => {
-  if (thinking || (props.steps.length > 0 && !complete)) {
-    isExpanded.value = true
-  } else if (complete) {
+watch(() => props.shouldAutoCollapse, (shouldAutoCollapse) => {
+  if (shouldAutoCollapse) {
     isExpanded.value = false
   }
-})
+}, { immediate: true })
 
 const formatToolName = (name) => {
   return name.replace(/_/g, ' ').replace(/^okta /, '')
@@ -134,38 +136,36 @@ const formatToolName = (name) => {
 </script>
 
 <style scoped>
-/* Frosted glass container */
+/* Thinking surface - structured, text-first */
 .thinking-glass {
-  margin: 1.5rem auto;
+  margin: 1.25rem auto;
   max-width: 900px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.7);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.5);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid rgba(var(--primary-rgb), 0.16);
+  box-shadow: none;
   overflow: hidden;
 }
 
-/* Header - more white */
 .glass-header {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 14px 20px;
-  background: rgba(255, 255, 255, 0.85);
+  padding: 12px 16px;
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.14), rgba(var(--primary-rgb), 0.08));
   border: none;
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.16);
   cursor: pointer;
-  transition: background 0.2s ease;
+  transition: background 0.15s ease;
 }
 
 .glass-header:hover {
-  background: rgba(255, 255, 255, 0.95);
+  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.18), rgba(var(--primary-rgb), 0.1));
 }
 
 .chevron {
-  color: #666;
+  color: var(--primary-dark);
   transition: transform 0.25s ease;
   flex-shrink: 0;
 }
@@ -177,38 +177,41 @@ const formatToolName = (name) => {
 .header-text {
   font-size: 13px;
   font-weight: 600;
-  color: #333;
-  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  letter-spacing: 0;
 }
 
 .header-spacer {
   flex: 1;
 }
 
-/* Status badges - right aligned with backgrounds */
 .status-badge {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.5px;
-  padding: 4px 10px;
-  border-radius: 6px;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
 }
 
 .status-badge.processing {
-  background: rgba(76, 100, 226, 0.12);
-  color: #4C64E2;
+  background: rgba(15, 23, 42, 0.035);
+  border-color: rgba(15, 23, 42, 0.08);
+  color: var(--text-secondary);
 }
 
 .status-badge.completed {
-  background: rgba(34, 197, 94, 0.12);
-  color: #16a34a;
+  background: #ffffff;
+  border-color: var(--border-strong);
+  color: var(--text-primary);
 }
 
 .status-badge.error {
-  background: rgba(239, 68, 68, 0.12);
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.14);
   color: #dc2626;
 }
 
@@ -248,7 +251,7 @@ const formatToolName = (name) => {
 
 /* Content */
 .glass-content {
-  padding: 16px 20px;
+  padding: 14px 16px 16px;
 }
 
 /* Shimmer loading */
@@ -259,15 +262,15 @@ const formatToolName = (name) => {
 }
 
 .shimmer-bar {
-  height: 12px;
+  height: 10px;
   background: linear-gradient(90deg, 
-    rgba(0,0,0,0.04) 0%, 
-    rgba(0,0,0,0.08) 50%, 
-    rgba(0,0,0,0.04) 100%
+    rgba(15, 23, 42, 0.04) 0%, 
+    rgba(15, 23, 42, 0.08) 50%, 
+    rgba(15, 23, 42, 0.04) 100%
   );
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 6px;
+  border-radius: 4px;
   width: 80%;
 }
 
@@ -282,40 +285,74 @@ const formatToolName = (name) => {
 
 /* Steps list */
 .steps-list {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+}
+
+.steps-list::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 18px;
+  bottom: 18px;
+  width: 1px;
+  background: rgba(var(--primary-rgb), 0.28);
 }
 
 .step-item {
-  padding: 12px 16px;
-  background: rgba(255, 255, 255, 0.85);
-  border-radius: 12px;
-  transition: all 0.2s ease;
+  position: relative;
+  padding: 10px 12px 10px 32px;
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.step-item::before {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 8px;
+  width: 14px;
+  height: 12px;
+  border-left: 1px solid rgba(var(--primary-rgb), 0.28);
+  border-bottom: 1px solid rgba(var(--primary-rgb), 0.28);
 }
 
 .step-item.current {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(var(--primary-rgb), 0.05);
+}
+
+.step-item.current::before {
+  border-left-color: rgba(var(--primary-rgb), 0.62);
+  border-bottom-color: rgba(var(--primary-rgb), 0.62);
 }
 
 .step-item.error {
-  background: rgba(229, 57, 53, 0.08);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.step-item.error::before {
+  border-left-color: rgba(239, 68, 68, 0.48);
+  border-bottom-color: rgba(239, 68, 68, 0.48);
 }
 
 .step-text {
   margin: 0;
   font-size: 13px;
-  line-height: 1.6;
-  color: #444;
-  font-weight: 450;
+  line-height: 1.55;
+  color: var(--text-primary);
+  font-weight: 500;
 }
 
 .step-item.current .step-text {
-  color: #222;
+  color: var(--text-primary);
 }
 
 .step-item.error .step-text {
-  color: #c62828;
+  color: #b91c1c;
 }
 
 /* Typing cursor */
@@ -323,7 +360,7 @@ const formatToolName = (name) => {
   display: inline-block;
   width: 2px;
   height: 14px;
-  background: #4C64E2;
+  background: rgba(15, 23, 42, 0.5);
   margin-left: 4px;
   vertical-align: middle;
   animation: blink 1s step-end infinite;
@@ -334,11 +371,11 @@ const formatToolName = (name) => {
   50% { opacity: 0; }
 }
 
-/* Tool chips - 2026 modern style */
+/* Tool chips - structured events, not prose */
 .tool-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 7px;
   margin-top: 10px;
 }
 
@@ -346,49 +383,51 @@ const formatToolName = (name) => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
-  background: rgba(76, 100, 226, 0.08);
-  border-radius: 100px;
-  font-size: 11px;
-  color: #5a6acf;
+  padding: 6px 10px;
+  background: #ffffff;
+  border: 1px solid rgba(var(--primary-rgb), 0.24);
+  border-radius: 8px;
+  font-size: 11.5px;
+  color: var(--text-primary);
   font-weight: 500;
   transition: all 0.2s ease;
 }
 
 .tool-chip:hover {
-  background: rgba(76, 100, 226, 0.14);
+  border-color: rgba(var(--primary-rgb), 0.38);
 }
 
 .tool-chip.active {
-  background: rgba(76, 100, 226, 0.12);
-  box-shadow: 0 0 0 1px rgba(76, 100, 226, 0.2);
+  background: rgba(var(--primary-rgb), 0.08);
+  border-color: rgba(var(--primary-rgb), 0.48);
+  color: var(--primary-dark);
+  box-shadow: none;
 }
 
 .tool-chip.active .tool-icon {
   animation: spin-slow 3s linear infinite;
 }
 
-/* Done state - subtle purple */
 .tool-chip.done {
-  background: rgba(142, 84, 233, 0.08);
-  color: #9b7ed4;
+  background: rgba(34, 197, 94, 0.04);
+  border-color: rgba(34, 197, 94, 0.24);
+  color: var(--text-primary);
 }
 
 .tool-chip.done:hover {
-  background: rgba(142, 84, 233, 0.12);
+  border-color: rgba(34, 197, 94, 0.34);
 }
 
 .tool-icon.done {
-  color: #a98eda;
+  color: #16a34a;
 }
 
-/* Chevron separator between sequential tools */
 .tool-separator {
-  color: #c4b5d8;
-  font-size: 14px;
-  font-weight: 300;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 400;
   margin: 0 2px;
-  opacity: 0.7;
+  opacity: 0.9;
 }
 
 @keyframes spin-slow {
@@ -398,19 +437,19 @@ const formatToolName = (name) => {
 
 .tool-icon {
   flex-shrink: 0;
-  opacity: 0.8;
+  opacity: 0.9;
 }
 
 .tool-label {
   white-space: nowrap;
 }
 
-/* Error message */
 .error-msg {
   padding: 12px 16px;
-  background: rgba(229, 57, 53, 0.1);
-  color: #c62828;
-  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-radius: 10px;
   font-size: 12px;
   margin-top: 8px;
 }

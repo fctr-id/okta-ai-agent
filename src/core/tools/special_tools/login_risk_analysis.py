@@ -31,7 +31,7 @@ TOOL_METADATA = {
         "entities": {
             "login_risk_analysis": {
                 "operations": ["special_tool_analyze_login_risk"],
-                "description": "Comprehensive login behavior analysis for risk assessment - returns raw data AND an AI-generated risk assessment summary.",
+                "description": "Comprehensive login behavior analysis for risk assessment - returns raw evidence for synthesis and can optionally produce a direct-answer summary.",
                 "aliases": ["login risk", "login analysis", "suspicious login", "login behavior", "authentication risk"],
                 "query_patterns": [
                     "analyze login risk for {user}",
@@ -54,7 +54,7 @@ TOOL_METADATA = {
                 "path": "/special-tools/login-risk-analysis",
                 "method": "GET",
                 "summary": "SPECIAL TOOL: Comprehensive login risk analysis for users",
-                "description": "REQUIRED PARAMETERS: Extract user identifier from the user's natural language query: 'user_identifier' (REQUIRED - user email/login/ID from query). SPECIAL TOOL: Collects last 10 login events (policy.evaluate_sign_on) including location patterns, device fingerprints, user agents, ISPs, network zones, and behavioral indicators. Returns comprehensive raw data AND an embedded AI risk assessment in the 'llm_summary' field. The tool performs its own analysis using a reasoning model. IMPORTANT: When generating code or reports, DO NOT manually format the raw data. ALWAYS output the 'llm_summary' string directly as it contains the expert analysis.",
+                "description": "REQUIRED PARAMETERS: Extract user identifier from the user's natural language query: 'user_identifier' (REQUIRED - user email/login/ID from query). SPECIAL TOOL: Collects last 10 login events (policy.evaluate_sign_on) including location patterns, device fingerprints, user agents, ISPs, network zones, and behavioral indicators. Returns comprehensive raw data for synthesis. In direct-answer mode it may also return an expert markdown summary in 'llm_summary'.",
                 "entity": "login_risk_analysis",
                 "operation_group": "special_tool_analyze_login_risk",
                 "parameters": {
@@ -176,15 +176,16 @@ def get_code_template():
 
 async def analyze_user_login_risk(
     client, 
-    user_identifier: str
+    user_identifier: str,
+    response_mode: str = "synthesis_ready",
 ) -> Dict[str, Any]:
     """
     SPECIAL TOOL: Comprehensive login risk data collection for user behavior analysis.
     
     Uses only base_okta_api_client.py - no SDK dependencies.
     
-    IMPORTANT: This tool ONLY collects raw data - it makes NO risk decisions.
-    The LLM will analyze the returned data and make the final risk assessment.
+    IMPORTANT: In synthesis_ready mode this tool only collects raw data.
+    In direct mode it may also generate an inline markdown risk assessment.
     
     Args:
         client: OktaAPIClient instance
@@ -430,46 +431,45 @@ async def analyze_user_login_risk(
         }
         
         logger.info("Login risk analysis completed successfully")
-        print(f"Analysis completed - ready for LLM assessment", file=sys.stderr)
-        
-        # --- INTELLIGENT TOOL: Generate LLM Risk Assessment ---
-        try:
-            if ModelConfig and Agent:
-                logger.info("Step 6 - Generating LLM Risk Assessment")
-                print("Generating AI Risk Assessment...", file=sys.stderr)
-                
-                # Initialize the reasoning model
-                model = ModelConfig.get_model(ModelType.REASONING)
-                agent = Agent(model)
-                
-                # Prepare the prompt with all the data and guidelines
-                prompt = f"""
-                You are an expert security analyst. Analyze the following login behavior data and provide a risk assessment.
-                
-                FULL ANALYSIS DATA:
-                {json.dumps(result, indent=2)}
-                
-                Provide a comprehensive risk assessment following the 'response_format_instructions' in the 'notes_must_read' section of the data.
-                
-                IMPORTANT FORMATTING INSTRUCTION:
-                Provide the output as a clear, narrative Markdown summary. 
-                Do NOT use tables. 
-                Use headers, bullet points, and bold text for readability.
-                """
-                
-                # Run the agent
-                llm_response = await agent.run(prompt)
-                result["llm_summary"] = llm_response.output
-                
-                logger.info("LLM Risk Assessment generated successfully")
-            else:
-                logger.warning("ModelConfig or Agent not available - skipping LLM assessment")
-                result["llm_summary"] = "LLM assessment skipped - dependencies not available"
-            
-        except Exception as e:
-            logger.error(f"Failed to generate LLM assessment: {str(e)}")
-            result["llm_summary"] = f"Error generating risk assessment: {str(e)}"
-            # Don't fail the whole tool, just return the data without summary
+        if response_mode == "direct":
+            print("Analysis completed - ready for LLM assessment", file=sys.stderr)
+
+            try:
+                if ModelConfig and Agent:
+                    logger.info("Step 6 - Generating LLM Risk Assessment")
+                    print("Generating AI Risk Assessment...", file=sys.stderr)
+
+                    model = ModelConfig.get_model(ModelType.REASONING)
+                    agent = Agent(model)
+
+                    prompt = f"""
+                    You are an expert security analyst. Analyze the following login behavior data and provide a risk assessment.
+
+                    FULL ANALYSIS DATA:
+                    {json.dumps(result, indent=2)}
+
+                    Provide a comprehensive risk assessment following the 'response_format_instructions' in the 'notes_must_read' section of the data.
+
+                    IMPORTANT FORMATTING INSTRUCTION:
+                    Provide the output as a clear, narrative Markdown summary.
+                    Do NOT use tables.
+                    Use headers, bullet points, and bold text for readability.
+                    """
+
+                    llm_response = await agent.run(prompt)
+                    result["llm_summary"] = llm_response.output
+
+                    logger.info("LLM Risk Assessment generated successfully")
+                else:
+                    logger.warning("ModelConfig or Agent not available - skipping LLM assessment")
+                    result["llm_summary"] = "LLM assessment skipped - dependencies not available"
+
+            except Exception as e:
+                logger.error(f"Failed to generate LLM assessment: {str(e)}")
+                result["llm_summary"] = f"Error generating risk assessment: {str(e)}"
+        else:
+            logger.info("Skipping inline LLM risk assessment; synthesis will generate the final summary")
+            print("Analysis completed - ready for synthesis", file=sys.stderr)
             
         return result
         

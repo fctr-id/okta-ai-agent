@@ -73,8 +73,8 @@ async def notify_step_start_to_user(
     """
     new_step = current_step + 1
     
-    logger.info(f"🎯 STEP {new_step} START: {title}")
-    logger.debug(f"💭 Reasoning: {reasoning}")
+    logger.info(f"STEP {new_step} START: {title}")
+    logger.debug(f"Reasoning: {reasoning}")
     
     if step_start_callback:
         await step_start_callback({
@@ -106,9 +106,9 @@ async def notify_step_end_to_user(
         result: Result summary
         success: Whether the step succeeded
     """
-    status = "✅" if success else "❌"
+    status = "SUCCESS" if success else "FAILED"
     logger.info(f"{status} STEP {current_step} END: {title}")
-    logger.debug(f"📋 Result: {result}")
+    logger.debug(f"Result: {result}")
     
     if step_end_callback:
         await step_end_callback({

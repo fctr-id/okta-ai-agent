@@ -48,6 +48,7 @@ htmlcov/
 
 sqlite_db/*
 sqlite_db/*.db
+chat_sessions/*
 
 # Generated scripts (temporary execution files)
 generated_scripts/
@@ -69,6 +70,7 @@ scripts/*.json
 src/data/final_generated_code_*.py
 docs/Untitled-3.txt
 src/data/results/*
+src/data/runtime/*
 .github/copilot-instructions.md
 docs/pydantic-ai-migration-spec.md
 .github/copilot-instructions.md
@@ -109,6 +111,7 @@ src/core/agents/prompts/api_sql_code_gen_agent_system_prompt_backup.txt
 src/core/orchestration/moder_execution_manager_yesterday.py
 src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY copy.json
 src/core/data/testing/*
+!src/core/data/testing/validate_phase2e_outcomes.py
 README_old.md
 docs/entity-specific-sync-filtering.md
 db/*.*

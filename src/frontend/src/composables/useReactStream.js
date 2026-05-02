@@ -11,6 +11,11 @@ import { useAuth } from './useAuth'
 // Use relative URL to go through Vite proxy
 const API_BASE_URL = ''
 
+const parseTurnNumber = (value) => {
+    const numericValue = Number(value)
+    return Number.isInteger(numericValue) && numericValue > 0 ? numericValue : null
+}
+
 export function useReactStream() {
     const auth = useAuth()
     
@@ -42,6 +47,9 @@ export function useReactStream() {
     const isProcessing = ref(false)
     const error = ref(null)
     const currentProcessId = ref(null)
+    const currentSessionId = ref(null)
+    const currentRunId = ref(null)
+    const currentTurnNumber = ref(null)
     
     // Discovery state
     const currentStep = ref('')
@@ -68,7 +76,7 @@ export function useReactStream() {
     /**
      * Start ReAct process
      */
-    const startProcess = async (query) => {
+    const startProcess = async (query, sessionId = null) => {
         console.log('[useReactStream] startProcess called with query:', query)
         
         // CRITICAL: Close any existing EventSource before starting new query
@@ -79,6 +87,12 @@ export function useReactStream() {
         
         isLoading.value = true
         error.value = null
+        currentProcessId.value = null
+        if (!sessionId) {
+            currentSessionId.value = null
+        }
+        currentRunId.value = null
+        currentTurnNumber.value = null
         discoverySteps.value = []
         isDiscoveryComplete.value = false
         validationStep.value = null
@@ -101,7 +115,7 @@ export function useReactStream() {
                     'Content-Type': 'application/json'
                 },
                 credentials: 'include',
-                body: JSON.stringify({ query })
+                body: JSON.stringify({ query, session_id: sessionId || undefined })
             })
             
             // Handle session timeout (401/403)
@@ -116,6 +130,9 @@ export function useReactStream() {
             const data = await response.json()
             console.log('[useReactStream] Received process_id:', data.process_id)
             currentProcessId.value = data.process_id
+            currentSessionId.value = data.session_id || sessionId || null
+            currentRunId.value = data.run_id || data.process_id || null
+            currentTurnNumber.value = parseTurnNumber(data.turn_number)
             return data.process_id
             
         } catch (err) {
@@ -129,11 +146,17 @@ export function useReactStream() {
     /**
      * Start execution from saved script
      */
-    const startScriptExecution = async (query, scriptCode) => {
+    const startScriptExecution = async (query, scriptCode, sessionId = null) => {
         console.log('[useReactStream] startScriptExecution called')
         
         isLoading.value = true
         error.value = null
+        currentProcessId.value = null
+        if (!sessionId) {
+            currentSessionId.value = null
+        }
+        currentRunId.value = null
+        currentTurnNumber.value = null
         discoverySteps.value = []
         isDiscoveryComplete.value = true // Skip discovery
         validationStep.value = null
@@ -154,7 +177,7 @@ export function useReactStream() {
                     'Content-Type': 'application/json'
                 },
                 credentials: 'include',
-                body: JSON.stringify({ query, script_code: scriptCode })
+                body: JSON.stringify({ query, script_code: scriptCode, session_id: sessionId || undefined })
             })
             
             if (await handleAuthError(response.status)) {
@@ -167,6 +190,9 @@ export function useReactStream() {
             
             const data = await response.json()
             currentProcessId.value = data.process_id
+            currentSessionId.value = data.session_id || sessionId || null
+            currentRunId.value = data.run_id || data.process_id || null
+            currentTurnNumber.value = parseTurnNumber(data.turn_number)
             return data.process_id
             
         } catch (err) {
@@ -188,11 +214,11 @@ export function useReactStream() {
             return
         }
         
-        // PRE-FLIGHT AUTH CHECK: Verify session before establishing SSE connection
-        // EventSource doesn't expose HTTP status codes, so we check proactively
+        // PRE-FLIGHT AUTH CHECK: verify auth before establishing SSE.
+        // EventSource doesn't expose HTTP status codes, so use the dedicated auth check endpoint.
         try {
-            const authCheck = await fetch(`${API_BASE_URL}/api/react/stream-react-updates?process_id=${processId}`, {
-                method: 'HEAD',
+            const authCheck = await fetch(`${API_BASE_URL}/api/auth/check`, {
+                method: 'GET',
                 credentials: 'include'
             })
             
@@ -747,6 +773,10 @@ export function useReactStream() {
         isLoading,
         isProcessing,
         error,
+        currentProcessId,
+        currentSessionId,
+        currentRunId,
+        currentTurnNumber,
         currentStep,
         
         // Discovery state

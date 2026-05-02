@@ -1,79 +1,68 @@
 <template>
     <AppLayout contentClass="chat-content" ref="appLayoutRef">
-        <main class="content-area" :class="{ 'has-results': hasResults }">
+        <main class="content-area" :class="{ 'has-results': hasResults }" :style="contentAreaStyle">
             <!-- Search Container with Animated Position -->
-            <div :class="['search-container', hasResults ? 'moved' : '']">
+            <div class="search-container">
                 <!-- Hero title -->
-                <div class="hero-card" :class="{ hidden: hasResults }">
+                <div class="hero-card" :class="{ hidden: hasResults || isReturningHome }">
                     <div class="title-wrapper">
                         <h1 class="main-title gradient-title">
-                            Hey there! I'm Tako
+                            Hey There! I'm Tako 
                         </h1>
-                        <p class="main-subtitle">Ask your AI agent anything about your Okta tenant</p>
+                        <p class="main-subtitle">Ask your AI agent anything about your okta tenant.</p>
                     </div>
                 </div>
 
                 <!-- Modern integrated search - Plain CSS Card -->
-                <div class="search-wrapper">
-                    <div class="query-card" :class="{ 'is-focused': isFocused }">
+                <div ref="composerShellRef" :class="['composer-shell', hasResults ? 'moved' : '']">
+                    <div ref="searchWrapperRef" class="search-wrapper">
+                        <div class="query-card" :class="{ 'is-focused': isFocused }">
                         
-                        <!-- Input row with icons -->
-                        <div class="query-input-row">
-                            <!-- Left icons (reset/stop) -->
-                            <div class="query-icons-left">
-                                <!-- Reset button when has results -->
+                            <!-- Input row with icons -->
+                            <div class="query-input-row">
+                                <div v-if="isLoading || reactLoading" class="query-icons-left">
+                                    <button 
+                                        class="icon-btn stop-icon" 
+                                        @click="stopProcessing"
+                                        title="Stop processing"
+                                    >
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                
+                                <!-- Native textarea -->
+                                <textarea 
+                                    ref="searchTextarea"
+                                    v-model="userInput"
+                                    @keydown="handleKeyDown"
+                                    @focus="isFocused = true"
+                                    @blur="isFocused = false"
+                                    @input="autoResizeTextarea"
+                                    placeholder="List all users in ACTIVE status"
+                                    class="query-textarea"
+                                    rows="1"
+                                ></textarea>
+                                
+                                <!-- Submit button -->
                                 <button 
-                                    v-if="hasResults && !isLoading && !reactLoading" 
-                                    class="icon-btn" 
-                                    @click="resetInterface"
-                                    title="Start over"
+                                    class="send-button"
+                                    :disabled="!userInput || !(userInput?.trim?.())"
+                                    @click="sendQuery"
+                                    title="Send query"
+                                    aria-label="Send query"
                                 >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M1 4v6h6M23 20v-6h-6"/>
-                                        <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
-                                    </svg>
-                                </button>
-                                <!-- Stop button when loading -->
-                                <button 
-                                    v-if="isLoading || reactLoading" 
-                                    class="icon-btn stop-icon" 
-                                    @click="stopProcessing"
-                                    title="Stop processing"
-                                >
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                                        <rect x="6" y="6" width="12" height="12" rx="2"/>
-                                    </svg>
+                                    <v-icon icon="mdi-arrow-up" size="18" />
                                 </button>
                             </div>
-                            
-                            <!-- Native textarea -->
-                            <textarea 
-                                ref="searchTextarea"
-                                v-model="userInput"
-                                @keydown="handleKeyDown"
-                                @focus="isFocused = true"
-                                @blur="isFocused = false"
-                                @input="autoResizeTextarea"
-                                placeholder="List all users in ACTIVE status"
-                                class="query-textarea"
-                                rows="1"
-                            ></textarea>
-                            
-                            <!-- Submit button -->
-                            <button 
-                                class="send-button"
-                                :disabled="!userInput || !(userInput?.trim?.())"
-                                @click="sendQuery"
-                            >
-                                SUBMIT
-                            </button>
                         </div>
                     </div>
                 </div>
 
                 <!-- Suggestions -->
                 <transition name="fade-up">
-                    <div v-if="!hasResults" class="suggestions-wrapper">
+                    <div v-if="!hasResults && !isReturningHome" class="suggestions-wrapper">
                         <div class="suggestions-grid">
                             <button 
                                 v-for="(suggestion, i) in suggestions" 
@@ -81,7 +70,6 @@
                                 class="suggestion-btn"
                                 @click="selectSuggestion(suggestion.query)"
                             >
-                                <v-icon class="suggestion-icon" size="16">{{ suggestion.icon }}</v-icon>
                                 <span class="suggestion-text">{{ suggestion.query }}</span>
                             </button>
                         </div>
@@ -96,19 +84,6 @@
                     </div>
                 </transition>
             </div>
-
-            <!-- Display User question -->
-            <transition name="fade">
-                <div v-if="hasResults && lastQuestion" class="question-header-container">
-                    <div class="question-header">
-                        <div class="question-icon">
-                            <v-icon color="#4C64E2">mdi-help-circle</v-icon>
-                        </div>
-                        <div class="question-text">{{ lastQuestion }}</div>
-                        <div class="question-timestamp">{{ getCurrentTime() }}</div>
-                    </div>
-                </div>
-            </transition>
 
             <!-- Error Alert - 2026 Minimal Style -->
             <transition name="fade-up">
@@ -132,53 +107,187 @@
                 </div>
             </transition>
 
-            <!-- ReAct Two-Panel Interface (only in ReAct mode) -->
             <transition name="fade-up">
-                <div v-if="isReActMode && (reactLoading || reactSteps.length > 0 || reactExecutionStarted)" class="react-panels mb-4">
-                    <!-- Discovery Panel -->
-                    <DiscoveryPanel
-                        :steps="reactSteps"
-                        :isThinking="reactLoading && reactSteps.length === 0"
-                        :isComplete="reactDiscoveryComplete"
-                        :error="reactError"
-                        :executionStarted="reactExecutionStarted"
-                    />
-                    
-                    <!-- Execution Panel (only show after discovery starts AND we have a script or execution started) -->
-                    <ExecutionPanel
-                        v-if="(reactDiscoveryComplete && reactGeneratedScript) || reactExecutionStarted"
-                        :validationStep="reactValidationStep"
-                        :executionStarted="reactExecutionStarted"
-                        :isExecuting="reactIsExecuting"
-                        :isComplete="!reactLoading && !reactProcessing && reactResults !== null"
-                        :executionError="reactError"
-                        :executionMessage="reactExecutionMessage"
-                        :progressValue="reactExecutionProgress"
-                        :subprocessProgress="reactSubprocessProgress"
-                        :resultCount="reactResults?.metadata?.count || 0"
-                        :tokenUsage="reactTokenUsage"
-                        :rateLimitWarning="reactRateLimitWarning"
-                        :generatedScript="reactGeneratedScript"
-                    />
-                </div>
-            </transition>
+                <div v-if="hasResults" class="transcript-shell">
+                    <div class="transcript-session-bar">
+                        <div class="transcript-session-label">
+                            <span class="transcript-session-label-caption">Current session</span>
+                            <span class="transcript-session-label-title" :title="activeSessionTitle || 'Untitled conversation'">
+                                {{ activeSessionTitle || 'Untitled conversation' }}
+                            </span>
+                        </div>
+                    </div>
 
-            <!-- Results Area with Smooth Transitions -->
-            <transition name="fade-up">
-                <div v-if="hasResults && ((isReActMode && !reactLoading) || (!isReActMode && !isLoading))"
-                    :class="['results-container', getContentClass(isReActMode ? MessageType.TABLE : currentResponse.type)]" class="mt-8">
-                    <DataDisplay 
-                        v-if="isReActMode && reactResults"
-                        :type="reactResults.display_type"
-                        :content="reactResults.content"
-                        :metadata="reactResults.metadata"
-                    />
-                    <DataDisplay 
-                        v-else-if="!isReActMode"
-                        :type="currentResponse.type" 
-                        :content="currentResponse.content"
-                        :metadata="currentResponse.metadata"
-                    />
+                    <div v-if="sessionLoadOverlayVisible" class="session-load-overlay" role="status" aria-live="polite" aria-busy="true">
+                        <div class="session-load-dialog">
+                            <div class="session-load-header">
+                                <div class="session-load-icon">
+                                    <v-progress-circular indeterminate color="primary" size="20" width="2" />
+                                </div>
+
+                                <div class="session-load-copy">
+                                    <span class="session-load-eyebrow">
+                                        {{ sessionHydrationTotal > 0 ? 'Loading saved session' : 'Opening session' }}
+                                    </span>
+                                    <span class="session-load-title" :title="sessionLoadOverlayTitle">
+                                        {{ sessionLoadOverlayTitle }}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div class="session-load-progress-block">
+                                <div class="session-load-progress-copy">
+                                    <span>{{ sessionHydrationLabel }}</span>
+                                    <span v-if="sessionHydrationTotal > 0" class="session-load-progress-muted">
+                                        {{ sessionHydrationProgress }}%
+                                    </span>
+                                </div>
+
+                                <v-progress-linear
+                                    color="primary"
+                                    rounded
+                                    height="8"
+                                    :indeterminate="sessionHydrationTotal === 0"
+                                    :model-value="sessionHydrationProgress"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-if="sessionViewError && conversationTurns.length === 0 && !legacyTurnVisible" class="transcript-state-card transcript-state-card-error">
+                        {{ sessionViewError }}
+                    </div>
+
+                    <div v-else-if="!sessionViewLoading && conversationTurns.length === 0 && !legacyTurnVisible" class="transcript-state-card">
+                        Ask a question to start this conversation.
+                    </div>
+
+                    <div v-if="legacyTurnVisible" class="transcript-list">
+                        <article class="transcript-turn is-active">
+                            <div class="question-header-container transcript-question-header">
+                                <div class="question-header">
+                                    <div class="question-copy">
+                                        <div class="question-text">{{ lastQuestion }}</div>
+                                    </div>
+                                    <div class="question-timestamp">Now</div>
+                                </div>
+                            </div>
+
+                            <div
+                                v-if="legacyResponseHasContent"
+                                :class="['results-container', 'transcript-results', getContentClass(currentResponse.type)]"
+                            >
+                                <DataDisplay
+                                    :type="currentResponse.type"
+                                    :content="currentResponse.content"
+                                    :metadata="currentResponse.metadata"
+                                />
+                            </div>
+
+                            <div v-else class="turn-loading-card">
+                                <div class="turn-summary-meta">
+                                    <span class="turn-status-pill turn-status-pill-active">
+                                        Running
+                                    </span>
+                                </div>
+                                <v-progress-linear indeterminate color="primary" rounded height="6" />
+                            </div>
+                        </article>
+                    </div>
+
+                    <div v-if="conversationTurns.length > 0" class="transcript-list">
+                        <article
+                            v-for="turn in conversationTurns"
+                            :key="turn.key"
+                            :ref="(element) => setTranscriptTurnElement(turn.key, element)"
+                            class="transcript-turn"
+                            :class="{ 'is-active': turn.isActive }"
+                        >
+                            <div class="question-header-container transcript-question-header">
+                                <div class="question-header">
+                                    <div class="question-copy">
+                                        <div class="question-text">{{ turn.queryText }}</div>
+                                    </div>
+                                    <div class="question-timestamp">{{ formatTurnTimestamp(turn) }}</div>
+                                </div>
+                            </div>
+
+                            <div v-if="showLivePanelsForTurn(turn)" class="react-panels mb-4 transcript-react-panels">
+                                <DiscoveryPanel
+                                        :steps="turn.steps"
+                                        :isThinking="turn.isActive && turn.steps.length === 0 && !turn.discoveryComplete && !turn.error"
+                                        :isComplete="turn.discoveryComplete"
+                                        :error="turn.error"
+                                        :executionStarted="turn.executionStarted"
+                                    :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
+                                />
+
+                                <ExecutionPanel
+                                        v-if="showExecutionPanelForTurn(turn)"
+                                        :validationStep="turn.validationStep"
+                                        :executionStarted="turn.executionStarted"
+                                        :isExecuting="turn.isExecuting"
+                                        :isComplete="turn.status === 'completed' && !turn.error"
+                                        :executionError="turn.error"
+                                        :executionMessage="turn.executionMessage"
+                                        :progressValue="turn.executionProgress"
+                                        :subprocessProgress="turn.subprocessProgress"
+                                        :resultCount="turn.results?.metadata?.count || turn.resultCount || 0"
+                                        :tokenUsage="turn.tokenUsage"
+                                        :rateLimitWarning="turn.rateLimitWarning"
+                                        :generatedScript="turn.generatedScript"
+                                        :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
+                                />
+                            </div>
+
+                            <div
+                                v-if="turn.results"
+                                :class="['results-container', 'transcript-results', getContentClass(turn.results.display_type)]"
+                            >
+                                <DataDisplay
+                                    :type="turn.results.display_type"
+                                    :content="turn.results.content"
+                                    :metadata="turn.results.metadata"
+                                    :showTableAction="shouldShowTurnResultsAction(turn) || turn.isLoadingFullResults"
+                                    :tableActionLabel="getTurnResultsActionLabel(turn)"
+                                    :tableActionLoading="turn.isLoadingFullResults"
+                                    @table-action="loadFullTurnResults(turn)"
+                                />
+                            </div>
+
+                            <div v-else-if="turn.isHydratingResults" class="turn-loading-card">
+                                <div class="turn-summary-meta">
+                                    <span class="turn-status-pill turn-status-pill-muted">
+                                        Loading saved result
+                                    </span>
+                                    <span
+                                        v-if="turn.resultCount !== null && turn.resultCount !== undefined"
+                                        class="turn-status-pill turn-status-pill-muted"
+                                    >
+                                        {{ formatResultCount(turn.resultCount, turn.isPartialResult) }}
+                                    </span>
+                                </div>
+                                <v-progress-linear indeterminate color="primary" rounded height="6" />
+                            </div>
+
+                            <div v-else-if="shouldShowTurnSummary(turn)" class="turn-summary-card">
+                                <div class="turn-summary-meta">
+                                    <span class="turn-status-pill" :class="turnStatusClass(turn)">
+                                        {{ formatTurnStatus(turn) }}
+                                    </span>
+                                    <span
+                                        v-if="turn.resultCount !== null && turn.resultCount !== undefined"
+                                        class="turn-status-pill turn-status-pill-muted"
+                                    >
+                                        {{ formatResultCount(turn.resultCount, turn.isPartialResult) }}
+                                    </span>
+                                </div>
+
+                                <p class="turn-summary-text">{{ getTurnSummary(turn) }}</p>
+                                <p v-if="turn.resultsError || turn.error" class="turn-error-text">{{ turn.resultsError || turn.error }}</p>
+                            </div>
+                        </article>
+                    </div>
                 </div>
             </transition>
         </main>
@@ -197,7 +306,7 @@
                 <v-card-text class="modal-content">
                     <!-- Info Note -->
                     <div class="info-note">
-                        <v-icon icon="mdi-information" size="20" color="#4C64E2" />
+                        <v-icon icon="mdi-information" size="20" style="color: var(--primary)" />
                         <span>These tools will automatically be invoked when your query matches the criteria. You don't need to do anything special.</span>
                     </div>
                     
@@ -255,7 +364,7 @@
  * user input, displays results, and manages the overall UI state.
  */
 
-import { ref, watch, nextTick, onMounted, inject } from 'vue'
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount, inject } from 'vue'
 import { useFetchStream } from '@/composables/useFetchStream'
 import { useSanitize } from '@/composables/useSanitize'
 import { useReactStream } from '@/composables/useReactStream'
@@ -276,12 +385,56 @@ import AppLayout from '@/components/layout/AppLayout.vue'
  */
 const userInput = ref('') // Current text in the input field
 const searchTextarea = ref(null) // Ref for native textarea
+const composerShellRef = ref(null) // Ref for the docked composer shell
+const searchWrapperRef = ref(null) // Ref for the moving composer wrapper
 const isLoading = ref(false) // Loading state for API calls
 const lastQuestion = ref('') // Stores the last question that was asked
 const isFocused = ref(false) // Tracks if the search input is focused
 const hasResults = ref(false) // Whether there are results to display
+const isReturningHome = ref(false) // Keeps the home shell hidden during reverse motion
 const auth = useAuth()
 const router = useRouter()
+const composerClearance = ref(176)
+
+let composerCleanupTimerId = null
+let homeRevealTimerId = null
+let composerClearanceFrameId = null
+let composerResizeObserver = null
+
+const contentAreaStyle = computed(() => (
+    hasResults.value
+        ? { '--composer-clearance': `${composerClearance.value}px` }
+        : undefined
+))
+
+const measureComposerClearance = () => {
+    const composerShell = composerShellRef.value
+    if (!composerShell || !hasResults.value || !composerShell.classList.contains('moved')) {
+        return 176
+    }
+
+    const rect = composerShell.getBoundingClientRect()
+    const overlayHeight = Math.max(0, window.innerHeight - rect.top)
+    return Math.max(176, Math.ceil(overlayHeight + 20))
+}
+
+const syncComposerClearance = () => {
+    composerClearance.value = measureComposerClearance()
+}
+
+const scheduleComposerClearanceSync = () => {
+    if (composerClearanceFrameId !== null) {
+        window.cancelAnimationFrame(composerClearanceFrameId)
+        composerClearanceFrameId = null
+    }
+
+    void nextTick(() => {
+        composerClearanceFrameId = window.requestAnimationFrame(() => {
+            composerClearanceFrameId = null
+            syncComposerClearance()
+        })
+    })
+}
 
 /**
  * Auto-resize textarea to fit content
@@ -291,7 +444,96 @@ const autoResizeTextarea = () => {
     if (textarea) {
         textarea.style.height = 'auto'
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
+        scheduleComposerClearanceSync()
     }
+}
+
+const clearComposerAnimationTimer = () => {
+    if (composerCleanupTimerId !== null) {
+        window.clearTimeout(composerCleanupTimerId)
+        composerCleanupTimerId = null
+    }
+}
+
+const clearHomeRevealTimer = () => {
+    if (homeRevealTimerId !== null) {
+        window.clearTimeout(homeRevealTimerId)
+        homeRevealTimerId = null
+    }
+}
+
+const cleanupComposerAnimation = () => {
+    const searchWrapper = searchWrapperRef.value
+    if (!searchWrapper) {
+        return
+    }
+
+    searchWrapper.style.removeProperty('transform')
+    searchWrapper.style.removeProperty('transition')
+    searchWrapper.style.removeProperty('transform-origin')
+    searchWrapper.style.removeProperty('will-change')
+    searchWrapper.style.removeProperty('opacity')
+}
+
+const animateComposerDock = async (beforeRect) => {
+    await nextTick()
+
+    const searchWrapper = searchWrapperRef.value
+    if (!searchWrapper || !beforeRect) {
+        return false
+    }
+
+    const afterRect = searchWrapper.getBoundingClientRect()
+    const deltaX = beforeRect.left - afterRect.left
+    const deltaY = beforeRect.top - afterRect.top
+    const scaleX = beforeRect.width / Math.max(afterRect.width, 1)
+    const scaleY = beforeRect.height / Math.max(afterRect.height, 1)
+    const hasMovement = Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1 || Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01
+
+    if (!hasMovement) {
+        return false
+    }
+
+    clearComposerAnimationTimer()
+
+    searchWrapper.style.transformOrigin = 'top left'
+    searchWrapper.style.willChange = 'transform, opacity'
+    searchWrapper.style.transition = 'none'
+    searchWrapper.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`
+    searchWrapper.style.opacity = '0.98'
+    searchWrapper.getBoundingClientRect()
+
+    requestAnimationFrame(() => {
+        searchWrapper.style.transition = 'transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
+        searchWrapper.style.transform = 'translate(0, 0) scale(1, 1)'
+        searchWrapper.style.opacity = '1'
+    })
+
+    composerCleanupTimerId = window.setTimeout(() => {
+        cleanupComposerAnimation()
+        composerCleanupTimerId = null
+    }, 380)
+
+    return true
+}
+
+const animateComposerReturnHome = async (beforeRect) => {
+    const didAnimate = await animateComposerDock(beforeRect)
+
+    if (!isReturningHome.value) {
+        return
+    }
+
+    if (!didAnimate) {
+        isReturningHome.value = false
+        return
+    }
+
+    clearHomeRevealTimer()
+    homeRevealTimerId = window.setTimeout(() => {
+        isReturningHome.value = false
+        homeRevealTimerId = null
+    }, 360)
 }
 
 // Add new refs to store stream controller and track streaming progress
@@ -317,8 +559,10 @@ const {
     generatedScript: reactGeneratedScript,
     results: reactResults,
     tokenUsage: reactTokenUsage,
+    currentSessionId: reactSessionId,
+    currentRunId: reactRunId,
+    currentTurnNumber: reactTurnNumber,
     startProcess: startReActProcess,
-    startScriptExecution,
     connectToStream: connectReActStream,
     cancelProcess: cancelReAct
 } = useReactStream()
@@ -327,8 +571,518 @@ const {
 const { query: sanitizeQuery, text: sanitizeText } = useSanitize()
 
 // History Management
-const { saveToHistory } = useHistory()
+const { fetchSessionDetail, fetchTurnResultPreview, fetchTurnResultFull } = useHistory()
 const appLayoutRef = ref(null)
+const activeSessionId = ref(null)
+const activeSessionTitle = ref('')
+const pendingSessionTitle = ref('')
+const conversationTurns = ref([])
+const sessionViewLoading = ref(false)
+const sessionViewError = ref(null)
+const activeTurnKey = ref(null)
+const sessionHydrationLoaded = ref(0)
+const sessionHydrationTotal = ref(0)
+let sessionLoadRequestId = 0
+const transcriptTurnElements = new Map()
+let activeTurnScrollFrameId = null
+
+const setTranscriptTurnElement = (turnKey, element) => {
+    if (!turnKey) {
+        return
+    }
+
+    if (element instanceof HTMLElement) {
+        transcriptTurnElements.set(turnKey, element)
+        return
+    }
+
+    transcriptTurnElements.delete(turnKey)
+}
+
+const scrollToTurn = (turnKey, behavior = 'smooth') => {
+    if (!turnKey) {
+        return
+    }
+
+    void nextTick(() => {
+        if (activeTurnScrollFrameId !== null) {
+            window.cancelAnimationFrame(activeTurnScrollFrameId)
+        }
+
+        activeTurnScrollFrameId = window.requestAnimationFrame(() => {
+            activeTurnScrollFrameId = null
+            const turnElement = transcriptTurnElements.get(turnKey)
+            if (!turnElement) {
+                return
+            }
+
+            turnElement.scrollIntoView({
+                behavior,
+                block: 'end',
+                inline: 'nearest'
+            })
+        })
+    })
+}
+
+const sessionHydrationProgress = computed(() => {
+    if (sessionHydrationTotal.value <= 0) {
+        return 0
+    }
+
+    return Math.min(100, Math.round((sessionHydrationLoaded.value / sessionHydrationTotal.value) * 100))
+})
+
+const sessionHydrationLabel = computed(() => {
+    if (sessionHydrationTotal.value > 0) {
+        const loaded = Math.min(sessionHydrationLoaded.value, sessionHydrationTotal.value)
+        return `Loading saved results ${loaded}/${sessionHydrationTotal.value}`
+    }
+
+    return 'Loading conversation...'
+})
+
+const sessionLoadOverlayVisible = computed(() => sessionViewLoading.value)
+
+const sessionLoadOverlayTitle = computed(() => {
+    return pendingSessionTitle.value || activeSessionTitle.value || 'Selected conversation'
+})
+
+const buildTurnKey = ({ sessionId, runId, turnNumber }) => `${sessionId || 'session'}:${turnNumber || 'turn'}:${runId || 'run'}`
+
+const deriveSessionTitle = (query, maxLength = 120) => {
+    const cleaned = String(query || '').replace(/\s+/g, ' ').trim()
+    if (!cleaned) return 'New conversation'
+    return cleaned.length <= maxLength ? cleaned : `${cleaned.slice(0, maxLength - 3).trimEnd()}...`
+}
+
+const cleanSummaryText = (value) => {
+    if (!value) return ''
+
+    return String(value)
+        .replace(/^#+\s*/gm, '')
+        .replace(/[`*_]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+}
+
+const normalizeConversationResult = (resultLike) => {
+    if (!resultLike) {
+        return null
+    }
+
+    const rawDisplayType = resultLike.display_type || resultLike.displayType || MessageType.TABLE
+    const normalizedDisplayType = rawDisplayType === MessageType.STREAM || rawDisplayType === MessageType.BATCH
+        ? MessageType.TABLE
+        : rawDisplayType
+
+    return {
+        display_type: normalizedDisplayType,
+        content: resultLike.content ?? resultLike.results ?? [],
+        metadata: resultLike.metadata || {}
+    }
+}
+
+const shouldHydrateSavedTurn = (turn) => Boolean(
+    turn.displayType ||
+    turn.artifactFile ||
+    turn.finalResponseSummary ||
+    turn.resultCount !== null ||
+    turn.status === 'completed'
+)
+
+const normalizeConversationTurn = (turnLike) => {
+    const sessionId = turnLike.sessionId || turnLike.session_id || activeSessionId.value || null
+    const runId = turnLike.runId || turnLike.run_id || null
+    const turnNumber = turnLike.turnNumber || turnLike.turn_number || null
+
+    return {
+        key: turnLike.key || buildTurnKey({ sessionId, runId, turnNumber }),
+        sessionId,
+        runId,
+        turnNumber,
+        queryText: turnLike.queryText ?? turnLike.query_text ?? '',
+        source: turnLike.source ?? 'user',
+        status: turnLike.status ?? 'created',
+        completionMode: turnLike.completionMode ?? turnLike.completion_mode ?? null,
+        displayType: turnLike.displayType ?? turnLike.display_type ?? null,
+        finalResponseSummary: turnLike.finalResponseSummary ?? turnLike.final_response_summary ?? null,
+        resultCount: turnLike.resultCount ?? turnLike.result_count ?? null,
+        isPartialResult: Boolean(turnLike.isPartialResult ?? turnLike.is_partial_result ?? false),
+        artifactFile: turnLike.artifactFile ?? turnLike.artifact_file ?? null,
+        startedAt: turnLike.startedAt ?? turnLike.started_at ?? null,
+        completedAt: turnLike.completedAt ?? turnLike.completed_at ?? null,
+        updatedAt: turnLike.updatedAt ?? turnLike.updated_at ?? null,
+        isActive: Boolean(turnLike.isActive),
+        isHydratingResults: Boolean(turnLike.isHydratingResults),
+        isLoadingFullResults: Boolean(turnLike.isLoadingFullResults),
+        resultsHydrated: Boolean(turnLike.resultsHydrated ?? turnLike.results_hydrated ?? turnLike.results),
+        results: normalizeConversationResult(turnLike.results),
+        resultsError: turnLike.resultsError ?? null,
+        error: turnLike.error ?? null,
+        steps: turnLike.steps || [],
+        validationStep: turnLike.validationStep || null,
+        executionStarted: Boolean(turnLike.executionStarted),
+        isExecuting: Boolean(turnLike.isExecuting),
+        executionMessage: turnLike.executionMessage ?? '',
+        executionProgress: turnLike.executionProgress || 0,
+        subprocessProgress: turnLike.subprocessProgress || [],
+        generatedScript: turnLike.generatedScript || null,
+        tokenUsage: turnLike.tokenUsage || null,
+        rateLimitWarning: turnLike.rateLimitWarning || 0,
+        discoveryComplete: Boolean(turnLike.discoveryComplete)
+    }
+}
+
+const sortConversationTurns = () => {
+    conversationTurns.value = [...conversationTurns.value].sort((left, right) => {
+        const leftOrder = left.turnNumber ?? Number.MAX_SAFE_INTEGER
+        const rightOrder = right.turnNumber ?? Number.MAX_SAFE_INTEGER
+        if (leftOrder !== rightOrder) {
+            return leftOrder - rightOrder
+        }
+        return String(left.runId || left.key).localeCompare(String(right.runId || right.key))
+    })
+}
+
+const findConversationTurnByIdentity = ({ sessionId, runId, turnNumber, key = null }) => {
+    return conversationTurns.value.find((item) => {
+        if (key && item.key === key) {
+            return true
+        }
+
+        if (runId && item.runId === runId) {
+            return true
+        }
+
+        return Boolean(sessionId && turnNumber && item.sessionId === sessionId && item.turnNumber === turnNumber)
+    }) || null
+}
+
+const resolveActiveTurnKey = ({ sessionId, runId, turnNumber }) => {
+    const matchedTurn = findConversationTurnByIdentity({
+        sessionId,
+        runId,
+        turnNumber,
+        key: activeTurnKey.value
+    })
+
+    return matchedTurn?.key || buildTurnKey({ sessionId, runId, turnNumber })
+}
+
+const upsertConversationTurn = (turnLike) => {
+    const normalized = normalizeConversationTurn(turnLike)
+    const index = conversationTurns.value.findIndex((item) =>
+        item.key === normalized.key ||
+        (normalized.runId && item.runId === normalized.runId) ||
+        (normalized.sessionId && normalized.turnNumber && item.sessionId === normalized.sessionId && item.turnNumber === normalized.turnNumber)
+    )
+
+    if (index >= 0) {
+        conversationTurns.value[index] = normalizeConversationTurn({
+            ...conversationTurns.value[index],
+            ...turnLike
+        })
+    } else {
+        conversationTurns.value.push(normalized)
+    }
+
+    sortConversationTurns()
+    return conversationTurns.value.find((item) => item.key === normalized.key) || normalized
+}
+
+const deriveActiveTurnStatus = () => {
+    if (reactError.value) return 'failed'
+    if (reactResults.value && !reactLoading.value && !reactProcessing.value) return 'completed'
+    if (reactExecutionStarted.value || reactLoading.value || reactProcessing.value) return 'running'
+    return 'created'
+}
+
+const deriveTurnCompletionMode = () => {
+    if (reactError.value) return 'fail'
+    if (!reactResults.value) return null
+    if (reactResults.value.display_type === 'markdown') return 'direct_answer'
+
+    const resultCount = reactResults.value?.metadata?.count
+    if (resultCount === 0) return 'empty'
+    return 'script'
+}
+
+const registerActiveTurn = (queryText, source = 'user') => {
+    const sessionId = reactSessionId.value || activeSessionId.value
+    const runId = reactRunId.value
+    const turnNumber = reactTurnNumber.value
+
+    if (!sessionId || !runId || !turnNumber) {
+        return null
+    }
+
+    activeSessionId.value = sessionId
+    if (!activeSessionTitle.value) {
+        activeSessionTitle.value = deriveSessionTitle(queryText)
+    }
+
+    const turn = upsertConversationTurn({
+        sessionId,
+        runId,
+        turnNumber,
+        queryText,
+        source,
+        status: 'created',
+        startedAt: new Date().toISOString(),
+        isActive: true
+    })
+
+    activeTurnKey.value = turn.key
+    hasResults.value = true
+    scrollToTurn(turn.key, 'smooth')
+    return turn
+}
+
+const syncActiveTurnFromStream = () => {
+    if (!isReActMode.value) {
+        return
+    }
+
+    const sessionId = reactSessionId.value || activeSessionId.value
+    const runId = reactRunId.value
+    const turnNumber = reactTurnNumber.value
+
+    if (!sessionId || !runId || !turnNumber || !lastQuestion.value) {
+        return
+    }
+
+    activeSessionId.value = sessionId
+    if (!activeSessionTitle.value) {
+        activeSessionTitle.value = deriveSessionTitle(lastQuestion.value)
+    }
+
+    const resultCount = reactResults.value?.metadata?.count ?? (Array.isArray(reactResults.value?.content) ? reactResults.value.content.length : null)
+    const existing = findConversationTurnByIdentity({ sessionId, runId, turnNumber })
+
+    const updatedTurn = upsertConversationTurn({
+        ...existing,
+        key: resolveActiveTurnKey({ sessionId, runId, turnNumber }),
+        sessionId,
+        runId,
+        turnNumber,
+        queryText: existing?.queryText || lastQuestion.value,
+        source: existing?.source || 'user',
+        status: deriveActiveTurnStatus(),
+        completionMode: deriveTurnCompletionMode(),
+        displayType: reactResults.value?.display_type || existing?.displayType || null,
+        finalResponseSummary: existing?.finalResponseSummary,
+        resultCount,
+        isPartialResult: Boolean(reactResults.value?.metadata?.is_partial_result || existing?.isPartialResult),
+        startedAt: existing?.startedAt || new Date().toISOString(),
+        completedAt: !reactLoading.value && !reactProcessing.value ? (existing?.completedAt || new Date().toISOString()) : existing?.completedAt,
+        isActive: reactLoading.value || reactProcessing.value,
+        results: reactResults.value || existing?.results || null,
+        error: reactError.value || null,
+        steps: reactSteps.value,
+        validationStep: reactValidationStep.value,
+        executionStarted: reactExecutionStarted.value,
+        isExecuting: reactIsExecuting.value,
+        executionMessage: reactExecutionMessage.value,
+        executionProgress: reactExecutionProgress.value,
+        subprocessProgress: reactSubprocessProgress.value,
+        generatedScript: reactGeneratedScript.value,
+        tokenUsage: reactTokenUsage.value,
+        rateLimitWarning: reactRateLimitWarning.value,
+        discoveryComplete: reactDiscoveryComplete.value
+    })
+
+    activeTurnKey.value = updatedTurn.key
+    hasResults.value = true
+    scrollToTurn(updatedTurn.key, updatedTurn.isActive ? 'auto' : 'smooth')
+}
+
+const prepareSessionTurnsForHydration = (turns) => turns.map((turnLike) => {
+    const normalizedTurn = normalizeConversationTurn(turnLike)
+    const needsHydration = shouldHydrateSavedTurn(normalizedTurn) && !normalizedTurn.results
+
+    return normalizeConversationTurn({
+        ...normalizedTurn,
+        isHydratingResults: needsHydration,
+        resultsHydrated: !needsHydration,
+        resultsError: null
+    })
+})
+
+const hydrateSessionTurnResults = async (sessionId, turns, requestId) => {
+    const turnsToHydrate = turns.filter((turn) => turn.isHydratingResults)
+    sessionHydrationLoaded.value = 0
+    sessionHydrationTotal.value = turnsToHydrate.length
+
+    for (const turn of turnsToHydrate) {
+        if (requestId !== sessionLoadRequestId) {
+            return
+        }
+
+        try {
+            const preview = await fetchTurnResultPreview(sessionId, turn.turnNumber)
+            if (requestId !== sessionLoadRequestId) {
+                return
+            }
+
+            upsertConversationTurn({
+                key: turn.key,
+                sessionId: turn.sessionId,
+                runId: turn.runId,
+                turnNumber: turn.turnNumber,
+                results: preview?.available ? preview : null,
+                isHydratingResults: false,
+                resultsHydrated: true,
+                resultsError: null
+            })
+        } catch (err) {
+            if (requestId !== sessionLoadRequestId) {
+                return
+            }
+
+            upsertConversationTurn({
+                key: turn.key,
+                sessionId: turn.sessionId,
+                runId: turn.runId,
+                turnNumber: turn.turnNumber,
+                isHydratingResults: false,
+                resultsHydrated: true,
+                resultsError: err.message || 'Failed to load saved result preview'
+            })
+        } finally {
+            if (requestId === sessionLoadRequestId) {
+                sessionHydrationLoaded.value += 1
+            }
+        }
+    }
+}
+
+const shouldShowLoadFullResults = (turn) => {
+    const resultMetadata = turn.results?.metadata || {}
+    if (!turn.results || turn.results.display_type === 'markdown') {
+        return false
+    }
+
+    return Boolean(resultMetadata.isPreview)
+}
+
+const shouldShowTurnResultsAction = (turn) => shouldShowLoadFullResults(turn)
+
+const getTurnResultsActionLabel = (turn) => {
+    if (turn.isLoadingFullResults) {
+        return 'Fetching all records...'
+    }
+
+    return 'Fetch all records'
+}
+
+const loadFullTurnResults = async (turn) => {
+    if (!turn?.sessionId || !turn?.turnNumber || turn.isLoadingFullResults) {
+        return
+    }
+
+    upsertConversationTurn({
+        key: turn.key,
+        sessionId: turn.sessionId,
+        runId: turn.runId,
+        turnNumber: turn.turnNumber,
+        isLoadingFullResults: true,
+        resultsError: null,
+    })
+
+    try {
+        const fullResult = await fetchTurnResultFull(turn.sessionId, turn.turnNumber)
+        upsertConversationTurn({
+            key: turn.key,
+            sessionId: turn.sessionId,
+            runId: turn.runId,
+            turnNumber: turn.turnNumber,
+            results: fullResult?.available ? fullResult : turn.results,
+            isLoadingFullResults: false,
+            resultsError: fullResult?.available ? null : 'Saved full result is not available for this turn',
+        })
+    } catch (err) {
+        upsertConversationTurn({
+            key: turn.key,
+            sessionId: turn.sessionId,
+            runId: turn.runId,
+            turnNumber: turn.turnNumber,
+            isLoadingFullResults: false,
+            resultsError: err.message || 'Failed to load saved full result',
+        })
+    }
+}
+
+const prepareComposerForSessionLoad = async () => {
+    clearHomeRevealTimer()
+    clearComposerAnimationTimer()
+    cleanupComposerAnimation()
+    isReturningHome.value = false
+    hasResults.value = true
+
+    await nextTick()
+    autoResizeTextarea()
+}
+
+const loadConversationSession = async (sessionId, options = {}) => {
+    const requestId = ++sessionLoadRequestId
+    pendingSessionTitle.value = String(options?.title || '').trim()
+    await prepareComposerForSessionLoad()
+    sessionViewLoading.value = true
+    sessionViewError.value = null
+    sessionHydrationLoaded.value = 0
+    sessionHydrationTotal.value = 0
+
+    let sessionDetail = null
+
+    try {
+        sessionDetail = await fetchSessionDetail(sessionId)
+        if (requestId !== sessionLoadRequestId) {
+            return null
+        }
+
+        activeSessionId.value = sessionDetail.session_id
+        activeSessionTitle.value = sessionDetail.title || 'Untitled conversation'
+        conversationTurns.value = prepareSessionTurnsForHydration(sessionDetail.turns || [])
+        sortConversationTurns()
+        activeTurnKey.value = null
+
+        await hydrateSessionTurnResults(sessionDetail.session_id, conversationTurns.value, requestId)
+        if (requestId !== sessionLoadRequestId) {
+            return null
+        }
+    } catch (err) {
+        if (requestId !== sessionLoadRequestId) {
+            return null
+        }
+
+        sessionViewError.value = err.message || 'Failed to load conversation'
+        conversationTurns.value = []
+        sessionHydrationLoaded.value = 0
+        sessionHydrationTotal.value = 0
+        window.dispatchEvent(new CustomEvent('tako:session-load-failed', {
+            detail: {
+                sessionId
+            }
+        }))
+        throw err
+    } finally {
+        if (requestId === sessionLoadRequestId) {
+            sessionViewLoading.value = false
+            pendingSessionTitle.value = ''
+        }
+    }
+
+    if (requestId === sessionLoadRequestId && sessionDetail) {
+        window.dispatchEvent(new CustomEvent('tako:session-loaded', {
+            detail: {
+                sessionId: sessionDetail.session_id
+            }
+        }))
+    }
+
+    return sessionDetail
+}
 
 // History refresh helper - matches the one provided by AppLayout but accessible here
 const refreshHistory = async () => {
@@ -336,6 +1090,33 @@ const refreshHistory = async () => {
         await appLayoutRef.value.refreshHistory()
     }
 }
+
+watch([
+    reactLoading,
+    reactProcessing,
+    reactResults,
+    reactError,
+    reactSteps,
+    reactValidationStep,
+    reactExecutionStarted,
+    reactIsExecuting,
+    reactExecutionMessage,
+    reactExecutionProgress,
+    reactSubprocessProgress,
+    reactGeneratedScript,
+    reactTokenUsage,
+    reactRateLimitWarning,
+    reactDiscoveryComplete,
+    reactSessionId,
+    reactRunId,
+    reactTurnNumber
+], () => {
+    syncActiveTurnFromStream()
+}, { deep: true })
+
+watch(hasResults, () => {
+    scheduleComposerClearanceSync()
+})
 
 // Watch for query completion to refresh history
 let lastQuery = null
@@ -368,6 +1149,18 @@ const currentResponse = ref({
     }
 })
 
+const legacyResponseHasContent = computed(() => {
+    const response = currentResponse.value
+    if (!response) return false
+    if (response.type === MessageType.ERROR) return Boolean(response.content)
+    if (Array.isArray(response.content)) return response.content.length > 0
+    return Boolean(response.content)
+})
+
+const legacyTurnVisible = computed(() => {
+    return !isReActMode.value && hasResults.value && (Boolean(lastQuestion.value) || legacyResponseHasContent.value || isLoading.value)
+})
+
 // ---------- UTILITY FUNCTIONS ----------
 
 /**
@@ -389,13 +1182,25 @@ const stopProcessing = () => {
     }
 }
 
-/**
- * Get the current time formatted as HH:MM
- * @returns {string} Formatted time string
- */
-const getCurrentTime = () => {
-    return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+onBeforeUnmount(() => {
+    clearComposerAnimationTimer()
+    clearHomeRevealTimer()
+    cleanupComposerAnimation()
+    if (composerClearanceFrameId !== null) {
+        window.cancelAnimationFrame(composerClearanceFrameId)
+        composerClearanceFrameId = null
+    }
+    composerResizeObserver?.disconnect()
+    composerResizeObserver = null
+    if (activeTurnScrollFrameId !== null) {
+        window.cancelAnimationFrame(activeTurnScrollFrameId)
+        activeTurnScrollFrameId = null
+    }
+    transcriptTurnElements.clear()
+    window.removeEventListener('tako:select-history', handleSidebarSelectEvent)
+    window.removeEventListener('tako:new-session', handleNewSessionEvent)
+    window.removeEventListener('resize', scheduleComposerClearanceSync)
+})
 
 /**
  * Ensures userInput is always a string and applies basic sanitization
@@ -426,6 +1231,136 @@ const getContentClass = (type) => {
     }
 }
 
+const parseApiTimestamp = (rawTimestamp) => {
+    if (!rawTimestamp) return null
+
+    const timestamp = String(rawTimestamp).trim()
+    if (!timestamp) return null
+
+    const hasTimezone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(timestamp)
+    const normalizedTimestamp = hasTimezone ? timestamp : `${timestamp}Z`
+    const parsedDate = new Date(normalizedTimestamp)
+
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
+}
+
+const formatTurnTimestamp = (turn) => {
+    const rawTimestamp = turn.completedAt || turn.updatedAt || turn.startedAt
+    if (!rawTimestamp) return 'Now'
+
+    const timestamp = parseApiTimestamp(rawTimestamp)
+    if (!timestamp) return 'Now'
+
+    const now = new Date()
+    if (timestamp.toDateString() === now.toDateString()) {
+        return timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+
+    return timestamp.toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+const formatTurnStatus = (turn) => {
+    const statusValue = turn.completionMode || turn.status || 'active'
+    return String(statusValue)
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+const formatResultCount = (count, isPartial = false) => {
+    const label = `${count} result${count === 1 ? '' : 's'}`
+    return isPartial ? `${label} partial` : label
+}
+
+const getTurnSummary = (turn) => {
+    if (turn.finalResponseSummary) {
+        return cleanSummaryText(turn.finalResponseSummary)
+    }
+
+    if (turn.results) {
+        if (turn.results.display_type === 'markdown' && typeof turn.results.content === 'string') {
+            const summary = cleanSummaryText(turn.results.content)
+            return summary ? summary.slice(0, 240) : 'Generated a direct answer.'
+        }
+
+        if (turn.resultCount === 0) {
+            return 'No matching results found.'
+        }
+
+        if (turn.resultCount !== null && turn.resultCount !== undefined) {
+            return `Returned ${formatResultCount(turn.resultCount, turn.isPartialResult)}.`
+        }
+
+        return 'Completed with structured results.'
+    }
+
+    if (turn.error) {
+        return 'This turn failed before producing a final result.'
+    }
+
+    if (turn.isActive) {
+        return turn.executionMessage || 'Working through this request.'
+    }
+
+    if (turn.status === 'created') {
+        return 'Preparing this turn.'
+    }
+
+    return 'No summary available yet.'
+}
+
+const showLivePanelsForTurn = (turn) => {
+    if (!isReActMode.value) {
+        return false
+    }
+
+    return Boolean(
+        turn.isActive ||
+        turn.steps.length > 0 ||
+        turn.discoveryComplete ||
+        turn.executionStarted ||
+        turn.validationStep ||
+        turn.generatedScript ||
+        (Array.isArray(turn.subprocessProgress) && turn.subprocessProgress.length > 0)
+    )
+}
+
+const showExecutionPanelForTurn = (turn) => {
+    return Boolean(
+        turn.validationStep ||
+        turn.executionStarted ||
+        turn.generatedScript ||
+        (Array.isArray(turn.subprocessProgress) && turn.subprocessProgress.length > 0)
+    )
+}
+
+const shouldShowTurnSummary = (turn) => {
+    if (turn.results || turn.isHydratingResults) {
+        return false
+    }
+
+    return !(turn.isActive && showLivePanelsForTurn(turn))
+}
+
+const shouldAutoCollapseTurnPanels = (turn) => {
+    return Boolean(turn.status === 'completed' && turn.results && !turn.error)
+}
+
+const turnStatusClass = (turn) => {
+    if (turn.error || turn.status === 'failed') {
+        return 'turn-status-pill-error'
+    }
+
+    if (turn.status === 'completed') {
+        return 'turn-status-pill-success'
+    }
+
+    if (turn.isActive || turn.status === 'running' || turn.status === 'created') {
+        return 'turn-status-pill-active'
+    }
+
+    return 'turn-status-pill-muted'
+}
+
 /**
  * Handle authentication errors by redirecting to login
  */
@@ -449,6 +1384,28 @@ const handleAuthError = async (status) => {
         return true;
     }
     return false;
+}
+
+const ensureAuthenticatedSession = async () => {
+    try {
+        const authCheckResponse = await fetch('/api/auth/check', {
+            method: 'GET',
+            credentials: 'include'
+        })
+
+        if (await handleAuthError(authCheckResponse.status)) {
+            return false
+        }
+
+        if (!authCheckResponse.ok) {
+            throw new Error(`Authentication check failed with status ${authCheckResponse.status}`)
+        }
+
+        return true
+    } catch (error) {
+        console.error('Failed to validate authentication before query submission:', error)
+        throw error
+    }
 }
 
 // ---------- PREDEFINED CONTENT ----------
@@ -505,8 +1462,30 @@ const handleKeyDown = (e) => {
  * Resets the interface to its initial state
  */
 const resetInterface = () => {
+    const shouldAnimateHome = hasResults.value
+    const composerRect = shouldAnimateHome ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
+
+    clearHomeRevealTimer()
+    if (shouldAnimateHome) {
+        isReturningHome.value = true
+    }
+
+    clearComposerAnimationTimer()
+    cleanupComposerAnimation()
     hasResults.value = false
+    sessionLoadRequestId += 1
     userInput.value = ''
+    lastQuestion.value = ''
+    activeSessionId.value = null
+    activeSessionTitle.value = ''
+    pendingSessionTitle.value = ''
+    conversationTurns.value = []
+    sessionViewLoading.value = false
+    sessionViewError.value = null
+    sessionHydrationLoaded.value = 0
+    sessionHydrationTotal.value = 0
+    activeTurnKey.value = null
+    window.dispatchEvent(new CustomEvent('tako:conversation-reset'))
     currentResponse.value = {
         type: MessageType.TEXT,
         content: '',
@@ -530,6 +1509,12 @@ const resetInterface = () => {
         reactTokenUsage.value = null
         reactDiscoveryComplete.value = false
         reactError.value = null
+    }
+
+    if (shouldAnimateHome) {
+        void animateComposerReturnHome(composerRect)
+    } else {
+        isReturningHome.value = false
     }
 }
 
@@ -614,14 +1599,34 @@ const refreshHistoryWithRetry = async (queryText, maxRetries = 3) => {
 const sendQuery = async () => {
     if (!userInput.value.trim() || isLoading.value) return
 
+    try {
+        const isSessionValid = await ensureAuthenticatedSession()
+        if (!isSessionValid) {
+            return
+        }
+    } catch (error) {
+        reactError.value = error.message || 'Failed to validate session'
+        return
+    }
+
     // Apply full sanitization before sending query
     const rawQuery = userInput.value.trim()
     const sanitizedQuery = sanitizeQuery(rawQuery, { maxLength: 2000 })
+    const shouldAnimateDock = !hasResults.value
+    const composerRect = shouldAnimateDock ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
+
+    clearHomeRevealTimer()
+    isReturningHome.value = false
+    activeTurnKey.value = null
 
     lastQuestion.value = sanitizedQuery
     isLoading.value = true
     hasResults.value = true
     userInput.value = ''
+
+    if (shouldAnimateDock) {
+        void animateComposerDock(composerRect)
+    }
 
     // Store sanitized query in history
     updateMessageHistory(sanitizedQuery)
@@ -629,8 +1634,9 @@ const sendQuery = async () => {
     try {
         if (isReActMode.value) {
             // Use ReAct flow
-            const pid = await startReActProcess(sanitizedQuery)
+            const pid = await startReActProcess(sanitizedQuery, activeSessionId.value)
             if (pid) {
+                registerActiveTurn(sanitizedQuery, 'user')
                 await connectReActStream(pid)
                 // History refresh will be triggered by watch on reactLoading
             }
@@ -639,18 +1645,6 @@ const sendQuery = async () => {
         }
 
         // Tako flow (existing)
-        // First check authentication only (lightweight call) 
-        const authCheckResponse = await fetch('/api/query?auth_check=true', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        // Check for auth errors before proceeding
-        if (await handleAuthError(authCheckResponse.status)) {
-            isLoading.value = false;
-            return;
-        }
-        // Send sanitized query to API
         const streamResponse = await postStream('/api/query', { query: sanitizedQuery })
         streamController.value = streamResponse
 
@@ -745,6 +1739,40 @@ const CONFIG = {
 const messageHistory = ref([])
 const historyIndex = ref(-1)
 
+const handleSidebarSelectEvent = async (event) => {
+    const item = event.detail
+
+    if (item?.kind === 'session' && item.session_id) {
+        if (reactLoading.value || reactProcessing.value) {
+            cancelReAct()
+            isLoading.value = false
+        }
+
+        try {
+            await loadConversationSession(item.session_id, {
+                title: item.title || ''
+            })
+        } catch (error) {
+            console.error('Failed to load selected conversation:', error)
+        }
+        return
+    }
+
+    if (item?.query_text) {
+        userInput.value = sanitizeQuery(item.query_text)
+        nextTick(() => {
+            autoResizeTextarea()
+            if (searchTextarea.value) {
+                searchTextarea.value.focus()
+            }
+        })
+    }
+}
+
+const handleNewSessionEvent = () => {
+    resetInterface()
+}
+
 // Add this mounted hook to load saved history
 onMounted(async () => {
     try {
@@ -770,34 +1798,8 @@ onMounted(async () => {
         await fetchTools()
 
         // History Event Listeners
-        window.addEventListener('tako:select-history', (e) => {
-            userInput.value = e.detail.query_text
-            nextTick(autoResizeTextarea)
-        })
-
-        window.addEventListener('tako:execute-history', async (e) => {
-            const item = e.detail
-            lastQuestion.value = item.query_text
-            isLoading.value = true
-            hasResults.value = true
-            
-            try {
-                const pid = await startScriptExecution(item.query_text, item.final_script)
-                if (pid) {
-                    await connectReActStream(pid)
-                    
-                    // Retry history refresh with exponential backoff
-                    try {
-                        await refreshHistoryWithRetry(item.query_text, 3)
-                    } catch (err) {
-                        console.error('Failed to refresh history sidebar after retries:', err)
-                        // Non-critical - don't block user workflow
-                    }
-                }
-            } finally {
-                isLoading.value = false
-            }
-        })
+        window.addEventListener('tako:select-history', handleSidebarSelectEvent)
+        window.addEventListener('tako:new-session', handleNewSessionEvent)
     } catch (error) {
         console.error('Failed to load message history:', error)
         localStorage.removeItem('messageHistory')
@@ -835,16 +1837,21 @@ const updateMessageHistory = (query) => {
 }
 
 onMounted(() => {
-    // Force document to be scrollable
-    document.documentElement.style.overflow = 'auto'
-    document.body.style.overflow = 'auto'
-    document.documentElement.style.height = 'auto'
-    document.body.style.height = 'auto'
-
     // Force layout recalculation on smaller screens
     if (window.innerHeight <= 800) {
         document.querySelector('.chat-content')?.classList.add('small-screen')
     }
+
+    composerResizeObserver = new ResizeObserver(() => {
+        scheduleComposerClearanceSync()
+    })
+
+    if (composerShellRef.value) {
+        composerResizeObserver.observe(composerShellRef.value)
+    }
+
+    window.addEventListener('resize', scheduleComposerClearanceSync)
+    scheduleComposerClearanceSync()
 
     // Auto-focus the textarea on load
     nextTick(() => {
@@ -870,82 +1877,87 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     padding: 0;
-    transition: all 0.3s ease;
+    transition: padding 0.3s ease;
     position: relative;
+    min-height: 0;
+    box-sizing: border-box;
 }
 
 /* Initially center the search container vertically and horizontally */
 .content-area:not(.has-results) {
     justify-content: center;
     align-items: center;
-}
-
-/* Add bottom padding when results appear to prevent content hiding under fixed input */
-.content-area.has-results {
-    padding-bottom: 180px;
+    padding-bottom: 42px;
+    padding-top: 0;
 }
 
 .search-container {
     width: 100%;
-    max-width: 900px;
-    padding-bottom: 40px;
-    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    max-width: 1080px;
+    padding: 0 24px 32px;
+    transition: opacity 0.28s ease;
     z-index: 50;
     margin: 0 auto;
 }
 
+.composer-shell {
+    width: 100%;
+}
+
 /* When results appear, fix search bar to bottom with space for footer */
-.search-container.moved {
+.composer-shell.moved {
     position: fixed;
-    bottom: 70px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 900px;
-    max-width: calc(100vw - 360px);
+    bottom: 72px;
+    left: 32px;
+    right: 32px;
+    width: auto;
+    max-width: 760px;
     padding-bottom: 0;
     z-index: 90;
-    margin: 0;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 /* Adjust horizontal position when sidebar is expanded */
-.sidebar-expanded .search-container.moved {
-    left: calc(50% + 140px);
+.sidebar-expanded .composer-shell.moved {
+    left: calc(var(--sidebar-width) + 32px);
+    right: 32px;
 }
 
 /* Hide placeholder when in mini mode */
-.search-container.moved .query-textarea::placeholder {
+.composer-shell.moved .query-textarea::placeholder {
     opacity: 0;
 }
 
 /* Compact style when moved - Clean white bar */
-.search-container.moved .query-card {
-    padding: 12px 16px;
-    border-radius: 16px;
+.composer-shell.moved .query-card {
+    padding: 10px 12px;
+    border-radius: 10px;
     background: #ffffff;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+    box-shadow: none;
 }
 
-.search-container.moved .query-card::before {
-    border-radius: 16px;
+.composer-shell.moved .query-card::before {
+    border-radius: 10px;
 }
 
-.search-container.moved .query-label {
+.composer-shell.moved .query-label {
     display: none;
 }
 
-.search-container.moved .query-input-row {
+.composer-shell.moved .query-input-row {
     flex-direction: row;
     align-items: center;
     gap: 12px;
 }
 
-.search-container.moved .query-icons-left {
+.composer-shell.moved .query-icons-left {
     display: flex;
     align-items: center;
     flex-shrink: 0;
 }
 
-.search-container.moved .query-textarea {
+.composer-shell.moved .query-textarea {
     min-height: 32px;
     max-height: 120px;
     font-size: 15px;
@@ -955,34 +1967,35 @@ onMounted(() => {
     padding: 6px 0;
 }
 
-.search-container.moved .send-button {
+.composer-shell.moved .send-button {
     margin-top: 0;
-    padding: 10px 20px;
-    border-radius: 10px;
-    font-size: 13px;
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 8px;
     flex-shrink: 0;
     background: var(--primary);
     color: white;
 }
 
-.search-container.moved .icon-btn {
+.composer-shell.moved .icon-btn {
     width: 38px;
     height: 38px;
     border-radius: 10px;
     background: #f3f4f6;
 }
 
-.search-container.moved .icon-btn:hover {
+.composer-shell.moved .icon-btn:hover {
     background: #e5e7eb;
 }
 
-.search-container.moved .icon-btn.stop-icon {
+.composer-shell.moved .icon-btn.stop-icon {
     background: rgba(239, 68, 68, 0.1);
     color: #ef4444;
     animation: pulse-stop 1.5s ease-in-out infinite;
 }
 
-.search-container.moved .icon-btn.stop-icon:hover {
+.composer-shell.moved .icon-btn.stop-icon:hover {
     background: rgba(239, 68, 68, 0.15);
 }
 
@@ -991,28 +2004,33 @@ onMounted(() => {
     50% { opacity: 0.6; }
 }
 
-.search-container.moved .send-button {
-    padding: 10px 20px;
-    border-radius: 10px;
-    font-size: 13px;
+.composer-shell.moved .send-button {
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    border-radius: 8px;
 }
 
 /* Title with animated underline */
 
 .hero-card {
-    max-width: 920px;
-    margin: 0 auto 16px;
-    padding: 10px 0 6px;
+    max-width: 760px;
+    margin: 0 auto 18px;
+    max-height: 140px;
+    overflow: hidden;
+    padding: 0;
     border-radius: 0;
     background: transparent;
     border: none;
     box-shadow: none;
-    transition: opacity 0.35s ease, transform 0.35s ease;
+    transition: opacity 0.35s ease, transform 0.35s ease, max-height 0.35s ease, margin 0.35s ease;
 }
 
 .hero-card.hidden {
     opacity: 0;
     transform: translateY(-16px);
+    max-height: 0;
+    margin-bottom: 0;
     pointer-events: none;
 }
 
@@ -1023,61 +2041,63 @@ onMounted(() => {
 
 .main-title {
     font-family: var(--font-family-display);
-    font-size: 55px;
+    font-size: 36px;
     font-weight: 700;
-    margin-bottom: 10px;
-    color: #1a1a1a;
+    margin-bottom: 8px;
+    color: var(--text-primary);
     position: relative;
+    letter-spacing: 0;
+    line-height: 1.12;
 }
 
 .main-title.gradient-title {
-    background: linear-gradient(135deg, #4C64E2 0%, #8B5CF6 50%, #d442f5 100%);
-    background-clip: text;
-    -webkit-background-clip: text;
-    color: transparent;
+    background: none;
+    color: var(--text-primary);
 }
 
 .main-subtitle {
-    font-family: var(--font-family-display);
-    font-size: 18px;
-    font-weight: 600;
-    color: #475569;
-    margin: 6px 0 0 0;
-    letter-spacing: -0.005em;
+    font-family: var(--font-family-body);
+    font-size: 14px;
+    font-weight: 450;
+    color: var(--text-secondary);
+    margin: 0 auto;
+    max-width: 520px;
+    line-height: 1.5;
+    letter-spacing: 0;
 }
 
 .content-area.has-results {
     padding-top: 60px;
-    padding-bottom: 60px;
+    padding-bottom: var(--composer-clearance, 176px);
 }
 
 /* Modern integrated search - Plain CSS Card */
 .search-wrapper {
     width: 100%;
-    max-width: 900px;
+    max-width: 760px;
     margin: 0 auto;
 }
 
 .query-card {
     position: relative;
     background: white;
-    border-radius: 20px; /* Rounded card */
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
-    padding: 20px 24px; /* Even padding for card */
-    transition: all 0.25s ease;
-    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 10px;
+    box-shadow: none;
+    padding: 14px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+    border: 2px solid rgba(15, 23, 42, 0.28);
     display: flex;
     flex-direction: column;
 }
 
 .query-card:hover {
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
-    transform: translateY(-1px);
+    border-color: rgba(15, 23, 42, 0.42);
+    box-shadow: none;
 }
 
 .query-card.is-focused {
-    box-shadow: 0 8px 30px rgba(76, 100, 226, 0.2);
-    border-color: rgba(76, 100, 226, 0.3);
+    box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.14);
+    border-color: rgba(var(--primary-rgb), 0.62);
 }
 
 .query-label {
@@ -1086,7 +2106,7 @@ onMounted(() => {
 
 .query-input-row {
     display: flex;
-    flex-direction: column; /* Vertical layout */
+    align-items: flex-end;
     width: 100%;
     gap: 12px;
 }
@@ -1101,19 +2121,20 @@ onMounted(() => {
     outline: none;
     resize: none;
     font-family: inherit;
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 400;
-    line-height: 1.6;
-    color: #1f2937;
+    line-height: 1.5;
+    color: var(--text-primary);
     background: transparent;
-    min-height: 52px; /* 2 lines approximately */
+    min-height: 42px;
     max-height: 150px;
     overflow-y: auto;
-    padding: 0;
+    padding: 8px 2px;
+    flex: 1;
 }
 
 .query-textarea::placeholder {
-    color: #9ca3af;
+    color: var(--text-muted);
 }
 
 .icon-btn {
@@ -1136,37 +2157,39 @@ onMounted(() => {
 }
 
 .icon-btn.stop-icon {
-    color: #4C64E2;
-    background: rgba(76, 100, 226, 0.08);
+    color: var(--primary);
+    background: rgba(var(--primary-rgb), 0.08);
 }
 
 .icon-btn.stop-icon:hover {
-    background: rgba(76, 100, 226, 0.12);
+    background: rgba(var(--primary-rgb), 0.12);
 }
 
 .send-button {
-    align-self: flex-end; /* Align to right */
-    padding: 10px 28px;
+    align-self: flex-end;
+    width: 40px;
+    height: 40px;
+    padding: 0;
     border: none;
-    border-radius: 100px; /* Pill button */
-    background: #4C64E2;
+    border-radius: 8px;
+    background: var(--primary);
     color: white;
-    font-size: 14px;
-    font-weight: 600;
-    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background 0.15s ease, transform 0.15s ease;
     flex-shrink: 0;
 }
 
 .send-button:hover:not(:disabled) {
-    background: #3d52c7;
-    transform: scale(1.02);
+    background: var(--primary-hover);
+    transform: translateY(-1px);
 }
 
 .send-button:disabled {
-    background: #e5e7eb;
-    color: #9ca3af;
+    background: var(--surface-muted);
+    color: var(--text-faint);
     cursor: not-allowed;
 }
 
@@ -1178,76 +2201,61 @@ onMounted(() => {
     padding: 5px 10px;
     border-radius: 4px;
     opacity: 0.95;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    box-shadow: none;
 }
 
 /* Modern 2026 Suggestion Cards - Clean minimal style */
 .suggestions-wrapper {
-    margin-top: 2rem;
-    padding: 0 1rem;
-    width: calc(100vw - 2rem);
-    max-width: 1200px;
+    margin-top: 14px;
+    padding: 0;
+    width: 100%;
+    max-width: 1040px;
     position: relative;
-    left: 50%;
-    transform: translateX(-50%);
     opacity: 1;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
     transition: opacity 0.4s ease;
 }
 
 .suggestions-grid {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 10px;
+    gap: 8px;
     justify-content: center;
     width: 100%;
-    max-width: 1400px;
+    max-width: 1040px;
     margin: 0 auto;
 }
 
 .suggestion-btn {
     position: relative;
-    padding: 9px 12px;
+    padding: 8px 12px;
     width: auto;
     max-width: 100%;
     display: inline-flex;
     margin: 0;
-    /* Brighter subtle dirty white */
-    background: rgba(250, 250, 248, 0.75);
-    /* Gradient border matching hero title */
-    border: 1.5px solid transparent;
-    background-clip: padding-box;
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.4),
-        0 2px 8px rgba(0, 0, 0, 0.02);
-    border-radius: 999px;
+    background: #ffffff;
+    border: 1px solid var(--border-color);
+    box-shadow: none;
+    border-radius: 10px;
     cursor: pointer;
     text-align: left;
     flex-direction: row;
     align-items: center;
-    gap: 8px;
-    transition: all 0.2s ease;
+    gap: 0;
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .suggestion-btn::before {
-    content: '';
-    position: absolute;
-    inset: -1.5px;
-    border-radius: 999px;
-    padding: 1.5px;
-    background: linear-gradient(135deg, #4C64E2, #8B5CF6, #d442f5);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    opacity: 0.15;
-    transition: opacity 0.2s ease;
+    display: none;
 }
 
 .suggestion-btn:hover {
-    background: rgba(252, 252, 250, 0.88);
-    box-shadow:
-        inset 0 1px 0 rgba(255, 255, 255, 0.5),
-        0 4px 12px rgba(76, 100, 226, 0.08),
-        0 2px 6px rgba(0, 0, 0, 0.03);
+    background: #ffffff;
+    border-color: var(--border-strong);
+    box-shadow: none;
     transform: translateY(-1px);
 }
 
@@ -1256,16 +2264,15 @@ onMounted(() => {
 }
 
 .suggestion-btn:focus-visible {
-    outline: 2px solid rgba(79, 70, 229, 0.35);
+    outline: 2px solid rgba(var(--primary-rgb), 0.35);
     outline-offset: 2px;
 }
 
 .suggestion-text {
-    font-size: 13px;
-    font-weight: 450;
-    color: #374151;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
     line-height: 1.4;
-    flex: 1;
 }
 
 .suggestion-header {
@@ -1275,20 +2282,11 @@ onMounted(() => {
 }
 
 .suggestion-icon {
-    width: 18px;
-    height: 18px;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px;
-    border-radius: 12px;
-    background: transparent;
-    color: #8B5CF6;
+    display: none;
 }
 
 .suggestion-icon :deep(.v-icon) {
-    color: #8B5CF6;
+    display: none;
 }
 
 /* Remove glow effect */
@@ -1297,50 +2295,343 @@ onMounted(() => {
 }
 
 .suggestion-btn:hover .suggestion-icon {
-    background: transparent;
-    color: #a78bfa;
+    display: none;
 }
 
 .suggestion-btn:hover .suggestion-icon :deep(.v-icon) {
-    color: #a78bfa;
+    display: none;
 }
 
 /* Centered question header with blue background */
 .question-header-container {
-    max-width: var(--max-width);
-    width: calc(100% - 40px);
+    width: min(var(--turn-content-max-width), 100%);
     margin: 24px auto 20px;
     display: flex;
-    justify-content: center;
+    justify-content: flex-end;
     position: relative;
     z-index: 40; /* Lower than search container but higher than results */
+}
+
+.transcript-shell {
+    --turn-content-max-width: 900px;
+    max-width: var(--max-width);
+    width: calc(100% - 40px);
+    margin: 0 auto var(--composer-clearance, 176px);
+    position: relative;
+    isolation: isolate;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.session-load-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 72px 20px 24px;
+    border-radius: 24px;
+    background: rgba(247, 250, 252, 0.58);
+    backdrop-filter: blur(12px);
+}
+
+.session-load-dialog {
+    width: min(100%, 440px);
+    padding: 18px;
+    border-radius: 18px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.session-load-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.session-load-icon {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(var(--primary-rgb), 0.08);
+    border: 1px solid rgba(var(--primary-rgb), 0.1);
+}
+
+.session-load-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.session-load-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.session-load-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.session-load-progress-block {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.session-load-progress-copy {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.session-load-progress-muted {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.transcript-session-bar {
+    width: calc(100% - 40px);
+    max-width: 100%;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.transcript-session-label {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.transcript-session-label-caption {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.transcript-session-label-title {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.transcript-state-card {
+    width: 100%;
+    padding: 20px 22px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.92);
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.transcript-state-card-error {
+    color: #b42318;
+    border-color: rgba(180, 35, 24, 0.18);
+    background: rgba(180, 35, 24, 0.05);
+}
+
+.transcript-list {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.transcript-turn {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    scroll-margin-bottom: var(--composer-clearance, 176px);
+}
+
+.transcript-turn.is-active {
+    scroll-margin-top: 96px;
+}
+
+.transcript-question-header {
+    margin: 0 auto;
+    width: calc(100% - 40px);
+    max-width: 100%;
+}
+
+.transcript-question-header .question-header {
+    width: fit-content;
+    max-width: 100%;
+    justify-content: flex-start;
+    align-items: center;
+    margin-left: auto;
+}
+
+.question-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+    flex: 1;
+}
+
+.transcript-react-panels {
+    margin-bottom: 0;
+}
+
+.transcript-results {
+    margin-top: 0;
+    margin-bottom: 0 !important;
+}
+
+.turn-summary-card {
+    width: 100%;
+    max-width: var(--turn-content-max-width);
+    margin: 0 auto;
+    padding: 18px 20px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.9);
+    box-shadow: none;
+}
+
+.turn-loading-card {
+    width: 100%;
+    max-width: var(--turn-content-max-width);
+    margin: 0 auto;
+    padding: 18px 20px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    background: rgba(255, 255, 255, 0.84);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.turn-summary-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+@media (max-width: 640px) {
+    .session-load-overlay {
+        padding: 64px 12px 18px;
+    }
+
+    .session-load-dialog {
+        padding: 16px;
+        border-radius: 16px;
+    }
+
+    .transcript-session-bar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+}
+
+.turn-status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    background: rgba(15, 23, 42, 0.04);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.turn-status-pill-active {
+    color: #0f766e;
+    border-color: rgba(15, 118, 110, 0.16);
+    background: rgba(15, 118, 110, 0.08);
+}
+
+.turn-status-pill-success {
+    color: #1d4ed8;
+    border-color: rgba(29, 78, 216, 0.16);
+    background: rgba(29, 78, 216, 0.08);
+}
+
+.turn-status-pill-error {
+    color: #b42318;
+    border-color: rgba(180, 35, 24, 0.16);
+    background: rgba(180, 35, 24, 0.08);
+}
+
+.turn-status-pill-muted {
+    color: var(--text-muted);
+    border-color: rgba(15, 23, 42, 0.1);
+    background: rgba(15, 23, 42, 0.03);
+}
+
+.turn-summary-text {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.turn-error-text {
+    margin: 10px 0 0;
+    color: #b42318;
+    font-size: 13px;
+    line-height: 1.5;
 }
 
 .question-header {
     background-color: var(--primary);
     color: white;
-    padding: 12px 20px;
-    border-radius: 12px;
+    padding: 10px 16px;
+    border-radius: 10px;
     width: fit-content;
-    max-width: 90%;
+    max-width: 88%;
     white-space: pre-wrap;
     word-break: break-word;
-    font-size: 15px;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 1.4;
     display: flex;
     align-items: center;
-    gap: 12px;
-    box-shadow: 0 4px 16px rgba(76, 100, 226, 0.2);
-}
-
-.question-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.question-icon :deep(.v-icon) {
-    color: white !important;
+    gap: 10px;
+    box-shadow: none;
 }
 
 .question-text {
@@ -1349,10 +2640,10 @@ onMounted(() => {
 }
 
 .question-timestamp {
-    font-size: 12px;
-    opacity: 0.8;
+    font-size: 11px;
+    opacity: 0.78;
     color: rgba(255, 255, 255, 0.9);
-    margin-left: 8px;
+    margin-left: 6px;
     white-space: nowrap;
 }
 
@@ -1384,16 +2675,17 @@ onMounted(() => {
 
 .full-width-results {
     border-radius: var(--border-radius);
-    box-shadow: var(--shadow-medium);
+    box-shadow: none;
     background: white;
+    border: 1px solid var(--border-color);
     overflow: hidden;
     width: 100%;
 }
 
 .compact-results {
-    width: fit-content;
-    max-width: var(--max-width);
-    margin-left: 0;
+    width: 100%;
+    max-width: none;
+    margin-left: auto;
     margin-right: auto;
     background: transparent;
     box-shadow: none;
@@ -1435,6 +2727,17 @@ onMounted(() => {
     transform: translateY(20px);
 }
 
+.working-bar-enter-active,
+.working-bar-leave-active {
+    transition: opacity 0.24s ease, transform 0.34s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.working-bar-enter-from,
+.working-bar-leave-to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+}
+
 /* Responsive styles */
 @media (max-width: 1300px) {
     .content-area {
@@ -1457,11 +2760,13 @@ onMounted(() => {
         max-width: 100%;
     }
 
-    .search-container.moved {
-        bottom: 16px;
+    .composer-shell.moved {
+        bottom: 20px;
+        left: 16px;
+        right: 16px;
     }
 
-    .search-container.moved .send-button {
+    .composer-shell.moved .send-button {
         padding: 8px 16px;
     }
 
@@ -1475,15 +2780,15 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
-    .search-container.moved {
-        bottom: 12px;
+    .composer-shell.moved {
+        bottom: 16px;
     }
 
-    .search-container.moved .query-card {
+    .composer-shell.moved .query-card {
         padding: 10px 12px;
     }
 
-    .search-container.moved .send-button {
+    .composer-shell.moved .send-button {
         padding: 8px 12px;
         font-size: 12px;
     }
@@ -1549,7 +2854,7 @@ onMounted(() => {
 
 /* Special Tools Button */
 .special-tools-container {
-    margin-top: 20px;
+    margin-top: 16px;
     display: flex;
     justify-content: center;
 }
@@ -1559,21 +2864,24 @@ onMounted(() => {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 13px 24px;
-    background: linear-gradient(135deg, #4C64E2, #8B5CF6);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    font-size: 14px;
+    padding: 8px 12px;
+    background: #ffffff;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
-    box-shadow: 0 2px 8px rgba(76, 100, 226, 0.2);
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    box-shadow: none;
 }
 
 .special-tools-btn:hover {
+    background: var(--surface-muted);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
     transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(76, 100, 226, 0.3);
+    box-shadow: none;
 }
 
 .special-tools-btn:active {
@@ -1588,6 +2896,8 @@ onMounted(() => {
 .special-tools-modal {
     border-radius: 16px;
     overflow: hidden;
+    box-shadow: none;
+    border: 1px solid var(--border-strong);
 }
 
 .modal-header {
@@ -1595,7 +2905,7 @@ onMounted(() => {
     justify-content: space-between;
     align-items: center;
     padding: 20px 24px;
-    background: linear-gradient(135deg, #f8f9fb 0%, #ffffff 100%);
+    background: #ffffff;
     border-bottom: 1px solid #e5e7eb;
 }
 
@@ -1617,7 +2927,7 @@ onMounted(() => {
 }
 
 .title-icon {
-    color: #4C64E2;
+    color: var(--primary);
 }
 
 .modal-content {
@@ -1648,12 +2958,12 @@ onMounted(() => {
     align-items: center;
     gap: 10px;
     padding: 12px 16px;
-    background: #EEF2FF;
-    border: 1px solid #C7D2FE;
+    background: var(--primary-light);
+    border: 1px solid rgba(var(--primary-rgb), 0.18);
     border-radius: 8px;
     margin-bottom: 20px;
     font-size: 13px;
-    color: #4338CA;
+    color: var(--primary-dark);
     line-height: 1.5;
 }
 
@@ -1674,8 +2984,8 @@ onMounted(() => {
 }
 
 .tool-card:hover {
-    border-color: #4C64E2;
-    background: #f8f9fb;
+    border-color: var(--primary);
+    background: #f8fbff;
     transform: translateX(4px);
 }
 

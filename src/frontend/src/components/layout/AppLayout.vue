@@ -30,7 +30,7 @@
         </header>
 
         <!-- Content Surface (rounded top corners, gradient background) -->
-        <div class="content-surface">
+        <div class="content-surface" :class="{ 'sidebar-expanded': showLogout && !sidebarCollapsed }">
             <!-- Main Content -->
             <main class="main-content" :class="[contentClass, { 'sidebar-expanded': showLogout && !sidebarCollapsed }]">
                 <slot></slot>
@@ -54,7 +54,7 @@
             v-if="showLogout" 
             ref="sidebarRef"
             @select="handleSelectHistory"
-            @execute="handleExecuteHistory"
+            @new-session="handleNewSession"
             @collapse-change="handleCollapseChange"
         />
     </div>
@@ -116,15 +116,19 @@ const handleSelectHistory = (item) => {
     window.dispatchEvent(new CustomEvent('tako:select-history', { detail: item }))
 }
 
-const handleExecuteHistory = (item) => {
-    window.dispatchEvent(new CustomEvent('tako:execute-history', { detail: item }))
+const handleNewSession = () => {
+    window.dispatchEvent(new CustomEvent('tako:new-session'))
 }
 </script>
 
 <style>
 .app-page {
+    --sidebar-width: 280px;
+    --collapsed-sidebar-width: 48px;
+    --header-height: 56px;
     min-height: 100vh;
-    background: #ffffff;
+    height: 100dvh;
+    background: var(--bg-page);
     position: relative;
     overflow-y: auto;
     overflow-x: hidden;
@@ -132,7 +136,7 @@ const handleExecuteHistory = (item) => {
     flex-direction: column;
 }
 
-/* Header */
+/* Header - flat, hairline divider */
 .floating-header {
     position: sticky;
     top: 0;
@@ -141,14 +145,9 @@ const handleExecuteHistory = (item) => {
     margin: 0;
     z-index: 100;
     width: 100%;
-    min-height: 64px;
-
-    /* High-end frosted glass */
-    background: rgba(255, 255, 255, 0.75);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-    transition: all 0.3s ease;
+    min-height: var(--header-height);
+    background: var(--bg-page);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .header-content {
@@ -158,20 +157,16 @@ const handleExecuteHistory = (item) => {
     width: 100%;
     max-width: 100%;
     margin: 0;
-    padding: 0 32px;
-    height: 64px;
+    padding: 0 24px;
+    height: var(--header-height);
     position: relative;
     z-index: 2;
-}
-
-.floating-header:hover {
-    background: rgba(255, 255, 255, 0.9);
 }
 
 .header-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
 }
 
 .brand {
@@ -182,18 +177,18 @@ const handleExecuteHistory = (item) => {
 
 .brand img {
     display: block;
-    height: 28px;
+    height: 27px;
     width: auto;
     object-fit: contain;
 }
 
 .tako-name {
     font-family: var(--font-family-display);
-    font-weight: 800;
-    font-size: 17px;
+    font-weight: 625;
+    font-size: 18px;
     line-height: 1;
     letter-spacing: -0.02em;
-    color: #475569;
+    color: var(--text-primary);
     display: flex;
     align-items: center;
 }
@@ -205,23 +200,21 @@ const handleExecuteHistory = (item) => {
 }
 
 .brand-divider {
-    height: 14px;
-    width: 2px;
-    background: #4C64E2;
+    height: 18px;
+    width: 1px;
+    background: var(--border-strong);
     align-self: center;
-    border-radius: 4px;
-    opacity: 0.2;
 }
 
 .beta-badge {
-    background: rgba(76, 100, 226, 0.08);
-    border: 1px solid rgba(76, 100, 226, 0.2);
-    color: #4C64E2;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
     font-size: 9px;
-    font-weight: 800;
+    font-weight: 600;
     padding: 2px 6px;
-    border-radius: 6px;
-    letter-spacing: 0.05em;
+    border-radius: 4px;
+    letter-spacing: 0.06em;
     line-height: 1;
 }
 
@@ -229,61 +222,69 @@ const handleExecuteHistory = (item) => {
     display: flex;
     align-items: center;
     gap: 6px;
-    background: transparent;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    color: #475569;
+    background: #ffffff;
+    border: 1px solid var(--border-strong);
+    color: var(--text-primary);
     cursor: pointer;
-    padding: 7px 16px;
+    padding: 6px 12px;
     border-radius: 8px;
     font-family: var(--font-family-body);
     font-size: 13px;
-    font-weight: 600;
-    transition: all 0.2s ease;
+    font-weight: 500;
+    box-shadow: none;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .logout-btn:hover {
     background: #ffffff;
-    border-color: rgba(15, 23, 42, 0.2);
-    color: #0f172a;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-color: rgba(var(--primary-rgb), 0.24);
+    color: var(--text-primary);
+    box-shadow: none;
 }
 
 .header-spacer {
     flex: 1;
 }
 
-/* Content surface below header with rounded top corners and gradient */
+/* Content surface - flat, calm canvas */
 .content-surface {
     flex: 1;
     display: flex;
     flex-direction: column;
     margin: 0;
     border-radius: 0;
-    /* Calm Slate - soft blue gradient */
-    background: linear-gradient(135deg, rgb(210, 218, 241), rgb(210, 220, 240), rgb(220, 238, 245));
-    /* overflow: hidden; Removed to allow sticky positioning in children */
+    background:
+        linear-gradient(rgba(15, 23, 42, 0.042) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(15, 23, 42, 0.042) 1px, transparent 1px),
+        var(--bg-page);
+    background-size: 28px 28px;
 }
 
 /* Main content area */
 .main-content {
-    width: calc(100% - 40px);
-    max-width: var(--max-width);
-    margin: 0 auto;
+    width: 100%;
+    max-width: none;
+    margin: 0;
     padding-top: 0;
-    padding-bottom: 30px;
+    padding-bottom: 0;
+    padding-left: 32px;
+    padding-right: 32px;
     /* Reduced from 80px */
     flex-grow: 1;
     /* Add this to make it expand and fill space */
     display: flex;
     flex-direction: column;
-    transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: padding-left 0.38s cubic-bezier(0.16, 1, 0.3, 1), padding-right 0.38s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Adjust content positioning when sidebar is expanded */
 /* Use padding instead of margin to maintain centering */
 .main-content.sidebar-expanded {
-    padding-left: 280px;
-    width: calc(100% - 40px);
+    padding-left: calc(var(--sidebar-width) + 32px);
+}
+
+.content-surface.sidebar-expanded .page-footer {
+    padding-left: var(--sidebar-width);
 }
 
 
@@ -295,7 +296,7 @@ const handleExecuteHistory = (item) => {
     align-items: center;
     flex: 1;
     width: 100%;
-    padding: 20px 0;
+    padding: 16px 0 clamp(72px, 10vh, 96px);
 }
 
 
@@ -303,12 +304,13 @@ const handleExecuteHistory = (item) => {
 .page-footer {
     position: relative;
     margin-top: auto;
-    padding: 14px 0;
+    padding: 12px 0;
     text-align: center;
-    font-size: 13px;
+    font-size: 11px;
     color: var(--text-muted);
     background: transparent;
     z-index: 50;
+    opacity: 0.85;
 }
 
 /* Hide the old pseudo border */
@@ -352,7 +354,7 @@ const handleExecuteHistory = (item) => {
     left: 0;
     width: 0;
     height: 1px;
-    background: linear-gradient(90deg, var(--primary), #5e72e4);
+    background: var(--primary);
     transition: width 0.2s ease;
 }
 
@@ -380,7 +382,8 @@ const handleExecuteHistory = (item) => {
 .app-card {
     background: white;
     border-radius: var(--border-radius);
-    box-shadow: var(--shadow-medium);
+    box-shadow: none;
+    border: 1px solid var(--border-color);
     padding: 40px;
     animation: cardEntry 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -411,6 +414,19 @@ const handleExecuteHistory = (item) => {
     .header-content {
         padding: 10px 16px;
     }
+
+    .main-content {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+
+    .main-content.sidebar-expanded {
+        padding-left: calc(var(--collapsed-sidebar-width) + 16px);
+    }
+
+    .content-surface.sidebar-expanded .page-footer {
+        padding-left: var(--collapsed-sidebar-width);
+    }
 }
 
 @media (max-width: 480px) {
@@ -422,7 +438,7 @@ const handleExecuteHistory = (item) => {
 /* For mobile responsiveness */
 @media (max-width: 600px) {
   .tako-name {
-    font-size: 18px;
+        font-size: 16px;
   }
 }
 </style>
