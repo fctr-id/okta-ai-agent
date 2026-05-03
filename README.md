@@ -55,7 +55,13 @@ Tako is a harness-engineered agentic system for Okta, built to make identity wor
 
 ### See Tako in Action (click image below)
 
-[![Tako AI Agent Demo](https://img.youtube.com/vi/TCzJEAvLYpM/0.jpg)](https://www.youtube.com/watch?v=TCzJEAvLYpM)
+
+
+https://github.com/user-attachments/assets/4eb806a0-dc97-4a1d-a889-b95c7e12afc9
+
+
+
+
 
 *Demo: ReAct agent reasoning through queries with real-time progress updates and CSV download*
 
