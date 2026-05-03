@@ -53,13 +53,10 @@ Tako is a harness-engineered agentic system for Okta, built to make identity wor
 
 > **📌 Note on AI Models:** Tako has been tested and validated with specific models ([see tested models here](#tested-model-combinations)). While you can use other models, they may not perform as expected.
 
-### See Tako in Action (click image below)
+### See Tako in Action Below
 
 
-
-https://github.com/user-attachments/assets/4eb806a0-dc97-4a1d-a889-b95c7e12afc9
-
-
+https://github.com/user-attachments/assets/7a27ebc4-39a0-400f-bf16-505afca7ca3d
 
 
 
