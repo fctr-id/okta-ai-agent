@@ -1,0 +1,95 @@
+# Tako AI — AI Agent for Okta
+
+> Tako AI is an open-source, self-hosted AI agent that lets Okta administrators query their Okta tenant using plain-English questions, replacing ad-hoc scripting and manual UI navigation.
+
+Built by Fctr (also known as Factor Identity) — https://fctr.io. Not affiliated with Okta, Inc.
+
+Target audience: Okta administrators, IAM managers, IT GRC teams, and audit teams.
+
+## What is Tako AI?
+
+Tako AI is an autonomous, harness-engineered AI agent for the Okta Identity Cloud. Admins type natural-language questions and Tako reasons over the right data source—synced SQLite, live Okta API, or special-purpose tools—to return structured, accurate answers.
+
+Name note: "Tako" is an anagram of "Okta".
+
+Tako is also an extensible platform, not a purpose-built Okta-only tool. The same architecture can be adapted to query other products' APIs (Google Workspace, Slack, Workday, etc.) with minimal changes.
+
+Tako AI is part of the broader Fctr AI ecosystem, which also includes MCP (Model Context Protocol) servers for Okta. See https://fctr.io for the full product lineup.
+
+Example queries Tako handles today:
+- "Why can't this user log in?"
+- "List all users not enrolled in push MFA"
+- "Find all deactivated accounts created in the last 90 days"
+- "Which apps does this group have access to?"
+- "Show me all service accounts with no MFA"
+
+Tako is read-only today. Modify operations with human-in-the-loop approvals are in active development.
+
+## Architecture (v3.0-beta)
+
+Tako uses a supervisor-led multi-agent harness that routes each turn dynamically:
+
+- Supervisor — control plane; decides which sub-agent handles each turn
+- SQL Discovery — answers from a locally-synced SQLite mirror of your Okta tenant
+- API Discovery — fetches live Okta data when SQL is stale or insufficient
+- Special Tools — targeted workflows: access analysis, login-risk analysis, factor enrollment checks
+- Result Analysis — cross-turn artifact comparison and synthesis
+- Multi-Turn Conversation — session-scoped runtime state lets follow-ups reuse prior results
+
+Context efficiency: the multi-agent design reduces token usage by ~60% compared to a single-agent approach (70k tokens vs 300–350k), which also lowers hallucination risk near context-window limits.
+
+## Key Capabilities
+
+- Natural-language queries over Okta users, groups, applications, policies, MFA factors, and devices
+- Local SQLite sync for speed and sovereignty — querying 10,000 users locally takes milliseconds vs minutes via API; also enables complex cross-entity queries like "find users in group A who are not in group B" that would require many chained API calls
+- Sandboxed code execution — all LLM-generated code is security-validated before running
+- Slack bot integration via /tako slash command (opt-in, disabled by default)
+- Query history and favorites for quick reuse
+- CLI for unattended runs and cron jobs
+- Python script export and CSV download
+- Self-healing code generation with automatic error correction and API parameter validation
+- Docker-ready (AMD64 and ARM64)
+
+## Supported AI Models (tested)
+
+Tako's structured harness means lightweight/cheap models work well—10–50x cheaper than premium models:
+- Google Gemini 2.5 Flash, 2.0 Flash
+- Anthropic Claude Haiku 3.5, Sonnet 3.7
+- OpenAI GPT-4o mini, GPT-4.1 mini
+- Ollama (local models) — for air-gapped or privacy-first deployments
+
+"Bring Your Own LLM" has been a core design principle since v1. Enterprises locked to a specific vendor (Microsoft, Google, Anthropic, OpenAI) or running local models are all supported.
+
+## Design Goals
+
+- Zero hallucination — if a user belongs to 2 groups and 5 apps, Tako returns exactly 2 groups and 5 apps
+- Predictable and repeatable results — same query should return the same answer; achieved through structured system prompts and context engineering
+- Provide real operational value for day-to-day Okta admin tasks
+
+## Quick Setup
+
+Requirements: Docker, or Python 3.11+ with an Okta API token and LLM API key.
+
+1. Clone https://github.com/fctr-id/okta-ai-agent
+2. Copy .env.example to .env — add your Okta API token and LLM credentials
+3. Run: docker-compose up  (or: python main.py)
+4. Open http://localhost:8000
+5. Click "Sync Okta Data" to populate the local database
+6. Start asking questions
+
+## Resources
+
+- GitHub: https://github.com/fctr-id/okta-ai-agent
+- Website: https://fctr.io
+- YouTube intro & demo: https://youtu.be/QZ13W6P04uQ
+- Release notes / changelog: https://github.com/fctr-id/okta-ai-agent/blob/main/VERSION.md
+- v3.0 launch blog post: https://iamse.blog/2026/05/04/tako-ai-v3-0-harness-the-vibe/
+- Docker Hub: https://hub.docker.com/r/fctrid/okta-ai-agent
+
+### Wiki
+
+- Wiki home: https://github.com/fctr-id/okta-ai-agent/wiki
+- Installation guide: https://github.com/fctr-id/okta-ai-agent/wiki/Installation
+- Authentication & Authorization (OAuth 2 and API tokens): https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens
+- Supported Okta API endpoints: https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints
+- Slack bot setup guide: https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide
