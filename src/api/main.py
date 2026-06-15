@@ -105,6 +105,14 @@ async def lifespan(app: FastAPI):
     # Note: query_history table is automatically created/migrated by init_db() above
     # This handles upgrades from older versions without query_history table
     logger.info("Database initialization complete")
+
+    async with db.get_session() as session:
+        setup_completed = await db.check_setup_completed(session)
+
+    if setup_completed:
+        auth._clear_ephemeral_setup_token()
+    else:
+        auth.ensure_ephemeral_setup_token()
     
     # Modern Execution Manager handles process lifecycle automatically
     #logger.info("Using Modern Execution Manager - no background cleanup needed")

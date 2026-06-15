@@ -136,7 +136,7 @@ export function useAuth() {
         }
     };
 
-    const setupAdmin = async (username, password) => {
+    const setupAdmin = async (username, password, setupToken) => {
         loading.value = true;
         error.value = null;
 
@@ -149,6 +149,7 @@ export function useAuth() {
                 body: JSON.stringify({
                     username,
                     password,
+                    setup_token: setupToken,
                 }),
             });
 

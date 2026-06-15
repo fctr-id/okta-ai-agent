@@ -4,7 +4,10 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timedelta
+import hmac
+import secrets
 import re
+import sys
 import time
 
 from src.core.security.dependencies import get_db_session, get_current_user
@@ -22,6 +25,44 @@ router = APIRouter(
 )
 
 db_operations = DatabaseOperations()
+_ephemeral_setup_token: Optional[str] = None
+_ephemeral_setup_token_announced = False
+
+
+def _get_or_create_ephemeral_setup_token() -> str:
+    global _ephemeral_setup_token
+    global _ephemeral_setup_token_announced
+
+    if not _ephemeral_setup_token:
+        _ephemeral_setup_token = secrets.token_urlsafe(24)
+
+    if not _ephemeral_setup_token_announced:
+        banner = "=" * 72
+        print(
+            f"\n{banner}"
+            "\n[okta-ai-agent] INITIAL SETUP REQUIRED"
+            f"\n[okta-ai-agent] Setup token: {_ephemeral_setup_token}"
+            "\n[okta-ai-agent] Use this token once to create the first admin account."
+            "\n[okta-ai-agent] The token is kept in memory only and resets on process restart."
+            f"\n{banner}\n",
+            file=sys.stdout,
+            flush=True,
+        )
+        _ephemeral_setup_token_announced = True
+
+    return _ephemeral_setup_token
+
+
+def ensure_ephemeral_setup_token() -> str:
+    """Ensure an in-memory setup token exists and is announced to the local operator."""
+    return _get_or_create_ephemeral_setup_token()
+
+
+def _clear_ephemeral_setup_token() -> None:
+    global _ephemeral_setup_token
+    global _ephemeral_setup_token_announced
+    _ephemeral_setup_token = None
+    _ephemeral_setup_token_announced = False
 
 # Input sanitization for usernames
 def sanitize_input(input_str: str, max_length: int = 50) -> Tuple[str, bool]:
@@ -67,6 +108,7 @@ class SetupStatus(BaseModel):
 class SetupRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=20)
     password: str = Field(..., min_length=12, max_length=50)
+    setup_token: str = Field(..., min_length=1, max_length=200)
     
     @field_validator('username')  # Updated to V2 validator
     @classmethod
@@ -112,6 +154,10 @@ class UserResponse(BaseModel):
 async def check_setup_status(session: AsyncSession = Depends(get_db_session)):
     """Check if initial setup is needed"""
     is_setup = await db_operations.check_setup_completed(session)
+    if is_setup:
+        _clear_ephemeral_setup_token()
+    else:
+        _get_or_create_ephemeral_setup_token()
     return {"needs_setup": not is_setup}
 
 @router.post("/setup", response_model=TokenResponse)
@@ -128,10 +174,21 @@ async def initial_setup(
     # Check if setup has already been completed
     is_setup = await db_operations.check_setup_completed(session)
     if is_setup:
+        _clear_ephemeral_setup_token()
         logger.warning(f"Setup attempted when already complete from IP: {client_ip}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Setup has already been completed"
+        )
+
+    expected_setup_token = _get_or_create_ephemeral_setup_token().strip()
+    provided_setup_token = (setup_data.setup_token or "").strip()
+
+    if not hmac.compare_digest(provided_setup_token, expected_setup_token):
+        logger.warning(f"Setup attempted with invalid bootstrap token from IP: {client_ip}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid setup token"
         )
     
     # Apply extra sanitization to username and password
@@ -172,6 +229,7 @@ async def initial_setup(
         
         # Set cookie using the updated utility (fctr_session)
         set_auth_cookie(response, access_token)
+        _clear_ephemeral_setup_token()
         
         logger.info(f"Initial setup completed: Admin user created from IP: {client_ip}")
         return {

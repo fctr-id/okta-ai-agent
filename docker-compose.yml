@@ -2,11 +2,11 @@ services:
   okta-ai-agent:
     build:
       context: .
-    image: fctrid/ai-agent-for-okta:latest
+    image: fctrid/ai-agent-for-okta:3.0.1-alpha
     pull_policy: always  # Always pull the latest image
     container_name: okta-ai-agent
     ports:
-      - "8001:8001"  # Expose HTTPS port
+      - "127.0.0.1:8001:8001"  # Expose HTTPS port locally by default
     volumes:
       # Database directory - contains all SQLite data
       - ./sqlite_db:/app/sqlite_db
