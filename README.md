@@ -8,7 +8,7 @@
 
   <p>
     <a href="VERSION.md">
-      <img src="https://img.shields.io/badge/NEW%20in%20v3.0--beta-Dynamic%20Routing%20%2B%20Multi--Turn%20Harness-0F766E?style=for-the-badge" alt="New in v3.0-beta: Dynamic Routing and Multi-Turn Harness" />
+      <img src="https://img.shields.io/badge/NEW%20in%20v3.0.1--beta-Security%20Patch-0F766E?style=for-the-badge" alt="New in v3.0.1-beta: Security Patch" />
     </a>
   </p>
 

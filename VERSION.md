@@ -1,5 +1,24 @@
 # Version History
 
+## v3.0.1-beta - "Secure the Harness"
+
+**Release Date**: June 30, 2026
+
+Security patch release addressing two reported vulnerabilities from external security research.
+
+🛡️ Security Fixes
+
+- **First-Run Admin Takeover (GHSA-536w-42p8-3qv9)**: Initial admin setup via `POST /api/auth/setup` is now gated by an ephemeral one-time setup token generated at server startup and printed in the startup logs. The token is kept in memory only, cleared after successful setup, and resets on process restart.
+- **Authenticated Python Code Execution (GHSA-r9q7-6784-7rc6)**: The legacy direct client-supplied script execution endpoint (`POST /api/react/execute-script`) has been disabled. Browser-supplied script replay is blocked on both the backend and frontend.
+
+🔧 Hardening
+
+- **Localhost-only Docker publish**: `docker-compose.yml` now binds the service port to `127.0.0.1` by default.
+- **Non-root container runtime**: The Docker image now runs as a dedicated `tako` user with writable directories pre-created.
+- **Setup UI improvements**: Setup token field includes an info tooltip and browser autofill suppression.
+
+---
+
 ## v3.0.0-beta - "Harness the Vibe"
 
 **Release Date**: May 2, 2026
