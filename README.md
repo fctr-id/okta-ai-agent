@@ -8,7 +8,7 @@
 
   <p>
     <a href="VERSION.md">
-      <img src="https://img.shields.io/badge/NEW%20in%20v3.0--beta-Dynamic%20Routing%20%2B%20Multi--Turn%20Harness-0F766E?style=for-the-badge" alt="New in v3.0-beta: Dynamic Routing and Multi-Turn Harness" />
+      <img src="https://img.shields.io/badge/NEW%20in%20v3.0.1--beta-Security%20Patch-0F766E?style=for-the-badge" alt="New in v3.0.1-beta: Security Patch" />
     </a>
   </p>
 
@@ -214,6 +214,8 @@ docker compose logs -f
 # Open browser
 https://localhost:8001
 ```
+
+> **First-run setup:** When no admin account exists yet, Tako prints a one-time setup token in the startup logs. Use that token on the setup screen to create the initial admin account.
 
 ## 🔧 CLI Tools for Automation
 

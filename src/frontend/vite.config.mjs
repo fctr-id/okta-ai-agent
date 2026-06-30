@@ -85,8 +85,14 @@ export default defineConfig({
     },
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor': ['vue', 'vue-router', 'vuetify']
+        manualChunks(id) {
+          if (
+            id.includes('node_modules/vue/') ||
+            id.includes('node_modules/vue-router/') ||
+            id.includes('node_modules/vuetify/')
+          ) {
+            return 'vendor';
+          }
         }
       }
     }

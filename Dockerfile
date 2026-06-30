@@ -56,8 +56,11 @@ COPY scripts /app/scripts
 # Frontend builds to ../api/static relative to the frontend directory
 COPY --from=frontend-builder /app/api/static/ /app/src/api/static/
 
-# Create necessary directories
-RUN mkdir -p /app/certs /app/sqlite_db /app/chat_sessions /app/logs
+# Create a dedicated runtime user and writable runtime directories
+RUN groupadd --system tako && \
+  useradd --system --gid tako --home-dir /app --shell /usr/sbin/nologin tako && \
+  mkdir -p /app/certs /app/sqlite_db /app/chat_sessions /app/logs /app/generated_scripts && \
+  chown -R tako:tako /app
 
 # Create startup script for SSL and server
 RUN echo '#!/bin/bash \n\
@@ -78,6 +81,9 @@ exec python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8001 --ssl-keyfile
 # Environment variables
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+
+# Drop root privileges for the application runtime
+USER tako:tako
 
 # Expose HTTPS port
 EXPOSE 8001

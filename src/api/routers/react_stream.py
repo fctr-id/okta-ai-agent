@@ -626,53 +626,12 @@ async def execute_script_directly(
     Returns process_id for connecting to SSE stream.
     Skips the multi-agent discovery phase.
     """
-    correlation_id = str(uuid.uuid4())
-    set_correlation_id(correlation_id)
-    
-    try:
-        username = current_user.username if current_user and hasattr(current_user, 'username') else "dev_user"
-        logger.info(f"[{correlation_id}] Starting direct script execution for user: {username}")
-
-        session_id, turn_number = await _bootstrap_conversation_process(
-            correlation_id=correlation_id,
-            query=request.query,
-            requested_session_id=request.session_id,
-            user_id=username,
-            source="saved_script",
-        )
-        
-        # Create process tracking entry with pre-generated script
-        active_processes[correlation_id] = {
-            "status": "initializing",
-            "query": request.query,
-            "script_code": request.script_code,  # Pre-generated script
-            "session_id": session_id,
-            "run_id": correlation_id,
-            "turn_number": turn_number,
-            "user_id": username,
-            "created_at": time.time(),
-            "cancelled": False,
-            "skip_discovery": True,  # Flag to skip orchestrator
-            "source": "saved_script",
-        }
-        
-        return QueryResponse(
-            process_id=correlation_id,
-            session_id=session_id,
-            run_id=correlation_id,
-            turn_number=turn_number,
-            message="Script execution started. Connect to /stream-react-updates to receive events."
-        )
-
-    except HTTPException:
-        raise
-        
-    except Exception as e:
-        logger.error(f"[{correlation_id}] Failed to start direct execution: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to start direct execution: {str(e)}"
-        )
+    username = current_user.username if current_user and hasattr(current_user, 'username') else "unknown"
+    logger.warning(f"Direct script execution request rejected for user: {username}")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Direct client-supplied script execution is disabled.",
+    )
 
 
 @router.get("/stream-react-updates")

@@ -169,38 +169,12 @@ export function useReactStream() {
         generatedScript.value = scriptCode
         results.value = null
         tokenUsage.value = null
-        
-        try {
-            const response = await fetch(`${API_BASE_URL}/api/react/execute-script`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                credentials: 'include',
-                body: JSON.stringify({ query, script_code: scriptCode, session_id: sessionId || undefined })
-            })
-            
-            if (await handleAuthError(response.status)) {
-                return null
-            }
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`)
-            }
-            
-            const data = await response.json()
-            currentProcessId.value = data.process_id
-            currentSessionId.value = data.session_id || sessionId || null
-            currentRunId.value = data.run_id || data.process_id || null
-            currentTurnNumber.value = parseTurnNumber(data.turn_number)
-            return data.process_id
-            
-        } catch (err) {
-            console.error('[useReactStream] Failed to start script execution:', err)
-            error.value = err.message
-            isLoading.value = false
-            return null
-        }
+
+        const message = 'Saved-script replay is currently disabled for security hardening.'
+        console.warn(`[useReactStream] ${message}`)
+        error.value = message
+        isLoading.value = false
+        return null
     }
     
     /**

@@ -21,6 +21,43 @@
           </transition>
 
           <div class="form-field">
+            <label for="setupToken" class="field-label-with-help">
+              <span>Setup Token</span>
+              <v-tooltip location="top">
+                <template #activator="{ props }">
+                  <button
+                    type="button"
+                    class="field-help-button"
+                    v-bind="props"
+                    tabindex="-1"
+                    aria-label="Setup token help"
+                  >
+                    <v-icon size="14">mdi-information-outline</v-icon>
+                  </button>
+                </template>
+                <span>The setup token is printed in the startup logs.</span>
+              </v-tooltip>
+            </label>
+            <div class="input-wrapper">
+              <input
+                id="setupToken"
+                v-model="setupToken"
+                type="password"
+                name="bootstrap-setup-token"
+                placeholder="Enter the bootstrap setup token"
+                autocomplete="off"
+                autocapitalize="none"
+                autocorrect="off"
+                spellcheck="false"
+                data-1p-ignore
+                data-lpignore="true"
+                required
+                :disabled="auth.loading.value"
+              />
+            </div>
+          </div>
+
+          <div class="form-field">
             <label for="username">Admin Username</label>
             <div class="input-wrapper">
               <input
@@ -138,6 +175,7 @@ const { username: sanitizeUsername, text: sanitizeText } = useSanitize()
 const username = ref('')
 const password = ref('')
 const confirmPassword = ref('')
+const setupToken = ref('')
 const showPassword = ref(false)
 const validationError = ref('')
 const usernameModified = ref(false)
@@ -195,6 +233,7 @@ const passwordIsValid = computed(() =>
 )
 
 const formIsValid = computed(() =>
+  setupToken.value.trim().length > 0 &&
   username.value.length >= 3 &&
   passwordIsValid.value &&
   password.value === confirmPassword.value
@@ -228,7 +267,18 @@ const handleSetup = async () => {
   }
 
   // Submit sanitized values
-  const success = await auth.setupAdmin(finalUsername, finalPassword);
+  const finalSetupToken = sanitizeText(setupToken.value, {
+    maxLength: 200,
+    removeHtml: true,
+    trim: true
+  });
+
+  if (!finalSetupToken) {
+    validationError.value = 'Setup token is required';
+    return;
+  }
+
+  const success = await auth.setupAdmin(finalUsername, finalPassword, finalSetupToken);
   if (success) {
     router.push('/agentChat');
   }
@@ -316,6 +366,30 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 }
 
 .form-field:focus-within label {
+  color: var(--text-primary);
+}
+
+.field-label-with-help {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px;
+}
+
+.field-help-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #64748b;
+  cursor: help;
+}
+
+.field-help-button:hover {
   color: var(--text-primary);
 }
 
