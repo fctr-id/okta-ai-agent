@@ -17,6 +17,10 @@ Security patch release addressing two reported vulnerabilities from external sec
 - **Non-root container runtime**: The Docker image now runs as a dedicated `tako` user with writable directories pre-created.
 - **Setup UI improvements**: Setup token field includes an info tooltip and browser autofill suppression.
 
+🙏 Credits
+
+- Thanks to [@EQSTLab](https://github.com/EQSTLab) for responsibly reporting both vulnerabilities, and to [@min8282](https://github.com/min8282) and [@yym8538](https://github.com/yym8538) for their analysis support.
+
 ---
 
 ## v3.0.0-beta - "Harness the Vibe"
