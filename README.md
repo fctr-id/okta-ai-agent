@@ -215,6 +215,8 @@ docker compose logs -f
 https://localhost:8001
 ```
 
+> **First-run setup:** When no admin account exists yet, Tako prints a one-time setup token in the startup logs. Use that token on the setup screen to create the initial admin account.
+
 ## 🔧 CLI Tools for Automation
 
 Tako includes command-line tools designed for non-interactive scenarios once your environment is already set up.
