@@ -8,9 +8,9 @@
       </svg>
       <span class="activity-label">Activity</span>
       <span v-if="tools.length" class="activity-count">{{ tools.length }} tool {{ tools.length === 1 ? 'call' : 'calls' }}</span>
-      <span v-if="!isWorking || showWorkingStatus" class="activity-state" :class="{ completed: isComplete && !error }">
+      <span v-if="error || (isWorking && showWorkingStatus)" class="activity-state">
         <span v-if="isWorking" class="busy-dot" aria-hidden="true"></span>
-        {{ error ? 'Stopped' : isComplete ? 'Completed' : 'Working' }}
+        {{ error ? 'Stopped' : 'Working' }}
       </span>
       <span v-if="failedRequests" class="failed-count">{{ failedRequests }} failed {{ failedRequests === 1 ? 'attempt' : 'attempts' }}</span>
     </button>
@@ -110,8 +110,6 @@ const toolSource = (tool) => {
 .activity-label { font-weight: 600; color: var(--text-primary, #27272a); }
 .activity-count { color: #626b79; }
 .activity-state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
-.activity-state.completed { padding: 4px 8px; border-radius: 6px; font-size: 12px; line-height: 1.3; color: #24694b; background: #e2f3e9; }
-.activity-state.completed::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .failed-count { color: #a15c0b; }
 .chevron { flex-shrink: 0; transition: transform 0.15s ease; }
 .chevron.expanded { transform: rotate(90deg); }

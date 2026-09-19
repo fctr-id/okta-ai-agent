@@ -17,15 +17,12 @@
         <span class="header-text">Execution details</span>
       </div>
 
-      <div class="header-badges">
-        <!-- Result count -->
-
+      <div v-if="(isExecuting && !isComplete) || executionError" class="header-badges">
         <!-- Status badges - right aligned -->
         <span v-if="isExecuting && !isComplete" class="status-badge processing">
           <span class="badge-pulse"></span>
           Running
         </span>
-        <span v-if="isComplete && !executionError" class="status-badge completed">Completed</span>
         <span v-if="executionError" class="status-badge error">Failed</span>
       </div>
     </button>
@@ -219,8 +216,6 @@ button:focus-visible { outline: 2px solid var(--primary, #4c64e2); outline-offse
 .header-text { font-size: 14px; font-weight: 600; color: var(--text-primary, #27272a); }
 .header-badges { flex-wrap: wrap; justify-content: flex-end; font-size: 12px; }
 .status-badge { padding: 2px 7px; border-radius: 5px; display: inline-flex; align-items: center; gap: 6px; }
-.status-badge.completed { padding: 4px 8px; border-radius: 6px; font-size: 12px; line-height: 1.3; color: #24694b; background: #e2f3e9; }
-.status-badge.completed::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .status-badge.error { color: #b42318; }
 .chevron { flex-shrink: 0; transition: transform .15s; }
 .chevron.expanded { transform: rotate(90deg); }
