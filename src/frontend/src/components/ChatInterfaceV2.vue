@@ -1,100 +1,10 @@
 <template>
-    <AppLayout contentClass="chat-content" ref="appLayoutRef">
-        <main class="content-area" :class="{ 'has-results': hasResults }" :style="contentAreaStyle">
-            <!-- Search Container with Animated Position -->
-            <div class="search-container">
-                <!-- Hero title -->
-                <div class="hero-card" :class="{ hidden: hasResults || isReturningHome }">
-                    <div class="title-wrapper">
-                        <span class="workspace-eyebrow"><span aria-hidden="true"></span> Your AI assistant</span>
-                        <h1 class="main-title">
-                            Hi, I’m <span class="title-accent">Tako.</span>
-                        </h1>
-                        <p class="main-subtitle">Let’s explore your Okta users, apps, and access.</p>
-                    </div>
-                </div>
-
-                <!-- Modern integrated search - Plain CSS Card -->
-                <div ref="composerShellRef" :class="['composer-shell', hasResults ? 'moved' : '']">
-                    <div ref="searchWrapperRef" class="search-wrapper">
-                        <div class="query-card" :class="{ 'is-focused': isFocused }">
-                        
-                            <!-- Input row with icons -->
-                            <div class="query-input-row">
-                                <div v-if="isLoading || reactLoading" class="query-icons-left">
-                                    <button 
-                                        class="icon-btn stop-icon" 
-                                        @click="stopProcessing"
-                                        title="Stop processing"
-                                    >
-                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                                            <rect x="6" y="6" width="12" height="12" rx="2"/>
-                                        </svg>
-                                    </button>
-                                </div>
-                                
-                                <!-- Native textarea -->
-                                <textarea 
-                                    ref="searchTextarea"
-                                    v-model="userInput"
-                                    @keydown="handleKeyDown"
-                                    @focus="isFocused = true"
-                                    @blur="isFocused = false"
-                                    @input="autoResizeTextarea"
-                                    :placeholder="hasResults ? 'Ask a follow-up…' : 'Ask Tako about your Okta tenant…'"
-                                    aria-label="Message Tako"
-                                    class="query-textarea"
-                                    rows="1"
-                                ></textarea>
-                                
-                                <!-- Submit button -->
-                                <button 
-                                    class="send-button"
-                                    :disabled="!userInput || !(userInput?.trim?.())"
-                                    @click="sendQuery"
-                                    title="Send query"
-                                    aria-label="Send query"
-                                >
-                                    <v-icon icon="mdi-arrow-up" size="18" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Suggestions -->
-                <transition name="fade-up">
-                    <div v-if="!hasResults && !isReturningHome" class="suggestions-wrapper">
-                        <div class="suggestions-grid">
-                            <button 
-                                v-for="(suggestion, i) in visibleSuggestions"
-                                :key="i" 
-                                class="suggestion-btn" :title="suggestion.query"
-                                @click="selectSuggestion(suggestion.query)"
-                            >
-                                <v-icon :icon="suggestion.icon" size="16" class="suggestion-symbol" />
-                                <span class="suggestion-text">{{ suggestion.label }}</span>
-                            </button>
-                        </div>
-                        
-                        <!-- Special Tools Button -->
-                        <div class="special-tools-container">
-                            <button class="special-tools-btn" @click="showAllSuggestions = !showAllSuggestions" :aria-expanded="showAllSuggestions">
-                                <span>{{ showAllSuggestions ? 'Fewer ideas' : 'More ideas' }}</span>
-                                <v-icon :icon="showAllSuggestions ? 'mdi-chevron-up' : 'mdi-chevron-down'" size="16" />
-                            </button>
-                            <button class="special-tools-btn" @click="showSpecialToolsModal = true">
-                                <v-icon icon="mdi-tools" size="18" />
-                                <span>Special Tools</span>
-                            </button>
-                        </div>
-                    </div>
-                </transition>
-            </div>
-
+    <AppLayout contentClass="chat-content" ref="appLayoutRef" :class="{ 'conversation-page': hasResults }">
+        <main class="content-area" :class="{ 'has-results': hasResults }">
+            <div ref="conversationScrollRef" class="conversation-scroll" :tabindex="hasResults ? 0 : undefined" :role="hasResults ? 'region' : undefined" :aria-label="hasResults ? 'Conversation results' : undefined">
             <!-- Error Alert - 2026 Minimal Style -->
             <transition name="fade-up">
-                <div v-if="reactError" class="error-block">
+                <div v-if="showGlobalError" class="error-block">
                     <div class="error-icon">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <circle cx="12" cy="12" r="10"/>
@@ -220,6 +130,8 @@
                                 <div v-if="showLivePanelsForTurn(turn)" class="react-panels transcript-react-panels">
                                     <DiscoveryPanel
                                         :showWorkingStatus="false"
+                                        :showError="false"
+                                        :collapseRevision="sectionCollapseRevisions[turn.key] || 0"
                                             :steps="turn.steps"
                                             :isThinking="turn.isActive && turn.steps.length === 0 && !turn.discoveryComplete && !turn.error"
                                             :isComplete="turn.discoveryComplete"
@@ -229,6 +141,8 @@
                                     />
 
                                     <ExecutionPanel
+                                            :showError="false"
+                                            :collapseRevision="sectionCollapseRevisions[turn.key] || 0"
                                             v-if="showExecutionPanelForTurn(turn)"
                                             :validationStep="turn.validationStep"
                                             :executionStarted="turn.executionStarted"
@@ -244,6 +158,12 @@
                                             :generatedScript="turn.generatedScript"
                                             :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
                                     />
+                                </div>
+
+                                <div v-if="turn.resultsError || turn.error" class="turn-feedback"
+                                    :class="{ 'is-error': !isClarificationTurn(turn) }"
+                                    :role="isClarificationTurn(turn) ? 'status' : 'alert'">
+                                    {{ turn.resultsError || turn.error }}
                                 </div>
 
                                 <div
@@ -290,13 +210,106 @@
                                     </div>
 
                                     <p class="turn-summary-text">{{ getTurnSummary(turn) }}</p>
-                                    <p v-if="turn.resultsError || turn.error" class="turn-error-text">{{ turn.resultsError || turn.error }}</p>
                                 </div>
                             </ConversationCard>
                         </article>
                     </div>
                 </div>
             </transition>
+            </div>
+            <!-- Search Container with Animated Position -->
+            <div class="search-container">
+                <!-- Hero title -->
+                <div class="hero-card" :class="{ hidden: hasResults || isReturningHome }">
+                    <div class="title-wrapper">
+                        <span class="workspace-eyebrow"><span aria-hidden="true"></span> Your AI assistant</span>
+                        <h1 class="main-title">
+                            Hi, I’m <span class="title-accent">Tako.</span>
+                        </h1>
+                        <p class="main-subtitle">Let’s explore your Okta users, apps, and access.</p>
+                    </div>
+                </div>
+
+                <!-- Modern integrated search - Plain CSS Card -->
+                <div :class="['composer-shell', hasResults ? 'moved' : '']">
+                    <div ref="searchWrapperRef" class="search-wrapper">
+                        <div class="query-card" :class="{ 'is-focused': isFocused }">
+
+                            <!-- Input row with icons -->
+                            <div class="query-input-row">
+                                <div v-if="isLoading || reactLoading" class="query-icons-left">
+                                    <button
+                                        class="icon-btn stop-icon"
+                                        @click="stopProcessing"
+                                        title="Stop processing"
+                                    >
+                                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                                        </svg>
+                                    </button>
+                                </div>
+
+                                <!-- Native textarea -->
+                                <textarea
+                                    ref="searchTextarea"
+                                    v-model="userInput"
+                                    @keydown="handleKeyDown"
+                                    @focus="isFocused = true"
+                                    @blur="isFocused = false"
+                                    @input="autoResizeTextarea"
+                                    :placeholder="hasResults ? 'Ask a follow-up question' : 'Ask Tako about your Okta tenant…'"
+                                    aria-label="Message Tako"
+                                    aria-describedby="query-disclaimer"
+                                    class="query-textarea"
+                                    rows="1"
+                                ></textarea>
+
+                                <!-- Submit button -->
+                                <button
+                                    class="send-button"
+                                    :disabled="!userInput || !(userInput?.trim?.())"
+                                    @click="sendQuery"
+                                    title="Send query"
+                                    aria-label="Send query"
+                                >
+                                    <v-icon icon="mdi-arrow-up" size="18" />
+                                </button>
+                            </div>
+                        </div>
+                        <p id="query-disclaimer" class="query-disclaimer">AI can make mistakes. Please validate results</p>
+                    </div>
+                </div>
+
+                <!-- Suggestions -->
+                <transition name="fade-up">
+                    <div v-if="!hasResults && !isReturningHome" class="suggestions-wrapper">
+                        <div class="suggestions-grid">
+                            <button
+                                v-for="(suggestion, i) in visibleSuggestions"
+                                :key="i"
+                                class="suggestion-btn" :title="suggestion.query"
+                                @click="selectSuggestion(suggestion.query)"
+                            >
+                                <v-icon :icon="suggestion.icon" size="16" class="suggestion-symbol" />
+                                <span class="suggestion-text">{{ suggestion.label }}</span>
+                            </button>
+                        </div>
+
+                        <!-- Special Tools Button -->
+                        <div class="special-tools-container">
+                            <button class="special-tools-btn" @click="showAllSuggestions = !showAllSuggestions" :aria-expanded="showAllSuggestions">
+                                <span>{{ showAllSuggestions ? 'Fewer ideas' : 'More ideas' }}</span>
+                                <v-icon :icon="showAllSuggestions ? 'mdi-chevron-up' : 'mdi-chevron-down'" size="16" />
+                            </button>
+                            <button class="special-tools-btn" @click="showSpecialToolsModal = true">
+                                <v-icon icon="mdi-tools" size="18" />
+                                <span>Special Tools</span>
+                            </button>
+                        </div>
+                    </div>
+                </transition>
+            </div>
+
         </main>
         
         <!-- Special Tools Modal -->
@@ -385,6 +398,8 @@ import { MessageType } from '@/components/messages/messageTypes'
 import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { useConversationCollapse } from '@/composables/useConversationCollapse'
+import { isClarificationTurn, isClarification, hasUnassignedError } from '@/composables/turnFeedback'
 
 // ---------- STATE MANAGEMENT ----------
 
@@ -393,7 +408,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
  */
 const userInput = ref('') // Current text in the input field
 const searchTextarea = ref(null) // Ref for native textarea
-const composerShellRef = ref(null) // Ref for the docked composer shell
+const conversationScrollRef = ref(null)
 const searchWrapperRef = ref(null) // Ref for the moving composer wrapper
 const isLoading = ref(false) // Loading state for API calls
 const lastQuestion = ref('') // Stores the last question that was asked
@@ -402,48 +417,9 @@ const hasResults = ref(false) // Whether there are results to display
 const isReturningHome = ref(false) // Keeps the home shell hidden during reverse motion
 const auth = useAuth()
 const router = useRouter()
-const composerClearance = ref(176)
 
 let composerCleanupTimerId = null
 let homeRevealTimerId = null
-let composerClearanceFrameId = null
-let composerResizeObserver = null
-
-const contentAreaStyle = computed(() => (
-    hasResults.value
-        ? { '--composer-clearance': `${composerClearance.value}px` }
-        : undefined
-))
-
-const measureComposerClearance = () => {
-    const composerShell = composerShellRef.value
-    if (!composerShell || !hasResults.value || !composerShell.classList.contains('moved')) {
-        return 176
-    }
-
-    const rect = composerShell.getBoundingClientRect()
-    const overlayHeight = Math.max(0, window.innerHeight - rect.top)
-    return Math.max(176, Math.ceil(overlayHeight + 20))
-}
-
-const syncComposerClearance = () => {
-    composerClearance.value = measureComposerClearance()
-}
-
-const scheduleComposerClearanceSync = () => {
-    if (composerClearanceFrameId !== null) {
-        window.cancelAnimationFrame(composerClearanceFrameId)
-        composerClearanceFrameId = null
-    }
-
-    void nextTick(() => {
-        composerClearanceFrameId = window.requestAnimationFrame(() => {
-            composerClearanceFrameId = null
-            syncComposerClearance()
-        })
-    })
-}
-
 /**
  * Auto-resize textarea to fit content
  */
@@ -452,7 +428,6 @@ const autoResizeTextarea = () => {
     if (textarea) {
         textarea.style.height = 'auto'
         textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px'
-        scheduleComposerClearanceSync()
     }
 }
 
@@ -585,25 +560,11 @@ const activeSessionId = ref(null)
 const activeSessionTitle = ref('')
 const pendingSessionTitle = ref('')
 const conversationTurns = ref([])
-const collapsedTurnKeys = ref(new Set())
-const hasExpandedPreviousTurns = computed(() =>
-    conversationTurns.value.slice(0, -1).some(turn => !collapsedTurnKeys.value.has(turn.key))
-)
-const setTurnCollapsed = (key, collapsed) => {
-    const next = new Set(collapsedTurnKeys.value)
-    if (collapsed) next.add(key)
-    else next.delete(key)
-    collapsedTurnKeys.value = next
-}
-const collapsePreviousTurns = () => {
-    const next = new Set(collapsedTurnKeys.value)
-    conversationTurns.value.slice(0, -1).forEach(turn => next.add(turn.key))
-    collapsedTurnKeys.value = next
-}
-watch(() => conversationTurns.value.map(turn => turn.key), keys => {
-    const present = new Set(keys)
-    collapsedTurnKeys.value = new Set([...collapsedTurnKeys.value].filter(key => present.has(key)))
-})
+const {
+    collapsedTurnKeys, sectionCollapseRevisions, setTurnCollapsed,
+    hasExpandedPreviousTurns, collapsePreviousTurns, collapseForFollowUp,
+} = useConversationCollapse(conversationTurns)
+const showGlobalError = computed(() => hasUnassignedError(reactError.value, activeTurnKey.value, conversationTurns.value))
 const sessionViewLoading = ref(false)
 const sessionViewError = ref(null)
 const activeTurnKey = ref(null)
@@ -643,10 +604,13 @@ const scrollToTurn = (turnKey, behavior = 'smooth') => {
                 return
             }
 
-            turnElement.scrollIntoView({
+            const scrollArea = conversationScrollRef.value
+            if (!scrollArea) return
+            const targetBottom = turnElement.getBoundingClientRect().bottom
+            const viewportBottom = scrollArea.getBoundingClientRect().bottom
+            scrollArea.scrollTo({
+                top: scrollArea.scrollTop + targetBottom - viewportBottom + 24,
                 behavior,
-                block: 'end',
-                inline: 'nearest'
             })
         })
     })
@@ -819,6 +783,7 @@ const upsertConversationTurn = (turnLike) => {
 }
 
 const deriveActiveTurnStatus = () => {
+    if (isClarification(reactResults.value?.metadata)) return 'needs_clarification'
     if (reactError.value) return 'failed'
     if (reactResults.value && !reactLoading.value && !reactProcessing.value) return 'completed'
     if (reactExecutionStarted.value || reactLoading.value || reactProcessing.value) return 'running'
@@ -826,6 +791,7 @@ const deriveActiveTurnStatus = () => {
 }
 
 const deriveTurnCompletionMode = () => {
+    if (isClarification(reactResults.value?.metadata)) return 'clarify'
     if (reactError.value) return 'fail'
     if (!reactResults.value) return null
     if (reactResults.value.display_type === 'markdown') return 'direct_answer'
@@ -1141,10 +1107,6 @@ watch([
     syncActiveTurnFromStream()
 }, { deep: true })
 
-watch(hasResults, () => {
-    scheduleComposerClearanceSync()
-})
-
 // Watch for query completion to refresh history
 let lastQuery = null
 watch([reactProcessing, reactResults], ([processing, results]) => {
@@ -1213,12 +1175,6 @@ onBeforeUnmount(() => {
     clearComposerAnimationTimer()
     clearHomeRevealTimer()
     cleanupComposerAnimation()
-    if (composerClearanceFrameId !== null) {
-        window.cancelAnimationFrame(composerClearanceFrameId)
-        composerClearanceFrameId = null
-    }
-    composerResizeObserver?.disconnect()
-    composerResizeObserver = null
     if (activeTurnScrollFrameId !== null) {
         window.cancelAnimationFrame(activeTurnScrollFrameId)
         activeTurnScrollFrameId = null
@@ -1226,7 +1182,6 @@ onBeforeUnmount(() => {
     transcriptTurnElements.clear()
     window.removeEventListener('tako:select-history', handleSidebarSelectEvent)
     window.removeEventListener('tako:new-session', handleNewSessionEvent)
-    window.removeEventListener('resize', scheduleComposerClearanceSync)
 })
 
 /**
@@ -1294,6 +1249,7 @@ const formatTurnStatus = (turn) => {
 }
 
 const turnHeaderStatus = (turn) => {
+    if (isClarificationTurn(turn)) return 'Needs clarification'
     if (turn.error || turn.resultsError || turn.status === 'failed') return 'Failed'
     if (turn.isHydratingResults) return 'Loading results'
     if (turn.status === 'completed') return turn.isPartialResult ? 'Partial results' : 'Completed'
@@ -1301,6 +1257,7 @@ const turnHeaderStatus = (turn) => {
     return formatTurnStatus(turn)
 }
 const turnHeaderTone = (turn) => {
+    if (isClarificationTurn(turn)) return 'muted'
     if (turn.error || turn.resultsError || turn.status === 'failed') return 'error'
     if (turn.isHydratingResults) return 'active'
     if (turn.status === 'completed') return turn.isPartialResult ? 'muted' : 'success'
@@ -1355,6 +1312,7 @@ const getTurnSummary = (turn) => {
 }
 
 const showLivePanelsForTurn = (turn) => {
+    if ((turn.error || isClarificationTurn(turn)) && !turn.steps.length && !showExecutionPanelForTurn(turn)) return false
     if (!isReActMode.value) {
         return false
     }
@@ -1380,6 +1338,7 @@ const showExecutionPanelForTurn = (turn) => {
 }
 
 const shouldShowTurnSummary = (turn) => {
+    if (turn.error || turn.resultsError) return false
     if (turn.results || turn.isHydratingResults) {
         return false
     }
@@ -1660,6 +1619,7 @@ const sendQuery = async () => {
     // Apply full sanitization before sending query
     const rawQuery = userInput.value.trim()
     const sanitizedQuery = sanitizeQuery(rawQuery, { maxLength: 2000 })
+    collapseForFollowUp()
     const shouldAnimateDock = !hasResults.value
     const composerRect = shouldAnimateDock ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
 
@@ -1890,17 +1850,6 @@ onMounted(() => {
         document.querySelector('.chat-content')?.classList.add('small-screen')
     }
 
-    composerResizeObserver = new ResizeObserver(() => {
-        scheduleComposerClearanceSync()
-    })
-
-    if (composerShellRef.value) {
-        composerResizeObserver.observe(composerShellRef.value)
-    }
-
-    window.addEventListener('resize', scheduleComposerClearanceSync)
-    scheduleComposerClearanceSync()
-
     // Auto-focus the textarea on load
     nextTick(() => {
         if (searchTextarea.value) {
@@ -1960,6 +1909,16 @@ onMounted(() => {
     width: 100%;
 }
 
+.query-disclaimer {
+    margin: 8px 0 0;
+    padding-inline: 8px;
+    color: #5d6b7d;
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.5;
+    text-align: center;
+}
+
 /* Localized color spills frame the welcome area without tinting result rows. */
 .content-area:not(.has-results) .search-container { position: relative; isolation: isolate; }
 .content-area:not(.has-results) .search-container::before {
@@ -1993,13 +1952,10 @@ onMounted(() => {
     .content-area:not(.has-results) .search-container::before { animation: none; }
 }
 
-/* When results appear, fix search bar to bottom with space for footer */
+/* The composer stays in its own layout row below the scrolling results. */
 .composer-shell.moved {
-    position: fixed;
-    bottom: 24px;
-    left: calc(var(--collapsed-sidebar-width) + 32px);
-    right: 32px;
-    width: auto;
+    position: relative;
+    width: 100%;
     max-width: 860px;
     padding-bottom: 0;
     z-index: 90;
@@ -2007,11 +1963,6 @@ onMounted(() => {
     margin-right: auto;
 }
 
-/* Adjust horizontal position when sidebar is expanded */
-.sidebar-expanded .composer-shell.moved {
-    left: calc(var(--sidebar-width) + 32px);
-    right: 32px;
-}
 
 /* Keep follow-up guidance visible in the docked composer. */
 .composer-shell.moved .query-textarea::placeholder {
@@ -2020,14 +1971,18 @@ onMounted(() => {
 
 /* Compact style when moved - Clean white bar */
 .composer-shell.moved .query-card {
-    padding: 10px 12px;
+    --composer-shadow: 0 2px 6px rgba(23, 36, 58, 0.05);
+    padding: 8px 12px;
     border-radius: 16px;
     background: #ffffff;
-    border-color: #bfcbdc;
-    box-shadow: 0 6px 22px rgba(34, 54, 91, 0.07), 0 1px 3px rgba(34, 54, 91, 0.04);
+    border-color: #a8b4c3;
+    box-shadow: var(--composer-shadow);
 }
-.composer-shell.moved .query-card:hover { border-color: #9fb3d3; }
-.composer-shell.moved .query-card:focus-within { border-color: #7698df; box-shadow: 0 0 0 3px rgba(62, 99, 221, 0.09), 0 6px 22px rgba(34, 54, 91, 0.06); }
+.composer-shell.moved .query-card:hover { border-color: #8998ab; }
+.composer-shell.moved .query-card:focus-within {
+    border-color: #7698df;
+    box-shadow: 0 0 0 3px rgba(62, 99, 221, 0.09), var(--composer-shadow);
+}
 
 .composer-shell.moved .query-card::before {
     border-radius: 10px;
@@ -2160,26 +2115,32 @@ onMounted(() => {
 
 .content-area.has-results {
     isolation: isolate;
-    padding-top: 24px;
-    padding-bottom: var(--composer-clearance, 176px);
+    overflow: hidden;
+    padding: 0;
 }
 
-/* A restrained accent below the opaque response cards. */
-.content-area.has-results::before {
-    content: '';
-    position: fixed;
-    height: calc(min(140px, 16vh) + 40px);
-    bottom: 0;
-    left: var(--collapsed-sidebar-width, 48px);
-    right: 0;
-    z-index: -1;
-    pointer-events: none;
-    background: url('../assets/workspace-waves.svg') center bottom / 100% 100% no-repeat;
+.conversation-scroll { display: contents; }
+.has-results .conversation-scroll {
+    display: block;
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable both-edges;
+    padding: 24px var(--workspace-gutter);
 }
-.sidebar-expanded .content-area.has-results::before { left: var(--sidebar-width, 260px); }
-@media (max-width: 768px) {
-    .content-area.has-results::before { height: 90px; }
-    .sidebar-expanded .content-area.has-results::before { left: var(--collapsed-sidebar-width, 48px); }
+.conversation-scroll:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+
+.has-results .search-container {
+    order: 1;
+    flex: 0 0 auto;
+    max-width: none;
+    padding: 16px var(--workspace-gutter) calc(16px + env(safe-area-inset-bottom, 0px));
+    /* Decoration stays inside the dock's reserved row, below the results. */
+    background: #fff url('../assets/workspace-waves.svg') center top / 100% 100% no-repeat;
+    border-top: 0;
+    z-index: 1;
 }
 
 /* Modern integrated search - Plain CSS Card */
@@ -2558,7 +2519,7 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    scroll-margin-bottom: var(--composer-clearance, 176px);
+    scroll-margin-bottom: 24px;
 }
 
 /* One shared edge for the question, activity and results in each turn. */
@@ -2705,6 +2666,9 @@ onMounted(() => {
     line-height: 1.6;
 }
 
+.turn-feedback { padding: 18px 22px; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--text-primary); }
+.turn-feedback.is-error { color: #b42318; background: #fff8f7; }
+
 .turn-error-text {
     margin: 10px 0 0;
     color: #b42318;
@@ -2731,13 +2695,13 @@ onMounted(() => {
 }
 
 .question-text {
-    font-weight: 400;
+    font-size: 16px;
+    font-weight: 500;
     color: var(--text-primary);
 }
 
 .question-timestamp {
-    font-size: 11px;
-    opacity: 0.78;
+    font-size: 12px;
     color: var(--text-secondary);
     margin-left: 6px;
     white-space: nowrap;
@@ -2852,12 +2816,6 @@ onMounted(() => {
         max-width: 100%;
     }
 
-    .composer-shell.moved {
-        bottom: 20px;
-        left: calc(var(--collapsed-sidebar-width) + 16px);
-        right: 16px;
-    }
-
     .composer-shell.moved .send-button {
         padding: 8px 16px;
     }
@@ -2872,14 +2830,6 @@ onMounted(() => {
 }
 
 @media (max-width: 480px) {
-    .composer-shell.moved {
-        bottom: 16px;
-    }
-
-    .composer-shell.moved .query-card {
-        padding: 10px 12px;
-    }
-
     .composer-shell.moved .send-button {
         padding: 8px 12px;
         font-size: 12px;
@@ -2890,9 +2840,7 @@ onMounted(() => {
     }
 }
 
-.has-results .search-container { padding: 0; }
 @media (max-width: 768px) {
-    .sidebar-expanded .composer-shell.moved { left: calc(var(--collapsed-sidebar-width) + 16px); right: 16px; }
     .transcript-question-header .question-header { max-width: 100%; }
     .question-timestamp { display: none; }
 }

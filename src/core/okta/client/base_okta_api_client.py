@@ -1079,6 +1079,13 @@ class OktaAPIClient:
         # Non-dict responses (primitives, etc.)
         if not isinstance(data, dict):
             return data
+
+        # A resource may contain arrays (objectClass, x5c, embedded rules).
+        # Keep the resource intact instead of treating those fields as wrappers.
+        resource_indicators = ['id', 'okta_id', 'userId', 'groupId', 'appId', 'name', 'login', 'email']
+        if any(key in data for key in resource_indicators):
+            self.logger.debug("Normalized single resource to list format")
+            return [data]
         
         # Known wrapper patterns (ordered by frequency in Okta APIs)
         wrapper_keys = [
@@ -1107,18 +1114,11 @@ class OktaAPIClient:
                 self.logger.debug(f"Normalized response with dynamic '{key}' wrapper")
                 return value
         
-        # Single resource detection
-        if isinstance(data, dict):
-            resource_indicators = ['id', 'okta_id', 'userId', 'groupId', 'appId', 'name', 'login', 'email']
-            if any(key in data for key in resource_indicators):
-                self.logger.debug("Normalized single resource to list format")
-                return [data]
-            
-            # Metadata-only response
-            metadata_keys = {'_links', 'meta', 'metadata', 'totalCount', 'totalResults', 'count', 'size', 'limit', 'after', 'cursor'}
-            if all(key in metadata_keys for key in data.keys()):
-                self.logger.debug("Metadata-only response, returning empty list")
-                return []
+        # Metadata-only response
+        metadata_keys = {'_links', 'meta', 'metadata', 'totalCount', 'totalResults', 'count', 'size', 'limit', 'after', 'cursor'}
+        if all(key in metadata_keys for key in data.keys()):
+            self.logger.debug("Metadata-only response, returning empty list")
+            return []
         
         # Fallback: return as-is (similar to Okta SDK approach)
         self.logger.debug(f"Response format not recognized, returning as-is: {type(data)}")

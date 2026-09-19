@@ -41,7 +41,7 @@
           <span v-else-if="entry.tool.testId" class="request-placeholder">No endpoint calls recorded.</span>
         </li>
       </ol>
-      <p v-if="error" class="activity-error">{{ error }}</p>
+      <p v-if="error && showError" class="activity-error">{{ error }}</p>
     </div>
   </section>
 </template>
@@ -55,12 +55,15 @@ const props = defineProps({
   isThinking: { type: Boolean, default: false },
   isComplete: { type: Boolean, default: false },
   error: { type: String, default: null },
+  showError: { type: Boolean, default: true },
+  collapseRevision: { type: Number, default: 0 },
   executionStarted: { type: Boolean, default: false },
   shouldAutoCollapse: { type: Boolean, default: false },
   showWorkingStatus: { type: Boolean, default: true },
 })
 const contentId = `activity-${useId()}`
 const isExpanded = ref(Boolean(props.error) || (!props.isComplete && !props.shouldAutoCollapse))
+watch(() => props.collapseRevision, () => { isExpanded.value = false })
 const isWorking = computed(() => !props.isComplete && !props.error)
 // Only display tool activity. Step titles/text/reasoning may contain internal
 // supervisor deliberation, including in previously saved conversations.
@@ -105,7 +108,7 @@ const toolSource = (tool) => {
 .activity-toggle:hover { background: rgba(127, 127, 127, 0.06); }
 .activity-toggle:focus-visible { outline: 2px solid var(--primary, #6366f1); outline-offset: -2px; }
 .activity-label { font-weight: 600; color: var(--text-primary, #27272a); }
-.activity-count { color: var(--text-muted, #71717a); }
+.activity-count { color: #626b79; }
 .activity-state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
 .activity-state.completed { padding: 4px 8px; border-radius: 6px; font-size: 12px; line-height: 1.3; color: #24694b; background: #e2f3e9; }
 .activity-state.completed::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
@@ -120,8 +123,8 @@ const toolSource = (tool) => {
 .tool-symbol { flex-shrink: 0; margin-top: 2px; opacity: 0.7; }
 .tool-copy { flex: 1; min-width: 0; }
 .tool-label { overflow-wrap: anywhere; color: var(--text-primary, #27272a); }
-.tool-description { margin: 3px 0 0; font-size: 12px; overflow-wrap: anywhere; color: var(--text-secondary, #61646c); }
-.tool-source { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted, #71717a); background: var(--bg-page, #f7f7f8); padding: 2px 7px; border-radius: 5px; }
+.tool-description { margin: 3px 0 0; font-size: 13px; overflow-wrap: anywhere; color: var(--text-secondary, #61646c); }
+.tool-source { flex-shrink: 0; font-size: 12px; font-weight: 500; color: #626b79; background: var(--bg-page, #f7f7f8); padding: 2px 7px; border-radius: 5px; }
 .tool-source[data-source="Database"] { color: #6d43a5; background: #f1ebfa; }
 .tool-source[data-source="API"] { color: #285eab; background: #eaf2fd; }
 .tool-source[data-source="Results"] { color: #17736a; background: #e7f5f1; }
@@ -130,14 +133,14 @@ const toolSource = (tool) => {
 .request { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 8px; padding: 3px 0; }
 .request-indicator, .busy-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #8b8e97; flex-shrink: 0; }
 .endpoint-name { min-width: 0; overflow-wrap: anywhere; color: var(--text-primary, #27272a); }
-.request-status { font-size: 12px; color: var(--text-muted, #71717a); }
+.request-status { font-size: 12px; color: #626b79; }
 .success .request-indicator { background: #16834a; }
 .empty .request-indicator { background: #b7791f; }
 .failed .request-indicator { background: #d13f3f; }
 .failed .request-status, .activity-error { color: #b42318; }
 .running .request-indicator, .busy-dot { background: var(--primary, #6366f1); animation: pulse 1.4s ease-in-out infinite; }
 .activity-placeholder, .activity-error { margin: 6px 0; overflow-wrap: anywhere; }
-.request-placeholder { display: block; margin: 4px 0 0 22px; font-size: 11px; color: var(--text-muted, #71717a); }
+.request-placeholder { display: block; margin: 4px 0 0 22px; font-size: 12px; color: #626b79; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) {
   .running .request-indicator, .busy-dot { animation: none; }

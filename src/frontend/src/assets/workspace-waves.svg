@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 180" preserveAspectRatio="none">
-  <path d="M0 104C240 16 425 158 720 105S1180 24 1440 94V180H0Z" fill="#5977ce" fill-opacity=".052"/>
-  <path d="M0 104C240 16 425 158 720 105S1180 24 1440 94" fill="none" stroke="#5977ce" stroke-opacity=".161"/>
-  <path d="M0 140C270 178 420 67 740 131S1200 175 1440 115V180H0Z" fill="#16a6a1" fill-opacity=".040"/>
-  <path d="M0 140C270 178 420 67 740 131S1200 175 1440 115" fill="none" stroke="#16a6a1" stroke-opacity=".138"/>
+  <path d="M0 58C120 -2 240 -2 360 58S600 118 720 58S960 -2 1080 58S1320 118 1440 58V180H0Z" fill="#eef3fc"/>
+  <path d="M0 58C120 -2 240 -2 360 58S600 118 720 58S960 -2 1080 58S1320 118 1440 58" fill="none" stroke="#d5e0f4" stroke-opacity=".75"/>
+  <path d="M0 108C120 158 240 158 360 108S600 58 720 108S960 158 1080 108S1320 58 1440 108V180H0Z" fill="#e4f0f1" fill-opacity=".75"/>
+  <path d="M0 108C120 158 240 158 360 108S600 58 720 108S960 158 1080 108S1320 58 1440 108" fill="none" stroke="#c6dedd" stroke-opacity=".65"/>
 </svg>

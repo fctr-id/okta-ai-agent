@@ -23,6 +23,7 @@ declare module 'vue' {
     LoginView: typeof import('./src/components/views/LoginView.vue')['default']
     NotFoundView: typeof import('./src/components/views/NotFoundView.vue')['default']
     ReActThinkingSteps: typeof import('./src/components/messages/ReActThinkingSteps.vue')['default']
+    ResultTableCell: typeof import('./src/components/messages/ResultTableCell.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     SetupView: typeof import('./src/components/views/SetupView.vue')['default']

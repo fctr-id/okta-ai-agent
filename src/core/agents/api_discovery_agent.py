@@ -12,6 +12,7 @@ Output: APIDiscoveryResult with success status
 """
 
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, ToolReturn, UsageLimits
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -19,11 +20,14 @@ from pathlib import Path
 import json
 import time
 import asyncio
+import ast
 import re
+from uuid import uuid4
 
 from src.utils.logging import get_logger
 from src.utils.security_config import validate_generated_code
 from src.core.security.network_security import validate_request
+from src.core.agents.api_test_progress import DiscoveryTestClient, response_diagnostics
 from src.core.agents.agent_callbacks import (
     notify_progress_to_user,
     notify_step_start_to_user,
@@ -322,12 +326,13 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         if deps.cancellation_check and deps.cancellation_check():
             raise asyncio.CancelledError("User cancelled execution")
     
-    async def notify_tool_call(tool_name: str, description: str):
+    async def notify_tool_call(tool_name: str, description: str, **details):
         """Emit tool call event to frontend"""
         if deps.tool_call_callback:
             await deps.tool_call_callback({
                 "tool_name": tool_name,
                 "description": description,
+                **details,
                 "timestamp": time.time()
             })
     
@@ -366,8 +371,8 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         """
         Load all available API operations.
         
-        Returns dot notation operations: "user.list", "role.list_by_user"
-        CALL THIS ONCE at start.
+        Returns dot notation operations such as "user.list".
+        Use when required operations are missing from the supplied catalog details.
         """
         check_cancellation()
         await notify_tool_call("load_comprehensive_api_endpoints", "Loading API endpoints catalog")
@@ -405,7 +410,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         Filter endpoints for specific operations.
         
         Args:
-            operations: List like ["user.list_assigned_roles", "group.list"]
+            operations: Exact catalog operation names, such as ["user.list", "group.list"]
         
         Returns:
             Filtered endpoint details with paths, methods, parameters
@@ -496,7 +501,8 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             )
         
         # Notify tool call start
-        await notify_tool_call("execute_test_query_api", description)
+        test_id = f"api-test-{uuid4().hex}"
+        await notify_tool_call("execute_test_query_api", description, test_id=test_id)
         
         logger.info(f"[{deps.correlation_id}] Executing API test #{deps.api_tests_executed} (global: {deps.global_tool_calls}/{deps.max_global_tool_calls}, api_tests: {deps.api_tests_executed}/10)")
         
@@ -540,43 +546,53 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         # Execute code
         try:
             # Create namespace with okta_client available (matching one_react_agent)
+            test_client = DiscoveryTestClient(
+                deps.okta_client, deps.endpoints, test_id, deps.progress_callback,
+                diagnostic_callback=lambda details: logger.info(
+                    f"[{deps.correlation_id}] API request diagnostic: {json.dumps(details)}"
+                ),
+            )
             namespace = {
-                'client': deps.okta_client,
-                'okta_client': deps.okta_client,
+                'client': test_client,
+                'okta_client': test_client,
                 'asyncio': asyncio
             }
             
-            # Detect function name from generated code
-            func_match = re.search(r'async\s+def\s+(\w+)\s*\(', code)
-            if not func_match:
+            # Inspect only executable top-level statements. Names such as
+            # result/results/payload must not determine whether we call twice.
+            tree = ast.parse(code)
+            functions = [node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)]
+            if not functions:
                 logger.error(f"[{deps.correlation_id}] Generated code must define an async function")
                 raise ValueError("Generated code must define an async function starting with 'async def function_name():'")
-            
-            func_name = func_match.group(1)
-            
-            # Only treat results assignment as pre-executed if it happens at the top level.
-            # Nested assignments inside the generated async function should not change wrapper behavior.
-            has_results_assignment = any(
-                re.match(r'^results\s*=\s*await\b', line) is not None
-                for line in code.splitlines()
-                if line and not line.startswith((' ', '\t'))
-            )
-            
-            if has_results_assignment:
-                # Code already calls the function and assigns to 'results'
-                wrapped_code = f"""async def __exec_wrapper__():
-{chr(10).join('    ' + line for line in code.split(chr(10)))}
-    return results
-"""
+
+            awaited_statements = [
+                node for node in tree.body
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and any(isinstance(child, ast.Await) for child in ast.walk(node))
+            ]
+            if awaited_statements:
+                last = awaited_statements[-1]
+                if isinstance(last, ast.Assign) and isinstance(last.targets[0], ast.Name):
+                    result_expression = ast.Name(id=last.targets[0].id, ctx=ast.Load())
+                elif isinstance(last, ast.AnnAssign) and isinstance(last.target, ast.Name):
+                    result_expression = ast.Name(id=last.target.id, ctx=ast.Load())
+                elif isinstance(last, ast.Expr) and isinstance(last.value, ast.Await) and last is tree.body[-1]:
+                    # A bare final await is itself the result, not a second call.
+                    tree.body.pop()
+                    result_expression = last.value
+                else:
+                    raise ValueError("Use a top-level result assignment or a final await expression for the test result")
             else:
-                # Code only defines the function, so call it
-                wrapped_code = f"""async def __exec_wrapper__():
-{chr(10).join('    ' + line for line in code.split(chr(10)))}
-    return await {func_name}()
-"""
+                result_expression = ast.Await(value=ast.Call(
+                    func=ast.Name(id=functions[0].name, ctx=ast.Load()), args=[], keywords=[]))
+            tree.body.append(ast.Return(value=result_expression))
+
+            wrapper = ast.parse("async def __exec_wrapper__():\n    pass\n")
+            wrapper.body[0].body = tree.body
             
             # Execute to define the wrapper function
-            exec(wrapped_code, namespace)
+            exec(compile(ast.fix_missing_locations(wrapper), "<api-discovery-test>", "exec"), namespace)
             
             # Now await the wrapper coroutine (we're already in an async context)
             result = await namespace['__exec_wrapper__']()
@@ -592,17 +608,34 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                 result_summary
             )
             
+            serialized_result = json.dumps(result, separators=(',', ':'), default=str)
+            returned_content = serialized_result[:4000]
+            logger.info(
+                f"[{deps.correlation_id}] API test diagnostic: "
+                + json.dumps({
+                    "test_id": test_id, "test_number": deps.api_tests_executed,
+                    "execution_outcome": "returned", "empty_result": empty_result,
+                    **response_diagnostics(result),
+                    "returned_chars": len(returned_content),
+                    "truncated": len(serialized_result) > len(returned_content),
+                })
+            )
             return ToolReturn(
                 return_value=(
                     "✅ API executed successfully but returned no data"
                     if empty_result else
                     "✅ API executed successfully"
                 ),
-                content=json.dumps(result, separators=(',', ':'), default=str)[:4000],
+                content=returned_content,
                 metadata={'success': True, 'empty_result': empty_result}
             )
             
         except Exception as e:
+            logger.info(
+                f"[{deps.correlation_id}] API test diagnostic: "
+                + json.dumps({"test_id": test_id, "test_number": deps.api_tests_executed,
+                              "execution_outcome": "exception", "exception_type": type(e).__name__})
+            )
             logger.error(f"[{deps.correlation_id}] API execution failed: {e}")
             # NOTE: Don't notify_step_end for tool errors - let LLM retry with adjusted code
             return ToolReturn(
@@ -772,21 +805,21 @@ async def execute_api_discovery(
         prompt_path = Path("src/core/agents/prompts/api_discovery_prompt.txt")
         base_prompt = prompt_path.read_text(encoding='utf-8')
         
-        # Get DB schema for intelligent needs_sql decisions
+        # Schema describes capabilities, not runtime availability or routing authority.
         db_schema = get_okta_database_schema()
         
         # Add schema context to prompt
         schema_context = f"""
 ─────────────────────────────────────────
-📊 DATABASE SCHEMA (For needs_sql Decisions)
+DATABASE SCHEMA REFERENCE
 ─────────────────────────────────────────
 {db_schema}
 
-💡 USE THIS TO DECIDE:
-- If you need base entities (users, groups, apps) → check schema → if in schema, set needs_sql: ["users", "groups"]
-- Example: Query asks for "roles for all users" but you have no user IDs → needs_sql: ["users"]
-- Example: You have user IDs, need groups → check schema → groups in okta_groups → needs_sql: ["user_group_memberships"]
-- This provides a safety net if the supervisor delegated API first but SQL base entities are still required
+This schema does not establish that SQL is available, populated, or current.
+Carry out the assigned API retrieval. Do not request SQL solely because a table
+exists or because a bulk lookup involves users, groups, or applications. If IDs
+are missing, discover them through supported APIs unless the supplied context
+establishes an eligible SQL dependency. Honor API-only and anchored-scope constraints.
 ─────────────────────────────────────────
 """
         
@@ -808,10 +841,9 @@ async def execute_api_discovery(
     {deps.followup_scope_context}
     ```
 
-    🚨 CRITICAL FOLLOW-UP RULES:
-    1. **Preserve the anchored population** - Treat these saved result-set refs as the source entity set
-    2. **Fetch only missing API fields or live enrichments** - Do not widen to a fresh search query
-    3. **Only widen scope if the user explicitly asks for new, fresh, or all data**
+    Preserve the population identified by these result-set refs. Retrieve only
+    missing API fields or live enrichments for that population. Widen or refresh
+    it only when the user's request explicitly calls for that change.
     ─────────────────────────────────────────
     """
         
@@ -827,10 +859,10 @@ async def execute_api_discovery(
 📊 DATA ALREADY RETRIEVED FROM SQL DATABASE
 ─────────────────────────────────────────
 
-🎯 YOUR SCOPE - FETCH ONLY:
+ASSIGNED API REQUIREMENTS:
 {needs_api_str}
 
-✅ ALREADY FOUND (DO NOT SEARCH/FETCH):
+ENTITIES ALREADY RETRIEVED:
 {found_data_str}
 
 SQL Agent Analysis:
@@ -841,16 +873,15 @@ Compact SQL Artifact Context (manifests, result refs, tiny samples):
 {deps.sql_discovered_data}
 ```
 
-🚨 CRITICAL RULES:
-1. **ONLY fetch entities listed in YOUR SCOPE** - If it says ['roles'], fetch ONLY roles
-2. **USE RESULT REFS AND SAMPLES** - Check `result_set_refs`, `key_columns`, and sample `okta_id` fields in the JSON above
-3. **DO NOT search for anything in ALREADY FOUND list** - No /api/v1/users?q=..., no /api/v1/groups?q=...
-4. **USE path parameter endpoints** - Example: /api/v1/users/{{user_id}}/roles (not search endpoints)
-5. **One test per entity type** - If scope says ['roles'], make 1 test for roles, that's it
+Fetch the assigned API requirements using the supplied result-set refs and IDs.
+Do not repeat discovery of entities already retrieved. Use scoped endpoints for
+known IDs and retain the relationship to the original result set. Sample IDs
+validate the retrieval pattern; they do not establish the full population.
+Validate the missing retrieval patterns together when their dependencies are
+known, and save the tested code and raw samples. Separate tests per endpoint
+are unnecessary. Do not rerun validated patterns merely to combine them.
 ─────────────────────────────────────────
 """
-        # else: API-only mode - prompt stays clean with just the user query
-        
         # Context includes SQL reasoning but NOT artifacts
         # The API agent must discover data independently based on what SQL found/missed
         result = await api_discovery_agent.run(
@@ -889,6 +920,9 @@ Compact SQL Artifact Context (manifests, result refs, tiny samples):
         
         return result.output, result.usage()
         
+    except UsageLimitExceeded:
+        # Let the orchestrator apply the shared runtime stop behavior.
+        raise
     except Exception as e:
         logger.error(f"[{deps.correlation_id}] API discovery failed: {e}", exc_info=True)
         return APIDiscoveryResult(

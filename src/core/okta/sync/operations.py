@@ -1147,9 +1147,14 @@ class DatabaseOperations:
 
     async def get_last_completed_sync(self, session: AsyncSession, tenant_id: str) -> Optional[SyncHistory]:
         """
-        Get the most recently completed sync
+        Get the most recently successfully completed sync.
         Returns SyncHistory object or None
-        
+
+        Note: Only COMPLETED records are considered. Including FAILED/CANCELED
+        records here caused the /sync/status endpoint to report cancelled or
+        failed syncs (with zero entity counts) even when a healthy sync had
+        completed earlier.
+
         Args:
             session: Active database session
             tenant_id: Tenant identifier
@@ -1157,7 +1162,7 @@ class DatabaseOperations:
         query = select(SyncHistory).where(
             and_(
                 SyncHistory.tenant_id == tenant_id,
-                SyncHistory.status.in_([SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELED])
+                SyncHistory.status == SyncStatus.COMPLETED
             )
         ).order_by(SyncHistory.end_time.desc()).limit(1)
         

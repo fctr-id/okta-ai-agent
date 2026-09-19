@@ -260,6 +260,19 @@ const handleNewSession = () => {
     background: var(--surface);
 }
 
+/* Reserve the sidebar once; all chat content shares the remaining canvas. */
+.chat-page .content-surface {
+    --sidebar-offset: var(--collapsed-sidebar-width);
+    --workspace-gutter: 32px;
+    margin-left: var(--sidebar-offset);
+    min-width: 0;
+    transition: margin-left 0.38s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.chat-page .content-surface.sidebar-expanded {
+    --sidebar-offset: var(--sidebar-width);
+}
+
 /* One continuous canvas for login and conversation. */
 .auth-page .floating-header { border-bottom: 0; }
 .chat-page .page-footer { display: none; }
@@ -289,12 +302,19 @@ const handleNewSession = () => {
     transition: padding-left 0.38s cubic-bezier(0.16, 1, 0.3, 1), padding-right 0.38s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.main-content.chat-content:not(.sidebar-expanded) { padding-left: calc(var(--collapsed-sidebar-width) + 32px); }
+.main-content.chat-content {
+    min-width: 0;
+    padding-inline: var(--workspace-gutter);
+}
 
-/* Adjust content positioning when sidebar is expanded */
-/* Use padding instead of margin to maintain centering */
-.main-content.sidebar-expanded {
-    padding-left: calc(var(--sidebar-width) + 32px);
+/* Conversation and composer share a bounded viewport below the header. */
+.app-page.conversation-page { overflow: hidden; min-height: 0; }
+.conversation-page .floating-header { flex-shrink: 0; }
+.conversation-page .content-surface { min-height: 0; }
+.conversation-page .main-content.chat-content {
+    min-height: 0;
+    overflow: hidden;
+    padding-inline: 0;
 }
 
 .content-surface.sidebar-expanded .page-footer {
@@ -434,10 +454,10 @@ const handleNewSession = () => {
         padding-right: 16px;
     }
 
-    .main-content.chat-content:not(.sidebar-expanded) { padding-left: calc(var(--collapsed-sidebar-width) + 16px); }
-
-    .main-content.sidebar-expanded {
-        padding-left: calc(var(--collapsed-sidebar-width) + 16px);
+    .chat-page .content-surface,
+    .chat-page .content-surface.sidebar-expanded {
+        --sidebar-offset: var(--collapsed-sidebar-width);
+        --workspace-gutter: 16px;
     }
 
     .content-surface.sidebar-expanded .page-footer {

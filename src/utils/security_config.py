@@ -63,7 +63,7 @@ BLOCKED_PATTERNS = [
 # Allowed modules for generated code
 ALLOWED_MODULES: Set[str] = {
     # Core Python modules
-    'asyncio', 'json', 'datetime', 'time', 'sys', 'pathlib',
+    'asyncio', 'json', 'datetime', 'zoneinfo', 'time', 'sys', 'pathlib',
     'logging', 're', 'typing', 'collections', 'itertools',
     'pprint',  # For template config formatting
     'xml.etree.ElementTree',  # For SAML certificate and XML processing
@@ -175,7 +175,7 @@ RESULT_ANALYSIS_ALLOWED_BUILTINS: Set[str] = {
     'range', 'enumerate', 'zip', 'sorted', 'reversed', 'sum', 'min', 'max',
     'abs', 'round', 'any', 'all', 'iter', 'next', 'map', 'filter',
     'isinstance', 'type', 'repr', 'format',
-    'Counter', 'defaultdict',
+    'Counter', 'defaultdict', 'datetime', 'timedelta', 'timezone', 'ZoneInfo',
 }
 
 RESULT_ANALYSIS_ALLOWED_METHODS: Set[str] = {
@@ -185,6 +185,7 @@ RESULT_ANALYSIS_ALLOWED_METHODS: Set[str] = {
     'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower',
     'startswith', 'endswith', 'replace', 'format',
     'most_common',
+    'fromisoformat', 'astimezone', 'isoformat', 'utcoffset', 'total_seconds',
     'dumps', 'loads',
 }
 

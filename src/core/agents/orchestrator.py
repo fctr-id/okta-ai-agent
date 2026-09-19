@@ -17,6 +17,7 @@ import asyncio
 import time
 import json
 import os
+from pydantic_ai.exceptions import UsageLimitExceeded
 
 from src.config.settings import settings
 from src.utils.logging import get_logger
@@ -61,6 +62,7 @@ from src.data.schemas.result_set_processor import (
     process_result_set_ref,
 )
 from src.core.agents.result_analysis_agent import execute_result_analysis
+from src.utils.timezone_context import normalize_user_timezone
 from src.data.schemas.runtime_storage import RUNTIME_ROOT
 
 logger = get_logger("okta_ai_agent")
@@ -81,6 +83,7 @@ class OrchestratorResult:
         self.result_mode: str = "continue"
         self.outcome_reason: Optional[str] = None
         self.user_message: Optional[str] = None
+        self.user_timezone: Optional[str] = None
         self.is_degraded_success: bool = False
         self.is_special_tool: bool = False  # Flag to skip validation for special tools
         self.no_data_found: bool = False  # Flag when discovery succeeds but finds no data (0 artifacts)
@@ -637,6 +640,7 @@ def _build_workflow_state(
 
     return {
         "completed_steps": list(result.phases_executed),
+        "user_timezone": result.user_timezone,
         "step_count": len(result.phases_executed),
         "latest_specialist": latest_delegation.source_specialist if latest_delegation else None,
         "latest_status": latest_delegation.status if latest_delegation else None,
@@ -1166,6 +1170,7 @@ async def _run_analysis_loop_step(
 
     analysis_delegation, analysis_usage = await execute_result_analysis(
         user_query,
+        user_timezone=result.user_timezone,
         correlation_id=correlation_id,
         artifacts_file=artifacts_file,
         preferred_result_set_refs=list(source_delegation.result_set_refs or []) if source_delegation else None,
@@ -1847,6 +1852,7 @@ async def _run_synthesis_phase(
     result.phases_executed.append('synthesis')
 
     synthesis_deps = SynthesisDeps(
+        user_timezone=result.user_timezone,
         correlation_id=correlation_id,
         artifacts_file=artifacts_file,
         step_start_callback=aggregator.step_start,
@@ -1935,7 +1941,8 @@ async def execute_multi_agent_query(
     okta_client: Any,  # OktaClient instance
     cancellation_check: callable,
     event_callback: Optional[callable] = None,
-    cli_mode: bool = False
+    cli_mode: bool = False,
+    user_timezone: Optional[str] = None,
 ) -> OrchestratorResult:
     """
     Execute multi-agent query workflow.
@@ -1968,6 +1975,7 @@ async def execute_multi_agent_query(
     logger.info(f"Query: {user_query}")
     
     result = OrchestratorResult()
+    result.user_timezone = normalize_user_timezone(user_timezone)
     
     # Initialize global tool call limits from environment
     max_tool_calls = int(os.getenv('MAX_TOOL_CALLS', '30'))
@@ -2008,6 +2016,7 @@ async def execute_multi_agent_query(
             db_runtime_summary=db_runtime_summary,
             special_tool_capabilities=special_tool_capabilities,
             workflow_state={
+                "user_timezone": result.user_timezone,
                 "completed_steps": [],
                 "step_count": 0,
                 "has_prior_session_result_sets": hydrated_session_result_sets > 0,
@@ -2131,7 +2140,7 @@ async def execute_multi_agent_query(
         })
         return result
         
-    except RuntimeError as e:
+    except (RuntimeError, UsageLimitExceeded) as e:
         # Tool call limit exceeded or other hard stop
         error_msg = str(e)
         logger.error(f"Hard stop triggered: {error_msg}")

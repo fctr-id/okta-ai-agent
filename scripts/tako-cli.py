@@ -267,8 +267,8 @@ async def event_callback(event_type: str, event_data: Dict[str, Any]):
         tool_name = clean_cli_text(event_data.get('tool_name') or event_data.get('name') or 'unknown_tool')
         print(f"  {Colors.OKGREEN}Using tool: {tool_name}{Colors.ENDC}")
 
-async def run_query(query: str, script_only: bool = False, session_id: Optional[str] = None):
-    """Execute a single query through the orchestrator"""
+async def run_query(query: str, script_only: bool = False, session_id: Optional[str] = None) -> int:
+    """Execute a query and return 0 on success (including empty results), or 1 on failure."""
     correlation_id = generate_correlation_id()
     set_correlation_id(correlation_id)
     cli_user = os.getenv("USERNAME") or os.getenv("USER") or "cli"
@@ -306,7 +306,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     if not result.success:
         print(f"\n{Colors.FAIL}Error: {result.error}{Colors.ENDC}")
         update_turn_metadata(runtime_paths, status="error", error=result.error, completed_at=datetime.now().isoformat())
-        return
+        return 1
 
     if result.no_data_found:
         print(f"\n{Colors.WARNING}No results found.{Colors.ENDC}")
@@ -320,7 +320,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
             "outcome": result.outcome_metadata(),
         })
         update_turn_metadata(runtime_paths, status="completed", completed_at=datetime.now().isoformat())
-        return
+        return 0
 
     if result.is_degraded_success:
         print(f"\n{Colors.WARNING}Partial result:{Colors.ENDC} {result.user_message or result.outcome_reason}")
@@ -340,13 +340,13 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
             "outcome": result.outcome_metadata(),
         })
         update_turn_metadata(runtime_paths, status="completed", completed_at=datetime.now().isoformat())
-        return
+        return 0
 
     if not result.script_code:
         print(f"\n{Colors.FAIL}Error: No executable script was generated for this query.{Colors.ENDC}")
         logger.error(f"No script generated for query: {query}")
         update_turn_metadata(runtime_paths, status="error", error="No executable script generated", completed_at=datetime.now().isoformat())
-        return
+        return 1
 
     # Script-only mode: save script to file
     if script_only:
@@ -377,7 +377,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
             "outcome": result.outcome_metadata(),
         })
         update_turn_metadata(runtime_paths, status="script_generated", completed_at=datetime.now().isoformat())
-        return
+        return 0
 
     # Full mode: execute the script and save results
     print(f"\n{Colors.OKGREEN}Discovery complete. Executing script...{Colors.ENDC}")
@@ -387,7 +387,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     if not results_data:
         print(f"\n{Colors.WARNING}No results returned from script execution{Colors.ENDC}")
         update_turn_metadata(runtime_paths, status="error", error="No results returned from script execution", completed_at=datetime.now().isoformat())
-        return
+        return 1
     
     # Display results summary
     record_count = results_data.get("count", 0)
@@ -409,6 +409,10 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     else:
         # Save to CSV for tabular outputs only
         csv_path = save_results_to_csv(results_data, date_str, output_dir=runtime_paths.results_dir)
+        if csv_path is None and results_data.get("data"):
+            print(f"\n{Colors.FAIL}Error: Could not save results to CSV.{Colors.ENDC}")
+            update_turn_metadata(runtime_paths, status="error", error="Could not save results to CSV", completed_at=datetime.now().isoformat())
+            return 1
         if csv_path:
             print(f"\n{Colors.BOLD}Results saved to:{Colors.ENDC} {csv_path}")
 
@@ -438,9 +442,10 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         },
     })
     update_turn_metadata(runtime_paths, status="completed", completed_at=datetime.now().isoformat())
+    return 0
 
 
-async def main():
+async def main() -> int:
     parser = argparse.ArgumentParser(description="Tako CLI Agent v2.0")
     parser.add_argument("query", nargs="?", help="The query to execute")
     parser.add_argument("--scriptonly", action="store_true", help="Only generate the script, do not execute")
@@ -453,6 +458,7 @@ async def main():
         print(f"{Colors.HEADER}{Colors.BOLD}Tako CLI Agent Interactive Mode{Colors.ENDC}")
         print("Type 'exit' or 'quit' to end session.")
         interactive_session_id = args.session_id or generate_correlation_id("cli-session")
+        exit_code = 0
         while True:
             try:
                 query = input(f"\n{Colors.OKBLUE}Query > {Colors.ENDC}").strip()
@@ -460,18 +466,22 @@ async def main():
                     break
                 if not query:
                     continue
-                await run_query(query, args.scriptonly, session_id=interactive_session_id)
+                query_exit_code = await run_query(query, args.scriptonly, session_id=interactive_session_id)
+                exit_code = max(exit_code, query_exit_code)
             except KeyboardInterrupt:
                 break
             except Exception as e:
                 print(f"{Colors.FAIL}Error: {e}{Colors.ENDC}")
+                exit_code = 1
+        return exit_code
     elif args.query:
-        await run_query(args.query, args.scriptonly, session_id=args.session_id)
+        return await run_query(args.query, args.scriptonly, session_id=args.session_id)
     else:
         parser.print_help()
+        return 0
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        sys.exit(asyncio.run(main()))
     except KeyboardInterrupt:
         pass

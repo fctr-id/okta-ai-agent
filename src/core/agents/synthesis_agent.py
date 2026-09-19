@@ -20,6 +20,7 @@ from pathlib import Path
 import time
 
 from src.utils.logging import get_logger
+from src.utils.timezone_context import timezone_instructions
 from src.core.agents.agent_callbacks import (
     notify_progress_to_user,
     notify_step_start_to_user,
@@ -65,6 +66,7 @@ class SynthesisDeps:
     tool_call_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     progress_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     cli_mode: bool = False
+    user_timezone: Optional[str] = None
 
 
 # ============================================================================
@@ -197,7 +199,7 @@ async def execute_synthesis(
         # Notify: Loading artifacts
         if deps.tool_call_callback:
             await deps.tool_call_callback({
-                "name": "load_artifacts",
+                "tool_name": "load_artifacts",
                 "arguments": {"source": "memory"},
                 "description": "Loading memory artifacts from previous phases",
                 "timestamp": time.time()
@@ -210,6 +212,8 @@ async def execute_synthesis(
         
         # Build context for agent
         context = f"""Original Query: {user_query}
+
+{timezone_instructions(deps.user_timezone)}
 
     Artifact manifests and result-set pointers from discovery phases:
     {artifact_context}
@@ -275,11 +279,6 @@ db_path = next((p for p in possible_paths if p.exists()), None)
         )
         
         logger.info(f"[{deps.correlation_id}] Synthesis complete: success={result.output.success}")
-        
-        # Post-process script code: unescape quotes if LLM escaped them
-        if result.output.script_code:
-            # Fix common escaping issues
-            result.output.script_code = result.output.script_code.replace('\\"', '"')
         
         # Log generated script summary
         if result.output.script_code:

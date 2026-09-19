@@ -41,7 +41,7 @@
                         <div class="results-heading">
                             <div class="results-title">
                                 <h3>Results</h3>
-                                <span class="record-count">{{ displayedItems.length.toLocaleString() }} {{ isStreaming ? 'loaded' : 'records' }}</span>
+                                <span class="record-count">{{ displayedItems.length.toLocaleString() }} {{ isStreaming ? 'loaded' : displayedItems.length === 1 ? 'record' : 'records' }}</span>
                             </div>
                             <div class="sync-info">
                                 <span class="source-badge" :class="`source-${props.metadata?.data_source_type || 'api'}`">
@@ -100,7 +100,7 @@
                     </div>
                 </template>
                 <template v-for="header in formattedHeaders" :key="header.key" v-slot:[`item.${header.key}`]="{ value }">
-                    <span>{{ value }}</span>
+                    <ResultTableCell :value="value" :label="header.title" />
                 </template>
             </v-data-table>
         </div>
@@ -119,6 +119,7 @@
 import { marked } from 'marked'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
+import ResultTableCell from './ResultTableCell.vue'
 
 marked.setOptions({
     breaks: true,    // Translate line breaks to <br>
@@ -639,9 +640,9 @@ const downloadCSV = () => {
 .download-btn {
     color: #ffffff !important;
     text-transform: none;
-    font-size: 12px;
+    font-size: 13px;
     letter-spacing: normal;
-    font-weight: 550;
+    font-weight: 500;
     padding: 0 14px !important;
     height: 34px;
     border: 1px solid #375bcc !important;
@@ -680,7 +681,7 @@ const downloadCSV = () => {
     display: flex;
     align-items: center;
     gap: 6px;
-    color: #737d8e;
+    color: #5f6b7a;
     font-size: 12px;
     white-space: normal;
     padding: 0;
@@ -689,11 +690,11 @@ const downloadCSV = () => {
     flex-wrap: wrap;
 }
 
-.source-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #edf3ff; color: #385ea9; font-size: 11px; font-weight: 600; }
+.source-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #edf3ff; color: #385ea9; font-size: 12px; font-weight: 500; }
 .source-sql { color: #7754aa; background: #f2ecfa; }
 .source-hybrid { color: #276e78; background: #eaf5f5; }
 .source-saved_session { color: #566174; background: #eef1f5; }
-.sync-time { font-size: 11px; }
+.sync-time { font-size: 12px; }
 
 .sync-icon {
     color: var(--primary);
@@ -796,8 +797,8 @@ const downloadCSV = () => {
 
 .results-heading, .results-title { display: flex; align-items: center; gap: 10px; }
 .results-heading { grid-column: 1; grid-row: 1; gap: 12px; flex-wrap: wrap; }
-.results-title h3 { color: #253248; font-size: 15px; font-weight: 650; margin: 0; }
-.record-count { border-radius: 20px; background: #f1f3f7; color: #626f83; padding: 3px 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.results-title h3 { color: #253248; font-size: 16px; font-weight: 600; margin: 0; }
+.record-count { border-radius: 20px; background: #f1f3f7; color: #586579; padding: 3px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .search-row, .header-actions { display: contents; }
 
@@ -828,11 +829,13 @@ const downloadCSV = () => {
 }
 
 :deep(.search-field .v-field__input) {
-    font-size: 12px;
+    font-size: 13px;
     min-height: 34px;
     padding-top: 6px;
     padding-bottom: 6px;
 }
+
+:deep(.search-field input::placeholder) { color: #626b79; opacity: 1; }
 
 :deep(.search-field .v-field) {
     border-radius: 10px;
@@ -845,7 +848,7 @@ const downloadCSV = () => {
 /* Target Vuetify's current table markup, including its native scroll wrapper. */
 .table-content { width: 100%; min-width: 0; }
 .results-table { font-family: var(--font-family-body, inherit); }
-.table-scroll-hint { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; margin: 0; color: #788295; font-size: 11px; }
+.table-scroll-hint { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; margin: 0; color: #626b79; font-size: 12px; }
 :deep(.results-table) { background: #fff; border: 1px solid var(--workspace-outline, #d6dce5); border-radius: 12px; overflow: hidden; box-shadow: none; font-size: 13px; }
 :deep(.results-table .v-table__wrapper) {
     overflow-x: auto;
@@ -861,10 +864,10 @@ const downloadCSV = () => {
 :deep(.results-table .v-table__wrapper > table > thead > tr > th) {
     height: 40px;
     padding: 10px 22px;
-    font-size: 10.5px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.055em;
+    letter-spacing: 0.035em;
     line-height: 1.4;
     color: #525866;
     background: #f1f4f8;
@@ -874,11 +877,11 @@ const downloadCSV = () => {
 }
 :deep(.results-table .v-table__wrapper > table > tbody > tr > td) {
     padding: 15px 22px;
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 400;
     line-height: 1.6;
     color: #202b3c;
-    vertical-align: middle;
+    vertical-align: top;
     white-space: normal;
     overflow-wrap: anywhere;
     border-bottom: 1px solid #e4e9f0;
@@ -890,13 +893,13 @@ const downloadCSV = () => {
 :deep(.results-table tbody > tr:last-child > td) { border-bottom: 0; }
 :deep(.results-table .v-data-table-footer) {
     padding: 8px 16px;
-    font-size: 12px;
+    font-size: 13px;
     background: #fff;
     border-top: 1px solid var(--workspace-outline, #d6dce5);
     gap: 4px 12px;
 }
-:deep(.results-table .v-data-table-footer .v-field__input) { font-size: 12px; }
-:deep(.results-table .v-data-table-footer__items-per-page) { margin-inline-end: auto; gap: 10px; color: #737e90; }
+:deep(.results-table .v-data-table-footer .v-field__input) { font-size: 13px; }
+:deep(.results-table .v-data-table-footer__items-per-page) { margin-inline-end: auto; gap: 10px; color: #5f6b7a; }
 :deep(.results-table .v-data-table-footer .v-field) { border-radius: 8px; background: #f8fafc; }
 :deep(.results-table .v-data-table-footer .v-field__outline) { color: #d4dce8; --v-field-border-opacity: 1; }
 :deep(.results-table .v-data-table-footer .v-field__input) { min-height: 32px; padding-top: 4px; padding-bottom: 4px; }
@@ -922,7 +925,7 @@ const downloadCSV = () => {
     margin: 0;
     padding: 0;
     line-height: 1.78;
-    font-size: 15px;
+    font-size: 16px;
     color: #0f172a;
     overflow-wrap: anywhere;
     background: transparent;
@@ -1177,7 +1180,7 @@ const downloadCSV = () => {
 
     .markdown-content {
         max-width: 100%;
-        font-size: 14.25px;
+        font-size: 15px;
         line-height: 1.72;
     }
 

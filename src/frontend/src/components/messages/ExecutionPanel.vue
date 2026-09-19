@@ -86,7 +86,7 @@
               <span v-else-if="validationStep.status === 'failed'" class="indicator-dot error"></span>
               <span v-else class="indicator-spinner"></span>
             </span>
-            <span class="step-label">{{ validationStep.message || 'Validating script...' }}</span>
+            <span class="step-label">{{ !showError && validationStep.message === executionError ? 'Validation failed' : validationStep.message || 'Validating script...' }}</span>
           </div>
 
           <!-- Execution -->
@@ -127,7 +127,7 @@
 
           <p v-if="rateLimitWarning > 0" class="rate-limit-note">Rate limit reached. Resuming in {{ rateLimitWarning }}s.</p>
           <!-- Error -->
-          <div v-if="executionError" class="error-msg">{{ executionError }}</div>
+          <div v-if="executionError && showError" class="error-msg">{{ executionError }}</div>
         </div>
 
         <!-- Token footer -->
@@ -149,6 +149,8 @@ const props = defineProps({
   isExecuting: { type: Boolean, default: false },
   isComplete: { type: Boolean, default: false },
   executionError: { type: String, default: null },
+  showError: { type: Boolean, default: true },
+  collapseRevision: { type: Number, default: 0 },
   executionMessage: { type: String, default: 'Executing script...' },
   progressValue: { type: Number, default: 0 },
   subprocessProgress: { type: Array, default: () => [] },
@@ -162,6 +164,10 @@ const props = defineProps({
 const contentId = `execution-${useId()}`
 const isExpanded = ref(Boolean(props.executionError) || (!props.isComplete && !props.shouldAutoCollapse))
 const isScriptExpanded = ref(false)
+watch(() => props.collapseRevision, () => {
+  isExpanded.value = false
+  isScriptExpanded.value = false
+})
 const showCopied = ref(false)
 
 watch(() => props.shouldAutoCollapse || props.isComplete, (shouldAutoCollapse) => {
@@ -221,15 +227,15 @@ button:focus-visible { outline: 2px solid var(--primary, #4c64e2); outline-offse
 .glass-content { margin: 0; padding: 4px 16px 14px; border-top: 1px solid var(--workspace-outline, #d6dce5); }
 .script-section { margin-bottom: 8px; }
 .script-toggle { display: flex; align-items: center; gap: 8px; }
-.script-open { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; flex: 1; padding: 10px 0; border: 0; background: transparent; cursor: pointer; font-size: 12px; color: var(--text-secondary, #61646c); }
-.script-title { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #edf3ff; color: #385ea9; font-size: 11px; font-weight: 600; }
+.script-open { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; flex: 1; padding: 10px 0; border: 0; background: transparent; cursor: pointer; font-size: 13px; color: var(--text-secondary, #61646c); }
+.script-title { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #edf3ff; color: #385ea9; font-size: 12px; font-weight: 500; }
 .script-title svg { flex-shrink: 0; }
-.script-size { color: var(--text-muted, #71717a); }
+.script-size { color: #626b79; }
 .script-hint { color: var(--primary, #4c64e2); }
 .copy-btn { padding: 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text-secondary, #61646c); cursor: pointer; }
 .copy-btn:hover { background: #f3f4f6; }
 .script-code { max-height: 300px; overflow: auto; }
-.script-code pre { margin: 0 0 12px; padding: 12px; background: #f6f7f9; border-radius: 8px; font: 12px/1.6 Consolas, monospace; white-space: pre; color: var(--text-primary, #27272a); }
+.script-code pre { margin: 0 0 12px; padding: 12px; background: #f6f7f9; border-radius: 8px; font: 13px/1.6 Consolas, monospace; white-space: pre; color: var(--text-primary, #27272a); }
 .steps-list { display: flex; flex-direction: column; gap: 8px; }
 .step-row, .subprocess-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; color: var(--text-secondary, #61646c); }
 .step-label, .subprocess-label, .subprocess-note { overflow-wrap: anywhere; min-width: 0; }
@@ -243,11 +249,11 @@ button:focus-visible { outline: 2px solid var(--primary, #4c64e2); outline-offse
 .progress-track { flex: 1; height: 3px; background: #e4e4e7; border-radius: 3px; overflow: hidden; }
 .progress-fill { height: 100%; background: var(--primary, #4c64e2); transition: width .3s; }
 .progress-fill.indeterminate { width: 30%; animation: indeterminate 1.5s ease-in-out infinite; }
-.progress-pct, .subprocess-note { font-size: 12px; color: var(--text-muted, #71717a); }
+.progress-pct, .subprocess-note { font-size: 12px; color: #626b79; }
 .subprocess-row { flex-wrap: wrap; }
 .error-msg, .rate-limit-note { margin-top: 8px; padding: 10px; border-radius: 8px; background: #fff5f3; color: #b42318; font-size: 13px; overflow-wrap: anywhere; }
 .rate-limit-note { background: #fffbeb; color: #92400e; }
-.token-footer { margin-top: 16px; color: var(--text-muted, #71717a); font-size: 11px; }
+.token-footer { margin-top: 16px; color: #626b79; font-size: 12px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes indeterminate { 50% { margin-left: 70%; } }
 @media (prefers-reduced-motion: reduce) { .indicator-spinner, .progress-fill.indeterminate { animation: none; } .chevron { transition: none; } }
