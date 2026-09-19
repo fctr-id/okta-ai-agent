@@ -5,7 +5,7 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
-from openai import AsyncAzureOpenAI
+from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.bedrock import BedrockConverseModel
@@ -254,15 +254,12 @@ class ModelConfig:
             }
             
         elif provider == AIProvider.AZURE_OPENAI:
-            # Create Azure OpenAI client
-            azure_client = AsyncAzureOpenAI(
+            # AzureProvider selects the v1 client from the configured endpoint.
+            # Keep Tako's existing key variable rather than relying on SDK defaults.
+            azure_provider = AzureProvider(
                 azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
-                api_version=os.getenv('AZURE_OPENAI_VERSION', '2024-07-01-preview'),
                 api_key=os.getenv('AZURE_OPENAI_KEY')
             )
-            
-            # Create OpenAI provider with the Azure client
-            azure_provider = OpenAIProvider(openai_client=azure_client)
             
             return {
                 ModelType.REASONING: OpenAIResponsesModel(
