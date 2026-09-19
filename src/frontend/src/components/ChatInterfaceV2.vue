@@ -222,11 +222,10 @@
                 <!-- Hero title -->
                 <div v-show="!hasResults" class="hero-card" :class="{ 'home-reveal-pending': isReturningHome }">
                     <div class="title-wrapper">
-                        <span class="workspace-eyebrow"><span aria-hidden="true"></span> Your AI assistant</span>
                         <h1 class="main-title">
                             Hi, I’m <span class="title-accent">Tako.</span>
                         </h1>
-                        <p class="main-subtitle">Let’s explore your Okta users, apps, and access.</p>
+                        <p class="main-subtitle">Let’s explore your Okta tenant.</p>
                     </div>
                 </div>
 
@@ -257,7 +256,7 @@
                                     @focus="isFocused = true"
                                     @blur="isFocused = false"
                                     @input="autoResizeTextarea"
-                                    :placeholder="hasResults ? 'Ask a follow-up question' : 'Ask Tako about your Okta tenant…'"
+                                    :placeholder="hasResults ? 'Ask a follow-up question' : 'Ask about your users, apps, authenticators, and more…'"
                                     aria-label="Message Tako"
                                     aria-describedby="query-disclaimer"
                                     class="query-textarea"
@@ -1809,9 +1808,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.workspace-eyebrow { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 18px; padding: 6px 11px; border: 1px solid rgba(103, 105, 205, 0.14); border-radius: 999px; background: rgba(239, 239, 255, 0.8); color: #5354a0; font-size: 12px; }
 .title-accent { color: #5565c9; }
-.workspace-eyebrow > span { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
 .suggestion-symbol { color: var(--suggestion-ink); opacity: 1; }
 .suggestion-btn:nth-child(3n) { --suggestion-ink: #8050b3; --suggestion-tint: #f5effc; --suggestion-border: #e6d8f6; }
 .suggestion-btn:nth-child(4n) { --suggestion-ink: #217d70; --suggestion-tint: #edf8f4; --suggestion-border: #d1eae2; }
