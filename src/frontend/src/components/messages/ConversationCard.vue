@@ -3,6 +3,7 @@
         <button
             type="button"
             class="turn-header"
+            v-hint="question"
             :aria-expanded="!collapsed"
             :aria-controls="bodyId"
             @click="$emit('update:collapsed', !collapsed)"
@@ -11,7 +12,7 @@
                 <path d="m6 4 4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
             <span class="turn-heading-copy">
-                <span class="turn-question" :title="question">{{ question }}</span>
+                <span class="turn-question">{{ question }}</span>
                 <span v-if="timestamp" class="turn-author">{{ timestamp }}</span>
             </span>
             <span class="turn-heading-summary">

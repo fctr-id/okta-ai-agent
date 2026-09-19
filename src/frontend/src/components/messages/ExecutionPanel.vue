@@ -61,7 +61,7 @@
               <span class="script-hint">{{ isScriptExpanded ? 'Hide code' : 'Show code' }}</span>
             </button>
             <div class="script-actions">
-              <button type="button" class="copy-btn" @click="copyScript" :aria-label="showCopied ? 'Script copied' : 'Copy script'" :title="showCopied ? 'Copied!' : 'Copy'">
+              <button type="button" class="copy-btn" @click="copyScript" :aria-label="showCopied ? 'Script copied' : 'Copy script'" v-hint="showCopied ? 'Copied!' : 'Copy'">
                 <svg v-if="!showCopied" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>

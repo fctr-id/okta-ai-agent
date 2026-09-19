@@ -401,17 +401,6 @@ const handleNewSession = () => {
     margin-left: 4px;
 }
 
-.v-tooltip .v-overlay__content {
-    background-color: var(--primary-dark) !important;
-    color: white !important;
-    font-size: 12px !important;
-    font-weight: 500 !important;
-    padding: 5px 10px !important;
-    border-radius: 4px !important;
-    opacity: 0.95 !important;
-}
-
-
 /* Common card styles */
 .app-card {
     background: white;

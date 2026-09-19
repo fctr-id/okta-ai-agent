@@ -7,7 +7,7 @@
         <span>Conversations</span>
       </div>
       <div class="header-spacer"></div>
-      <button type="button" class="collapse-toggle" :title="isCollapsed ? 'Expand conversations' : 'Collapse conversations'" :aria-label="isCollapsed ? 'Expand conversations' : 'Collapse conversations'" :aria-expanded="!isCollapsed" @click="isCollapsed = !isCollapsed">
+      <button type="button" class="collapse-toggle" v-hint="isCollapsed ? 'Expand conversations' : 'Collapse conversations'" :aria-label="isCollapsed ? 'Expand conversations' : 'Collapse conversations'" :aria-expanded="!isCollapsed" @click="isCollapsed = !isCollapsed">
         <v-icon :icon="isCollapsed ? 'mdi-chevron-right' : 'mdi-chevron-left'" size="16" />
       </button>
     </div>
@@ -61,7 +61,7 @@
               >
                 <button type="button" class="session-select" @click="handleSessionSelect(session)"
                   :aria-current="selectedSessionId === session.session_id ? 'true' : undefined"
-                  :title="[session.title || 'Untitled conversation', formatSessionSummary(session)].filter(Boolean).join(' — ')">
+                  v-hint="[session.title || 'Untitled conversation', formatSessionSummary(session)].filter(Boolean).join(' — ')">
                   <v-icon icon="mdi-message-text-outline" size="14" class="conversation-icon" aria-hidden="true" />
                   <span class="row-title">{{ session.title || 'Untitled conversation' }}</span>
                   <span class="row-meta">
@@ -76,7 +76,7 @@
                       type="button"
                       class="pin-toggle"
                       :class="{ 'is-active': session.is_pinned }"
-                      :title="session.is_pinned ? 'Unpin session' : 'Pin session'"
+                      v-hint="session.is_pinned ? 'Unpin session' : 'Pin session'"
                       :aria-label="session.is_pinned ? 'Unpin session' : 'Pin session'"
                       :disabled="pinningSessionId === session.session_id"
                       @click.stop="toggleSessionPin(session)"
@@ -101,7 +101,7 @@
     
     <!-- Collapsed State Icons -->
     <div v-else class="collapsed-icons">
-      <button type="button" class="collapsed-action-btn" title="New chat session" aria-label="New chat session" @click.stop="handleNewSession">
+      <button type="button" class="collapsed-action-btn" v-hint="'New chat session'" aria-label="New chat session" @click.stop="handleNewSession">
         <v-icon icon="mdi-plus" size="18" />
       </button>
 

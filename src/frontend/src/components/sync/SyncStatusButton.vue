@@ -4,7 +4,7 @@
             transition="slide-y-transition" :offset="[10, 10]">
             <template v-slot:activator="{ props: menuProps }">
                 <v-btn v-bind="menuProps" class="sync-button" :class="{ 'is-open': showDropdown }"
-                    variant="text" size="small" :aria-label="`Okta data sync: ${statusText}`" :title="`Data sync: ${statusText}`">
+                    variant="text" size="small" :aria-label="`Okta data sync: ${statusText}`" v-hint="`Data sync: ${statusText}`">
                     <div class="sync-button-content">
                         <v-icon size="16" aria-hidden="true">mdi-sync</v-icon>
                         <span v-if="!$vuetify.display.smAndDown">Data sync</span>

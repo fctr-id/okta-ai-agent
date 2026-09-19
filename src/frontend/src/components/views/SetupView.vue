@@ -23,7 +23,7 @@
           <div class="form-field">
             <label for="setupToken" class="field-label-with-help">
               <span>Setup Token</span>
-              <v-tooltip location="top">
+              <v-tooltip>
                 <template #activator="{ props }">
                   <button
                     type="button"

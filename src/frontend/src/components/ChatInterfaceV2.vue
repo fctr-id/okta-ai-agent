@@ -15,7 +15,7 @@
                     <div class="error-content">
                         <span class="error-text">{{ reactError }}</span>
                     </div>
-                    <button class="error-dismiss" @click="reactError = null" title="Dismiss">
+                    <button class="error-dismiss" @click="reactError = null" v-hint="'Dismiss'" aria-label="Dismiss">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
                             <line x1="18" y1="6" x2="6" y2="18"/>
                             <line x1="6" y1="6" x2="18" y2="18"/>
@@ -37,7 +37,7 @@
                                     <span class="session-load-eyebrow">
                                         {{ sessionHydrationTotal > 0 ? 'Loading saved session' : 'Opening session' }}
                                     </span>
-                                    <span class="session-load-title" :title="sessionLoadOverlayTitle">
+                                    <span class="session-load-title" v-hint="sessionLoadOverlayTitle" tabindex="0">
                                         {{ sessionLoadOverlayTitle }}
                                     </span>
                                 </div>
@@ -241,7 +241,7 @@
                                     <button
                                         class="icon-btn stop-icon"
                                         @click="stopProcessing"
-                                        title="Stop processing"
+                                        v-hint="'Stop processing'" aria-label="Stop processing"
                                     >
                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                                             <rect x="6" y="6" width="12" height="12" rx="2"/>
@@ -269,7 +269,7 @@
                                     class="send-button"
                                     :disabled="!userInput || !(userInput?.trim?.())"
                                     @click="sendQuery"
-                                    title="Send query"
+                                    v-hint="'Send query'"
                                     aria-label="Send query"
                                 >
                                     <v-icon icon="mdi-arrow-up" size="18" />
@@ -286,7 +286,7 @@
                             <button
                                 v-for="(suggestion, i) in visibleSuggestions"
                                 :key="i"
-                                class="suggestion-btn" :title="suggestion.query"
+                                class="suggestion-btn" v-hint="suggestion.query"
                                 @click="selectSuggestion(suggestion.query)"
                             >
                                 <v-icon :icon="suggestion.icon" size="16" class="suggestion-symbol" />
@@ -2211,17 +2211,6 @@ onMounted(() => {
     background: var(--surface-muted);
     color: var(--text-faint);
     cursor: not-allowed;
-}
-
-:deep(.v-tooltip .v-overlay__content) {
-    background-color: var(--primary-dark);
-    color: white;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 5px 10px;
-    border-radius: 4px;
-    opacity: 0.95;
-    box-shadow: none;
 }
 
 /* Modern 2026 Suggestion Cards - Clean minimal style */

@@ -1,8 +1,11 @@
 import '@mdi/font/css/materialdesignicons.css'
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
+import { Hint } from '../directives/hint'
+import '../styles/tooltips.css'
 
 export default createVuetify({
+  directives: { Hint },
   theme: {
     defaultTheme: 'light',
     themes: {
@@ -18,6 +21,16 @@ export default createVuetify({
     }
   },
   defaults: {
+    VTooltip: {
+      contentClass: 'app-tooltip',
+      location: 'bottom',
+      offset: 8,
+      openDelay: 350,
+      closeDelay: 100,
+      openOnFocus: true,
+      interactive: true,
+      maxWidth: 320
+    },
     VCard: {
       rounded: 'lg'
     },
