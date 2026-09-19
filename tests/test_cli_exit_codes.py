@@ -35,15 +35,19 @@ def run_fixture(scenario):
             elif current == "markdown":
                 payload = {"content": "Fixture answer", "display_type": "markdown"}
             globals_["execute_generated_script"] = AsyncMock(return_value=payload)
+            if current == "analysis":
+                globals_["execute_generated_script"].side_effect = AssertionError("Completed analysis must not execute a retrieval script")
             if current == "csv_failure":
                 globals_["save_results_to_csv"] = Mock(return_value=None)
             if current == "exception":
                 raise RuntimeError("Fixture unexpected failure")
             return SimpleNamespace(
                 success=current != "timeout", error="Request timed out.",
-                no_data_found=current == "empty", user_message="No fixture matches",
+                no_data_found=current == "empty", user_message="No fixture matches" if current == "empty" else None,
+                completed_result=payload if current == "analysis" else None,
+                completed_result_event=lambda: {**payload, "results": payload["data"]},
                 is_degraded_success=False, is_special_tool=current == "special",
-                script_code="" if current == "missing_script" else "print('fixture')",
+                script_code="" if current in {"missing_script", "analysis"} else "print('fixture')",
                 display_type="markdown" if current == "special" else "table",
                 outcome_metadata=lambda: {"outcome": "success"},
                 total_input_tokens=0, total_output_tokens=0, total_tokens=0, total_requests=0,
@@ -86,7 +90,7 @@ class CLIExitCodeTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
 
     def test_successful_outputs_and_empty_results_exit_zero(self):
-        for scenario in ("table", "empty", "empty_table", "special", "markdown", "script_only"):
+        for scenario in ("table", "empty", "empty_table", "special", "markdown", "script_only", "analysis"):
             with self.subTest(scenario=scenario):
                 result = self.run_cli(scenario)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

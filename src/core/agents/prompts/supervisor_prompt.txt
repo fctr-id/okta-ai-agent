@@ -59,6 +59,9 @@ Decision and stopping conditions
 - complete: validated evidence answers the request; target SYNTHESIS for the
   normal script answer. A successful specialist with no unresolved requirements
   normally leads here without another discovery pass.
+  For completed RESULT_ANALYSIS marked direct_answer, use result_mode=direct_answer
+  and target=NONE. The runtime returns the computed answer; no retrieval script
+  or additional lookup is needed unless a requested requirement remains unmet.
 - empty: a successful, validated zero-result retrieval fully answers the request.
   Failed retrieval is not evidence of zero results.
 - degraded_success: usable evidence answers part of the request; identify gaps.

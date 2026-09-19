@@ -304,7 +304,8 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     )
 
     if not result.success:
-        print(f"\n{Colors.FAIL}Error: {result.error}{Colors.ENDC}")
+        logger.error(f"Query failed: {result.error}")
+        print(f"\n{Colors.FAIL}Error: {result.user_message or result.error}{Colors.ENDC}")
         update_turn_metadata(runtime_paths, status="error", error=result.error, completed_at=datetime.now().isoformat())
         return 1
 
@@ -342,14 +343,14 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         update_turn_metadata(runtime_paths, status="completed", completed_at=datetime.now().isoformat())
         return 0
 
-    if not result.script_code:
+    if not result.script_code and result.completed_result is None:
         print(f"\n{Colors.FAIL}Error: No executable script was generated for this query.{Colors.ENDC}")
         logger.error(f"No script generated for query: {query}")
         update_turn_metadata(runtime_paths, status="error", error="No executable script generated", completed_at=datetime.now().isoformat())
         return 1
 
-    # Script-only mode: save script to file
-    if script_only:
+    # Script-only mode: completed local analysis has no script to save.
+    if script_only and result.completed_result is None:
         # Save to tako-cli-scripts folder
         script_dir = project_root / "logs" / "tako-cli-scripts"
         script_dir.mkdir(parents=True, exist_ok=True)
@@ -379,10 +380,14 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         update_turn_metadata(runtime_paths, status="script_generated", completed_at=datetime.now().isoformat())
         return 0
 
-    # Full mode: execute the script and save results
-    print(f"\n{Colors.OKGREEN}Discovery complete. Executing script...{Colors.ENDC}")
-    
-    results_data = await execute_generated_script(result.script_code, date_str, query)
+    # Full mode: use completed analysis or execute the retrieval script.
+    if result.completed_result is not None:
+        results_data = result.completed_result_event()
+        results_data["data"] = results_data.get("results", [])
+        print("Using completed analysis of saved results; no script execution needed.")
+    else:
+        print(f"\n{Colors.OKGREEN}Discovery complete. Executing script...{Colors.ENDC}")
+        results_data = await execute_generated_script(result.script_code, date_str, query)
     
     if not results_data:
         print(f"\n{Colors.WARNING}No results returned from script execution{Colors.ENDC}")

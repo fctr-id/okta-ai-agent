@@ -390,11 +390,35 @@ async def execute_result_analysis(
         selected_result_set_ids=selected_result_set_ids,
     )
 
+    # The restricted runner has already computed the answer from the full saved
+    # population. Keep it outside model context and do not retrieve it again.
+    if execution_output.rows or ("rows" in execution_output.model_fields_set and not execution_output.answer):
+        completed_result = {
+            "display_type": "table",
+            "results": execution_output.rows,
+            "headers": list(dict.fromkeys(key for row in execution_output.rows for key in row)),
+            "count": len(execution_output.rows),
+        }
+    else:
+        completed_result = {
+            "display_type": "markdown",
+            "content": execution_output.answer or execution_output.summary,
+            "count": 0,
+        }
+    completed_result["metadata"] = {
+        **execution_output.metadata,
+        "data_source_type": "analysis",
+        "result_set_refs": result_set_refs,
+        "entity_type": execution_output.entity_type or plan.result_entity_type,
+    }
+
     return (
         DelegationResult(
             success=True,
             source_specialist="analysis",
-            result_mode="synthesis_ready",
+            result_mode="direct_answer",
+            direct_answer=execution_output.answer or execution_output.summary,
+            completed_result=completed_result,
             summary=execution_output.summary,
             artifact_keys=[artifact_key],
             result_set_refs=result_set_refs,

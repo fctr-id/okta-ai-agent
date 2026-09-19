@@ -4,6 +4,7 @@ Contains core AI agents for the Okta AI Agent system
 """
 
 import os
+from pathlib import Path
 from typing import Any, cast
 
 from pydantic_ai import Agent
@@ -26,6 +27,8 @@ DEFAULT_AGENT_METADATA: dict[str, str] = {
 	"implementation_phase": "phase1",
 }
 
+USER_MESSAGE_INSTRUCTIONS = (Path(__file__).parent / "prompts" / "user_messages.txt").read_text(encoding="utf-8")
+
 
 def get_default_model_settings() -> ModelSettings:
 	"""Read optional shared reasoning effort; leave model defaults intact when unset."""
@@ -44,6 +47,9 @@ def build_agent(model_type: ModelType, /, *, name: str, **agent_kwargs: Any) -> 
 	model = ModelConfig.get_model(model_type)
 	model_settings = get_default_model_settings()
 	model_settings.update(agent_kwargs.pop("model_settings", None) or {})
+	instructions = agent_kwargs.pop("instructions", ()) or ()
+	if isinstance(instructions, str) or callable(instructions):
+		instructions = (instructions,)
 	provided_metadata = agent_kwargs.pop("metadata", None)
 	combined_metadata = {
 		**DEFAULT_AGENT_METADATA,
@@ -61,6 +67,7 @@ def build_agent(model_type: ModelType, /, *, name: str, **agent_kwargs: Any) -> 
 		"name": name,
 		"metadata": combined_metadata,
 		"model_settings": model_settings,
+		"instructions": (*instructions, USER_MESSAGE_INSTRUCTIONS),
 	}
 	return Agent(model, **combined_kwargs)
 

@@ -54,7 +54,7 @@ from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 # Track background tasks to prevent memory leaks
 background_tasks: set = set()
 from src.utils.logging import get_logger, set_correlation_id
-from src.utils.security_config import validate_generated_code
+from src.utils.security_config import SECURITY_VALIDATION_USER_MESSAGE, validate_generated_code
 from src.utils.timezone_context import normalize_user_timezone
 
 # Load environment variables
@@ -937,7 +937,7 @@ async def stream_react_updates(
             if not result.success:
                 error_event = {
                     "type": "ERROR",
-                    "error": result.error or "Orchestrator failed",
+                    "error": result.user_message or result.error or "I couldn't complete this request.",
                     **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
@@ -948,6 +948,27 @@ async def stream_react_updates(
                 process["status"] = "error"
                 return
             
+            if result.completed_result is not None:
+                complete_event = result.completed_result_event()
+                write_turn_summary(runtime_paths, {
+                    "status": "completed",
+                    "user_query": process["query"],
+                    "final_response_summary": _build_turn_output_summary(complete_event),
+                    "display_type": complete_event["display_type"],
+                    "result_count": complete_event.get("count", 0),
+                    "artifact_file": artifacts_file.as_posix(),
+                    "outcome": result.outcome_metadata(),
+                    "token_usage": {"input_tokens": result.total_input_tokens,
+                                    "output_tokens": result.total_output_tokens,
+                                    "total_tokens": result.total_tokens, "requests": result.total_requests},
+                })
+                update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+                await mirror_runtime_state()
+                process["status"] = "complete"
+                yield f"data: {json.dumps(complete_event, default=str)}\n\n"
+                yield f"data: {json.dumps({'type': 'DONE', 'timestamp': time.time()})}\n\n"
+                return
+
             # Send SCRIPT-GENERATED event (matching one_react_agent_executor.py pattern)
             if result.script_code:
                 # Orchestrator already logged synthesis completion
@@ -1089,11 +1110,12 @@ async def stream_react_updates(
             logger.debug(f"[{process_id}] Validation result: is_valid={validation_result.is_valid}, risk_level={validation_result.risk_level}")
             
             if not validation_result.is_valid:
+                logger.error(f"[{process_id}] Security validation failed: {', '.join(validation_result.violations)}")
                 validation_error = {
                     "type": "STEP-END",
                     "step": "validation",  # String to match frontend check
                     "title": "Security Validation Failed",
-                    "text": f"Security issues found: {', '.join(validation_result.violations)}",
+                    "text": SECURITY_VALIDATION_USER_MESSAGE,
                     "success": False,
                     "timestamp": time.time()
                 }
@@ -1101,7 +1123,7 @@ async def stream_react_updates(
                 
                 error_event = {
                     "type": "ERROR",
-                    "error": f"Security validation failed: {', '.join(validation_result.violations)}",
+                    "error": SECURITY_VALIDATION_USER_MESSAGE,
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"

@@ -78,7 +78,8 @@ API execution
 Output contract
 Return SynthesisResult(success=True, script_code=<plain executable Python>,
 display_type='table' or 'markdown', error=None). Return success=False with a clear
-error if the artifacts cannot support a valid script.
+error for diagnostics and a concise user_message if the artifacts cannot support
+a valid script. The user does not need to understand the artifact format.
 script_code has no Markdown fences or extra serialization layer. Preserve valid
 Python string escapes, including quotes inside filter expressions.
 

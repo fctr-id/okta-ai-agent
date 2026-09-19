@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator, ValidationError
-from src.utils.security_config import validate_result_analysis_code, validate_generated_code
+from src.utils.security_config import SECURITY_VALIDATION_USER_MESSAGE, validate_result_analysis_code, validate_generated_code
 from src.utils.timezone_context import normalize_user_timezone
 from src.data.schemas.artifact_manifest import DerivationKind, append_artifacts_with_result_sets
 
@@ -106,14 +106,23 @@ class StreamOutcomeTests(unittest.IsolatedAsyncioTestCase):
         tree = ast.parse(Path('src/api/routers/react_stream.py').read_text(encoding='utf-8'))
         route = next(n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'stream_react_updates')
         generator = next(n for n in route.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'event_generator')
-        for outcome in ['clarify', 'fail']:
+        for outcome in ['clarify', 'fail', 'analysis', 'validation_failure']:
             with self.subTest(outcome=outcome), TemporaryDirectory() as tmp:
                 root = Path(tmp)
                 paths = SimpleNamespace(artifacts_file=root/'artifacts.json', turn_metadata_file=root/'metadata.json',
                     turn_summary_file=root/'summary.json', user_id='fixture', session_id='fixture', run_id='fixture', turn_number=1)
                 process = {'query': 'fixture', 'source': 'web', 'user_timezone': 'Asia/Kathmandu'}
-                result = SimpleNamespace(success=False, no_data_found=False, outcome=outcome,
+                result = SimpleNamespace(success=outcome in {'analysis', 'validation_failure'}, no_data_found=False, outcome=outcome,
                     user_message='Which timezone?' if outcome == 'clarify' else None, error='fixture failure')
+                if outcome == 'validation_failure':
+                    result.completed_result = None
+                    result.script_code = 'exec("print(1)")'
+                    result.is_special_tool = False
+                if outcome == 'analysis':
+                    result.completed_result = {'type': 'COMPLETE', 'display_type': 'table', 'count': 320,
+                        'headers': ['email'], 'results': [{'email': f'user{i}@example.test'} for i in range(320)]}
+                    result.completed_result_event = lambda: result.completed_result
+                    result.total_input_tokens = result.total_output_tokens = result.total_tokens = result.total_requests = 0
                 result.outcome_metadata = lambda: {'outcome': outcome, 'result_mode': 'needs_clarification' if outcome == 'clarify' else 'failed'}
                 ns = dict(globals(), process=process, process_id='fixture', active_processes={'fixture': process},
                     logger=logging.getLogger('fixture'), settings=SimpleNamespace(tenant_id='fixture'),
@@ -123,7 +132,12 @@ class StreamOutcomeTests(unittest.IsolatedAsyncioTestCase):
                 definitions('src/api/routers/react_stream.py', {'_persist_turn_output_artifact', '_build_turn_output_summary', '_build_turn_output_artifact_payload'}, ns)
                 module = ast.Module(body=[ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0), generator], type_ignores=[])
                 exec(compile(ast.fix_missing_locations(module), 'stream', 'exec'), ns)
-                events = [json.loads(chunk.removeprefix('data: ')) async for chunk in ns['event_generator']()]
+                if outcome == 'validation_failure':
+                    with self.assertLogs('fixture', level='ERROR') as logs:
+                        events = [json.loads(chunk.removeprefix('data: ')) async for chunk in ns['event_generator']()]
+                    self.assertIn('Unauthorized function call: exec', '\n'.join(logs.output))
+                else:
+                    events = [json.loads(chunk.removeprefix('data: ')) async for chunk in ns['event_generator']()]
                 ns['execute_multi_agent_query'].assert_awaited_once()
                 self.assertEqual(ns['execute_multi_agent_query'].call_args.kwargs['user_timezone'], 'Asia/Kathmandu')
                 metadata = json.loads(paths.turn_metadata_file.read_text())
@@ -144,6 +158,19 @@ class StreamOutcomeTests(unittest.IsolatedAsyncioTestCase):
                     preview = ns['_build_markdown_turn_preview'](SimpleNamespace(completion_mode='clarify'))
                     self.assertTrue(preview.available)
                     self.assertEqual(preview.content, 'Which timezone?')
+                elif outcome == 'analysis':
+                    self.assertEqual([e['type'] for e in events], ['COMPLETE', 'DONE'])
+                    self.assertEqual(len(events[0]['results']), 320)
+                    self.assertEqual(events[0]['headers'], ['email'])
+                    self.assertEqual(metadata['status'], 'completed')
+                    summary = json.loads(paths.turn_summary_file.read_text())
+                    self.assertEqual(summary['result_count'], 320)
+                elif outcome == 'validation_failure':
+                    self.assertEqual(events[-1]['type'], 'ERROR')
+                    self.assertEqual(events[-1]['error'], SECURITY_VALIDATION_USER_MESSAGE)
+                    self.assertEqual(events[-2]['text'], SECURITY_VALIDATION_USER_MESSAGE)
+                    self.assertNotIn('Unauthorized function call', json.dumps(events))
+                    self.assertEqual(metadata['status'], 'error')
                 else:
                     self.assertEqual(events[0]['type'], 'ERROR')
                     self.assertEqual(events[0]['error'], 'fixture failure')

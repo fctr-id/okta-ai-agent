@@ -53,6 +53,7 @@ from src.core.okta.sync.operations import DatabaseOperations
 from src.data.schemas.artifact_manifest import (
     DelegationResult,
     append_artifacts_to_file,
+    append_artifacts_with_result_sets,
     build_artifact_prompt_context,
     load_artifacts_file,
 )
@@ -77,6 +78,7 @@ class OrchestratorResult:
     def __init__(self):
         self.success: bool = False
         self.script_code: Optional[str] = None
+        self.completed_result: Optional[Dict[str, Any]] = None
         self.display_type: str = "table"
         self.error: Optional[str] = None
         self.outcome: str = "pending"
@@ -123,6 +125,19 @@ class OrchestratorResult:
         if self.user_message:
             metadata["user_message"] = self.user_message
         return metadata
+
+    def completed_result_event(self) -> Dict[str, Any]:
+        """Use the existing COMPLETE contract for a runtime-computed answer."""
+        if self.completed_result is None or not self.success:
+            raise ValueError("No successful completed result is available")
+        return {
+            **self.completed_result,
+            "type": "COMPLETE",
+            "success": True,
+            **self.outcome_metadata(),
+            "metadata": {**self.completed_result.get("metadata", {}), **self.outcome_metadata()},
+            "timestamp": time.time(),
+        }
 
 
 @dataclass
@@ -1841,6 +1856,34 @@ async def _run_synthesis_phase(
     post_processing_succeeded: bool,
     cli_mode: bool,
 ) -> None:
+    if (
+        latest_processor_delegation
+        and latest_processor_delegation.success
+        and latest_processor_delegation.source_specialist == "analysis"
+        and latest_processor_delegation.completed_result is not None
+        and not result.is_degraded_success
+        and not latest_processor_delegation.needs_specialists
+        and not latest_processor_delegation.unresolved_requirements
+        and not latest_processor_delegation.capability_gaps
+        and latest_processor_delegation.status == "success"
+    ):
+        result.completed_result = latest_processor_delegation.completed_result
+        result.success = True
+        result.display_type = result.completed_result["display_type"]
+        result.data_source_type = "analysis"
+        _set_result_outcome(result, "direct_answer", reason="Completed analysis of saved results.")
+        payload = result.completed_result
+        append_artifacts_with_result_sets(artifacts_file, [{
+            "key": "turn_output_final", "category": "turn_output",
+            "display_type": result.display_type, "canonical_turn_output": True,
+            "content": payload.get("content", "") if result.display_type == "markdown" else json.dumps(payload, default=str),
+            "notes": latest_processor_delegation.summary,
+            "row_count": payload.get("count", 0),
+            "entity_type": payload.get("metadata", {}).get("entity_type"),
+            "metadata": payload.get("metadata", {}),
+        }], source_specialist="analysis")
+        logger.info(f"[{correlation_id}] Returning completed analysis directly ({result.completed_result.get('count', 0)} rows); synthesis skipped")
+        return
     logger.info("Running Synthesis Agent")
     aggregator.set_phase('synthesis')
 
@@ -1868,11 +1911,12 @@ async def _run_synthesis_phase(
     if not result.synthesis_result.success:
         logger.error(f"Synthesis failed: {result.synthesis_result.error}")
         result.error = result.synthesis_result.error
+        result.user_message = result.synthesis_result.user_message or "I couldn't prepare the requested result from the available data."
         _set_result_outcome(
             result,
             "fail",
             reason="Synthesis failed after discovery.",
-            user_message=result.error,
+            user_message=result.user_message,
         )
         return
 
@@ -1957,8 +2001,8 @@ async def execute_multi_agent_query(
             - delegate + RESULT_ANALYSIS: Analyze saved result-set refs from prior turns
          - clarify: Return a clarification message
          - fail: Return an error message
-    2. Run Synthesis Agent (always, for any data workflow)
-    3. Return final script
+    2. Return completed saved-result analysis, or synthesize a retrieval script.
+    3. Return the completed output or final script.
     
     Args:
         user_query: User's question

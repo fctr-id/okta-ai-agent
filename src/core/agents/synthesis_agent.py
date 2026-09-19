@@ -49,6 +49,7 @@ class SynthesisResult(BaseModel):
     artifact_keys: List[str] = Field(default_factory=list)
     result_set_refs: List[str] = Field(default_factory=list)
     error: Optional[str] = None
+    user_message: Optional[str] = Field(default=None, description="Concise, actionable explanation for the user; keep technical diagnostics in error.")
 
 
 # ============================================================================
@@ -313,9 +314,10 @@ db_path = next((p for p in possible_paths if p.exists()), None)
                 f"Successfully generated production script ({script_lines} lines). Ready for validation and execution."
             )
         else:
+            logger.error(f"[{deps.correlation_id}] Synthesis diagnostic: {result.output.error}")
             await notify_step_end(
                 "Synthesis Failed",
-                f"Script generation failed: {result.output.error or 'Unknown error'}"
+                result.output.user_message or "I couldn't prepare the requested result from the available data."
             )
         
         return result.output, usage
@@ -324,5 +326,6 @@ db_path = next((p for p in possible_paths if p.exists()), None)
         logger.error(f"[{deps.correlation_id}] Synthesis failed: {e}", exc_info=True)
         return SynthesisResult(
             success=False,
-            error=str(e)
+            error=str(e),
+            user_message="I couldn't prepare the requested result because processing failed."
         ), None

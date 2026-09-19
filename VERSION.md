@@ -11,6 +11,7 @@ This release refreshes Tako's conversation interface, improves follow-up clarity
 ✨ Highlights
 
 - **Refreshed Conversation Experience**: Questions, activity, execution details, and results now sit together in collapsible conversation cards, making longer investigations easier to follow.
+- **Configurable AI Reasoning Effort**: Set `AI_REASONING_EFFORT` once for all agents and standalone AI analyses on supported models and providers. The sample recommends `high`; leaving it unset, blank, or `none` preserves model defaults.
 - **Clearer Tables and Navigation**: Improved table readability, expandable long values, clearer saved-result previews, and updated sidebar, login, setup, and sync interfaces.
 - **Clarification Without False Errors**: Clarification questions appear as normal conversational responses, allowing users to answer and continue.
 - **Timezone-Aware Answers**: Browser timezone context and daylight-saving-aware conversion support local-time requests while preserving explicit timestamp offsets.
@@ -18,6 +19,7 @@ This release refreshes Tako's conversation interface, improves follow-up clarity
 🔧 Optimizations and Fixes
 
 - **Major Dependency Upgrades**: Refreshed backend and frontend dependencies for security and compatibility, including Pydantic AI 1.107.6 and cryptography 50.0.1, and simplified Docker dependency installation.
+- **Azure OpenAI API Compatibility**: Fixed Azure v1 Responses API configuration with the correct provider and endpoint normalization, using Azure deployment names without requiring a dated API version.
 - **More Reliable Agent Execution**: Fixed duplicate execution of API discovery tests, helper-function scope errors, and changes to escaped strings in generated scripts.
 - **Better Budget Handling**: Agent tool-budget exhaustion now stops correctly instead of triggering unintended fallback requests.
 - **Improved Retrieval Guidance**: Refined prompts for reusing saved evidence, preserving follow-up scope, respecting database freshness, and avoiding unnecessary repeat lookups.

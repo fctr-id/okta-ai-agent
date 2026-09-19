@@ -24,6 +24,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+SECURITY_VALIDATION_USER_MESSAGE = (
+    "I couldn't run the generated code because it didn't pass the safety checks. "
+    "No results were produced by this code."
+)
+
 # ------------------------------------------------------------------------
 # Security Validation Result Classes
 # ------------------------------------------------------------------------
@@ -44,19 +49,19 @@ class SecurityValidationResult:
 BLOCKED_PATTERNS = [
     r'os\.system\s*\(',
     r'subprocess\.',
-    r'exec\s*\(',
-    r'eval\s*\(',
-    r'__import__\s*\(',
-    r'open\s*\(',
-    r'input\s*\(',
+    r'\bexec\s*\(',
+    r'\beval\s*\(',
+    r'\b__import__\s*\(',
+    r'\bopen\s*\(',
+    r'\binput\s*\(',
     r'\bfile\s*\(',  # Word boundary to avoid matching "profile("
-    r'execfile\s*\(',
-    r'compile\s*\(',
-    r'globals\s*\(',
-    r'locals\s*\(',
-    r'setattr\s*\(',
-    r'delattr\s*\(',
-    r'reload\s*\(',
+    r'\bexecfile\s*\(',
+    r'\bcompile\s*\(',
+    r'\bglobals\s*\(',
+    r'\blocals\s*\(',
+    r'\bsetattr\s*\(',
+    r'\bdelattr\s*\(',
+    r'\breload\s*\(',
     r'__.*__\s*\(',  # Dunder methods (magic methods) - except allowed ones
 ]
 
@@ -267,6 +272,31 @@ class EnhancedSecurityValidator:
                     blocked_patterns.append(pattern.pattern)
                     risk_level = 'HIGH'
             
+            # A helper name may contain words like "execute" or "input" without
+            # invoking a restricted builtin. Only recognize declarations in this
+            # script; their bodies are still visited and validated below.
+            local_functions = {
+                node.name for node in ast.walk(tree)
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and not node.decorator_list
+            }
+            # A reassigned/imported name is no longer demonstrably this helper.
+            rebound_names = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                    rebound_names.add(node.id)
+                elif isinstance(node, ast.arg):
+                    rebound_names.add(node.arg)
+                elif isinstance(node, ast.alias):
+                    rebound_names.add(node.asname or node.name.split('.')[0])
+                elif isinstance(node, (ast.ClassDef, ast.ExceptHandler)) and node.name:
+                    rebound_names.add(node.name)
+            local_functions.difference_update(rebound_names)
+            restricted_function_names = {
+                'exec', 'eval', 'compile', 'open', 'input', 'system', 'execfile',
+                'SystemExit',
+            }
+
             # Validate imports and function calls
             for node in ast.walk(tree):
                 # Check imports
@@ -293,12 +323,14 @@ class EnhancedSecurityValidator:
                 elif isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name):
                         func_name = node.func.id
-                        # Allow user-defined functions (not in builtins but also not dangerous)
-                        # Only block if it's NOT in allowed builtins AND matches dangerous patterns
+                        is_local_helper = (
+                            func_name in local_functions
+                            and func_name not in restricted_function_names
+                        )
                         if func_name not in self.allowed_builtins:
                             # Check if it's a dangerous function name
                             dangerous_patterns = ['exec', 'eval', 'compile', 'open', 'input', 'system']
-                            if any(dangerous in func_name.lower() for dangerous in dangerous_patterns):
+                            if not is_local_helper and any(dangerous in func_name.lower() for dangerous in dangerous_patterns):
                                 violations.append(f"Unauthorized function call: {func_name}")
                                 risk_level = 'HIGH'
                             # Allow user-defined functions like fetch_user_roles, process_data, etc.

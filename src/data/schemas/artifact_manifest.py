@@ -119,6 +119,8 @@ class DelegationResult(BaseModel):
     evidence_found: List[str] = Field(default_factory=list)
     capability_gaps: List[str] = Field(default_factory=list)
     direct_answer: Optional[str] = None
+    # Runtime-only completed output: never send full rows back into model context.
+    completed_result: Optional[Dict[str, Any]] = Field(default=None, exclude=True, repr=False)
     error: Optional[str] = None
     token_usage: Dict[str, int] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
