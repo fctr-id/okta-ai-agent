@@ -26,6 +26,24 @@ def load_model_picker():
 
 
 class AzureModelConfigTests(unittest.IsolatedAsyncioTestCase):
+    def test_existing_resource_roots_and_full_v1_endpoints(self):
+        picker = load_model_picker()
+        cases = {
+            ' https://fixture.cognitiveservices.azure.com/ ': 'https://fixture.cognitiveservices.azure.com/openai/v1/',
+            'https://fixture.openai.azure.com': 'https://fixture.openai.azure.com/openai/v1/',
+            'https://fixture.services.ai.azure.com/openai/': 'https://fixture.services.ai.azure.com/openai/v1/',
+            'https://fixture.openai.azure.com/openai/v1/': 'https://fixture.openai.azure.com/openai/v1/',
+            'https://fixture.region.models.ai.azure.com/': 'https://fixture.region.models.ai.azure.com/v1/',
+        }
+        for endpoint, expected in cases.items():
+            with self.subTest(endpoint=endpoint):
+                self.assertEqual(picker.normalize_azure_endpoint(endpoint), expected)
+        for invalid in (None, '', 'not-a-url',
+                        'https://fixture.openai.azure.com/?api-version=2024-07-08',
+                        'https://fixture.openai.azure.com/openai/v1/responses'):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, 'AZURE_OPENAI_ENDPOINT'):
+                picker.normalize_azure_endpoint(invalid)
+
     async def test_both_roles_use_v1_and_configured_deployments(self):
         picker = load_model_picker()
         requests = []
@@ -48,7 +66,7 @@ class AzureModelConfigTests(unittest.IsolatedAsyncioTestCase):
 
         settings = {
             'AI_PROVIDER': 'azure_openai',
-            'AZURE_OPENAI_ENDPOINT': 'https://fixture.openai.azure.com/openai/v1/',
+            'AZURE_OPENAI_ENDPOINT': 'https://fixture.openai.azure.com/',
             'AZURE_OPENAI_KEY': 'fixture-key',
             'AZURE_OPENAI_REASONING_MODEL': 'reasoning-deployment',
             'AZURE_OPENAI_CODING_MODEL': 'coding-deployment',
