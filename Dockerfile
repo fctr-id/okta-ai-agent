@@ -33,9 +33,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy Python requirements and install dependencies with UV (10-100x faster)
 COPY requirements.txt .
-# Pin setuptools <70 and install wheel to avoid flatdict pkg_resources issue
-RUN uv pip install --system --no-cache 'setuptools<70.0.0' wheel && \
-    uv pip install --system --no-cache --no-build-isolation -r requirements.txt
+# flatdict >=4.1 provides a wheel; retain build isolation for source packages.
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # Copy main entry point
 COPY main.py /app/

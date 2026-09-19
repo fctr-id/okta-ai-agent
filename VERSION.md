@@ -17,6 +17,7 @@ This release refreshes Tako's conversation interface, improves follow-up clarity
 
 🔧 Optimizations and Fixes
 
+- **Major Dependency Upgrades**: Refreshed backend and frontend dependencies for security and compatibility, including Pydantic AI 1.107.6 and cryptography 50.0.1, and simplified Docker dependency installation.
 - **More Reliable Agent Execution**: Fixed duplicate execution of API discovery tests, helper-function scope errors, and changes to escaped strings in generated scripts.
 - **Better Budget Handling**: Agent tool-budget exhaustion now stops correctly instead of triggering unintended fallback requests.
 - **Improved Retrieval Guidance**: Refined prompts for reusing saved evidence, preserving follow-up scope, respecting database freshness, and avoiding unnecessary repeat lookups.
