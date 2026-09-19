@@ -661,6 +661,15 @@ class DatabaseOperations:
         try:
             total_factors = 0
             total_user_devices = 0
+            # Fetch existing rows once per bounded batch, not once per record.
+            existing_by_id = {}
+            record_ids = list({record['okta_id'] for record in records})
+            for offset in range(0, len(record_ids), 500):
+                result = await session.execute(select(model).where(
+                    model.tenant_id == tenant_id,
+                    model.okta_id.in_(record_ids[offset:offset + 500]),
+                ))
+                existing_by_id.update((row.okta_id, row) for row in result.scalars())
             
             for record in records:
                 # Extract factors if present (User model)
@@ -674,14 +683,7 @@ class DatabaseOperations:
                     total_user_devices += len(user_devices) if user_devices else 0
                 
                 # Process main record
-                stmt = select(model).where(
-                    and_(
-                        model.okta_id == record['okta_id'],
-                        model.tenant_id == tenant_id
-                    )
-                )
-                result = await session.execute(stmt)
-                existing = result.scalar_one_or_none()
+                existing = existing_by_id.get(record['okta_id'])
     
                 if existing:
                     for key, value in record.items():
@@ -700,6 +702,7 @@ class DatabaseOperations:
                         record['custom_attributes'] = {}
                     existing = model(**record)
                     session.add(existing)
+                    existing_by_id[record['okta_id']] = existing
                 
                 # Process factors if present
                 if factors:

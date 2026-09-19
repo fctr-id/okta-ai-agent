@@ -1,13 +1,14 @@
 <template>
     <div class="sync-status-container">
-        <v-menu v-model="showDropdown" :close-on-content-click="false" location="bottom end" max-width="340"
+        <v-menu v-model="showDropdown" :close-on-content-click="false" location="bottom end" max-width="360"
             transition="slide-y-transition" :offset="[10, 10]">
             <template v-slot:activator="{ props: menuProps }">
-                <v-btn v-bind="menuProps" class="sync-button" :class="[{ 'px-2': $vuetify.display.smAndDown }, `status-${statusColor}`]"
-                    variant="text" size="small" :aria-label="`Okta data sync: ${statusText}`">
-                    <div class="d-flex align-center">
-                        <div class="status-indicator me-2" :class="statusColor"></div>
-                        <span v-if="!$vuetify.display.smAndDown">{{ statusText }}</span>
+                <v-btn v-bind="menuProps" class="sync-button" :class="{ 'is-open': showDropdown }"
+                    variant="text" size="small" :aria-label="`Okta data sync: ${statusText}`" :title="`Data sync: ${statusText}`">
+                    <div class="sync-button-content">
+                        <v-icon size="16" aria-hidden="true">mdi-sync</v-icon>
+                        <span v-if="!$vuetify.display.smAndDown">Data sync</span>
+                        <span class="status-indicator" :class="statusColor" aria-hidden="true"></span>
                         <v-icon class="sync-chevron" size="14" aria-hidden="true">mdi-chevron-down</v-icon>
                     </div>
                 </v-btn>
@@ -16,35 +17,22 @@
             <div class="modern-dropdown" role="region" aria-label="Okta data sync">
                 <div class="modern-content">
                     <div class="modern-header">
-                        <h3>Okta data sync</h3>
-
-                            <v-tooltip text="Start Sync" location="bottom" v-if="!isSyncing">
-                            <template v-slot:activator="{ props }">
-                                <button v-bind="props" type="button" class="action-btn primary" @click="handleStartSync"
-                                    :disabled="isStarting">
-                                    <v-icon v-if="!isStarting" size="15" aria-hidden="true">mdi-sync</v-icon>
-                                    <v-progress-circular v-else indeterminate size="14" width="2"
-                                        color="white" aria-hidden="true"></v-progress-circular>
-                                    <span>{{ isStarting ? 'Starting…' : 'Sync now' }}</span>
-                                </button>
-                            </template>
-                        </v-tooltip>
-
-                            <v-tooltip text="Cancel Sync" location="bottom" v-else>
-                            <template v-slot:activator="{ props }">
-                                <button v-bind="props" type="button" class="action-btn error" @click="cancelSync">
-                                    <v-icon size="15" aria-hidden="true">mdi-stop</v-icon>
-                                    <span>Stop sync</span>
-                                </button>
-                            </template>
-                        </v-tooltip>
+                        <div class="sync-title-icon"><v-icon size="20" aria-hidden="true">mdi-database-outline</v-icon></div>
+                        <div class="sync-title-copy">
+                            <h3>Okta data sync</h3>
+                            <p>Data available to Tako</p>
+                        </div>
+                        <button type="button" class="close-sync" aria-label="Close sync panel" @click="showDropdown = false">
+                            <v-icon size="18" aria-hidden="true">mdi-close</v-icon>
+                        </button>
                     </div>
 
-                    <div v-if="isSyncing" class="progress-section" role="status">
-                        <div class="sync-status-text">
-                            <div class="pulse-dot"></div>
-                            <span>Syncing data from Okta...</span>
-                        </div>
+                    <div class="sync-summary" role="status">
+                        <span class="sync-state"><span class="status-indicator" :class="statusColor" aria-hidden="true"></span>{{ statusText }}</span>
+                        <span class="sync-summary-description">{{ isSyncing ? 'Updating records from Okta…' : 'Record totals' }}</span>
+                    </div>
+                    <div v-if="isSyncing" class="sync-progress-track" aria-hidden="true">
+                        <span></span>
                     </div>
 
                     <!-- Counts share one compact grid, without nested cards. -->
@@ -112,13 +100,24 @@
                         </div>
                     </div>
 
-                    <!-- Last sync time with improved styling -->
+                    <!-- Timestamp and primary action stay together below the counts. -->
                     <div class="last-sync">
                         <div class="last-sync-label">
                             <v-icon size="16" class="me-1">mdi-clock-outline</v-icon>
                             Last updated
                         </div>
                         <span class="last-sync-time">{{ formattedLastSyncTime() }}</span>
+                    </div>
+                    <div class="sync-actions">
+                        <button v-if="!isSyncing" type="button" class="action-btn primary" @click="handleStartSync" :disabled="isStarting">
+                            <v-icon v-if="!isStarting" size="15" aria-hidden="true">mdi-sync</v-icon>
+                            <v-progress-circular v-else indeterminate size="14" width="2" color="white" aria-hidden="true" />
+                            <span>{{ isStarting ? 'Starting…' : 'Sync now' }}</span>
+                        </button>
+                        <button v-else type="button" class="action-btn error" @click="cancelSync">
+                            <v-icon size="15" aria-hidden="true">mdi-stop</v-icon>
+                            <span>Stop sync</span>
+                        </button>
                     </div>
 
                     <!-- Error message with user-friendly text -->
@@ -135,163 +134,73 @@
 </template>
 
 <style scoped>
-.sync-status-container {
-    position: relative;
-}
-
+.sync-status-container { position: relative; }
 .sync-button {
-    --sync-surface: #f4f7fc;
-    --sync-border: #dce3ef;
-    --sync-ink: #53617a;
-    background: var(--sync-surface) !important;
-    color: var(--sync-ink) !important;
-    box-shadow: none !important;
-    border: 1px solid var(--sync-border) !important;
-    border-radius: 9px !important;
-    font-weight: 500 !important;
+    background: #fff !important;
+    color: #334b72 !important;
+    border: 1px solid #cbd7ea !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 2px rgba(23, 36, 58, .05) !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 11px !important;
     font-size: 12px !important;
-    height: 32px !important;
-    min-height: 32px !important;
-    padding: 0 10px !important;
+    font-weight: 500 !important;
     text-transform: none !important;
     letter-spacing: 0 !important;
-    transition: box-shadow 0.15s ease;
+    transition: background .15s, border-color .15s;
 }
-
-.sync-button:hover {
-    transform: none !important;
-    box-shadow: 0 0 0 2px var(--sync-surface) !important;
-}
-
-.sync-button:focus-visible {
-    outline: 2px solid var(--primary);
-    outline-offset: 3px;
-}
-
-.sync-chevron {
-    margin-left: 6px;
-    opacity: 0.7;
-}
-
-.sync-button.status-green {
-    --sync-surface: #eaf7f0;
-    --sync-border: #c4e5d4;
-    --sync-ink: #237453;
-}
-
-.sync-button.status-orange {
-    --sync-surface: #fff6e6;
-    --sync-border: #f1d8a9;
-    --sync-ink: #946314;
-}
-
-.sync-button.status-red {
-    --sync-surface: #fff0f0;
-    --sync-border: #efcdcd;
-    --sync-ink: #b34646;
-}
-
-.sync-button.status-blue {
-    --sync-surface: #edf2ff;
-    --sync-border: #d4dfff;
-    --sync-ink: #4563bb;
-}
-
-.sync-button .status-indicator {
-    border: none !important;
-}
-
-/* Minimal status indicator - 2026 style */
-.status-indicator {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    transition: background-color 0.2s ease;
-}
-
-.green {
-    background: #22c55e;
-}
-
-.orange {
-    background: #f59e0b;
-    animation: pulse-subtle 2s infinite ease-in-out;
-}
-
-.red {
-    background: #ef4444;
-}
-
-.grey {
-    background: #9ca3af;
-}
-
-.blue {
-    background: var(--primary);
-}
-
-@keyframes pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.6);
-    }
-
-    70% {
-        box-shadow: 0 0 0 8px rgba(255, 152, 0, 0);
-    }
-
-    100% {
-        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
-    }
-}
-
-/* Match the white response surfaces and clearly defined section dividers. */
-.modern-dropdown { width: min(340px, calc(100vw - 32px)); border: 1px solid #96a5b9; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(30, 48, 76, .10); overflow: hidden; }
-.modern-content { background: #f0f4f9; }
-.modern-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--workspace-outline, #b8c2cf); background: #f8fafc; }
-.modern-header h3 { margin: 0; color: #253248; font-size: 14px; font-weight: 600; line-height: 1.4; }
-.action-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; min-height: 30px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; font: inherit; font-size: 11px; font-weight: 550; cursor: pointer; transition: background .15s, border-color .15s; }
-.action-btn.primary { background: var(--primary); border-color: #375bcc; color: #fff; }
-.action-btn.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: #2948a8; }
-.action-btn:disabled { opacity: .55; cursor: default; }
-.action-btn.error { color: #aa3636; background: #fff0f0; border-color: #e6b8b8; }
-.action-btn.error:hover { background: #ffe3e3; border-color: #ce9595; }
-.action-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
-.progress-section { padding: 10px 16px; border-bottom: 1px solid #dbe3ef; background: #edf3ff; }
-.sync-status-text { display: flex; align-items: center; gap: 8px; color: #385ea9; font-size: 12px; }
-.pulse-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; animation: pulse-subtle 1.5s ease-in-out infinite; }
-@keyframes pulse-subtle { 50% { opacity: .4; } }
-.entity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.entity-card { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 16px; background: #f0f4f9; }
-.entity-card:nth-child(odd) { border-right: 1px solid #dde3eb; }
-.entity-card:nth-child(n+3) { border-top: 1px solid #dde3eb; }
-.entity-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0; background: #edf3ff; color: #4568b3; }
-.entity-2 .entity-icon { background: #f2ecfa; color: #7754aa; }
-.entity-4 .entity-icon { background: #eaf5f5; color: #276e78; }
+.sync-button:hover, .sync-button.is-open { background: #eef3fc !important; border-color: #aebfe0 !important; }
+.sync-button :deep(.v-btn__overlay) { opacity: 0 !important; }
+.sync-button:focus-visible, .action-btn:focus-visible, .close-sync:focus-visible { outline: 2px solid var(--primary, #3e63dd); outline-offset: 3px; }
+.sync-button-content { display: flex; align-items: center; gap: 7px; }
+.sync-chevron { color: #647797; transition: transform .15s; }
+.is-open .sync-chevron { transform: rotate(180deg); }
+.status-indicator { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.green { background: #299477; }
+.orange { background: #b7791f; }
+.red { background: #c44949; }
+.grey { background: #8793a4; }
+.blue { background: #3e63dd; }
+.modern-dropdown { width: min(360px, calc(100vw - 32px)); border: 1px solid #d5deec; border-radius: 14px; background: #fff; box-shadow: 0 16px 40px -12px rgba(23, 36, 58, .22), 0 3px 10px rgba(23, 36, 58, .05); overflow: hidden; }
+.modern-content { background: #fff; }
+.modern-header { display: flex; align-items: center; gap: 10px; padding: 18px 18px 16px; background: #f7f9fd; border-bottom: 1px solid #e3e9f2; }
+.sync-title-icon { display: grid; place-items: center; width: 36px; height: 36px; flex-shrink: 0; border: 1px solid #dbe5f6; border-radius: 10px; background: #eef3fc; color: #4567ad; }
+.sync-title-copy { flex: 1; min-width: 0; }
+.modern-header h3 { margin: 0; color: #17243a; font-size: 14px; font-weight: 600; line-height: 1.4; }
+.sync-title-copy p { margin: 3px 0 0; color: #5d6b7d; font-size: 12px; line-height: 1.4; }
+.close-sync { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #63738b; cursor: pointer; }
+.close-sync:hover { background: #e8eef8; color: #243957; }
+.sync-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 14px 18px 12px; font-size: 12px; }
+.sync-state { display: inline-flex; align-items: center; gap: 7px; color: #334155; font-weight: 500; }
+.sync-summary-description { color: #5d6b7d; }
+.sync-progress-track { height: 3px; margin: 0 18px 12px; overflow: hidden; border-radius: 2px; background: #e7edf8; }
+.sync-progress-track span { display: block; width: 40%; height: 100%; border-radius: inherit; background: #597bd4; animation: sync-progress 1.8s ease-in-out infinite alternate; }
+@keyframes sync-progress { from { transform: translateX(0); } to { transform: translateX(150%); } }
+.entity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 18px 16px; }
+.entity-card { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 13px 12px; border: 1px solid #e3e9f2; border-radius: 10px; background: #f7f9fd; }
+.entity-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0; background: #eaf0fc; color: #4e6daf; }
+.entity-4 .entity-icon { background: #e5f1f0; color: #327d79; }
 .entity-icon :deep(.v-icon) { font-size: 16px; }
 .entity-details { min-width: 0; }
-.entity-count { color: #253248; font-size: 20px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.entity-count { color: #243957; font-size: 20px; font-weight: 500; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .entity-count-large { font-size: 16px; }
-.entity-label { margin-top: 3px; color: #64748b; font-size: 11px; line-height: 1.4; }
-.last-sync { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px; border-top: 1px solid var(--workspace-outline, #b8c2cf); background: #f8fafc; }
-.last-sync-label { display: inline-flex; align-items: center; color: #64748b; font-size: 11px; }
-.last-sync-time { color: #46566f; font-size: 11px; font-weight: 500; }
-.error-message { display: flex; align-items: flex-start; gap: 5px; padding: 12px 16px; border-top: 1px solid #e6b8b8; background: #fff0f0; color: #a13333; font-size: 12px; overflow-wrap: anywhere; }
+.entity-label { margin-top: 3px; color: #5d6b7d; font-size: 12px; line-height: 1.4; }
+.last-sync { display: flex; flex-direction: column; gap: 4px; padding: 13px 18px 0; border-top: 1px solid #e3e9f2; }
+.last-sync-label { display: inline-flex; align-items: center; color: #5d6b7d; font-size: 12px; }
+.last-sync-time { padding-left: 20px; color: #334b72; font-size: 12px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
+.sync-actions { display: flex; padding: 14px 18px 18px; }
+.action-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: 100%; min-height: 34px; padding: 7px 12px; border: 1px solid transparent; border-radius: 8px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s, border-color .15s; }
+.action-btn.primary { background: var(--primary, #3e63dd); border-color: #375bcc; color: #fff; box-shadow: 0 1px 2px rgba(23, 36, 58, .08); }
+.action-btn.primary:hover:not(:disabled) { background: var(--primary-hover, #3556c3); }
+.action-btn:disabled { opacity: .6; cursor: default; }
+.action-btn.error { color: #a13333; background: #fff5f5; border-color: #ebcccc; }
+.action-btn.error:hover { background: #fce8e8; }
+.error-message { display: flex; align-items: flex-start; gap: 6px; margin: 0 18px 18px; padding: 10px 12px; border: 1px solid #f0d5d5; border-radius: 8px; background: #fff7f7; color: #a13333; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .error-message :deep(.v-icon) { flex-shrink: 0; margin-top: 2px; }
 .fade-enter-active, .fade-leave-active { transition: opacity .15s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
-@media (prefers-reduced-motion: reduce) { .pulse-dot, .orange { animation: none; } .fade-enter-active, .fade-leave-active { transition: none; } }
-
-/* Tooltip matching */
-:deep(.v-tooltip .v-overlay__content) {
-    background-color: var(--primary-dark);
-    color: white;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 5px 10px;
-    border-radius: 4px;
-    opacity: 0.95;
-    box-shadow: none;
-}
+@media (prefers-reduced-motion: reduce) { .sync-progress-track span { animation: none; width: 100%; opacity: .55; } .sync-chevron, .fade-enter-active, .fade-leave-active { transition: none; } }
 </style>
 
 <script setup>

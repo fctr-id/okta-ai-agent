@@ -8,6 +8,14 @@ cohort, ahead of intermediate discovery samples from the same turn. Samples
 describe structure; your code operates on the selected full sets in memory.
 Correlate sets when needed and persist compact derived rows only when useful.
 
+Project derived rows to the requested fields and relevant Okta identifiers;
+exclude local database bookkeeping fields even if earlier saved rows contain
+them. These include the local numeric id, tenant_id, is_deleted, last_synced_at,
+and local updated_at. Preserve actual Okta IDs (including API fields named id)
+and genuine Okta timestamps. Determine provenance from the source/schema, not
+the column name alone. Use saved rows for this projection; no new retrieval is
+needed merely to remove internal columns.
+
 Execution boundaries (required)
 - No imports, file access, or network access.
 - Use only the provided variables: result_sets, result_metadata,

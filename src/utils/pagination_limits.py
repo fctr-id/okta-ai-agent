@@ -471,6 +471,7 @@ async def _paginate_direct_api(
     """
     log_prefix = f"[FLOW:{flow_id}] " if flow_id else ""
     
+    oauth2_manager = None
     try:
         logger.info(f"{log_prefix}Starting direct API pagination for {entity_name}")
         
@@ -504,13 +505,13 @@ async def _paginate_direct_api(
             # Initialize OAuth2 client
             if not await oauth2_manager.initialize_from_config(domain):
                 logger.error(f"{log_prefix}Failed to initialize OAuth2 client for {entity_name}")
-                return [] if not processor_func else 0
+                raise RuntimeError(f"Could not authenticate for {entity_name}")
             
             # Get OAuth2 headers
             oauth_headers = await oauth2_manager.get_auth_headers()
             if not oauth_headers:
                 logger.error(f"{log_prefix}Failed to get OAuth2 headers for {entity_name}")
-                return [] if not processor_func else 0
+                raise RuntimeError(f"Could not authenticate for {entity_name}")
             
             headers.update(oauth_headers)
             logger.debug(f"{log_prefix}Using OAuth2 authentication with Bearer token for {entity_name}")
@@ -532,6 +533,7 @@ async def _paginate_direct_api(
         
         all_items = []
         page_count = 0
+        total_processed = 0
         
         import aiohttp
         import re
@@ -542,7 +544,7 @@ async def _paginate_direct_api(
                 # Check for cancellation
                 if hasattr(self, 'cancellation_flag') and self.cancellation_flag and self.cancellation_flag.is_set():
                     logger.info(f"{log_prefix}Cancellation requested, stopping {entity_name} pagination")
-                    break
+                    raise asyncio.CancelledError("Sync process was cancelled")
                 
                 page_count += 1
                 full_url = f"{base_url}{current_url}"
@@ -555,7 +557,7 @@ async def _paginate_direct_api(
                         if response.status != 200:
                             error_text = await response.text()
                             logger.error(f"{log_prefix}HTTP {response.status} error for {entity_name}: {error_text}")
-                            break
+                            raise RuntimeError(f"Incomplete {entity_name} retrieval: HTTP {response.status}")
                         
                         # Get response data
                         items = await response.json()
@@ -576,23 +578,28 @@ async def _paginate_direct_api(
                                 logger.debug(f"{log_prefix}Transformed {len(items)} {entity_name} items")
                             except Exception as e:
                                 logger.error(f"{log_prefix}Error transforming {entity_name}: {str(e)}")
-                                transformed_items = items  # Fall back to raw items
+                                raise
                         else:
                             transformed_items = items
                         
+                        if len(transformed_items) != len(items):
+                            raise RuntimeError(f"Incomplete transformation of {entity_name}")
+
                         # Process immediately or collect
                         if processor_func and transformed_items:
                             try:
                                 await processor_func(transformed_items)
+                                total_processed += len(transformed_items)
                                 logger.debug(f"{log_prefix}Processed {len(transformed_items)} {entity_name} from page {page_count}")
                             except Exception as e:
                                 logger.error(f"{log_prefix}Error processing {entity_name}: {str(e)}")
+                                raise
                         elif transformed_items:
                             all_items.extend(transformed_items)
                         
                         # Handle pagination using Link headers
                         current_url = None
-                        all_link_headers = response.headers.getall('Link')
+                        all_link_headers = response.headers.getall('Link', [])
                         logger.debug(f"{log_prefix}Page {page_count} Link headers: {all_link_headers}")
                         
                         # Check each Link header for rel="next"
@@ -618,10 +625,10 @@ async def _paginate_direct_api(
                             logger.info(f"{log_prefix}Final pagination stats: {page_count} pages, {len(all_items)} total items")
                         
                         # Safety check
-                        if page_count > 1000:
+                        if page_count >= 1000 and current_url:
                             logger.error(f"{log_prefix}Reached maximum page limit ({page_count} > 1000), stopping {entity_name} pagination")
                             logger.error(f"{log_prefix}Current stats: {page_count} pages, {len(all_items)} total items")
-                            break
+                            raise RuntimeError(f"Incomplete {entity_name} retrieval: page limit reached")
                 
                 # Add delay between requests
                 rate_limit_delay = getattr(self, 'RATE_LIMIT_DELAY', 0.2)
@@ -630,20 +637,23 @@ async def _paginate_direct_api(
         # Return results
         if processor_func:
             logger.info(f"{log_prefix}Completed processing {entity_name} across {page_count} pages")
-            return page_count  # Return page count as processed count
+            return total_processed
         else:
             logger.info(f"{log_prefix}Completed fetching {len(all_items)} {entity_name} in {page_count} pages")
             return all_items
             
     except asyncio.CancelledError:
         logger.info(f"{log_prefix}Direct API pagination cancelled for {entity_name}")
-        return all_items if not processor_func else page_count
+        raise
     except Exception as e:
         logger.error(f"{log_prefix}Error in direct API pagination for {entity_name}: {str(e)}")
         import traceback
         logger.error(f"{log_prefix}Traceback: {traceback.format_exc()}")
-        raise  
-    
+        raise
+    finally:
+        if oauth2_manager is not None:
+            await oauth2_manager.close()
+
 #async def paginate_with_request_executor(
 #    client,
 #    initial_url: str,

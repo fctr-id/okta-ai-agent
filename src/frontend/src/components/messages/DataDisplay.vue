@@ -33,70 +33,48 @@
 
         <!-- Data Table Display -->
         <div v-else-if="displayedItems.length > 0 || (isStreaming && (props.type === MessageType.TABLE || props.type === MessageType.STREAM))" class="table-content">
-            <v-data-table ref="tableRef" class="results-table" :style="{ '--results-table-min-width': `${tableMinWidth}px` }"
+            <v-data-table class="results-table" :style="{ '--results-table-min-width': `${tableMinWidth}px` }"
                 :headers="formattedHeaders" :items="displayedItems"
                 :loading="loading" :items-per-page="10" :search="search" :sort-by="sortBy" items-per-page-text="Rows per page" density="compact" hover>
                 <template v-slot:top>
-                    <div class="table-header-container">
+                    <div class="table-header-container" :class="{ 'is-preview': isResultsPreview }">
                         <div class="results-heading">
                             <div class="results-title">
-                                <h3>Results</h3>
-                                <span class="record-count">{{ displayedItems.length.toLocaleString() }} {{ isStreaming ? 'loaded' : displayedItems.length === 1 ? 'record' : 'records' }}</span>
+                                <h3>{{ isResultsPreview ? 'Results preview' : 'Results' }}</h3>
+                                <span class="record-count">{{ recordCountLabel }}</span>
                             </div>
                             <div class="sync-info">
                                 <span class="source-badge" :class="`source-${props.metadata?.data_source_type || 'api'}`">
-                                    <v-icon size="14">{{ getDataSourceDisplay.showRealtime ? 'mdi-cloud-outline' : 'mdi-database-outline' }}</v-icon>
+                                    <v-icon size="14" aria-hidden="true">{{ getDataSourceDisplay.showRealtime ? 'mdi-cloud-outline' : 'mdi-database-outline' }}</v-icon>
                                     {{ getDataSourceDisplay.source }}{{ getDataSourceDisplay.suffix || '' }}
                                 </span>
                                 <span v-if="!getDataSourceDisplay.showRealtime && props.metadata?.data_source_type !== 'saved_session'" class="sync-time">Synced {{ getLastSyncTime }}</span>
                             </div>
                         </div>
-                        <div class="search-row">
-                            <div class="header-actions">
-                                <div v-if="showTableAction" class="left-section">
-                                    <v-btn
-                                        v-if="showTableAction"
-                                        class="saved-results-btn"
-                                        :loading="tableActionLoading"
-                                        :disabled="tableActionLoading"
-                                        variant="flat"
-                                        @click="emit('table-action')"
-                                    >
-                                        <v-icon size="small" start>mdi-database-arrow-down-outline</v-icon>
-                                        {{ tableActionLabel }}
-                                    </v-btn>
-
-                                </div>
-
-                                <div class="right-section">
-                                    <!-- Streaming indicator in header -->
-                                    <div v-if="isStreaming" class="streaming-indicator me-3">
-                                        <v-progress-circular 
-                                            :model-value="streamingProgressPercent"
-                                            size="16" 
-                                            width="2" 
-                                            color="primary" 
-                                            class="me-2">
-                                        </v-progress-circular>
-                                        <span class="streaming-text">
-                                            Loading results ({{ streamingProgressPercent }}%)
-                                        </span>
-                                    </div>
-
-                                    <v-text-field v-model="search" density="compact" hide-details
-                                        aria-label="Search results"
-                                        placeholder="Search results" prepend-inner-icon="mdi-magnify" single-line
-                                        clearable variant="outlined" class="search-field"></v-text-field>
-                                    <v-btn class="download-btn" @click="downloadCSV" variant="flat">
-                                        <v-icon size="small" start>mdi-download</v-icon>
-                                        Export CSV
-                                    </v-btn>
-                                </div>
+                        <div class="results-tools">
+                            <div v-if="isStreaming" class="streaming-indicator">
+                                <v-progress-circular :model-value="streamingProgressPercent" size="16" width="2" color="primary" class="me-2" />
+                                <span class="streaming-text">Loading results ({{ streamingProgressPercent }}%)</span>
                             </div>
+                            <v-text-field v-model="search" density="compact" hide-details
+                                :aria-label="isResultsPreview ? 'Search preview' : 'Search results'"
+                                :placeholder="isResultsPreview ? 'Search preview' : 'Search results'"
+                                prepend-inner-icon="mdi-magnify" single-line clearable variant="outlined" class="search-field" />
+                            <v-btn class="download-btn" :class="{ 'preview-export': isResultsPreview }" @click="downloadCSV" variant="flat">
+                                <v-icon size="small" start aria-hidden="true">mdi-download</v-icon>
+                                {{ isResultsPreview ? 'Export preview' : 'Export CSV' }}
+                            </v-btn>
                         </div>
-                        <p v-if="hasHorizontalOverflow" class="table-scroll-hint">
-                            <v-icon size="14">mdi-arrow-left-right</v-icon> Scroll horizontally to see all columns
+                        <p v-if="isResultsPreview" class="preview-description">
+                            {{ showTableAction ? 'Fetch all records to search and export the complete saved result.' : 'Search and export include only the records in this preview.' }}
                         </p>
+                        <div v-if="showTableAction" class="table-action">
+                            <v-btn class="saved-results-btn" :loading="tableActionLoading" :disabled="tableActionLoading"
+                                variant="flat" @click="emit('table-action')">
+                                <v-icon size="small" start aria-hidden="true">mdi-database-arrow-down-outline</v-icon>
+                                {{ tableActionLabel }}
+                            </v-btn>
+                        </div>
                     </div>
                 </template>
                 <template v-for="header in formattedHeaders" :key="header.key" v-slot:[`item.${header.key}`]="{ value }">
@@ -117,7 +95,7 @@
 
 <script setup>
 import { marked } from 'marked'
-import { computed, ref, watch, onBeforeUnmount } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
 import ResultTableCell from './ResultTableCell.vue'
 
@@ -182,21 +160,6 @@ const emit = defineEmits(['table-action'])
 
 // State management
 
-const tableRef = ref(null)
-const hasHorizontalOverflow = ref(false)
-let tableResizeObserver
-watch(tableRef, (table) => {
-    tableResizeObserver?.disconnect()
-    const wrapper = table?.$el?.querySelector('.v-table__wrapper')
-    hasHorizontalOverflow.value = false
-    if (!wrapper) return
-    const updateOverflow = () => { hasHorizontalOverflow.value = wrapper.scrollWidth > wrapper.clientWidth + 1 }
-    tableResizeObserver = new ResizeObserver(updateOverflow)
-    tableResizeObserver.observe(wrapper)
-    const tableElement = wrapper.querySelector('table')
-    if (tableElement) tableResizeObserver.observe(tableElement)
-    updateOverflow()
-}, { flush: 'post' })
 
 const search = ref('')
 const sortBy = ref([{ key: 'email', order: 'asc' }])
@@ -250,6 +213,18 @@ const displayedItems = computed(() => {
 // Keep track of last displayed items to prevent blank table
 const lastDisplayedItems = ref([]);
 
+const isResultsPreview = computed(() => props.metadata?.isPreview === true)
+const recordCountLabel = computed(() => {
+    const loaded = displayedItems.value.length
+    const count = loaded.toLocaleString()
+    if (isResultsPreview.value) {
+        const total = Number(props.metadata?.count)
+        return Number.isSafeInteger(total) && total > loaded
+            ? `${count} of ${total.toLocaleString()} records`
+            : `${count} shown`
+    }
+    return `${count} ${isStreaming.value ? 'loaded' : loaded === 1 ? 'record' : 'records'}`
+})
 
 
 // Keep technical identifiers readable without giving short statuses equal space.
@@ -359,7 +334,7 @@ const getDataSourceDisplay = computed(() => {
             return {
                 showRealtime: false,
                 prefix: 'Data Source:',
-                source: 'Saved Session Preview'
+                source: 'Saved session'
             };
         case 'sql':
             return {
@@ -475,7 +450,7 @@ const getErrorContent = computed(() => {
 
 // Cleanup
 onBeforeUnmount(() => {
-    tableResizeObserver?.disconnect()
+
     search.value = ''
     sortBy.value = [{ key: 'email', order: 'asc' }]
 
@@ -653,24 +628,21 @@ const downloadCSV = () => {
 }
 
 .saved-results-btn {
-    color: var(--primary) !important;
+    color: #fff !important;
     text-transform: none;
+    letter-spacing: normal;
     font-size: 13px;
-    font-weight: 600;
-    padding: 0 14px !important;
-    height: 34px;
-    border: 1px solid rgba(var(--primary-rgb), 0.18) !important;
-    background: rgba(var(--primary-rgb), 0.1) !important;
+    font-weight: 500;
+    padding: 0 12px !important;
+    min-height: 34px;
+    border: 1px solid #375bcc !important;
+    background: var(--primary) !important;
     border-radius: 8px !important;
-    box-shadow: none !important;
-    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 1px 2px rgba(23, 36, 58, .08) !important;
 }
-
-.saved-results-btn:hover {
-    background: rgba(var(--primary-rgb), 0.14) !important;
-    border-color: rgba(var(--primary-rgb), 0.26) !important;
-    transform: translateY(-1px);
-}
+.saved-results-btn:hover { background: var(--primary-hover) !important; }
+.download-btn.preview-export { background: #fff !important; color: #405779 !important; border-color: #cbd7ea !important; box-shadow: none; }
+.download-btn.preview-export:hover { background: #f7f9fd !important; border-color: #aebfe0 !important; }
 
 .download-btn:hover {
     background: var(--primary-hover) !important;
@@ -790,37 +762,20 @@ const downloadCSV = () => {
 
 .table-header-container {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
     gap: 10px 24px;
     padding: 20px 22px;
 }
 
-.results-heading, .results-title { display: flex; align-items: center; gap: 10px; }
+.results-heading, .results-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
 .results-heading { grid-column: 1; grid-row: 1; gap: 12px; flex-wrap: wrap; }
-.results-title h3 { color: #253248; font-size: 16px; font-weight: 600; margin: 0; }
+.results-title h3 { color: #253248; font-size: 14px; font-weight: 600; margin: 0; }
 .record-count { border-radius: 20px; background: #f1f3f7; color: #586579; padding: 3px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
 
-.search-row, .header-actions { display: contents; }
-
-.left-section {
-    grid-column: 1;
-    grid-row: 2;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    flex: 1 1 320px;
-}
-
-.right-section {
-    grid-column: 2;
-    grid-row: 1;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex: 0 1 380px;
-    justify-content: flex-end;
-}
+.results-tools { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.preview-description { grid-column: 1; grid-row: 2; align-self: center; margin: 0; color: #5d6b7d; font-size: 12px; line-height: 1.5; }
+.table-action { grid-column: 2; grid-row: 2; display: flex; justify-content: flex-end; align-items: center; }
+.results-tools .streaming-indicator { flex-basis: 100%; text-align: right; }
 
 .search-field {
     min-width: 160px;
@@ -848,7 +803,6 @@ const downloadCSV = () => {
 /* Target Vuetify's current table markup, including its native scroll wrapper. */
 .table-content { width: 100%; min-width: 0; }
 .results-table { font-family: var(--font-family-body, inherit); }
-.table-scroll-hint { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; margin: 0; color: #626b79; font-size: 12px; }
 :deep(.results-table) { background: #fff; border: 1px solid var(--workspace-outline, #d6dce5); border-radius: 12px; overflow: hidden; box-shadow: none; font-size: 13px; }
 :deep(.results-table .v-table__wrapper) {
     overflow-x: auto;
@@ -876,8 +830,9 @@ const downloadCSV = () => {
     border-bottom: 1px solid var(--workspace-outline, #d6dce5);
 }
 :deep(.results-table .v-table__wrapper > table > tbody > tr > td) {
-    padding: 15px 22px;
-    font-size: 14px;
+    height: 44px;
+    padding: 11px 22px;
+    font-size: 13px;
     font-weight: 400;
     line-height: 1.6;
     color: #202b3c;
@@ -1156,17 +1111,15 @@ const downloadCSV = () => {
 /* Responsive adjustments */
 @media (max-width: 992px) {
     .table-header-container { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .results-tools { grid-column: 1; grid-row: 2; }
+    .preview-description { grid-column: 1; grid-row: 2; }
+    .table-header-container.is-preview .results-tools { grid-row: 3; }
+    .table-action { grid-column: 1; grid-row: 4; }
+    .table-action .saved-results-btn { width: 100%; }
 
-    .right-section {
-        grid-column: 1;
-        grid-row: 3;
-        flex: 1 0 100%;
-        order: 1;
-    }
 
-    .left-section {
-        order: 0;
-    }
+
+
 }
 
 @media (max-width: 768px) {
@@ -1174,9 +1127,7 @@ const downloadCSV = () => {
         padding: 20px 18px;
     }
 
-    .right-section {
-        flex-direction: row;
-    }
+
 
     .markdown-content {
         max-width: 100%;
@@ -1206,15 +1157,9 @@ const downloadCSV = () => {
         border-radius: 12px;
     }
 
-    .left-section {
-        flex-wrap: wrap;
-        gap: 8px;
-    }
 
-    .right-section {
-        flex-direction: row;
-        flex-wrap: wrap;
-    }
+
+
 
     .search-field {
         width: 100%;

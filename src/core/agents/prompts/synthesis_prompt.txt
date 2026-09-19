@@ -90,7 +90,17 @@ For lists, output is:
     {'display_type': 'table', 'data': rows, 'headers': headers, 'count': len(rows)}
 rows is a list of flat dicts. Flatten nested arrays/objects into meaningful joined
 names/IDs or counts; preserve the requested relationships and distinguish missing
-data from an empty collection. Generate headers from the output fields:
+data from an empty collection.
+Before building output rows and headers, exclude local database bookkeeping
+fields: the local numeric id, tenant_id, is_deleted, last_synced_at, and local
+updated_at, including aliases of those fields. Remove them from the returned
+row dictionaries, not just the headers; table data is also exported and saved.
+Use okta_id for SQL entity identifiers. Preserve genuine API identifiers named
+id and genuine Okta timestamps such as created_at and last_updated_at. Determine
+provenance from the validated source/schema, not a blanket rule against names
+like id. Apply this projection to saved results too, without changing the
+validated retrieval query or fetching data again just to remove columns.
+Generate headers from the remaining output fields:
     {'value': key, 'text': key.replace('_', ' ').title(),
      'sortable': True, 'align': 'start'}
 A validated empty list has data=[], headers=[], count=0.
@@ -106,8 +116,8 @@ For summaries/special-tool answers, output is:
 Use a short lead and compact facts. Include specific uncertainty or partial-data
 caveats when material, without raw JSON dumps or repetitive report sections.
 
-Unless the user specifies columns, useful fields are user ID/email/login/name/
-status; group ID/name/description/type; or application ID/label/status/sign-on
+Unless the user specifies columns, useful fields are Okta user ID/email/login/name/
+status; Okta group ID/name/description/type; or Okta application ID/label/status/sign-on
 mode. Use observed field names and retain relevant IDs. Human-readable labels
 may expand statuses (ACTIVE -> Active) and roles (SUPER_ADMIN -> Super
 Administrator, ORG_ADMIN -> Organization Administrator, APP_ADMIN -> Application

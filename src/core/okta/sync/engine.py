@@ -266,7 +266,6 @@ class SyncOrchestrator:
                     AND user_okta_id = :user_okta_id
                 """), {'tenant_id': self.tenant_id, 'user_okta_id': user_okta_id})
 
-            await session.commit()
             logger.debug(f"Completed relationship sync for user {user_okta_id}")
                 
         except Exception as e:
@@ -507,7 +506,6 @@ class SyncOrchestrator:
                     'app_okta_id': app_okta_id
                 })
 
-            await session.commit()
             logger.debug(f"Processed {len(user_assignments)} assignments for app {app_okta_id}")
 
         except Exception as e:
@@ -601,8 +599,7 @@ class SyncOrchestrator:
                 active_sync = result.scalars().first()
                 
                 if not active_sync:
-                    logger.error("No active sync record found for updates")
-                    return
+                    raise RuntimeError("No active sync record found for updates")
                     
                 sync_id = active_sync.id
                 
@@ -637,12 +634,17 @@ class SyncOrchestrator:
                             elif model.__name__ == 'Device': 
                                 sync_history.devices_count = total_records
                                 
-                            await session.commit()
+                        # Entity rows, relationships and polling counters become
+                        # visible together after each bounded batch.
+                        await session.commit()
                         
                         logger.info(f"Processed {batch_count} {model.__name__} records, total: {total_records}")
                     
                     # Call list method with direct processor function 
                     await list_method(processor_func=process_batch_directly)
+
+                    if self.cancellation_flag and self.cancellation_flag.is_set():
+                        raise asyncio.CancelledError("Sync cancelled before reconciliation")
 
                     # Reconcile: remove rows that were not touched during this sync
                     # (i.e. entities deleted in Okta since the last sync)
@@ -842,4 +844,4 @@ class SyncOrchestrator:
             
         except Exception as e:
             logger.error(f"Error processing batch of {model.__name__}: {str(e)}")
-            raise       
+            raise

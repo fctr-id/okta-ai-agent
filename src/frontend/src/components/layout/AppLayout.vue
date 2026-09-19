@@ -225,23 +225,23 @@ const handleNewSession = () => {
     display: flex;
     align-items: center;
     gap: 6px;
-    background: #f8faff;
-    border: 1px solid #dce3ef;
-    color: #53617a;
+    background: #ffffff;
+    border: 1px solid #cbd7ea;
+    color: #334b72;
     cursor: pointer;
-    height: 32px;
-    padding: 0 10px;
-    border-radius: 9px;
+    height: 34px;
+    padding: 0 11px;
+    border-radius: 8px;
     font-family: var(--font-family-body);
     font-size: 12px;
     font-weight: 500;
-    box-shadow: none;
+    box-shadow: 0 1px 2px rgba(23, 36, 58, 0.05);
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .logout-btn:hover {
-    background: #edf2ff;
-    border-color: #bdcdef;
+    background: #eef3fc;
+    border-color: #aebfe0;
     color: #3556aa;
     box-shadow: none;
 }

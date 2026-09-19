@@ -53,7 +53,7 @@ const bodyId = `turn-body-${useId()}`
 .turn-chevron { flex-shrink: 0; color: #4c67a1; transition: transform .15s ease; }
 .turn-chevron.expanded { transform: rotate(90deg); }
 .turn-heading-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
-.turn-question { font-size: 16px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.turn-question { font-size: 14px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .is-collapsed .turn-question { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .turn-author { font-size: 12px; color: #596b82; line-height: 1.5; }
 .turn-heading-summary { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; flex-shrink: 0; max-width: 35%; font-size: 12px; }

@@ -35,6 +35,13 @@ Efficient discovery
    The final script reruns the validated query without discovery-only limits.
 
 Query guidance
+- Select explicit columns needed for the answer or downstream enrichment; do not
+  use SELECT * or table.* to return every database field. Entity identifiers mean
+  the actual Okta identifier (okta_id), not the local database's numeric id.
+  Keep local bookkeeping fields (id, tenant_id, is_deleted, last_synced_at, and
+  local updated_at) out of the output projection. They may still be used in
+  filters, joins, or ordering. Preserve genuine Okta fields such as created_at
+  and last_updated_at; local updated_at is not the Okta last-updated value.
 - Preserve user filters and known IDs. For anchored follow-ups, enrich the saved
   population instead of starting a broader search.
 - Preserve the existing ACTIVE default for both users and applications, including
