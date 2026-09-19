@@ -69,8 +69,11 @@ API execution
   visibly unknown/failed rather than reporting no roles/apps or a zero count.
   Retain successful partial data with a clear caveat; fail if no usable answer
   remains. Do not silently drop failed entities or broaden/retry indefinitely.
-- Report database/fatal API failures to stderr and exit nonzero. Mark failed
-  progress with success=False; do not print a successful zero-result answer.
+- For database/fatal API exceptions, print the error to stderr and re-raise it
+  with bare `raise` inside the except block. This preserves the original failure
+  and exits the script nonzero after finally cleanup. Avoid SystemExit, exit(),
+  quit(), and sys.exit(). Mark failed progress with success=False; do not print
+  a successful zero-result answer.
 
 Output contract
 Return SynthesisResult(success=True, script_code=<plain executable Python>,

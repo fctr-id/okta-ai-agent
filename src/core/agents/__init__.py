@@ -3,9 +3,11 @@ Agents package for Tako v1.0.0-beta
 Contains core AI agents for the Okta AI Agent system
 """
 
-from typing import Any
+import os
+from typing import Any, cast
 
 from pydantic_ai import Agent
+from pydantic_ai.settings import ModelSettings, ThinkingLevel
 
 from src.core.models.model_picker import ModelConfig, ModelType
 
@@ -25,9 +27,23 @@ DEFAULT_AGENT_METADATA: dict[str, str] = {
 }
 
 
+def get_default_model_settings() -> ModelSettings:
+	"""Read optional shared reasoning effort; leave model defaults intact when unset."""
+	effort = os.getenv("AI_REASONING_EFFORT", "").strip().lower()
+	if effort in {"", "none"}:
+		return ModelSettings()
+	if effort in {"true", "false"}:
+		return ModelSettings(thinking=effort == "true")
+	if effort not in {"minimal", "low", "medium", "high", "xhigh"}:
+		raise ValueError("AI_REASONING_EFFORT must be minimal, low, medium, high, xhigh, true, false, or none (or unset/blank)")
+	return ModelSettings(thinking=cast(ThinkingLevel, effort))
+
+
 def build_agent(model_type: ModelType, /, *, name: str, **agent_kwargs: Any) -> Agent[Any, Any]:
 	"""Create an agent with shared Phase 1 defaults while keeping model selection centralized."""
 	model = ModelConfig.get_model(model_type)
+	model_settings = get_default_model_settings()
+	model_settings.update(agent_kwargs.pop("model_settings", None) or {})
 	provided_metadata = agent_kwargs.pop("metadata", None)
 	combined_metadata = {
 		**DEFAULT_AGENT_METADATA,
@@ -44,6 +60,7 @@ def build_agent(model_type: ModelType, /, *, name: str, **agent_kwargs: Any) -> 
 		**agent_kwargs,
 		"name": name,
 		"metadata": combined_metadata,
+		"model_settings": model_settings,
 	}
 	return Agent(model, **combined_kwargs)
 
@@ -52,4 +69,5 @@ __all__ = [
 	"DEFAULT_AGENT_METADATA",
 	"DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS",
 	"build_agent",
+	"get_default_model_settings",
 ]

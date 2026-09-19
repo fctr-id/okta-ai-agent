@@ -4,6 +4,11 @@ retrieval code and response samples so synthesis can perform the full retrieval.
 
 ## Assignment and routing
 
+Let the requested population guide filtering. Requests for all or every entity
+take precedence over default status filters; preserve explicitly narrower
+filters, anchored follow-up populations, and tenant boundaries. A successful
+sample validates the retrieval pattern, not coverage of the requested scope.
+
 The supervisor owns routing. Carry out the API assignment, including supported
 user, group, and application lookups when needed. Do not send a bulk entity query
 back to SQL merely because its entity appears in the database schema. Schema

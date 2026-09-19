@@ -123,7 +123,7 @@ const handleNewSession = () => {
 
 <style>
 .app-page {
-    --sidebar-width: 260px;
+    --sidebar-width: min(280px, calc(100vw - 48px));
     --collapsed-sidebar-width: 48px;
     --header-height: 56px;
     min-height: 100vh;

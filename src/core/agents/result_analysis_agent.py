@@ -279,7 +279,7 @@ async def execute_result_analysis(
         )
 
     plan = run_result.output
-    usage = run_result.usage()
+    usage = run_result.usage
     selected_result_set_ids = list(plan.selected_result_set_ids)
     selected_candidates = _select_candidate_result_sets(candidate_result_sets, selected_result_set_ids)
     anchored_result_scope = _build_anchored_result_scope(selected_candidates)

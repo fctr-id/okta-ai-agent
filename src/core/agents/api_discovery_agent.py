@@ -908,8 +908,8 @@ are unnecessary. Do not rerun validated patterns merely to combine them.
         )
         
         # Log token usage
-        if result.usage():
-            usage = result.usage()
+        usage = result.usage
+        if usage:
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
                 f"[{deps.correlation_id}] API Agent Token Usage: "
@@ -918,7 +918,7 @@ are unnecessary. Do not rerun validated patterns merely to combine them.
                 f"avg {avg_per_call:,.0f} input/call)"
             )
         
-        return result.output, result.usage()
+        return result.output, usage
         
     except UsageLimitExceeded:
         # Let the orchestrator apply the shared runtime stop behavior.

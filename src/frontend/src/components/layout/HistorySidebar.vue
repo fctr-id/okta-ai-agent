@@ -15,7 +15,7 @@
     <div v-if="!isCollapsed" class="sidebar-actions">
       <button type="button" class="new-session-btn" @click.stop="handleNewSession">
         <span class="new-chat-icon"><v-icon icon="mdi-plus" size="14" /></span>
-        <span>New chat</span>
+        <span>New chat session</span>
       </button>
     </div>
 
@@ -101,7 +101,7 @@
     
     <!-- Collapsed State Icons -->
     <div v-else class="collapsed-icons">
-      <button type="button" class="collapsed-action-btn" title="New chat" aria-label="New chat" @click.stop="handleNewSession">
+      <button type="button" class="collapsed-action-btn" title="New chat session" aria-label="New chat session" @click.stop="handleNewSession">
         <v-icon icon="mdi-plus" size="18" />
       </button>
 
@@ -372,16 +372,16 @@ defineExpose({ refresh: refreshSidebar })
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 8px 16px;
+  padding: 12px 10px 16px;
   display: flex;
   flex-direction: column;
 }
 
-.sidebar-actions { padding: 0 12px 14px; border-bottom: 1px solid #e6ebf3; }
+.sidebar-actions { padding: 0 10px 16px; }
 
 .new-session-btn {
-  width: 100%; min-height: 38px; padding: 0 10px;
-  display: flex; align-items: center; gap: 9px;
+  width: 100%; min-height: 44px; padding: 8px 12px;
+  display: flex; align-items: center; gap: 10px; text-align: left;
   border: 1px solid #375bcc; border-radius: 9px; background: var(--primary);
   color: #fff; font-size: 12px; font-weight: 550; cursor: pointer;
   box-shadow: 0 2px 4px rgba(62, 99, 221, 0.12);
@@ -465,8 +465,8 @@ defineExpose({ refresh: refreshSidebar })
 .conversation-icon { color: #9aa8bc; margin-top: 3px; }
 .history-row.is-selected .conversation-icon { color: #5279cb; }
 .history-row.is-archived { opacity: .75; }
-.session-select { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 8px; width: 100%; padding: 10px 30px 10px 10px; border: 0; border-radius: inherit; background: transparent; text-align: left; cursor: pointer; }
-.row-status-group { position: absolute; top: 6px; right: 5px; }
+.session-select { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 8px; width: 100%; padding: 10px; border: 0; border-radius: inherit; background: transparent; text-align: left; cursor: pointer; }
+.row-status-group { position: absolute; bottom: 6px; right: 5px; }
 .history-sidebar button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .pin-toggle { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: #7b8190; cursor: pointer; transition: background .15s, opacity .15s; }
 .pin-toggle:hover, .pin-toggle.is-active { color: #526fc1; background: #e8eefb; }
@@ -475,8 +475,8 @@ defineExpose({ refresh: refreshSidebar })
 .status-chip-active { color: #3a62b6; background: #edf2ff; }
 .status-chip-complete { color: #217866; background: #e8f5ef; }
 .status-chip-error { color: #b42318; background: #fff0ee; }
-.row-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; line-height: 1.5; color: #383e4c; }
-.row-meta { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+.row-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; font-weight: 400; line-height: 1.5; color: #383e4c; }
+.row-meta { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; padding-right: 24px; }
 .row-date { color: #7b8190; font-size: 10px; font-weight: 400; line-height: 1.5; }
 
 /* Empty/Loading States */

@@ -46,6 +46,15 @@ Saved results and follow-ups
   ref when analysis is unnecessary. It requires an existing result-set ref.
 
 Decision and stopping conditions
+- Compare the requested population and fields with the saved evidence before
+  deciding coverage is complete. A successful query establishes that it ran,
+  not that its filters match the request. Requests for all or every entity take
+  precedence over default status filters, while explicit narrower filters,
+  anchored follow-up populations, and tenant boundaries still apply.
+- When evidence covers a narrower population or lacks requested fields, describe
+  the concrete gap in requested_data and delegate the correction within the
+  remaining budget. Reuse valid evidence; a scope correction is different from
+  repeating an already answered lookup.
 - delegate: choose exactly one of SQL, API, SPECIAL, PROCESSOR, RESULT_ANALYSIS.
 - complete: validated evidence answers the request; target SYNTHESIS for the
   normal script answer. A successful specialist with no unresolved requirements

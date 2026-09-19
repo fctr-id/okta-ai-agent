@@ -220,7 +220,7 @@
             <!-- Search Container with Animated Position -->
             <div class="search-container">
                 <!-- Hero title -->
-                <div class="hero-card" :class="{ hidden: hasResults || isReturningHome }">
+                <div v-show="!hasResults" class="hero-card" :class="{ 'home-reveal-pending': isReturningHome }">
                     <div class="title-wrapper">
                         <span class="workspace-eyebrow"><span aria-hidden="true"></span> Your AI assistant</span>
                         <h1 class="main-title">
@@ -281,8 +281,7 @@
                 </div>
 
                 <!-- Suggestions -->
-                <transition name="fade-up">
-                    <div v-if="!hasResults && !isReturningHome" class="suggestions-wrapper">
+                    <div v-show="!hasResults" class="suggestions-wrapper" :class="{ 'home-reveal-pending': isReturningHome }">
                         <div class="suggestions-grid">
                             <button
                                 v-for="(suggestion, i) in visibleSuggestions"
@@ -307,7 +306,6 @@
                             </button>
                         </div>
                     </div>
-                </transition>
             </div>
 
         </main>
@@ -418,8 +416,8 @@ const isReturningHome = ref(false) // Keeps the home shell hidden during reverse
 const auth = useAuth()
 const router = useRouter()
 
-let composerCleanupTimerId = null
-let homeRevealTimerId = null
+let composerAnimation = null
+let composerAnimationRevision = 0
 /**
  * Auto-resize textarea to fit content
  */
@@ -431,39 +429,23 @@ const autoResizeTextarea = () => {
     }
 }
 
-const clearComposerAnimationTimer = () => {
-    if (composerCleanupTimerId !== null) {
-        window.clearTimeout(composerCleanupTimerId)
-        composerCleanupTimerId = null
-    }
-}
-
-const clearHomeRevealTimer = () => {
-    if (homeRevealTimerId !== null) {
-        window.clearTimeout(homeRevealTimerId)
-        homeRevealTimerId = null
-    }
-}
-
-const cleanupComposerAnimation = () => {
-    const searchWrapper = searchWrapperRef.value
-    if (!searchWrapper) {
-        return
-    }
-
-    searchWrapper.style.removeProperty('transform')
-    searchWrapper.style.removeProperty('transition')
-    searchWrapper.style.removeProperty('transform-origin')
-    searchWrapper.style.removeProperty('will-change')
-    searchWrapper.style.removeProperty('opacity')
+const cancelComposerAnimation = () => {
+    composerAnimationRevision += 1
+    composerAnimation?.cancel()
+    composerAnimation = null
 }
 
 const animateComposerDock = async (beforeRect) => {
+    cancelComposerAnimation()
+    const revision = composerAnimationRevision
     await nextTick()
+    if (revision !== composerAnimationRevision) return
 
     const searchWrapper = searchWrapperRef.value
-    if (!searchWrapper || !beforeRect) {
-        return false
+    autoResizeTextarea()
+    if (!searchWrapper || !beforeRect || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        isReturningHome.value = false
+        return
     }
 
     const afterRect = searchWrapper.getBoundingClientRect()
@@ -474,49 +456,23 @@ const animateComposerDock = async (beforeRect) => {
     const hasMovement = Math.abs(deltaX) > 1 || Math.abs(deltaY) > 1 || Math.abs(scaleX - 1) > 0.01 || Math.abs(scaleY - 1) > 0.01
 
     if (!hasMovement) {
-        return false
-    }
-
-    clearComposerAnimationTimer()
-
-    searchWrapper.style.transformOrigin = 'top left'
-    searchWrapper.style.willChange = 'transform, opacity'
-    searchWrapper.style.transition = 'none'
-    searchWrapper.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`
-    searchWrapper.style.opacity = '0.98'
-    searchWrapper.getBoundingClientRect()
-
-    requestAnimationFrame(() => {
-        searchWrapper.style.transition = 'transform 0.34s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease'
-        searchWrapper.style.transform = 'translate(0, 0) scale(1, 1)'
-        searchWrapper.style.opacity = '1'
-    })
-
-    composerCleanupTimerId = window.setTimeout(() => {
-        cleanupComposerAnimation()
-        composerCleanupTimerId = null
-    }, 380)
-
-    return true
-}
-
-const animateComposerReturnHome = async (beforeRect) => {
-    const didAnimate = await animateComposerDock(beforeRect)
-
-    if (!isReturningHome.value) {
-        return
-    }
-
-    if (!didAnimate) {
         isReturningHome.value = false
         return
     }
 
-    clearHomeRevealTimer()
-    homeRevealTimerId = window.setTimeout(() => {
+    // Animate between settled layouts. The welcome content keeps its final
+    // space during the return, so revealing it cannot move the destination.
+    const animation = searchWrapper.animate([
+        { transform: `translate(${deltaX}px, ${deltaY}px) scale(${scaleX}, ${scaleY})`, transformOrigin: 'top left' },
+        { transform: 'none', transformOrigin: 'top left' },
+    ], { duration: 340, easing: 'cubic-bezier(0.25, 0.8, 0.25, 1)' })
+    composerAnimation = animation
+    await animation.finished.catch(() => {}) // Rapid New chat / send cancels the old motion.
+    if (revision === composerAnimationRevision) {
+        animation.cancel()
+        composerAnimation = null
         isReturningHome.value = false
-        homeRevealTimerId = null
-    }, 360)
+    }
 }
 
 // Add new refs to store stream controller and track streaming progress
@@ -1007,9 +963,7 @@ const loadFullTurnResults = async (turn) => {
 }
 
 const prepareComposerForSessionLoad = async () => {
-    clearHomeRevealTimer()
-    clearComposerAnimationTimer()
-    cleanupComposerAnimation()
+    cancelComposerAnimation()
     isReturningHome.value = false
     hasResults.value = true
 
@@ -1172,9 +1126,7 @@ const stopProcessing = () => {
 }
 
 onBeforeUnmount(() => {
-    clearComposerAnimationTimer()
-    clearHomeRevealTimer()
-    cleanupComposerAnimation()
+    cancelComposerAnimation()
     if (activeTurnScrollFrameId !== null) {
         window.cancelAnimationFrame(activeTurnScrollFrameId)
         activeTurnScrollFrameId = null
@@ -1472,13 +1424,11 @@ const resetInterface = () => {
     const shouldAnimateHome = hasResults.value
     const composerRect = shouldAnimateHome ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
 
-    clearHomeRevealTimer()
     if (shouldAnimateHome) {
         isReturningHome.value = true
     }
 
-    clearComposerAnimationTimer()
-    cleanupComposerAnimation()
+    cancelComposerAnimation()
     hasResults.value = false
     sessionLoadRequestId += 1
     userInput.value = ''
@@ -1519,7 +1469,7 @@ const resetInterface = () => {
     }
 
     if (shouldAnimateHome) {
-        void animateComposerReturnHome(composerRect)
+        void animateComposerDock(composerRect)
     } else {
         isReturningHome.value = false
     }
@@ -1623,7 +1573,6 @@ const sendQuery = async () => {
     const shouldAnimateDock = !hasResults.value
     const composerRect = shouldAnimateDock ? searchWrapperRef.value?.getBoundingClientRect() ?? null : null
 
-    clearHomeRevealTimer()
     isReturningHome.value = false
     activeTurnKey.value = null
 
@@ -1882,7 +1831,6 @@ onMounted(() => {
     display: flex;
     flex-direction: column;
     padding: 0;
-    transition: padding 0.3s ease;
     position: relative;
     min-height: 0;
     box-sizing: border-box;
@@ -2070,14 +2018,12 @@ onMounted(() => {
     background: transparent;
     border: none;
     box-shadow: none;
-    transition: opacity 0.35s ease, transform 0.35s ease, max-height 0.35s ease, margin 0.35s ease;
+    transition: opacity 0.2s ease;
 }
 
-.hero-card.hidden {
+.hero-card.home-reveal-pending,
+.suggestions-wrapper.home-reveal-pending {
     opacity: 0;
-    transform: translateY(-16px);
-    max-height: 0;
-    margin-bottom: 0;
     pointer-events: none;
 }
 
@@ -2120,6 +2066,8 @@ onMounted(() => {
 }
 
 .conversation-scroll { display: contents; }
+/* Leaving results must not take up space in the centered welcome layout. */
+.content-area:not(.has-results) .transcript-shell { display: none; }
 .has-results .conversation-scroll {
     display: block;
     flex: 1 1 0;
@@ -2779,7 +2727,7 @@ onMounted(() => {
 
 .fade-up-enter-active,
 .fade-up-leave-active {
-    transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+    transition: opacity 0.24s ease, transform 0.24s ease;
 }
 
 .fade-up-enter-from,

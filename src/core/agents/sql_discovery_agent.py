@@ -815,8 +815,8 @@ Compact API Artifact Context (manifests, result refs, tiny samples):
         )
         
         # Log token usage
-        if result.usage():
-            usage = result.usage()
+        usage = result.usage
+        if usage:
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
                 f"[{deps.correlation_id}] SQL Agent Token Usage: "
@@ -825,7 +825,7 @@ Compact API Artifact Context (manifests, result refs, tiny samples):
                 f"avg {avg_per_call:,.0f} input/call)"
             )
         
-        return result.output, result.usage()
+        return result.output, usage
         
     except UsageLimitExceeded:
         # Preserve the exception type so the orchestrator stops instead of

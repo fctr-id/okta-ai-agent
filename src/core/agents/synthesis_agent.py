@@ -295,8 +295,8 @@ db_path = next((p for p in possible_paths if p.exists()), None)
                 logger.debug(f"[{deps.correlation_id}] Complete script:\n{result.output.script_code}")
         
         # Log token usage
-        if result.usage():
-            usage = result.usage()
+        usage = result.usage
+        if usage:
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
                 f"[{deps.correlation_id}] Synthesis Agent Token Usage: "
@@ -318,7 +318,7 @@ db_path = next((p for p in possible_paths if p.exists()), None)
                 f"Script generation failed: {result.output.error or 'Unknown error'}"
             )
         
-        return result.output, result.usage()
+        return result.output, usage
         
     except Exception as e:
         logger.error(f"[{deps.correlation_id}] Synthesis failed: {e}", exc_info=True)
