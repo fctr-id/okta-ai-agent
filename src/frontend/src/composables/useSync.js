@@ -40,7 +40,7 @@ export function useSync() {
         if (!timestamp) return null;
 
         // If timestamp doesn't end with Z, add it to make JavaScript interpret it as UTC
-        const utcTimeStr = timestamp.endsWith("Z") ? timestamp : timestamp + "Z";
+        const utcTimeStr = /(?:Z|[+-]\d{2}:\d{2})$/i.test(timestamp) ? timestamp : timestamp + "Z";
         return new Date(utcTimeStr);
     };
 
@@ -132,7 +132,7 @@ export function useSync() {
                     data.entity_counts.users !== previousCounts.users ||
                     data.entity_counts.groups !== previousCounts.groups ||
                     data.entity_counts.applications !== previousCounts.applications ||
-                    data.entity_counts.policies !== previousCounts.policies;
+                    data.entity_counts.policies !== previousCounts.policies ||
                     data.entity_counts.devices !== previousCounts.devices;
 
                 // If counts changed, update the timestamp
@@ -146,7 +146,9 @@ export function useSync() {
             }
 
             // Parse timestamps as UTC
-            if (data.end_time) {
+            if ("last_successful_sync_time" in data) {
+                lastSyncTime.value = parseUtcTimestamp(data.last_successful_sync_time);
+            } else if (data.end_time && data.status === "completed") {
                 lastSyncTime.value = parseUtcTimestamp(data.end_time);
             } else if (data.start_time && data.status === "completed") {
                 lastSyncTime.value = parseUtcTimestamp(data.start_time);

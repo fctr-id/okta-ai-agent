@@ -1,5 +1,35 @@
 # Version History
 
+## v3.1.0-beta - "Catch of the Day"
+
+**Status**: Unreleased
+
+**Recommended upgrade for all Tako users.** This release delivers a refreshed interface and important fixes for incomplete sync data, repeated API calls, timezone handling, and misleading error states.
+
+This release refreshes Tako's conversation interface, improves follow-up clarity and timezone handling, and fixes issues in agent execution and Okta synchronization.
+
+✨ Highlights
+
+- **Refreshed Conversation Experience**: Questions, activity, execution details, and results now sit together in collapsible conversation cards, making longer investigations easier to follow.
+- **Clearer Tables and Navigation**: Improved table readability, expandable long values, clearer saved-result previews, and updated sidebar, login, setup, and sync interfaces.
+- **Clarification Without False Errors**: Clarification questions appear as normal conversational responses, allowing users to answer and continue.
+- **Timezone-Aware Answers**: Browser timezone context and daylight-saving-aware conversion support local-time requests while preserving explicit timestamp offsets.
+
+🔧 Optimizations and Fixes
+
+- **More Reliable Agent Execution**: Fixed duplicate execution of API discovery tests, helper-function scope errors, and changes to escaped strings in generated scripts.
+- **Better Budget Handling**: Agent tool-budget exhaustion now stops correctly instead of triggering unintended fallback requests.
+- **Improved Retrieval Guidance**: Refined prompts for reusing saved evidence, preserving follow-up scope, respecting database freshness, and avoiding unnecessary repeat lookups.
+- **More Complete API Results**: Fixed response normalization that could discard resource fields when objects contained nested arrays.
+- **Safer, More Efficient Sync**: Reused HTTP connections, reduced database lookups, and added bounded batch commits while retaining live progress updates.
+- **Correct Sync Failure Handling**: Pagination failures, exhausted retries, and cancellation no longer masquerade as complete retrievals before stale-record cleanup. New authenticator types are preserved despite older SDK enums.
+- **Safer Relationship Updates**: Unfetched group-to-app assignments no longer erase saved links. Confirmed device-user removals and application-policy removals clear stale relationships; unresolved policy references report a sync failure.
+- **Atomic Device Batches**: Device records, user relationships, and progress counts roll back together when a batch fails.
+- **Accurate Sync Status**: Failed or canceled attempts remain visible instead of being hidden by an earlier success, while the interface retains the last successful counts and timestamp.
+- **Cleaner Output and Better Diagnostics**: Updated prompts to omit internal database fields; improved activity reporting, persistent logs, startup configuration loading, and CLI failure exit codes.
+
+---
+
 ## v3.0.1-beta - "Secure the Harness"
 
 **Release Date**: June 30, 2026

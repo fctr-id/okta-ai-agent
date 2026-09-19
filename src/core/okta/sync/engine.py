@@ -63,7 +63,7 @@ class SyncOrchestrator:
         self._initialized = False
         self.cancellation_flag = cancellation_flag
         self._pending_group_relationships: List[Dict[str, Any]] = []
-        self._pending_application_policy_links: List[Dict[str, str]] = []
+        self._pending_application_policy_links: List[Dict[str, Any]] = []
 
     async def _initialize(self) -> None:
         if not self._initialized:
@@ -285,7 +285,9 @@ class SyncOrchestrator:
         """
         try:
             # Get current assignments from Okta response
-            current_app_assignments = group_data.pop('applications', [])
+            if 'applications' not in group_data:
+                return  # Not fetched is different from a confirmed empty snapshot.
+            current_app_assignments = group_data.pop('applications')
             current_app_ids = [str(a['application_okta_id']) for a in current_app_assignments]
             group_okta_id = str(group_data['okta_id'])
             now = datetime.now(timezone.utc)
@@ -377,12 +379,12 @@ class SyncOrchestrator:
                                 updated_at = :updated_at
                             WHERE tenant_id = :tenant_id
                             AND okta_id = :application_okta_id
-                            AND EXISTS (
+                            AND (:policy_id IS NULL OR EXISTS (
                                 SELECT 1
                                 FROM policies
                                 WHERE tenant_id = :tenant_id
                                 AND okta_id = :policy_id
-                            )
+                            ))
                         """),
                         {
                             'tenant_id': str(self.tenant_id),
@@ -393,10 +395,9 @@ class SyncOrchestrator:
                     )
 
                     if result.rowcount == 0:
-                        logger.warning(
-                            "Skipped application policy link for app %s because policy %s was not present after Policy sync",
-                            policy_link['application_okta_id'],
-                            policy_link['policy_id'],
+                        raise RuntimeError(
+                            f"Cannot reconcile application {policy_link['application_okta_id']} "
+                            f"with policy {policy_link['policy_id']}: application or policy missing"
                         )
 
                 await session.commit()
@@ -800,10 +801,11 @@ class SyncOrchestrator:
 
             if model == Group:
                 for record in batch:
-                    self._pending_group_relationships.append({
-                        'okta_id': record['okta_id'],
-                        'applications': record.pop('applications', []),
-                    })
+                    if 'applications' in record:
+                        self._pending_group_relationships.append({
+                            'okta_id': record['okta_id'],
+                            'applications': record.pop('applications'),
+                        })
 
                 await self.db.bulk_upsert(session, model, batch, self.tenant_id)
                 return len(batch)
@@ -811,11 +813,11 @@ class SyncOrchestrator:
             if model == Application:
                 relationship_payloads = []
                 for record in batch:
-                    policy_id = record.pop('policy_id', None)
-                    if policy_id:
+                    if 'policy_id' in record:
+                        policy_id = record.pop('policy_id')
                         self._pending_application_policy_links.append({
                             'application_okta_id': record['okta_id'],
-                            'policy_id': str(policy_id),
+                            'policy_id': str(policy_id) if policy_id is not None else None,
                         })
 
                     relationship_payloads.append({

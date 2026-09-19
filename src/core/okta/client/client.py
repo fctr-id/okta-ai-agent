@@ -1542,13 +1542,15 @@ class OktaClientWrapper:
                 embedded_data = device_dict.get('_embedded', {})
                 embedded_users = embedded_data.get('users', [])
                 
-                if embedded_users:
+                if 'users' in embedded_data:
                     user_devices = []
                     for user_relationship in embedded_users:
                         # Get the nested user object
                         user_info = user_relationship.get('user', {})
                         user_id = user_info.get('id')  # This is the okta_id
                         
+                        if not user_id:
+                            raise ValueError(f"Missing user ID in device {okta_id} relationship")
                         if user_id:
                             user_device_data = {
                                 'device_okta_id': okta_id,
@@ -1562,9 +1564,8 @@ class OktaClientWrapper:
                             # Debug logging
                             logger.debug(f"Created user-device relationship: device={okta_id}, user={user_id}, mgmt={user_device_data['management_status']}")
                     
-                    if user_devices:
-                        device_data['user_devices'] = user_devices
-                        logger.debug(f"Device {okta_id} has {len(user_devices)} user relationships")
+                    device_data['user_devices'] = user_devices
+                    logger.debug(f"Device {okta_id} has {len(user_devices)} user relationships")
                 else:
                     logger.debug(f"Device {okta_id} has no embedded users")
                 

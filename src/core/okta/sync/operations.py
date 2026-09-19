@@ -678,7 +678,7 @@ class DatabaseOperations:
                     total_factors += len(factors) if factors else 0
                 
                 # Extract user_devices if present (Device model) 
-                user_devices = record.pop('user_devices', []) if model == Device else None
+                user_devices = record.pop('user_devices', None) if model == Device else None
                 if model == Device:
                     total_user_devices += len(user_devices) if user_devices else 0
                 
@@ -709,7 +709,9 @@ class DatabaseOperations:
                     await self._process_user_factors(session, existing, factors, tenant_id)
                     
                 # Process user-device relationships if present (Device model)
-                if user_devices:
+                if user_devices is not None:
+                    # The relationship FK requires new devices to exist first.
+                    await session.flush()
                     await self._process_device_user_relationships(session, existing, user_devices, tenant_id)                    
     
             # Logging
@@ -943,8 +945,7 @@ class DatabaseOperations:
         Notes:
             - Creates/updates user-device relationships
             - Validates that users exist before creating relationships
-            - Marks removed relationships as deleted
-            - Maintains relationship sync timestamps
+            - Deletes removed relationships within the caller's transaction
         """        
         try:
             logger.debug(f"Processing {len(user_devices)} user relationships for device {device.okta_id}")
@@ -986,7 +987,7 @@ class DatabaseOperations:
                     for key, value in user_device_data.items():
                         if hasattr(existing_relationship, key):
                             setattr(existing_relationship, key, value)
-                    existing_relationship.last_synced_at = datetime.utcnow()
+                    existing_relationship.updated_at = datetime.utcnow()
                 else:
                     # Create new relationship
                     new_relationship = UserDevice(**user_device_data)
@@ -994,7 +995,7 @@ class DatabaseOperations:
                 
                 relationship_keys.append((user_okta_id, device.okta_id))
     
-            # Mark deleted relationships (soft delete)
+            # UserDevice has no soft-delete columns; remove stale links physically.
             if relationship_keys:
                 # Build the condition for relationships that should remain active
                 active_conditions = [
@@ -1026,10 +1027,7 @@ class DatabaseOperations:
             deleted_relationships = result.scalars().all()
             
             for relationship in deleted_relationships:
-                relationship.is_deleted = True
-                relationship.last_synced_at = datetime.utcnow()
-    
-            await session.commit()
+                await session.delete(relationship)
     
         except Exception as e:
             logger.error(f"Error processing user relationships for device {device.okta_id}: {str(e)}")
@@ -1148,15 +1146,21 @@ class DatabaseOperations:
         result = await session.execute(query)
         return result.scalars().first()
 
+    async def get_latest_sync(self, session: AsyncSession, tenant_id: str) -> Optional[SyncHistory]:
+        """Return the latest attempt, including failures and cancellations."""
+        result = await session.execute(
+            select(SyncHistory).where(SyncHistory.tenant_id == tenant_id)
+            .order_by(SyncHistory.start_time.desc(), SyncHistory.id.desc()).limit(1)
+        )
+        return result.scalars().first()
+
     async def get_last_completed_sync(self, session: AsyncSession, tenant_id: str) -> Optional[SyncHistory]:
         """
         Get the most recently successfully completed sync.
         Returns SyncHistory object or None
 
-        Note: Only COMPLETED records are considered. Including FAILED/CANCELED
-        records here caused the /sync/status endpoint to report cancelled or
-        failed syncs (with zero entity counts) even when a healthy sync had
-        completed earlier.
+        Use get_latest_sync for attempt status; this method supplies the last
+        successful snapshot's counts and timestamp independently of failures.
 
         Args:
             session: Active database session
