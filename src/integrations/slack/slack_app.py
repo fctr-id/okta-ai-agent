@@ -43,7 +43,7 @@ from src.integrations.slack.formatters import (
     format_history_message,
 )
 from src.utils.logging import get_logger, set_correlation_id
-from src.utils.security_config import validate_generated_code
+from src.utils.security_config import SECURITY_VALIDATION_USER_MESSAGE, validate_generated_code
 
 logger = get_logger("slack_bot")
 
@@ -475,7 +475,8 @@ async def _replay_saved_script(
         validation_result = validate_generated_code(script_code)
         if not validation_result.is_valid:
             violations = ", ".join(validation_result.violations)
-            await slack_handler.post_error(f"Security validation failed: {violations}")
+            logger.error(f"[{correlation_id}] Security validation failed: {violations}")
+            await slack_handler.post_error(SECURITY_VALIDATION_USER_MESSAGE)
             return
 
         # Execute the script directly — no OrchestratorResult metadata needed
@@ -591,7 +592,8 @@ async def _process_query(
 
         # Handle failures
         if not result.success:
-            error_msg = result.error or "Query execution failed"
+            logger.error(f"[{correlation_id}] Query failed: {result.error}")
+            error_msg = result.user_message or result.error or "I couldn't complete this request."
 
             # NOT_RELEVANT special case
             if error_msg == "NOT-OKTA-RELATED":
@@ -624,6 +626,20 @@ async def _process_query(
                 "outcome": result.outcome_metadata(),
             })
             update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+            return
+
+        if result.completed_result is not None:
+            complete_event = result.completed_result_event()
+            await slack_handler.post_final_results(query, complete_event)
+            write_turn_summary(runtime_paths, {
+                "status": "completed", "user_query": query,
+                "final_response_summary": complete_event.get("content") or f"Found {complete_event.get('count', 0)} results",
+                "display_type": complete_event["display_type"],
+                "result_count": complete_event.get("count", 0),
+                "artifact_file": artifacts_file.as_posix(), "outcome": result.outcome_metadata(),
+            })
+            update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+            await _save_history(correlation_id, query, "", user_id, channel_id=channel_id, thread_ts=message_thread_ts)
             return
 
         # Handle special tools (summaries, modifications)
@@ -659,8 +675,9 @@ async def _process_query(
         validation_result = validate_generated_code(result.script_code)
         if not validation_result.is_valid:
             violations = ", ".join(validation_result.violations)
-            await slack_handler.post_error(f"Security validation failed: {violations}")
-            update_turn_metadata(runtime_paths, status="error", error=f"Security validation failed: {violations}", completed_at=time.time())
+            logger.error(f"[{correlation_id}] Security validation failed: {violations}")
+            await slack_handler.post_error(SECURITY_VALIDATION_USER_MESSAGE)
+            update_turn_metadata(runtime_paths, status="error", error=SECURITY_VALIDATION_USER_MESSAGE, completed_at=time.time())
             return
 
         # Execute the generated script

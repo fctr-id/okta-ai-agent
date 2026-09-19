@@ -1,11 +1,12 @@
 from enum import Enum
 from typing import Optional, Dict
+from urllib.parse import urlsplit, urlunsplit
 from pydantic import BaseModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
-from openai import AsyncAzureOpenAI
+from pydantic_ai.providers.azure import AzureProvider
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.bedrock import BedrockConverseModel
@@ -142,6 +143,24 @@ def parse_headers() -> Dict[str, str]:
         logger.error(f"Error parsing CUSTOM_HTTP_HEADERS: {e}")
         return {}
 
+def normalize_azure_endpoint(endpoint: Optional[str]) -> str:
+    """Accept existing resource roots while explicitly selecting Azure's v1 API."""
+    parts = urlsplit((endpoint or '').strip())
+    if not parts.scheme or not parts.netloc or parts.query or parts.fragment:
+        raise ValueError('AZURE_OPENAI_ENDPOINT must be an Azure resource URL without query parameters or fragments')
+
+    path = parts.path.rstrip('/')
+    if not path:
+        path = '/v1' if (parts.hostname or '').endswith('.models.ai.azure.com') else '/openai/v1'
+    elif path.endswith('/openai'):
+        path += '/v1'
+    elif path.endswith('/v1/responses'):
+        raise ValueError('AZURE_OPENAI_ENDPOINT must end in /openai/v1/; remove /responses because the SDK adds it')
+    elif not path.endswith('/v1'):
+        raise ValueError('AZURE_OPENAI_ENDPOINT must be a resource root or an API base URL ending in /openai/v1/')
+    return urlunsplit(parts._replace(path=path + '/'))
+
+
 class AIProvider(str, Enum):
     GOOGLE = "google"
     VERTEX_AI = "vertex_ai"
@@ -254,15 +273,12 @@ class ModelConfig:
             }
             
         elif provider == AIProvider.AZURE_OPENAI:
-            # Create Azure OpenAI client
-            azure_client = AsyncAzureOpenAI(
-                azure_endpoint=os.getenv('AZURE_OPENAI_ENDPOINT'),
-                api_version=os.getenv('AZURE_OPENAI_VERSION', '2024-07-01-preview'),
+            # AzureProvider selects the v1 client from the configured endpoint.
+            # Keep Tako's existing key variable rather than relying on SDK defaults.
+            azure_provider = AzureProvider(
+                azure_endpoint=normalize_azure_endpoint(os.getenv('AZURE_OPENAI_ENDPOINT')),
                 api_key=os.getenv('AZURE_OPENAI_KEY')
             )
-            
-            # Create OpenAI provider with the Azure client
-            azure_provider = OpenAIProvider(openai_client=azure_client)
             
             return {
                 ModelType.REASONING: OpenAIResponsesModel(

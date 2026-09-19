@@ -1,55 +1,41 @@
 <template>
     <div class="sync-status-container">
-        <v-menu v-model="showDropdown" :close-on-content-click="false" location="bottom end" max-width="320"
+        <v-menu v-model="showDropdown" :close-on-content-click="false" location="bottom end" max-width="300"
             transition="slide-y-transition" :offset="[10, 10]">
             <template v-slot:activator="{ props: menuProps }">
-                <v-btn v-bind="menuProps" class="sync-button" :class="[{ 'px-2': $vuetify.display.smAndDown }, `status-${statusColor}`]"
-                    variant="text" size="small">
-                    <div class="d-flex align-center">
-                        <div class="status-indicator me-2" :class="statusColor"></div>
-                        <span v-if="!$vuetify.display.smAndDown">{{ statusText }}</span>
+                <v-btn v-bind="menuProps" class="sync-button" :class="{ 'is-open': showDropdown }"
+                    variant="text" size="small" :aria-label="`Okta data sync: ${statusText}`" v-hint="`Data sync: ${statusText}`">
+                    <div class="sync-button-content">
+                        <v-icon size="16" aria-hidden="true">mdi-sync</v-icon>
+                        <span v-if="!$vuetify.display.smAndDown">Data sync</span>
+                        <span class="status-indicator" :class="statusColor" aria-hidden="true"></span>
+                        <v-icon class="sync-chevron" size="14" aria-hidden="true">mdi-chevron-down</v-icon>
                     </div>
                 </v-btn>
             </template>
 
-            <!-- Modern dropdown with enhanced aesthetics -->
-            <div class="modern-dropdown">
+            <div class="modern-dropdown" role="region" aria-label="Okta data sync">
                 <div class="modern-content">
-                    <!-- Header with gradient background -->
                     <div class="modern-header">
-                        <h3>Okta Data Sync</h3>
-
-                        <!-- Enhanced icon button with same styling as ChatInterface -->
-                        <v-tooltip text="Start Sync" location="bottom" v-if="!isSyncing">
-                            <template v-slot:activator="{ props }">
-                                <button v-bind="props" class="action-btn primary" @click="handleStartSync"
-                                    :disabled="isStarting">
-                                    <v-icon v-if="!isStarting">mdi-sync</v-icon>
-                                    <v-progress-circular v-else indeterminate size="20" width="2"
-                                        color="primary"></v-progress-circular>
-                                </button>
-                            </template>
-                        </v-tooltip>
-
-                        <!-- Enhanced stop button with same styling -->
-                        <v-tooltip text="Cancel Sync" location="bottom" v-else>
-                            <template v-slot:activator="{ props }">
-                                <button v-bind="props" class="action-btn error" @click="cancelSync">
-                                    <v-icon>mdi-stop</v-icon>
-                                </button>
-                            </template>
-                        </v-tooltip>
-                    </div>
-
-                    <!-- Enhanced Sync Progress with gradient background -->
-                    <div v-if="isSyncing" class="progress-section">
-                        <div class="sync-status-text">
-                            <div class="pulse-dot"></div>
-                            <span>Syncing data from Okta...</span>
+                        <div class="sync-title-icon"><v-icon size="18" aria-hidden="true">mdi-database-outline</v-icon></div>
+                        <div class="sync-title-copy">
+                            <h3>Okta data sync</h3>
+                            <p>Data available to Tako</p>
                         </div>
+                        <button type="button" class="close-sync" aria-label="Close sync panel" @click="showDropdown = false">
+                            <v-icon size="18" aria-hidden="true">mdi-close</v-icon>
+                        </button>
                     </div>
 
-                    <!-- Entity Cards with enhanced visual appeal -->
+                    <div class="sync-summary" role="status">
+                        <span class="sync-state"><span class="status-indicator" :class="statusColor" aria-hidden="true"></span>{{ statusText }}</span>
+                        <span class="sync-summary-description">{{ isSyncing ? 'Updating records from Okta…' : 'Record totals' }}</span>
+                    </div>
+                    <div v-if="isSyncing" class="sync-progress-track" aria-hidden="true">
+                        <span></span>
+                    </div>
+
+                    <!-- Compact record totals. -->
                     <div class="entity-grid">
                         <div class="entity-card entity-1">
                             <div class="entity-icon">
@@ -114,7 +100,7 @@
                         </div>
                     </div>
 
-                    <!-- Last sync time with improved styling -->
+                    <!-- Timestamp and primary action stay together below the counts. -->
                     <div class="last-sync">
                         <div class="last-sync-label">
                             <v-icon size="16" class="me-1">mdi-clock-outline</v-icon>
@@ -122,10 +108,21 @@
                         </div>
                         <span class="last-sync-time">{{ formattedLastSyncTime() }}</span>
                     </div>
+                    <div class="sync-actions">
+                        <button v-if="!isSyncing" type="button" class="action-btn primary" @click="handleStartSync" :disabled="isStarting">
+                            <v-icon v-if="!isStarting" size="15" aria-hidden="true">mdi-sync</v-icon>
+                            <v-progress-circular v-else indeterminate size="14" width="2" color="white" aria-hidden="true" />
+                            <span>{{ isStarting ? 'Starting…' : 'Sync now' }}</span>
+                        </button>
+                        <button v-else type="button" class="action-btn error" @click="cancelSync">
+                            <v-icon size="15" aria-hidden="true">mdi-stop</v-icon>
+                            <span>Stop sync</span>
+                        </button>
+                    </div>
 
                     <!-- Error message with user-friendly text -->
                     <transition name="fade">
-                        <div v-if="syncError" class="error-message">
+                        <div v-if="syncError" class="error-message" role="alert">
                             <v-icon size="small" class="me-1">mdi-alert-circle</v-icon>
                             <span>{{ friendlyErrorMessage }}</span>
                         </div>
@@ -137,455 +134,73 @@
 </template>
 
 <style scoped>
-.sync-status-container {
-    position: relative;
-}
-
+.sync-status-container { position: relative; }
 .sync-button {
-    background: #ffffff !important;
-    color: var(--text-primary) !important;
-    box-shadow: none !important;
-    border: 1px solid var(--border-strong) !important;
+    background: #fff !important;
+    color: #334b72 !important;
+    border: 1px solid #cbd7ea !important;
     border-radius: 8px !important;
+    box-shadow: 0 1px 2px rgba(23, 36, 58, .05) !important;
+    height: 34px !important;
+    min-height: 34px !important;
+    padding: 0 11px !important;
+    font-size: 12px !important;
     font-weight: 500 !important;
-    font-size: 12.5px !important;
-    height: 32px !important;
-    min-height: 32px !important;
-    padding: 0 12px !important;
     text-transform: none !important;
     letter-spacing: 0 !important;
+    transition: background .15s, border-color .15s;
 }
-
-.sync-button:hover {
-    background: #ffffff !important;
-    border-color: rgba(var(--primary-rgb), 0.24) !important;
-    color: var(--text-primary) !important;
-    transform: none !important;
-    box-shadow: none !important;
-}
-
-.sync-button.status-green {
-    background: #f6fffa !important;
-    border-color: rgba(34, 197, 94, 0.24) !important;
-}
-
-.sync-button.status-orange {
-    background: #fffaf2 !important;
-    border-color: rgba(245, 158, 11, 0.26) !important;
-}
-
-.sync-button.status-red {
-    background: #fff7f7 !important;
-    border-color: rgba(239, 68, 68, 0.22) !important;
-}
-
-.sync-button.status-grey,
-.sync-button.status-blue {
-    background: #ffffff !important;
-}
-
-.sync-button .status-indicator {
-    border: none !important;
-}
-
-/* Minimal status indicator - 2026 style */
-.status-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    transition: background-color 0.2s ease;
-}
-
-.green {
-    background: #22c55e;
-}
-
-.orange {
-    background: #f59e0b;
-    animation: pulse-subtle 2s infinite ease-in-out;
-}
-
-.red {
-    background: #ef4444;
-}
-
-.grey {
-    background: #9ca3af;
-}
-
-.blue {
-    background: var(--primary);
-}
-
-@keyframes pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.6);
-    }
-
-    70% {
-        box-shadow: 0 0 0 8px rgba(255, 152, 0, 0);
-    }
-
-    100% {
-        box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
-    }
-}
-
-/* Minimal dropdown - 2026 style */
-.modern-dropdown {
-    background: #ffffff;
-    border-radius: 14px;
-    overflow: hidden;
-    box-shadow: none;
-    border: 1px solid var(--border-strong);
-    width: 300px;
-}
-
-.modern-content {
-    border-radius: 14px;
-    background: transparent;
-    overflow: hidden;
-}
-
-/* Clean header - 2026 style */
-.modern-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 18px 16px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-}
-
-.modern-header h3 {
-    font-size: 15px;
-    font-weight: 600;
-    color: #0f172a;
-    margin: 0;
-    letter-spacing: -0.02em;
-}
-
-/* Minimal action buttons - 2026 style */
-.action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-    border: none;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.action-btn.primary {
-    background: var(--primary);
-    color: white;
-    box-shadow: none;
-}
-
-.action-btn.primary:hover:not(:disabled) {
-    background: var(--primary-hover);
-    box-shadow: none;
-    transform: translateY(-1px);
-}
-
-.action-btn.primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.action-btn.error {
-    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
-    color: white;
-    box-shadow: none;
-}
-
-.action-btn.error:hover {
-    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-    box-shadow: none;
-    transform: translateY(-1px);
-}
-
-/* Minimal progress section */
-.progress-section {
-    padding: 14px 18px;
-    background: rgba(99, 102, 241, 0.04);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-}
-
-.progress-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.sync-status-text {
-    display: flex;
-    align-items: center;
-}
-
-.sync-status-text span {
-    font-size: 13px;
-    font-weight: 500;
-    color: #52525b;
-}
-
-.pulse-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #f59e0b;
-    margin-right: 10px;
-    animation: pulse-subtle 1.5s infinite ease-in-out;
-}
-
-@keyframes pulse-subtle {
-    0%, 100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.5;
-    }
-}
-
-.progress-info span {
-    font-size: 13px;
-    color: #666;
-    letter-spacing: 0.2px;
-}
-
-.progress-percentage {
-    font-weight: 600;
-    font-size: 14px;
-    color: var(--primary);
-}
-
-/* Beautiful progress bar with gradient and animation */
-.progress-bar-container {
-    height: 6px;
-    width: 100%;
-    background: transparent;
-    border-radius: 10px;
-    overflow: hidden;
-    position: relative;
-}
-
-.progress-bar-background {
-    position: absolute;
-    inset: 0;
-    background: rgba(var(--primary-rgb), 0.12);
-    border-radius: 10px;
-}
-
-.progress-bar-filled {
-    height: 100%;
-    background: var(--primary);
-    border-radius: 10px;
-    transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1);
-    position: relative;
-    overflow: hidden;
-}
-
-.progress-bar-filled::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(90deg,
-            rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.3) 50%,
-            rgba(255, 255, 255, 0) 100%);
-    animation: shimmer 2s infinite;
-}
-
-@keyframes shimmer {
-    0% {
-        transform: translateX(-100%);
-    }
-
-    100% {
-        transform: translateX(100%);
-    }
-}
-
-/* Minimal entity grid - 2026 style */
-.entity-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    padding: 16px 18px;
-}
-
-.entity-card {
-    display: flex;
-    align-items: center;
-    padding: 14px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.6);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(148, 163, 184, 0.08);
-    min-width: 110px;
-    backdrop-filter: blur(8px);
-}
-
-.entity-card:hover {
-    background: rgba(255, 255, 255, 0.85);
-    border-color: rgba(148, 163, 184, 0.15);
-    transform: translateY(-1px);
-    box-shadow: none;
-}
-
-/* Calm blue tints for entity cards */
-.entity-1 {
-    background: rgba(var(--primary-rgb), 0.04);
-}
-.entity-1:hover {
-    background: rgba(var(--primary-rgb), 0.08);
-}
-
-.entity-2 {
-    background: rgba(var(--primary-rgb), 0.05);
-}
-.entity-2:hover {
-    background: rgba(var(--primary-rgb), 0.09);
-}
-
-.entity-3 {
-    background: rgba(var(--primary-rgb), 0.06);
-}
-.entity-3:hover {
-    background: rgba(var(--primary-rgb), 0.1);
-}
-
-.entity-4 {
-    background: rgba(var(--primary-rgb), 0.07);
-}
-.entity-4:hover {
-    background: rgba(var(--primary-rgb), 0.11);
-}
-
-.entity-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
-    margin-right: 12px;
-    flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    box-shadow: none;
-}
-
-.entity-icon :deep(.v-icon) {
-    color: #64748b;
-    font-size: 16px;
-}
-
-.entity-details {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-}
-
-.entity-count {
-    font-weight: 500;
-    font-size: 15px;
-    color: #0f172a;
-    line-height: 1;
-    margin-bottom: 4px;
-    white-space: nowrap;
-    letter-spacing: -0.02em;
-}
-
-.entity-label {
-    font-size: 11px;
-    color: #64748b;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    word-break: break-word;
-    line-height: 1.3;
-}
-
-.entity-count-large {
-    font-size: 13px;
-    letter-spacing: -0.02em;
-}
-
-/* Minimal last sync footer */
-.last-sync {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 18px;
-    border-top: 1px solid rgba(148, 163, 184, 0.15);
-    background: rgba(248, 250, 252, 0.5);
-}
-
-.last-sync-label {
-    font-size: 12px;
-    color: #64748b;
-    display: flex;
-    align-items: center;
-    font-weight: 500;
-}
-
-.last-sync-label :deep(.v-icon) {
-    color: #94a3b8;
-}
-
-.last-sync-time {
-    font-size: 12px;
-    font-weight: 600;
-    color: #334155;
-}
-
-/* Minimal error message */
-.error-message {
-    display: flex;
-    align-items: center;
-    padding: 12px 16px;
-    background: #fef2f2;
-    border-top: 1px solid #fecaca;
-    color: #dc2626;
-    font-size: 12px;
-}
-
-.error-message :deep(.v-icon) {
-    color: #dc2626;
-}
-
-/* Matching transitions from ChatInterface */
-.fade-enter-active,
-.fade-leave-active {
-    transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-    opacity: 0;
-}
-
-/* Tooltip matching */
-:deep(.v-tooltip .v-overlay__content) {
-    background-color: var(--primary-dark);
-    color: white;
-    font-size: 12px;
-    font-weight: 500;
-    padding: 5px 10px;
-    border-radius: 4px;
-    opacity: 0.95;
-    box-shadow: none;
-}
+.sync-button:hover, .sync-button.is-open { background: #eef3fc !important; border-color: #aebfe0 !important; }
+.sync-button :deep(.v-btn__overlay) { opacity: 0 !important; }
+.sync-button:focus-visible, .action-btn:focus-visible, .close-sync:focus-visible { outline: 2px solid var(--primary, #3e63dd); outline-offset: 3px; }
+.sync-button-content { display: flex; align-items: center; gap: 7px; }
+.sync-chevron { color: #647797; transition: transform .15s; }
+.is-open .sync-chevron { transform: rotate(180deg); }
+.status-indicator { display: inline-block; width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.green { background: #299477; }
+.orange { background: #b7791f; }
+.red { background: #c44949; }
+.grey { background: #8793a4; }
+.blue { background: #3e63dd; }
+.modern-dropdown { width: min(300px, calc(100vw - 32px)); border: 1px solid #d5deec; border-radius: 12px; background: #fff; box-shadow: 0 16px 40px -12px rgba(23, 36, 58, .22), 0 3px 10px rgba(23, 36, 58, .05); overflow: hidden; }
+.modern-content { background: #fff; }
+.modern-header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: #f7f9fd; border-bottom: 1px solid #e3e9f2; }
+.sync-title-icon { display: grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; border: 1px solid #e3e9f2; border-radius: 8px; background: #f0f4fb; color: #4567ad; }
+.sync-title-copy { flex: 1; min-width: 0; }
+.modern-header h3 { margin: 0; color: #17243a; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.sync-title-copy p { margin: 3px 0 0; color: #5d6b7d; font-size: 12px; line-height: 1.4; }
+.close-sync { display: grid; place-items: center; flex-shrink: 0; width: 30px; height: 30px; border: 0; border-radius: 7px; background: transparent; color: #63738b; cursor: pointer; }
+.close-sync:hover { background: #e8eef8; color: #243957; }
+.sync-summary { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; padding: 8px 12px 6px; font-size: 12px; }
+.sync-state { display: inline-flex; align-items: center; gap: 7px; color: #334155; font-weight: 500; }
+.sync-summary-description { color: #5d6b7d; }
+.sync-progress-track { height: 3px; margin: 0 14px 8px; overflow: hidden; border-radius: 2px; background: #e7edf8; }
+.sync-progress-track span { display: block; width: 40%; height: 100%; border-radius: inherit; background: #597bd4; animation: sync-progress 1.8s ease-in-out infinite alternate; }
+@keyframes sync-progress { from { transform: translateX(0); } to { transform: translateX(150%); } }
+.entity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 0 12px 10px; }
+.entity-card { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px; border: 1px solid #e3e9f2; border-radius: 8px; background: #f7f9fd; }
+.entity-icon { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0; background: #eff3fb; color: #4e6daf; }
+.entity-4 .entity-icon { background: #e5f1f0; color: #327d79; }
+.entity-icon :deep(.v-icon) { font-size: 14px; }
+.entity-details { min-width: 0; }
+.entity-count { color: #243957; font-size: 16px; font-weight: 500; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.entity-count-large { font-size: 14px; }
+.entity-label { margin-top: 1px; color: #5d6b7d; font-size: 12px; line-height: 1.4; }
+.last-sync { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 8px 12px 0; border-top: 1px solid #e3e9f2; }
+.last-sync-label { display: inline-flex; align-items: center; color: #5d6b7d; font-size: 12px; }
+.last-sync-time { color: #334b72; font-size: 12px; font-weight: 400; line-height: 1.5; overflow-wrap: anywhere; }
+.sync-actions { display: flex; justify-content: flex-end; padding: 8px 12px 10px; }
+.action-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 92px; min-height: 30px; padding: 4px 9px; border: 1px solid transparent; border-radius: 7px; font: inherit; font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s, border-color .15s; }
+.action-btn.primary { background: var(--primary, #3e63dd); border-color: #375bcc; color: #fff; box-shadow: 0 1px 2px rgba(23, 36, 58, .08); }
+.action-btn.primary:hover:not(:disabled) { background: var(--primary-hover, #3556c3); }
+.action-btn:disabled { opacity: .6; cursor: default; }
+.action-btn.error { color: #a13333; background: #fff5f5; border-color: #ebcccc; }
+.action-btn.error:hover { background: #fce8e8; }
+.error-message { display: flex; align-items: flex-start; gap: 6px; margin: 0 14px 12px; padding: 10px 12px; border: 1px solid #f0d5d5; border-radius: 8px; background: #fff7f7; color: #a13333; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.error-message :deep(.v-icon) { flex-shrink: 0; margin-top: 2px; }
+.fade-enter-active, .fade-leave-active { transition: opacity .15s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .sync-progress-track span { animation: none; width: 100%; opacity: .55; } .sync-chevron, .fade-enter-active, .fade-leave-active { transition: none; } }
 </style>
 
 <script setup>

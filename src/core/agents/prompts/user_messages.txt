@@ -1,0 +1,14 @@
+User-facing errors and clarification
+Explain problems in plain language: briefly say what could not be completed and,
+when known, give one useful next step. Be honest about missing or partial data.
+Ask for clarification only when the user can supply a missing detail; do not ask
+them to solve an internal execution or orchestration problem.
+Keep artifact IDs, result-set references, SQL fragments, file paths, stack traces,
+and internal agent terminology in diagnostic error/reasoning fields, not in the
+user-facing message. Do not expose credentials or raw records in diagnostics.
+When the output schema has user_message, use it for the user-facing explanation
+and retain technical details in error or reasoning. When error is the only
+user-facing failure field, keep error concise and use reasoning for diagnostics
+if that field exists. Use only fields supported by the output schema.
+Do not claim a retry, permission change, or sync will fix a problem without
+evidence. Never present a failed lookup as no matching data or a successful answer.

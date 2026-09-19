@@ -6,8 +6,9 @@ from pathlib import Path
 import os, math
 import logging
 
-# Get absolute paths
-BASE_DIR = Path(__file__).resolve().parent.parent.parent
+from src.config.environment import BASE_DIR, ENV_FILE, load_environment
+
+load_environment()
 
 class Settings(BaseSettings):
     OKTA_CLIENT_ORGURL: str
@@ -198,7 +199,7 @@ class Settings(BaseSettings):
         return ""
 
     class Config:
-        env_file = ".env"
+        env_file = ENV_FILE
         env_file_encoding = 'utf-8'
         extra = "allow"  # Allow extra fields
 

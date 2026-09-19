@@ -7,6 +7,9 @@
 
 import { ref, watch } from 'vue'
 import { useAuth } from './useAuth'
+import { applyApiTestProgress, interruptApiTests } from './apiTestProgress'
+import { isClarification, clarificationResult } from './turnFeedback'
+import { getBrowserTimezone } from './userTimezone'
 
 // Use relative URL to go through Vite proxy
 const API_BASE_URL = ''
@@ -115,7 +118,7 @@ export function useReactStream() {
                     'Content-Type': 'application/json'
                 },
                 credentials: 'include',
-                body: JSON.stringify({ query, session_id: sessionId || undefined })
+                body: JSON.stringify({ query, session_id: sessionId || undefined, user_timezone: getBrowserTimezone() })
             })
             
             // Handle session timeout (401/403)
@@ -402,6 +405,8 @@ export function useReactStream() {
         if (lastStep && lastStep.tools) {
             lastStep.tools.push({
                 name: data.tool_name || 'unknown',
+                testId: data.test_id || null,
+                requests: [],
                 description: data.description || '',
                 timestamp: new Date((data.timestamp || Date.now()) * 1000).toLocaleTimeString()
             })
@@ -412,6 +417,7 @@ export function useReactStream() {
      * Handle STEP-PROGRESS event (subprocess execution)
      */
     const handleStepProgress = (data) => {
+        if (applyApiTestProgress(discoverySteps.value, data.details)) return
         // Check if this is a rate limit event
         if (data.progress_type === 'rate_limit' && data.wait_seconds) {
             rateLimitWarning.value = data.wait_seconds
@@ -583,7 +589,10 @@ export function useReactStream() {
         }
         
         // Handle Markdown/Text content
-        if (data.display_type === 'markdown') {
+        if (isClarification(data)) {
+            error.value = null
+            results.value = clarificationResult(data)
+        } else if (data.display_type === 'markdown') {
             console.log('[useReactStream] Setting markdown results with content:', data.content?.substring(0, 100))
             results.value = {
                 display_type: 'markdown',
@@ -633,6 +642,19 @@ export function useReactStream() {
      * Handle ERROR event
      */
     const handleError = (data) => {
+        // Retain compatibility with older servers using the ERROR channel.
+        if (isClarification(data)) {
+            error.value = null
+            results.value = clarificationResult(data)
+            isDiscoveryComplete.value = true
+            isExecuting.value = false
+            isLoading.value = false
+            isProcessing.value = false
+            currentStep.value = ''
+            closeStream()
+            currentProcessId.value = null
+            return
+        }
         console.log('[useReactStream] ========== ERROR EVENT ==========')
         console.log('[useReactStream] Full data object:', JSON.stringify(data, null, 2))
         console.log('[useReactStream] data.error value:', data.error)
@@ -734,6 +756,7 @@ export function useReactStream() {
      * Close SSE connection
      */
     const closeStream = () => {
+        interruptApiTests(discoverySteps.value)
         if (eventSource) {
             console.log('[useReactStream] Closing EventSource (readyState:', eventSource.readyState, ')')
             eventSource.close()

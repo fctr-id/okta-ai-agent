@@ -19,6 +19,7 @@ except Exception:
 try:
     from src.core.models.model_picker import ModelConfig, ModelType
     from pydantic_ai import Agent
+    from src.core.agents import get_default_model_settings
 except ImportError:
     # Fallback if imports fail (e.g. during initial setup)
     ModelConfig = None
@@ -440,7 +441,7 @@ async def analyze_user_login_risk(
                     print("Generating AI Risk Assessment...", file=sys.stderr)
 
                     model = ModelConfig.get_model(ModelType.REASONING)
-                    agent = Agent(model)
+                    agent = Agent(model, model_settings=get_default_model_settings())
 
                     prompt = f"""
                     You are an expert security analyst. Analyze the following login behavior data and provide a risk assessment.

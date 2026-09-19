@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 180" preserveAspectRatio="none">
+  <path d="M0 58C120 -2 240 -2 360 58S600 118 720 58S960 -2 1080 58S1320 118 1440 58V180H0Z" fill="#eef3fc"/>
+  <path d="M0 58C120 -2 240 -2 360 58S600 118 720 58S960 -2 1080 58S1320 118 1440 58" fill="none" stroke="#d5e0f4" stroke-opacity=".75"/>
+  <path d="M0 108C120 158 240 158 360 108S600 58 720 108S960 158 1080 108S1320 58 1440 108V180H0Z" fill="#e4f0f1" fill-opacity=".75"/>
+  <path d="M0 108C120 158 240 158 360 108S600 58 720 108S960 158 1080 108S1320 58 1440 108" fill="none" stroke="#c6dedd" stroke-opacity=".65"/>
+</svg>

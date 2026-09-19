@@ -1,25 +1,26 @@
 <template>
   <aside class="history-sidebar" :class="{ 'is-collapsed': isCollapsed }">
     <!-- Header -->
-    <div class="sidebar-header" @click="isCollapsed = !isCollapsed">
+    <div class="sidebar-header">
       <div v-if="!isCollapsed" class="sidebar-title">
-        <v-icon icon="mdi-history" size="15" class="title-icon" />
-        <span>Sessions</span>
-        <span class="count-pill">{{ sessions.length }}</span>
+        <v-icon icon="mdi-chat-outline" size="15" class="title-icon" />
+        <span>Conversations</span>
       </div>
       <div class="header-spacer"></div>
-      <button class="collapse-toggle" :title="isCollapsed ? 'Expand' : 'Collapse'">
+      <button type="button" class="collapse-toggle" v-hint:right="isCollapsed ? 'Expand conversations' : 'Collapse conversations'" :aria-label="isCollapsed ? 'Expand conversations' : 'Collapse conversations'" :aria-expanded="!isCollapsed" @click="isCollapsed = !isCollapsed">
         <v-icon :icon="isCollapsed ? 'mdi-chevron-right' : 'mdi-chevron-left'" size="16" />
       </button>
     </div>
 
-    <!-- Content Area -->
-    <div v-if="!isCollapsed" class="sidebar-content">
+    <div v-if="!isCollapsed" class="sidebar-actions">
       <button type="button" class="new-session-btn" @click.stop="handleNewSession">
-        <v-icon icon="mdi-plus" size="14" />
-        <span>New session</span>
+        <span class="new-chat-icon"><v-icon icon="mdi-plus" size="14" /></span>
+        <span>New chat session</span>
       </button>
+    </div>
 
+    <!-- Only the conversation list scrolls; New chat stays within reach. -->
+    <div v-if="!isCollapsed" class="sidebar-content">
       <!-- Loading State -->
       <div v-if="isInitialLoading" class="loading-state">
         <div class="loading-shimmer">
@@ -38,7 +39,7 @@
 
       <div v-else class="sidebar-sections">
         <section class="sidebar-section">
-          <button type="button" class="section-header section-toggle" @click="sessionsExpanded = !sessionsExpanded">
+          <button type="button" class="section-header section-toggle" :aria-expanded="sessionsExpanded" @click="sessionsExpanded = !sessionsExpanded">
             <span class="section-header-main">
               <v-icon :icon="sessionsExpanded ? 'mdi-chevron-down' : 'mdi-chevron-right'" size="14" />
               <span class="section-label">Recent</span>
@@ -57,28 +58,25 @@
                 :key="session.session_id"
                 class="history-row session-row"
                 :class="{ 'is-pinned': session.is_pinned, 'is-archived': session.is_archived, 'is-selected': selectedSessionId === session.session_id }"
-                @click="handleSessionSelect(session)"
               >
-                <div class="row-main">
-                  <div class="row-copy">
-                    <div class="row-title" :title="session.title || session.session_id">
-                      {{ session.title || 'Untitled conversation' }}
-                    </div>
-
-                    <div class="row-meta">
-                      <span class="row-date">{{ formatDate(session.last_activity_at) }}</span>
-                      <span v-if="formatSessionSummary(session)" class="row-summary" :title="formatSessionSummary(session)">
-                        {{ formatSessionSummary(session) }}
-                      </span>
-                    </div>
-                  </div>
-
+                <button type="button" class="session-select" @click="handleSessionSelect(session)"
+                  :aria-current="selectedSessionId === session.session_id ? 'true' : undefined"
+                  v-hint:right="[session.title || 'Untitled conversation', formatSessionSummary(session)].filter(Boolean).join(' — ')">
+                  <v-icon icon="mdi-message-text-outline" size="14" class="conversation-icon" aria-hidden="true" />
+                  <span class="row-title">{{ session.title || 'Untitled conversation' }}</span>
+                  <span class="row-meta">
+                    <span class="row-date">{{ formatDate(session.last_activity_at) }}</span>
+                    <span v-if="getSessionDisplayStatus(session)" class="status-chip" :class="statusClass(getSessionDisplayStatus(session))">
+                      {{ formatStatus(getSessionDisplayStatus(session)) }}
+                    </span>
+                  </span>
+                </button>
                   <div class="row-status-group">
                     <button
                       type="button"
                       class="pin-toggle"
                       :class="{ 'is-active': session.is_pinned }"
-                      :title="session.is_pinned ? 'Unpin session' : 'Pin session'"
+                      v-hint:right="session.is_pinned ? 'Unpin session' : 'Pin session'"
                       :aria-label="session.is_pinned ? 'Unpin session' : 'Pin session'"
                       :disabled="pinningSessionId === session.session_id"
                       @click.stop="toggleSessionPin(session)"
@@ -92,15 +90,7 @@
                       />
                       <v-icon v-else :icon="session.is_pinned ? 'mdi-pin' : 'mdi-pin-outline'" size="14" />
                     </button>
-                    <span v-if="session.is_pinned" class="status-chip status-chip-pin">
-                      <v-icon icon="mdi-pin" size="11" />
-                      <span>Pinned</span>
-                    </span>
-                    <span v-if="getSessionDisplayStatus(session)" class="status-chip" :class="statusClass(getSessionDisplayStatus(session))">
-                      {{ formatStatus(getSessionDisplayStatus(session)) }}
-                    </span>
                   </div>
-                </div>
               </div>
             </div>
           </div>
@@ -110,15 +100,15 @@
     </div>
     
     <!-- Collapsed State Icons -->
-    <div v-else class="collapsed-icons" @click="isCollapsed = false">
-      <button type="button" class="collapsed-action-btn" title="New session" @click.stop="handleNewSession">
+    <div v-else class="collapsed-icons">
+      <button type="button" class="collapsed-action-btn" v-hint:right="'New chat session'" aria-label="New chat session" @click.stop="handleNewSession">
         <v-icon icon="mdi-plus" size="18" />
       </button>
 
-      <div class="collapsed-icon-wrapper">
+      <button type="button" class="collapsed-icon-wrapper" aria-label="Expand conversations" @click="isCollapsed = false">
         <v-icon icon="mdi-chat-processing-outline" size="20" class="icon-dim" />
         <div v-if="sessions.length > 0" class="mini-fav-badge">{{ sessions.length }}</div>
-      </div>
+      </button>
     </div>
   </aside>
 </template>
@@ -292,15 +282,18 @@ defineExpose({ refresh: refreshSidebar })
 </script>
 
 <style scoped>
-/* Main Sidebar Container - off-white, flat */
+.history-row .pin-toggle { opacity: 0; }
+.history-row:hover .pin-toggle, .history-row:focus-within .pin-toggle, .history-row .pin-toggle.is-active { opacity: 1; }
+@media (hover: none) { .history-row .pin-toggle { opacity: 1; } }
+/* A distinct navigation surface beside the cooler workspace canvas. */
 .history-sidebar {
   position: fixed;
   left: 0;
   top: var(--header-height, 56px);
   bottom: 0;
   width: var(--sidebar-width, 280px);
-  background: rgba(255, 255, 255, 0.94);
-  border-right: 1px solid var(--border-strong);
+  background: var(--surface-sidebar, #f8fafc);
+  border-right: 1px solid #d8e0ec;
   display: flex;
   flex-direction: column;
   transition: width 0.25s ease;
@@ -314,13 +307,13 @@ defineExpose({ refresh: refreshSidebar })
 
 /* Sidebar Header */
 .sidebar-header {
-  height: 44px;
-  padding: 0 10px 0 14px;
+  height: 52px;
+  flex-shrink: 0;
+  padding: 0 12px 0 16px;
   display: flex;
   align-items: center;
-  cursor: pointer;
-  background: rgba(255, 255, 255, 0.96);
-  border-bottom: 1px solid var(--border-strong);
+  background: transparent;
+  border-bottom: 0;
 }
 
 .sidebar-title {
@@ -328,14 +321,14 @@ defineExpose({ refresh: refreshSidebar })
   align-items: center;
   gap: 8px;
   font-family: var(--font-family-display);
-  font-weight: 650;
+  font-weight: 600;
   font-size: 12px;
   color: var(--text-primary);
   letter-spacing: 0;
 }
 
 .title-icon {
-  color: var(--text-muted);
+  color: #5470aa;
 }
 
 .count-pill {
@@ -359,8 +352,8 @@ defineExpose({ refresh: refreshSidebar })
   width: 26px;
   height: 26px;
   border-radius: 6px;
-  border: none;
-  background: transparent;
+  border: 1px solid #e2e7f0;
+  background: #fff;
   cursor: pointer;
   color: var(--text-muted);
   display: flex;
@@ -377,36 +370,25 @@ defineExpose({ refresh: refreshSidebar })
 /* Sidebar Content Area */
 .sidebar-content {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  padding: 10px 10px 16px;
+  padding: 12px 10px 16px;
   display: flex;
   flex-direction: column;
 }
 
-.new-session-btn {
-  width: 100%;
-  min-height: 40px;
-  margin-bottom: 12px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border: 1px solid rgba(var(--primary-rgb), 0.16);
-  border-radius: 10px;
-  background: rgba(var(--primary-rgb), 0.08);
-  color: var(--primary);
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-}
+.sidebar-actions { padding: 0 10px 16px; }
 
-.new-session-btn:hover {
-  background: rgba(var(--primary-rgb), 0.12);
-  border-color: rgba(var(--primary-rgb), 0.24);
-  transform: translateY(-1px);
+.new-session-btn {
+  width: 100%; min-height: 44px; padding: 8px 12px;
+  display: flex; align-items: center; gap: 10px; text-align: left;
+  border: 1px solid #375bcc; border-radius: 9px; background: var(--primary);
+  color: #fff; font-size: 12px; font-weight: 550; cursor: pointer;
+  box-shadow: 0 2px 4px rgba(62, 99, 221, 0.12);
+  transition: background .15s, border-color .15s;
 }
+.new-session-btn:hover { background: var(--primary-hover); border-color: #2948a8; }
+.new-chat-icon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: rgba(255,255,255,.15); color: inherit; }
 
 .sidebar-sections {
   display: flex;
@@ -417,7 +399,7 @@ defineExpose({ refresh: refreshSidebar })
 .sidebar-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 .sidebar-section-secondary {
@@ -429,7 +411,7 @@ defineExpose({ refresh: refreshSidebar })
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 4px;
+  padding: 0 8px 6px;
 }
 
 .section-toggle {
@@ -446,26 +428,14 @@ defineExpose({ refresh: refreshSidebar })
 }
 
 .section-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .065em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
-.section-count {
-  min-width: 18px;
-  height: 18px;
-  padding: 0 6px;
-  border-radius: 999px;
-  border: 1px solid var(--border-color);
-  color: var(--text-muted);
-  font-size: 10px;
-  font-weight: 700;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
+.section-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 5px; border: 1px solid #e3e8f1; border-radius: 5px; background: #f3f6fb; color: #71809a; font-size: 10px; font-weight: 500; font-variant-numeric: tabular-nums; }
 
 .section-empty {
   padding: 0 4px;
@@ -485,216 +455,29 @@ defineExpose({ refresh: refreshSidebar })
   background: rgba(15, 23, 42, 0.14);
 }
 
-/* History rows */
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.history-row {
-  position: relative;
-  padding: 12px 12px;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  background: rgba(var(--primary-rgb), 0.035);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-}
-
-.history-row:hover {
-  background: rgba(var(--primary-rgb), 0.055);
-  border-color: rgba(15, 23, 42, 0.16);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05);
-}
-
-.history-row.is-selected {
-  border-color: rgba(var(--primary-rgb), 0.22);
-  background: rgba(255, 255, 255, 0.98);
-}
-
-.history-row.session-row {
-  background: rgba(15, 23, 42, 0.025);
-}
-
-.history-row.session-row.is-pinned {
-  border-color: rgba(var(--primary-rgb), 0.24);
-  background: rgba(var(--primary-rgb), 0.07);
-}
-
-.history-row.session-row.is-archived {
-  opacity: 0.8;
-}
-
-.row-main {
-  min-width: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.row-copy {
-  min-width: 0;
-  flex: 1;
-}
-
-.row-status-group {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 5px;
-  flex-shrink: 0;
-}
-
-.pin-toggle {
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  border: 1px solid rgba(var(--primary-rgb), 0.12);
-  background: rgba(var(--primary-rgb), 0.04);
-  color: #4d678a;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease, transform 0.12s ease;
-}
-
-.pin-toggle:hover:not(:disabled) {
-  background: rgba(var(--primary-rgb), 0.1);
-  border-color: rgba(var(--primary-rgb), 0.22);
-  color: var(--primary);
-  transform: translateY(-1px);
-}
-
-.pin-toggle.is-active {
-  background: rgba(var(--primary-rgb), 0.12);
-  border-color: rgba(var(--primary-rgb), 0.24);
-  color: var(--primary);
-}
-
-.pin-toggle:disabled {
-  cursor: wait;
-  opacity: 0.82;
-}
-
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 7px;
-  border-radius: 999px;
-  border: 1px solid rgba(15, 23, 42, 0.1);
-  background: rgba(255, 255, 255, 0.85);
-  color: var(--text-muted);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.status-chip-active {
-  color: #245ea8;
-  border-color: rgba(36, 94, 168, 0.18);
-  background: rgba(36, 94, 168, 0.08);
-}
-
-.status-chip-complete {
-  color: #1d4ed8;
-  border-color: rgba(29, 78, 216, 0.16);
-  background: rgba(29, 78, 216, 0.08);
-}
-
-.status-chip-error {
-  color: #b42318;
-  border-color: rgba(180, 35, 24, 0.18);
-  background: rgba(180, 35, 24, 0.08);
-}
-
-.status-chip-archived {
-  color: #6b7280;
-  border-color: rgba(107, 114, 128, 0.18);
-  background: rgba(107, 114, 128, 0.08);
-}
-
-.status-chip-pin {
-  color: var(--primary);
-  border-color: rgba(var(--primary-rgb), 0.18);
-  background: rgba(var(--primary-rgb), 0.08);
-}
-
-.row-title {
-  font-size: 12px;
-  font-weight: 550;
-  color: #183552;
-  line-height: 1.4;
-  letter-spacing: -0.01em;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.row-meta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  font-size: 10px;
-  color: var(--text-muted);
-  line-height: 1.35;
-  overflow: hidden;
-  margin-top: 6px;
-}
-
-.row-date {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  min-height: 0;
-  padding: 0;
-  border-radius: 0;
-  border: none;
-  background: transparent;
-  color: #4e647f;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.row-summary {
-  max-width: 100%;
-  color: #415873;
-  font-size: 10px;
-  line-height: 1.45;
-  padding-left: 10px;
-  position: relative;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.row-summary::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.5em;
-  width: 4px;
-  height: 4px;
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.22);
-}
-
-.history-row:hover .row-title {
-  color: #102a44;
-}
+/* Compact rows keep titles and timestamps readable without nested cards. */
+.history-list { display: flex; flex-direction: column; gap: 4px; }
+.history-row { position: relative; border: 1px solid transparent; border-radius: 9px; transition: background .15s, border-color .15s; }
+.history-row:hover { background: #f1f5fb; border-color: #e0e7f2; }
+.history-row.is-selected { background: #eaf1ff; border-color: #cbdaf7; }
+.history-row.is-selected::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 2px; border-radius: 2px; background: var(--primary); }
+.history-row.is-selected .row-title { color: #2f53a0; font-weight: 550; }
+.conversation-icon { color: #9aa8bc; margin-top: 3px; }
+.history-row.is-selected .conversation-icon { color: #5279cb; }
+.history-row.is-archived { opacity: .75; }
+.session-select { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 8px; width: 100%; padding: 10px; border: 0; border-radius: inherit; background: transparent; text-align: left; cursor: pointer; }
+.row-status-group { position: absolute; bottom: 6px; right: 5px; }
+.history-sidebar button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.pin-toggle { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 6px; background: transparent; color: #7b8190; cursor: pointer; transition: background .15s, opacity .15s; }
+.pin-toggle:hover, .pin-toggle.is-active { color: #526fc1; background: #e8eefb; }
+.pin-toggle:disabled { cursor: wait; }
+.status-chip { display: inline-flex; padding: 2px 5px; border-radius: 4px; font-size: 9px; line-height: 1.2; background: #eef0f4; color: #697080; }
+.status-chip-active { color: #3a62b6; background: #edf2ff; }
+.status-chip-complete { color: #217866; background: #e8f5ef; }
+.status-chip-error { color: #b42318; background: #fff0ee; }
+.row-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; font-weight: 400; line-height: 1.5; color: #383e4c; }
+.row-meta { grid-column: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; padding-right: 24px; }
+.row-date { color: #7b8190; font-size: 10px; font-weight: 400; line-height: 1.5; }
 
 /* Empty/Loading States */
 .empty-state, .loading-state {
@@ -783,6 +566,9 @@ defineExpose({ refresh: refreshSidebar })
   align-items: center;
   justify-content: center;
   border-radius: 6px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
   color: var(--text-muted);
   transition: background 0.15s, color 0.15s;
 }

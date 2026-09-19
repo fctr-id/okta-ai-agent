@@ -30,6 +30,7 @@ ENV/
 logs/
 
 # Development files
+/DO_NOT_SHARE/
 .coverage
 htmlcov/
 .pytest_cache/

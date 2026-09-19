@@ -51,6 +51,7 @@ class SyncResponse(BaseModel):
     entity_counts: Optional[Dict[str, int]] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    last_successful_sync_time: Optional[datetime] = None
     error_details: Optional[str] = None
 
 # Get tenant ID from the application settings
@@ -321,13 +322,17 @@ async def get_sync_status(
     session: AsyncSession = Depends(get_db_session),
     current_user: Any = Depends(get_current_user)  # Keep for auth check
 ):
-    """Get current sync status or last completed sync"""
+    """Report attempt status separately from the last successful snapshot."""
     tenant_id = get_tenant_id()
     db = await get_db_ops()
     
     # First check for active sync
     # Fix: Pass session and tenant_id explicitly 
     active_sync = await db.get_active_sync(session, tenant_id)
+    completed_sync = await db.get_last_completed_sync(session, tenant_id)
+    last_successful_sync_time = (
+        completed_sync.end_time or completed_sync.start_time if completed_sync else None
+    )
     
     if active_sync:
         return SyncResponse(
@@ -343,28 +348,30 @@ async def get_sync_status(
                 "devices": active_sync.devices_count or 0
             },
             start_time=active_sync.start_time,
+            last_successful_sync_time=last_successful_sync_time,
             error_details=active_sync.error_details
         )
     
-    # If no active sync, get last completed sync
-    # Fix: Pass session and tenant_id explicitly
-    last_sync = await db.get_last_completed_sync(session, tenant_id)
+    # A newer failed/canceled attempt must not be hidden by an older success.
+    last_sync = await db.get_latest_sync(session, tenant_id)
     
     if last_sync:
+        snapshot = completed_sync or last_sync
         return SyncResponse(
             status=last_sync.status.value,
             message="Latest sync information" if not last_sync.error_details else last_sync.error_details,
             sync_id=last_sync.id,
             progress=100 if last_sync.status == SyncStatus.COMPLETED else None,
             entity_counts={
-                "users": last_sync.users_count or 0,
-                "groups": last_sync.groups_count or 0,
-                "applications": last_sync.apps_count or 0,
-                "policies": last_sync.policies_count or 0,
-                "devices": last_sync.devices_count or 0
+                "users": snapshot.users_count or 0,
+                "groups": snapshot.groups_count or 0,
+                "applications": snapshot.apps_count or 0,
+                "policies": snapshot.policies_count or 0,
+                "devices": snapshot.devices_count or 0
             },
             start_time=last_sync.start_time,
             end_time=last_sync.end_time,
+            last_successful_sync_time=last_successful_sync_time,
             error_details=last_sync.error_details
         )
     

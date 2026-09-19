@@ -33,7 +33,7 @@ from typing import Dict, Any, AsyncGenerator, Optional, List
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, status
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sse_starlette.sse import EventSourceResponse
 
 from src.config.settings import Settings
@@ -54,7 +54,8 @@ from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
 # Track background tasks to prevent memory leaks
 background_tasks: set = set()
 from src.utils.logging import get_logger, set_correlation_id
-from src.utils.security_config import validate_generated_code
+from src.utils.security_config import SECURITY_VALIDATION_USER_MESSAGE, validate_generated_code
+from src.utils.timezone_context import normalize_user_timezone
 
 # Load environment variables
 load_dotenv()
@@ -79,6 +80,12 @@ class QueryRequest(BaseModel):
     """Request body for ReAct query"""
     query: str
     session_id: Optional[str] = None
+    user_timezone: Optional[str] = Field(default=None, max_length=128)
+
+    @field_validator("user_timezone")
+    @classmethod
+    def validate_user_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return normalize_user_timezone(value)
 
 
 class ScriptExecuteRequest(BaseModel):
@@ -587,6 +594,7 @@ async def start_react_process(
         active_processes[correlation_id] = {
             "status": "initializing",
             "query": request.query,
+            "user_timezone": request.user_timezone,
             "session_id": session_id,
             "run_id": correlation_id,
             "turn_number": turn_number,
@@ -755,6 +763,7 @@ async def stream_react_updates(
                     sse_event = {
                         "type": "TOOL-CALL",
                         "tool_name": event_data.get("tool_name", "unknown"),
+                        "test_id": event_data.get("test_id"),
                         "description": event_data.get("description", ""),
                         "timestamp": event_data.get("timestamp", time.time())
                     }
@@ -797,6 +806,7 @@ async def stream_react_updates(
                     try:
                         return await execute_multi_agent_query(
                             user_query=process["query"],
+                            user_timezone=process.get("user_timezone"),
                             correlation_id=process_id,
                             artifacts_file=artifacts_file,
                             okta_client=okta_client,
@@ -894,10 +904,40 @@ async def stream_react_updates(
                 yield f"data: {json.dumps(done_event)}\n\n"
                 return
             
+            if result.outcome == "clarify":
+                # Clarification is a completed conversational response, not an
+                # execution error. Persist it so reloading keeps the same state.
+                message = result.user_message or result.error or "Please clarify your request."
+                complete_event = {
+                    "type": "COMPLETE",
+                    "success": True,
+                    "display_type": "markdown",
+                    "content": message,
+                    **result.outcome_metadata(),
+                    "metadata": result.outcome_metadata(),
+                    "timestamp": time.time(),
+                }
+                _persist_turn_output_artifact(artifacts_file=artifacts_file, complete_event=complete_event)
+                write_turn_summary(runtime_paths, {
+                    "status": "completed",
+                    "user_query": process["query"],
+                    "final_response_summary": message,
+                    "display_type": "markdown",
+                    "artifact_file": artifacts_file.as_posix(),
+                    "outcome": result.outcome_metadata(),
+                })
+                update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+                await mirror_runtime_state()
+                process["status"] = "complete"
+                logger.info(f"[{process_id}] Clarification requested")
+                yield f"data: {json.dumps(complete_event)}\n\n"
+                yield f"data: {json.dumps({'type': 'DONE', 'timestamp': time.time()})}\n\n"
+                return
+
             if not result.success:
                 error_event = {
                     "type": "ERROR",
-                    "error": result.error or "Orchestrator failed",
+                    "error": result.user_message or result.error or "I couldn't complete this request.",
                     **result.outcome_metadata(),
                     "timestamp": time.time()
                 }
@@ -908,6 +948,27 @@ async def stream_react_updates(
                 process["status"] = "error"
                 return
             
+            if result.completed_result is not None:
+                complete_event = result.completed_result_event()
+                write_turn_summary(runtime_paths, {
+                    "status": "completed",
+                    "user_query": process["query"],
+                    "final_response_summary": _build_turn_output_summary(complete_event),
+                    "display_type": complete_event["display_type"],
+                    "result_count": complete_event.get("count", 0),
+                    "artifact_file": artifacts_file.as_posix(),
+                    "outcome": result.outcome_metadata(),
+                    "token_usage": {"input_tokens": result.total_input_tokens,
+                                    "output_tokens": result.total_output_tokens,
+                                    "total_tokens": result.total_tokens, "requests": result.total_requests},
+                })
+                update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
+                await mirror_runtime_state()
+                process["status"] = "complete"
+                yield f"data: {json.dumps(complete_event, default=str)}\n\n"
+                yield f"data: {json.dumps({'type': 'DONE', 'timestamp': time.time()})}\n\n"
+                return
+
             # Send SCRIPT-GENERATED event (matching one_react_agent_executor.py pattern)
             if result.script_code:
                 # Orchestrator already logged synthesis completion
@@ -1049,11 +1110,12 @@ async def stream_react_updates(
             logger.debug(f"[{process_id}] Validation result: is_valid={validation_result.is_valid}, risk_level={validation_result.risk_level}")
             
             if not validation_result.is_valid:
+                logger.error(f"[{process_id}] Security validation failed: {', '.join(validation_result.violations)}")
                 validation_error = {
                     "type": "STEP-END",
                     "step": "validation",  # String to match frontend check
                     "title": "Security Validation Failed",
-                    "text": f"Security issues found: {', '.join(validation_result.violations)}",
+                    "text": SECURITY_VALIDATION_USER_MESSAGE,
                     "success": False,
                     "timestamp": time.time()
                 }
@@ -1061,7 +1123,7 @@ async def stream_react_updates(
                 
                 error_event = {
                     "type": "ERROR",
-                    "error": f"Security validation failed: {', '.join(validation_result.violations)}",
+                    "error": SECURITY_VALIDATION_USER_MESSAGE,
                     "timestamp": time.time()
                 }
                 yield f"data: {json.dumps(error_event)}\n\n"

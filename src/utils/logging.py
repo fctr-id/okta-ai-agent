@@ -14,9 +14,9 @@ from logging.handlers import RotatingFileHandler
 import atexit
 from pathlib import Path
 from typing import Dict, Optional, Any
-from dotenv import load_dotenv
+from src.config.environment import load_environment
 
-load_dotenv(override=True)
+load_environment()
 
 # Default log levels - Use standard LOG_LEVEL variable for all logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -138,11 +138,11 @@ def get_default_log_dir() -> Path:
 
 def get_logger(name: str, log_dir: Optional[Path] = None) -> logging.Logger:
     """
-    Get a properly configured logger.
+    Get a logger that writes to both the console and the shared rotating file.
     
     Args:
         name: Logger name (typically __name__)
-        log_dir: Directory for log files
+        log_dir: Directory for the shared log file; defaults to project-root/logs.
         
     Returns:
         Configured logger
@@ -180,30 +180,28 @@ def get_logger(name: str, log_dir: Optional[Path] = None) -> logging.Logger:
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
     
-    # Add file handler if log_dir is provided
-    if log_dir:
+    # Every application logger shares the same file handler, including agents
+    # that call get_logger(name) without explicitly supplying a directory.
+    global _FILE_HANDLER_SINGLETON
+    if _FILE_HANDLER_SINGLETON is None:
+        log_dir = log_dir if log_dir is not None else get_default_log_dir()
         os.makedirs(log_dir, exist_ok=True)
-        # Use unified okta_ai_agent.log for all agents (singleton handler)
-        log_file = os.path.join(log_dir, "okta_ai_agent.log")
-        global _FILE_HANDLER_SINGLETON
-        if _FILE_HANDLER_SINGLETON is None:
-            file_handler = SafeRotatingFileHandler(
-                log_file,
-                maxBytes=10 * 1024 * 1024,
-                backupCount=5,
-                encoding="utf-8",
-                delay=True,  # Open lazily to reduce locking window
-            )
-            file_handler.setLevel(DEFAULT_FILE_LEVEL)
-            file_formatter = logging.Formatter(
-                '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s',
-                '%Y-%m-%d %H:%M:%S'
-            )
-            file_handler.setFormatter(file_formatter)
-            _FILE_HANDLER_SINGLETON = file_handler
-        # Attach singleton handler if not already attached
-        if _FILE_HANDLER_SINGLETON not in logger.handlers:
-            logger.addHandler(_FILE_HANDLER_SINGLETON)
+        file_handler = SafeRotatingFileHandler(
+            Path(log_dir) / "okta_ai_agent.log",
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+            delay=True,  # Open lazily to reduce locking window
+        )
+        file_handler.setLevel(DEFAULT_FILE_LEVEL)
+        file_formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(pathname)s:%(lineno)d - %(message)s',
+            '%Y-%m-%d %H:%M:%S'
+        )
+        file_handler.setFormatter(file_formatter)
+        _FILE_HANDLER_SINGLETON = file_handler
+    if _FILE_HANDLER_SINGLETON not in logger.handlers:
+        logger.addHandler(_FILE_HANDLER_SINGLETON)
     
     # Prevent duplicate logs
     if name != "root":

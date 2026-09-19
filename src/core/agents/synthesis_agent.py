@@ -20,6 +20,7 @@ from pathlib import Path
 import time
 
 from src.utils.logging import get_logger
+from src.utils.timezone_context import timezone_instructions
 from src.core.agents.agent_callbacks import (
     notify_progress_to_user,
     notify_step_start_to_user,
@@ -48,6 +49,7 @@ class SynthesisResult(BaseModel):
     artifact_keys: List[str] = Field(default_factory=list)
     result_set_refs: List[str] = Field(default_factory=list)
     error: Optional[str] = None
+    user_message: Optional[str] = Field(default=None, description="Concise, actionable explanation for the user; keep technical diagnostics in error.")
 
 
 # ============================================================================
@@ -65,6 +67,7 @@ class SynthesisDeps:
     tool_call_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     progress_callback: Optional[Callable[[dict], Awaitable[None]]] = None
     cli_mode: bool = False
+    user_timezone: Optional[str] = None
 
 
 # ============================================================================
@@ -197,7 +200,7 @@ async def execute_synthesis(
         # Notify: Loading artifacts
         if deps.tool_call_callback:
             await deps.tool_call_callback({
-                "name": "load_artifacts",
+                "tool_name": "load_artifacts",
                 "arguments": {"source": "memory"},
                 "description": "Loading memory artifacts from previous phases",
                 "timestamp": time.time()
@@ -210,6 +213,8 @@ async def execute_synthesis(
         
         # Build context for agent
         context = f"""Original Query: {user_query}
+
+{timezone_instructions(deps.user_timezone)}
 
     Artifact manifests and result-set pointers from discovery phases:
     {artifact_context}
@@ -276,11 +281,6 @@ db_path = next((p for p in possible_paths if p.exists()), None)
         
         logger.info(f"[{deps.correlation_id}] Synthesis complete: success={result.output.success}")
         
-        # Post-process script code: unescape quotes if LLM escaped them
-        if result.output.script_code:
-            # Fix common escaping issues
-            result.output.script_code = result.output.script_code.replace('\\"', '"')
-        
         # Log generated script summary
         if result.output.script_code:
             script_length = len(result.output.script_code)
@@ -296,8 +296,8 @@ db_path = next((p for p in possible_paths if p.exists()), None)
                 logger.debug(f"[{deps.correlation_id}] Complete script:\n{result.output.script_code}")
         
         # Log token usage
-        if result.usage():
-            usage = result.usage()
+        usage = result.usage
+        if usage:
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
                 f"[{deps.correlation_id}] Synthesis Agent Token Usage: "
@@ -314,16 +314,18 @@ db_path = next((p for p in possible_paths if p.exists()), None)
                 f"Successfully generated production script ({script_lines} lines). Ready for validation and execution."
             )
         else:
+            logger.error(f"[{deps.correlation_id}] Synthesis diagnostic: {result.output.error}")
             await notify_step_end(
                 "Synthesis Failed",
-                f"Script generation failed: {result.output.error or 'Unknown error'}"
+                result.output.user_message or "I couldn't prepare the requested result from the available data."
             )
         
-        return result.output, result.usage()
+        return result.output, usage
         
     except Exception as e:
         logger.error(f"[{deps.correlation_id}] Synthesis failed: {e}", exc_info=True)
         return SynthesisResult(
             success=False,
-            error=str(e)
+            error=str(e),
+            user_message="I couldn't prepare the requested result because processing failed."
         ), None

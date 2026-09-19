@@ -3,19 +3,19 @@
     <section class="auth-shell animate-entry">
       <div class="auth-hero">
         <h1 class="auth-title">Create your admin account</h1>
-        <p class="auth-description">Set up the first admin account before entering the Tako workspace.</p>
+        <p class="auth-description">Set up your first admin account to get started with Tako.</p>
       </div>
 
-      <div class="auth-card auth-card-wide">
+      <div class="auth-card">
         <form @submit.prevent="handleSetup" class="auth-form">
           <transition name="fade-slide">
-            <div v-if="auth.error.value" class="status-alert status-alert-error">
+            <div v-if="auth.error.value" class="status-alert status-alert-error" role="alert">
               {{ auth.error.value }}
             </div>
           </transition>
 
           <transition name="fade-slide">
-            <div v-if="validationError" class="status-alert status-alert-warning">
+            <div v-if="validationError" class="status-alert status-alert-warning" role="alert">
               {{ validationError }}
             </div>
           </transition>
@@ -23,13 +23,12 @@
           <div class="form-field">
             <label for="setupToken" class="field-label-with-help">
               <span>Setup Token</span>
-              <v-tooltip location="top">
+              <v-tooltip>
                 <template #activator="{ props }">
                   <button
                     type="button"
                     class="field-help-button"
                     v-bind="props"
-                    tabindex="-1"
                     aria-label="Setup token help"
                   >
                     <v-icon size="14">mdi-information-outline</v-icon>
@@ -91,7 +90,7 @@
                 :disabled="auth.loading.value"
                 @input="sanitizePasswordInput"
               />
-              <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
+              <button type="button" class="password-toggle" @click="showPassword = !showPassword" :aria-label="showPassword ? 'Hide passwords' : 'Show passwords'" :aria-pressed="showPassword">
                 <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
               </button>
             </div>
@@ -300,13 +299,33 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 
 <style scoped>
 .auth-shell {
-  width: min(100%, 840px);
+  position: relative;
+  isolation: isolate;
+  width: min(100%, 480px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-  padding: 24px 24px 40px;
+  gap: 32px;
+  padding: 32px 24px;
 }
+
+.auth-shell::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  width: min(850px, 96vw);
+  height: 640px;
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  mask-image: radial-gradient(ellipse closest-side, #000 35%, transparent 100%);
+  background:
+    radial-gradient(ellipse at 28% 36%, rgba(119, 156, 241, 0.19), transparent 55%),
+    radial-gradient(ellipse at 72% 28%, rgba(173, 135, 224, 0.17), transparent 50%),
+    radial-gradient(ellipse at 65% 76%, rgba(101, 194, 172, 0.12), transparent 48%);
+}
+.password-toggle:focus-visible, .field-help-button:focus-visible, .auth-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 
 .animate-entry {
   animation: auth-rise 0.45s cubic-bezier(0.16, 1, 0.3, 1);
@@ -320,32 +339,28 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 .auth-title {
   margin: 0;
   color: var(--text-primary);
-  font-size: 42px;
-  font-weight: 700;
-  letter-spacing: 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
   line-height: 1.08;
 }
 
 .auth-description {
   margin: 10px auto 0;
   max-width: 580px;
-  font-size: 15px;
-  font-weight: 450;
+  font-size: 14px;
+  font-weight: 400;
   line-height: 1.55;
   color: var(--text-secondary);
 }
 
 .auth-card {
-  width: min(100%, 620px);
-  background: #ffffff;
-  border: 2px solid rgba(15, 23, 42, 0.28);
+  width: 100%;
+  background: transparent;
+  border: 0;
   border-radius: 10px;
-  padding: 16px;
+  padding: 0;
   box-shadow: none;
-}
-
-.auth-card-wide {
-  width: min(100%, 680px);
 }
 
 .auth-form {
@@ -397,9 +412,10 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 52px;
+  min-height: 46px;
   background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.16);
+  border: 1px solid rgba(96, 112, 167, 0.22);
+  box-shadow: 0 3px 10px rgba(64, 80, 139, 0.035);
   border-radius: 10px;
   overflow: hidden;
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
@@ -411,7 +427,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 
 .input-wrapper:focus-within {
   border-color: rgba(var(--primary-rgb), 0.5);
-  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.08);
 }
 
 .input-wrapper input {
@@ -452,21 +468,16 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 34px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(15, 23, 42, 0.03);
-  color: var(--text-muted);
+  min-height: 22px;
+  padding: 2px 0;
+  color: var(--text-secondary);
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 400;
   line-height: 1.35;
 }
 
 .requirement.met {
   color: #0f766e;
-  border-color: rgba(15, 118, 110, 0.16);
-  background: rgba(15, 118, 110, 0.07);
 }
 
 .status-alert {
@@ -499,7 +510,7 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 
 .auth-button {
   width: 100%;
-  min-height: 52px;
+  min-height: 46px;
   margin-top: 10px;
   border: none;
   border-radius: 10px;
@@ -522,8 +533,8 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 }
 
 .auth-button:disabled {
-  background: var(--surface-muted);
-  color: var(--text-faint);
+  background: #e9edfc;
+  color: #8b97bd;
   cursor: not-allowed;
   box-shadow: none;
 }
@@ -600,15 +611,15 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
 @media (max-width: 640px) {
   .auth-shell {
     padding: 16px 16px 28px;
-    gap: 16px;
+    gap: 28px;
   }
 
   .auth-title {
-    font-size: 32px;
+    font-size: 28px;
   }
 
   .auth-card {
-    padding: 14px;
+    padding: 0;
   }
 
   .auth-description {
@@ -618,5 +629,6 @@ watch([password, confirmPassword], ([newPassword, newConfirmPassword]) => {
   .password-requirements {
     grid-template-columns: 1fr;
   }
+  .input-wrapper input { font-size: 16px; }
 }
 </style>

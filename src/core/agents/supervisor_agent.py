@@ -506,7 +506,7 @@ async def supervise_query(
         logger.info(
             f"Supervisor initial decision: mode={decision.mode}, target={decision.target} - {decision.reasoning}"
         )
-        return decision, run_result.usage()
+        return decision, run_result.usage
     except Exception as exc:
         logger.error(f"Supervisor initial decision failed: {exc}", exc_info=True)
         return SupervisorDecision(
@@ -567,7 +567,7 @@ async def supervise_next_step(
         logger.info(
             f"Supervisor next decision: mode={decision.mode}, target={decision.target} - {decision.reasoning}"
         )
-        return decision, run_result.usage()
+        return decision, run_result.usage
     except Exception as exc:
         logger.error(f"Supervisor next-step decision failed: {exc}", exc_info=True)
         return _fallback_after_delegation_decision(latest_delegation_result, str(exc)), None

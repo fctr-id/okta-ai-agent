@@ -27,7 +27,7 @@ from src.core.okta.sync.models import (
 )
 from src.utils.logging import logger
 import asyncio
-from sqlalchemy import insert, text, select, and_
+from sqlalchemy import insert, text, select, and_, bindparam
 from datetime import datetime
 import time
 
@@ -63,7 +63,7 @@ class SyncOrchestrator:
         self._initialized = False
         self.cancellation_flag = cancellation_flag
         self._pending_group_relationships: List[Dict[str, Any]] = []
-        self._pending_application_policy_links: List[Dict[str, str]] = []
+        self._pending_application_policy_links: List[Dict[str, Any]] = []
 
     async def _initialize(self) -> None:
         if not self._initialized:
@@ -144,25 +144,26 @@ class SyncOrchestrator:
         session: AsyncSession,
         user_data: Dict,
     ) -> None:
-        """Process all user relationships with upsert handling"""
+        """Process all user relationships with upsert handling plus removal of
+        memberships/factors no longer present in Okta for this user."""
         try:
             user_okta_id = user_data['okta_id']
+            now = datetime.now(timezone.utc)
             logger.debug(f"Starting relationship sync for user {user_okta_id}")
-    
+
             # Handle group memberships with upsert
             group_memberships = user_data.pop('group_memberships', [])
             if group_memberships:
                 for membership in group_memberships:
                     stmt = text("""
-                        INSERT INTO user_group_memberships 
+                        INSERT INTO user_group_memberships
                         (tenant_id, user_okta_id, group_okta_id, created_at, updated_at)
                         VALUES (:tenant_id, :user_okta_id, :group_okta_id, :created_at, :updated_at)
-                        ON CONFLICT (tenant_id, user_okta_id, group_okta_id) 
+                        ON CONFLICT (tenant_id, user_okta_id, group_okta_id)
                         DO UPDATE SET
                             updated_at = excluded.updated_at
                     """)
-                    
-                    now = datetime.now(timezone.utc)
+
                     await session.execute(stmt, {
                         'tenant_id': self.tenant_id,
                         'user_okta_id': user_okta_id,
@@ -170,7 +171,28 @@ class SyncOrchestrator:
                         'created_at': now,
                         'updated_at': now
                     })
-    
+
+            # Remove memberships for this user that no longer exist in Okta
+            current_group_ids = [str(m['group_okta_id']) for m in group_memberships]
+            if current_group_ids:
+                delete_stale_memberships = text("""
+                    DELETE FROM user_group_memberships
+                    WHERE tenant_id = :tenant_id
+                    AND user_okta_id = :user_okta_id
+                    AND group_okta_id NOT IN :current_group_ids
+                """).bindparams(bindparam('current_group_ids', expanding=True))
+                await session.execute(delete_stale_memberships, {
+                    'tenant_id': self.tenant_id,
+                    'user_okta_id': user_okta_id,
+                    'current_group_ids': current_group_ids
+                })
+            else:
+                await session.execute(text("""
+                    DELETE FROM user_group_memberships
+                    WHERE tenant_id = :tenant_id
+                    AND user_okta_id = :user_okta_id
+                """), {'tenant_id': self.tenant_id, 'user_okta_id': user_okta_id})
+
             # Handle factors with upsert
             factors = user_data.pop('factors', [])
             if factors:
@@ -222,8 +244,28 @@ class SyncOrchestrator:
                         'last_updated_at': factor.get('last_updated_at'),
                         'updated_at': now
                     })
-    
-            await session.commit()
+
+            # Remove factors for this user that no longer exist in Okta
+            current_factor_ids = [str(f['okta_id']) for f in factors]
+            if current_factor_ids:
+                delete_stale_factors = text("""
+                    DELETE FROM user_factors
+                    WHERE tenant_id = :tenant_id
+                    AND user_okta_id = :user_okta_id
+                    AND okta_id NOT IN :current_factor_ids
+                """).bindparams(bindparam('current_factor_ids', expanding=True))
+                await session.execute(delete_stale_factors, {
+                    'tenant_id': self.tenant_id,
+                    'user_okta_id': user_okta_id,
+                    'current_factor_ids': current_factor_ids
+                })
+            else:
+                await session.execute(text("""
+                    DELETE FROM user_factors
+                    WHERE tenant_id = :tenant_id
+                    AND user_okta_id = :user_okta_id
+                """), {'tenant_id': self.tenant_id, 'user_okta_id': user_okta_id})
+
             logger.debug(f"Completed relationship sync for user {user_okta_id}")
                 
         except Exception as e:
@@ -235,47 +277,71 @@ class SyncOrchestrator:
         session: AsyncSession,
         group_data: Dict,
     ) -> None:
-        """Process group relationships with cleanup of removed assignments"""
+        """
+        Process group-to-application assignments using upserts, then remove
+        assignments for this group that are no longer present in Okta.
+        Avoids the previous delete-all-then-reinsert pattern which was slow
+        on subsequent syncs.
+        """
         try:
             # Get current assignments from Okta response
-            current_app_assignments = group_data.pop('applications', [])
+            if 'applications' not in group_data:
+                return  # Not fetched is different from a confirmed empty snapshot.
+            current_app_assignments = group_data.pop('applications')
             current_app_ids = [str(a['application_okta_id']) for a in current_app_assignments]
             group_okta_id = str(group_data['okta_id'])
-    
-            # Delete all existing assignments for this group first
-            delete_all_stmt = text("""
-                DELETE FROM group_application_assignments 
-                WHERE tenant_id = :tenant_id 
-                AND group_okta_id = :group_okta_id
-            """)
-            
-            await session.execute(delete_all_stmt, {
-                'tenant_id': str(self.tenant_id),
-                'group_okta_id': group_okta_id
-            })
-    
-            # Insert current assignments
-            if current_app_assignments:
-                for assignment in current_app_assignments:
-                    insert_stmt = text("""
-                        INSERT INTO group_application_assignments 
-                        (tenant_id, group_okta_id, application_okta_id, assignment_id, created_at, updated_at)
-                        VALUES (:tenant_id, :group_okta_id, :application_okta_id, :assignment_id, :created_at, :updated_at)
-                    """)
-                    
-                    now = datetime.now(timezone.utc)
-                    await session.execute(insert_stmt, {
-                        'tenant_id': str(self.tenant_id),
-                        'group_okta_id': str(assignment['group_okta_id']),
-                        'application_okta_id': str(assignment['application_okta_id']),
-                        'assignment_id': str(assignment['assignment_id']),
-                        'created_at': now,
-                        'updated_at': now
-                    })
-    
+            now = datetime.now(timezone.utc)
+
+            # Upsert current assignments
+            for assignment in current_app_assignments:
+                upsert_stmt = text("""
+                    INSERT INTO group_application_assignments
+                    (tenant_id, group_okta_id, application_okta_id, assignment_id, created_at, updated_at)
+                    VALUES (:tenant_id, :group_okta_id, :application_okta_id, :assignment_id, :created_at, :updated_at)
+                    ON CONFLICT (tenant_id, group_okta_id, application_okta_id)
+                    DO UPDATE SET
+                        assignment_id = excluded.assignment_id,
+                        updated_at = excluded.updated_at
+                """)
+
+                await session.execute(upsert_stmt, {
+                    'tenant_id': str(self.tenant_id),
+                    'group_okta_id': str(assignment['group_okta_id']),
+                    'application_okta_id': str(assignment['application_okta_id']),
+                    'assignment_id': str(assignment['assignment_id']),
+                    'created_at': now,
+                    'updated_at': now
+                })
+
+            # Remove assignments for this group that no longer exist in Okta
+            if current_app_ids:
+                delete_stale_stmt = text("""
+                    DELETE FROM group_application_assignments
+                    WHERE tenant_id = :tenant_id
+                    AND group_okta_id = :group_okta_id
+                    AND application_okta_id NOT IN :current_app_ids
+                """).bindparams(bindparam('current_app_ids', expanding=True))
+
+                await session.execute(delete_stale_stmt, {
+                    'tenant_id': str(self.tenant_id),
+                    'group_okta_id': group_okta_id,
+                    'current_app_ids': current_app_ids
+                })
+            else:
+                # Group has no app assignments left in Okta - remove all for this group
+                delete_all_stmt = text("""
+                    DELETE FROM group_application_assignments
+                    WHERE tenant_id = :tenant_id
+                    AND group_okta_id = :group_okta_id
+                """)
+                await session.execute(delete_all_stmt, {
+                    'tenant_id': str(self.tenant_id),
+                    'group_okta_id': group_okta_id
+                })
+
             await session.commit()
             logger.debug(f"Processed {len(current_app_assignments)} assignments for group {group_okta_id}")
-            
+
         except Exception as e:
             logger.error(f"Error processing group relationships: {str(e)}")
             raise
@@ -313,12 +379,12 @@ class SyncOrchestrator:
                                 updated_at = :updated_at
                             WHERE tenant_id = :tenant_id
                             AND okta_id = :application_okta_id
-                            AND EXISTS (
+                            AND (:policy_id IS NULL OR EXISTS (
                                 SELECT 1
                                 FROM policies
                                 WHERE tenant_id = :tenant_id
                                 AND okta_id = :policy_id
-                            )
+                            ))
                         """),
                         {
                             'tenant_id': str(self.tenant_id),
@@ -329,10 +395,9 @@ class SyncOrchestrator:
                     )
 
                     if result.rowcount == 0:
-                        logger.warning(
-                            "Skipped application policy link for app %s because policy %s was not present after Policy sync",
-                            policy_link['application_okta_id'],
-                            policy_link['policy_id'],
+                        raise RuntimeError(
+                            f"Cannot reconcile application {policy_link['application_okta_id']} "
+                            f"with policy {policy_link['policy_id']}: application or policy missing"
                         )
 
                 await session.commit()
@@ -351,35 +416,24 @@ class SyncOrchestrator:
         app_data: Dict,
     ) -> None:
         """
-        Process application user assignments with scope awareness.
-        Uses batched INSERTs for performance with large apps (10K+ users).
+        Process application user assignments using batched upserts, then remove
+        assignments for this app that are no longer present in Okta.
+        Avoids the previous delete-all-then-reinsert pattern which was slow
+        on subsequent syncs with large apps (10K+ users).
         """
         try:
             # Get current assignments from Okta response
             user_assignments = app_data.pop('user_assignments', [])
             app_okta_id = str(app_data['okta_id'])
-            
-            # DELETE all existing assignments for this app first
-            delete_stmt = text("""
-                DELETE FROM user_application_assignments 
-                WHERE tenant_id = :tenant_id 
-                AND application_okta_id = :app_okta_id
-            """)
-            
-            await session.execute(delete_stmt, {
-                'tenant_id': str(self.tenant_id),
-                'app_okta_id': app_okta_id
-            })
-            
-            # INSERT current assignments with batched execution for performance
+            now = datetime.now(timezone.utc)
+
+            # Upsert current assignments with batched execution for performance
             if user_assignments:
                 BATCH_SIZE = 1000
-                now = datetime.now(timezone.utc)
-                
-                # Prepare INSERT statement (reuse for all batches)
-                insert_stmt = text("""
-                    INSERT INTO user_application_assignments 
-                    (tenant_id, user_okta_id, application_okta_id, 
+
+                upsert_stmt = text("""
+                    INSERT INTO user_application_assignments
+                    (tenant_id, user_okta_id, application_okta_id,
                      assignment_id, assignment_type, group_name, group_okta_id,
                      assignment_status, credentials_setup, hidden,
                      created_at, updated_at)
@@ -387,14 +441,22 @@ class SyncOrchestrator:
                             :assignment_id, :assignment_type, :group_name, :group_okta_id,
                             :assignment_status, :credentials_setup, :hidden,
                             :created_at, :updated_at)
+                    ON CONFLICT (tenant_id, user_okta_id, application_okta_id)
+                    DO UPDATE SET
+                        assignment_id = excluded.assignment_id,
+                        assignment_type = excluded.assignment_type,
+                        group_name = excluded.group_name,
+                        group_okta_id = excluded.group_okta_id,
+                        assignment_status = excluded.assignment_status,
+                        credentials_setup = excluded.credentials_setup,
+                        hidden = excluded.hidden,
+                        updated_at = excluded.updated_at
                 """)
-                
-                # Process in batches of 1000 for optimal performance
-                total_inserted = 0
+
+                total_upserted = 0
                 for i in range(0, len(user_assignments), BATCH_SIZE):
                     batch = user_assignments[i:i + BATCH_SIZE]
-                    
-                    # Prepare batch parameters
+
                     batch_params = []
                     for assignment in batch:
                         batch_params.append({
@@ -411,90 +473,113 @@ class SyncOrchestrator:
                             'created_at': assignment.get('created_at', now),
                             'updated_at': now
                         })
-                    
-                    # Execute batch insert
-                    await session.execute(insert_stmt, batch_params)
-                    total_inserted += len(batch)
-                    
+
+                    await session.execute(upsert_stmt, batch_params)
+                    total_upserted += len(batch)
+
                     if len(user_assignments) > BATCH_SIZE:
-                        logger.debug(f"Inserted batch {i//BATCH_SIZE + 1}: {len(batch)} assignments for app {app_okta_id}")
-            
-            await session.commit()
+                        logger.debug(f"Upserted batch {i//BATCH_SIZE + 1}: {len(batch)} assignments for app {app_okta_id}")
+
+            # Remove assignments for this app that no longer exist in Okta
+            current_user_ids = [str(a['user_okta_id']) for a in user_assignments]
+            if current_user_ids:
+                delete_stale_stmt = text("""
+                    DELETE FROM user_application_assignments
+                    WHERE tenant_id = :tenant_id
+                    AND application_okta_id = :app_okta_id
+                    AND user_okta_id NOT IN :current_user_ids
+                """).bindparams(bindparam('current_user_ids', expanding=True))
+
+                await session.execute(delete_stale_stmt, {
+                    'tenant_id': str(self.tenant_id),
+                    'app_okta_id': app_okta_id,
+                    'current_user_ids': current_user_ids
+                })
+            else:
+                # App has no user assignments left in Okta - remove all for this app
+                delete_all_stmt = text("""
+                    DELETE FROM user_application_assignments
+                    WHERE tenant_id = :tenant_id
+                    AND application_okta_id = :app_okta_id
+                """)
+                await session.execute(delete_all_stmt, {
+                    'tenant_id': str(self.tenant_id),
+                    'app_okta_id': app_okta_id
+                })
+
             logger.debug(f"Processed {len(user_assignments)} assignments for app {app_okta_id}")
-            
+
         except Exception as e:
             logger.error(f"Error processing app relationships: {str(e)}")
             raise
         
-    async def _clean_entity_data(self, session: AsyncSession, model: Type[ModelType]) -> None:
-        """Clean existing data for entity type"""
-        try:
-            # Delete data based on model type
-            if model == User:
-                # Clean user-related tables first
-                await session.execute(text("""
-                    DELETE FROM user_factors 
-                    WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
-                
-                await session.execute(text("""
-                    DELETE FROM user_application_assignments 
-                    WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
-                
-                await session.execute(text("""
-                    DELETE FROM user_group_memberships 
-                    WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
-                
-                await session.execute(text("""
-                    DELETE FROM users 
-                    WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
-                
-            elif model == Group:
-                await session.execute(text("""
-                    DELETE FROM group_application_assignments 
-                    WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
-                
-                await session.execute(text("""
-                    DELETE FROM groups 
-                    WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
-                
-            elif model == Application:
-                await session.execute(text("""
-                    DELETE FROM applications 
-                    WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
+    async def _delete_stale_entity_data(self, session: AsyncSession, model: Type[ModelType], sync_started_at: datetime) -> None:
+        """
+        Delete rows for this entity type that were not updated during the
+        current sync (i.e. their last_synced_at predates the sync start).
+        These represent entities removed in Okta since the previous sync.
 
-            elif model == Device: 
-                # Clean device-related tables first (user_devices relationships)
+        This replaces the old wipe-everything-then-reinsert approach with a
+        single indexed delete per entity type. Related child rows are removed
+        via FK cascade (ondelete='CASCADE') or explicitly where no FK exists.
+        """
+        try:
+            table = model.__tablename__
+
+            if model == User:
+                # Clean user-related child rows for stale users first (no FK on user_factors)
                 await session.execute(text("""
-                    DELETE FROM user_devices 
+                    DELETE FROM user_factors
                     WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})
-                
-                # Then clean devices themselves
+                    AND user_okta_id IN (
+                        SELECT okta_id FROM users
+                        WHERE tenant_id = :tenant_id
+                        AND (last_synced_at IS NULL OR last_synced_at < :sync_started_at)
+                    )
+                """), {'tenant_id': self.tenant_id, 'sync_started_at': sync_started_at})
+
+            elif model == Device:
                 await session.execute(text("""
-                    DELETE FROM devices 
+                    DELETE FROM user_devices
                     WHERE tenant_id = :tenant_id
-                """), {'tenant_id': self.tenant_id})                
-                
-                
+                    AND device_okta_id IN (
+                        SELECT okta_id FROM devices
+                        WHERE tenant_id = :tenant_id
+                        AND (last_synced_at IS NULL OR last_synced_at < :sync_started_at)
+                    )
+                """), {'tenant_id': self.tenant_id, 'sync_started_at': sync_started_at})
+
+            # Delete the stale main entity rows (relationship join tables have
+            # FK ondelete='CASCADE' so they are cleaned up automatically)
+            result = await session.execute(text(f"""
+                DELETE FROM {table}
+                WHERE tenant_id = :tenant_id
+                AND (last_synced_at IS NULL OR last_synced_at < :sync_started_at)
+            """), {'tenant_id': self.tenant_id, 'sync_started_at': sync_started_at})
+
             await session.commit()
-            logger.info(f"Cleaned {model.__name__} data for tenant {self.tenant_id}")
-            
+            deleted = result.rowcount if result.rowcount is not None else 0
+            if deleted:
+                logger.info(f"Removed {deleted} stale {model.__name__} records no longer present in Okta")
+            else:
+                logger.debug(f"No stale {model.__name__} records to remove")
+
         except Exception as e:
-            logger.error(f"Error cleaning {model.__name__} data: {str(e)}")
-            raise 
+            logger.error(f"Error removing stale {model.__name__} data: {str(e)}")
+            raise
         
         
     async def sync_model_streaming(self, model: Type[ModelType], list_method: Callable, batch_size: int = 100) -> None:
-        """Sync model with direct API-to-DB streaming (no memory accumulation)."""
+        """Sync model with direct API-to-DB streaming (no memory accumulation).
+
+        Uses upserts instead of wiping the table first, then reconciles stale
+        rows (records no longer present in Okta) at the end via a single
+        timestamp-based delete. This avoids expensive full-table deletes on
+        every sync while keeping the local copy accurate.
+        """
         import time
         start_time = time.time()
+        sync_started_at = datetime.now(timezone.utc)
         logger.info(f"Starting sync for {model.__name__}")
         try:
             # Make sure the database operations object has the tenant_id set
@@ -515,16 +600,11 @@ class SyncOrchestrator:
                 active_sync = result.scalars().first()
                 
                 if not active_sync:
-                    logger.error("No active sync record found for updates")
-                    return
+                    raise RuntimeError("No active sync record found for updates")
                     
                 sync_id = active_sync.id
                 
                 try:
-                    # Clean existing data first
-                    await self._clean_entity_data(session, model)
-                    logger.info(f"Cleaned existing {model.__name__} data")
-                    
                     # Create processor function for handling batches directly from API to DB
                     total_records = 0
                     
@@ -555,13 +635,22 @@ class SyncOrchestrator:
                             elif model.__name__ == 'Device': 
                                 sync_history.devices_count = total_records
                                 
-                            await session.commit()
+                        # Entity rows, relationships and polling counters become
+                        # visible together after each bounded batch.
+                        await session.commit()
                         
                         logger.info(f"Processed {batch_count} {model.__name__} records, total: {total_records}")
                     
                     # Call list method with direct processor function 
                     await list_method(processor_func=process_batch_directly)
-                    
+
+                    if self.cancellation_flag and self.cancellation_flag.is_set():
+                        raise asyncio.CancelledError("Sync cancelled before reconciliation")
+
+                    # Reconcile: remove rows that were not touched during this sync
+                    # (i.e. entities deleted in Okta since the last sync)
+                    await self._delete_stale_entity_data(session, model, sync_started_at)
+
                     duration = time.time() - start_time
                     logger.info(f"Processed {total_records} {model.__name__} records in {format_duration(duration)}")
                     
@@ -712,10 +801,11 @@ class SyncOrchestrator:
 
             if model == Group:
                 for record in batch:
-                    self._pending_group_relationships.append({
-                        'okta_id': record['okta_id'],
-                        'applications': record.pop('applications', []),
-                    })
+                    if 'applications' in record:
+                        self._pending_group_relationships.append({
+                            'okta_id': record['okta_id'],
+                            'applications': record.pop('applications'),
+                        })
 
                 await self.db.bulk_upsert(session, model, batch, self.tenant_id)
                 return len(batch)
@@ -723,11 +813,11 @@ class SyncOrchestrator:
             if model == Application:
                 relationship_payloads = []
                 for record in batch:
-                    policy_id = record.pop('policy_id', None)
-                    if policy_id:
+                    if 'policy_id' in record:
+                        policy_id = record.pop('policy_id')
                         self._pending_application_policy_links.append({
                             'application_okta_id': record['okta_id'],
-                            'policy_id': str(policy_id),
+                            'policy_id': str(policy_id) if policy_id is not None else None,
                         })
 
                     relationship_payloads.append({
@@ -756,4 +846,4 @@ class SyncOrchestrator:
             
         except Exception as e:
             logger.error(f"Error processing batch of {model.__name__}: {str(e)}")
-            raise       
+            raise

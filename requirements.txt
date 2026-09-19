@@ -1,24 +1,47 @@
 # Core dependencies
-pydantic~=2.13.3
-pydantic-ai-slim[openai,anthropic,google,bedrock]~=1.89.1
-python-dotenv~=1.2.2
+pydantic~=2.13.5
+pydantic-ai-slim[openai,anthropic,google,bedrock]>=1.107.6,<2
+python-dotenv~=1.2.3
 okta~=2.9.13
-sqlalchemy~=2.0.49
+sqlalchemy~=2.0.54
 aiosqlite~=0.22.1
-pydantic-settings~=2.14.0
-pytz==2026.1.post1
-fastapi~=0.136.1
-uvicorn~=0.46.0
-sse-starlette==3.4.1
+pydantic-settings~=2.15.0
+pytz==2026.3.post1
+tzdata==2026.4
+fastapi~=0.141.1
+uvicorn~=0.53.0
+sse-starlette==3.4.11
 argon2-cffi~=25.1.0
 python-jose[cryptography]~=3.5.0
-python-multipart~=0.0.27
+python-multipart~=0.0.32
 #html-sanitizer~=2.6.0
 #dateparser~=1.2.2
 #polars~=1.31.0
 #polars-lts-cpu~=1.32.2
-authlib~=1.7.0
+authlib~=1.8.0
+
+# Retain provider SDK major versions validated with Pydantic AI 1.x.
+openai>=2.32.0,<3
+anthropic>=0.108.0,<1
+google-genai>=1.73.1,<2
+
+# Security floors for shared runtime/transitive dependencies.
+starlette>=1.6.0,<2
+aiohttp>=3.14.3,<4
+anyio>=4.15.1,<5
+cryptography>=50.0.1,<51
+joserfc>=1.7.5,<2
+jwcrypto>=1.6.1,<2
+PyJWT>=2.14.0,<3
+pyasn1>=0.6.4,<0.7
+requests>=2.34.2,<3
+urllib3>=2.8.0,<3
+# Includes the DER fix; the upstream Minerva timing advisory remains unresolved.
+ecdsa>=0.19.2,<0.20
+click>=8.5.0,<9
+# Ships a wheel and no longer needs the legacy setuptools build workaround.
+flatdict>=4.1.0,<5
 
 # Slack Bot Integration (optional, needed if ENABLE_SLACK_BOT=true)
-slack-bolt~=1.28.0
-slack-sdk~=3.41.0
+slack-bolt~=1.30.0
+slack-sdk~=3.44.1

@@ -11,6 +11,7 @@ Output: SQLDiscoveryResult with found_data, needs_api, reasoning
 """
 
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, ToolReturn, UsageLimits
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Any, Dict
 from dataclasses import dataclass
@@ -164,6 +165,8 @@ def get_database_runtime_summary() -> Dict[str, Any]:
         "table_counts": {},
         "missing_key_tables": [],
         "last_sync_time": None,
+        "sync_age_hours": None,
+        "sync_stale": False,
         "reason": None,
     }
 
@@ -202,6 +205,25 @@ def get_database_runtime_summary() -> Dict[str, Any]:
             summary["missing_key_tables"] = missing_tables
             summary["usable_for_sql"] = table_counts.get("users", 0) > 0
             summary["last_sync_time"] = get_last_sync_timestamp()
+
+            # Surface sync freshness so the supervisor can prefer API for
+            # time-sensitive queries when the local copy is old.
+            sync_age_hours: Optional[float] = None
+            if summary["last_sync_time"]:
+                try:
+                    from datetime import datetime, timezone
+                    ts = summary["last_sync_time"].replace("Z", "+00:00")
+                    sync_time = datetime.fromisoformat(ts)
+                    if sync_time.tzinfo is None:
+                        sync_time = sync_time.replace(tzinfo=timezone.utc)
+                    sync_age_hours = round(
+                        (datetime.now(timezone.utc) - sync_time).total_seconds() / 3600, 2
+                    )
+                except Exception:
+                    sync_age_hours = None
+            summary["sync_age_hours"] = sync_age_hours
+            summary["sync_stale"] = bool(sync_age_hours is not None and sync_age_hours > 24)
+
             if not summary["usable_for_sql"]:
                 summary["reason"] = "Users table is missing or empty."
             else:
@@ -397,7 +419,22 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         
         # Load schema ONLY - the agent prompt already has SQL patterns
         schema_description = get_sqlite_schema_description()
-        
+
+        # Include local copy freshness so the agent can caveat results that
+        # depend on current Okta state.
+        last_sync = get_last_sync_timestamp()
+        freshness_note = (
+            f"\n\nLOCAL DATA FRESHNESS: This database was last synced from Okta at "
+            f"{last_sync}. If the user's question depends on very recent changes "
+            f"(new users, today's deactivations, assignments changed since that time), "
+            f"note this timestamp in your reasoning and consider setting needs_api for "
+            f"verification of time-sensitive results."
+            if last_sync else
+            "\n\nLOCAL DATA FRESHNESS: No successful sync timestamp found. Treat results "
+            "as potentially incomplete and prefer needs_api for time-sensitive questions."
+        )
+        schema_description = schema_description + freshness_note
+
         await notify_step_end(
             "Schema Loaded",
             f"Loaded {len(schema_description)} chars of database schema"
@@ -778,8 +815,8 @@ Compact API Artifact Context (manifests, result refs, tiny samples):
         )
         
         # Log token usage
-        if result.usage():
-            usage = result.usage()
+        usage = result.usage
+        if usage:
             avg_per_call = usage.input_tokens / usage.requests if usage.requests > 0 else 0
             logger.info(
                 f"[{deps.correlation_id}] SQL Agent Token Usage: "
@@ -788,8 +825,12 @@ Compact API Artifact Context (manifests, result refs, tiny samples):
                 f"avg {avg_per_call:,.0f} input/call)"
             )
         
-        return result.output, result.usage()
+        return result.output, usage
         
+    except UsageLimitExceeded:
+        # Preserve the exception type so the orchestrator stops instead of
+        # treating budget exhaustion as a retrieval failure eligible for fallback.
+        raise
     except Exception as e:
         logger.error(f"[{deps.correlation_id}] SQL discovery failed: {e}", exc_info=True)
         return SQLDiscoveryResult(

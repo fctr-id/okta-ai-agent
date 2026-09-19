@@ -8,7 +8,8 @@ import time
 import builtins
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -31,6 +32,7 @@ from src.data.schemas.artifact_manifest import (
 )
 from src.utils.logging import get_logger
 from src.utils.security_config import validate_result_analysis_code
+from src.utils.timezone_context import timezone_instructions
 
 logger = get_logger("okta_ai_agent")
 
@@ -181,6 +183,7 @@ class ResultAnalysisDeps:
     candidate_result_sets: List[Dict[str, Any]] = field(default_factory=list)
     preferred_result_set_refs: List[str] = field(default_factory=list)
     workflow_state: Dict[str, Any] = field(default_factory=dict)
+    user_timezone: Optional[str] = None
 
 
 result_analysis_agent = build_agent(
@@ -197,6 +200,8 @@ def create_dynamic_instructions(ctx: RunContext[ResultAnalysisDeps]) -> str:
     deps = ctx.deps
     return f"""
 CORRELATION ID: {deps.correlation_id}
+
+{timezone_instructions(deps.user_timezone)}
 
 SESSION SUMMARY:
 {deps.session_summary or "(none)"}
@@ -222,6 +227,7 @@ async def execute_result_analysis(
     artifacts_file: Path,
     preferred_result_set_refs: Optional[List[str]] = None,
     workflow_state: Optional[Dict[str, Any]] = None,
+    user_timezone: Optional[str] = None,
 ) -> tuple[DelegationResult, Any]:
     """Run the LLM-guided result-analysis specialist and return a specialist-style delegation result."""
     candidate_result_sets = _load_candidate_result_sets(
@@ -250,6 +256,7 @@ async def execute_result_analysis(
         candidate_result_sets=candidate_result_sets,
         preferred_result_set_refs=list(preferred_result_set_refs or []),
         workflow_state=workflow_state or {},
+        user_timezone=user_timezone,
     )
 
     try:
@@ -272,7 +279,7 @@ async def execute_result_analysis(
         )
 
     plan = run_result.output
-    usage = run_result.usage()
+    usage = run_result.usage
     selected_result_set_ids = list(plan.selected_result_set_ids)
     selected_candidates = _select_candidate_result_sets(candidate_result_sets, selected_result_set_ids)
     anchored_result_scope = _build_anchored_result_scope(selected_candidates)
@@ -353,6 +360,7 @@ async def execute_result_analysis(
         execution_output = _execute_analysis_code(
             user_query=user_query,
             python_code=plan.python_code or "",
+            user_timezone=user_timezone,
             selected_candidates=selected_candidates,
             selected_result_set_ids=selected_result_set_ids,
         )
@@ -382,11 +390,35 @@ async def execute_result_analysis(
         selected_result_set_ids=selected_result_set_ids,
     )
 
+    # The restricted runner has already computed the answer from the full saved
+    # population. Keep it outside model context and do not retrieve it again.
+    if execution_output.rows or ("rows" in execution_output.model_fields_set and not execution_output.answer):
+        completed_result = {
+            "display_type": "table",
+            "results": execution_output.rows,
+            "headers": list(dict.fromkeys(key for row in execution_output.rows for key in row)),
+            "count": len(execution_output.rows),
+        }
+    else:
+        completed_result = {
+            "display_type": "markdown",
+            "content": execution_output.answer or execution_output.summary,
+            "count": 0,
+        }
+    completed_result["metadata"] = {
+        **execution_output.metadata,
+        "data_source_type": "analysis",
+        "result_set_refs": result_set_refs,
+        "entity_type": execution_output.entity_type or plan.result_entity_type,
+    }
+
     return (
         DelegationResult(
             success=True,
             source_specialist="analysis",
-            result_mode="synthesis_ready",
+            result_mode="direct_answer",
+            direct_answer=execution_output.answer or execution_output.summary,
+            completed_result=completed_result,
             summary=execution_output.summary,
             artifact_keys=[artifact_key],
             result_set_refs=result_set_refs,
@@ -427,6 +459,7 @@ def _execute_analysis_code(
     python_code: str,
     selected_candidates: Dict[str, Dict[str, Any]],
     selected_result_set_ids: List[str],
+    user_timezone: Optional[str] = None,
 ) -> ResultAnalysisExecutionOutput:
     result_sets = {
         result_set_id: _load_result_records(candidate["storage_path"])
@@ -472,14 +505,17 @@ def _execute_analysis_code(
         )
     }
 
-    globals_dict = {
+    execution_namespace = {
         "__builtins__": safe_builtins,
         "Counter": Counter,
         "defaultdict": defaultdict,
         "json": json,
         "re": re,
-    }
-    locals_dict = {
+        "datetime": datetime,
+        "timedelta": timedelta,
+        "timezone": timezone,
+        "ZoneInfo": ZoneInfo,
+        "user_timezone": user_timezone,
         "result_sets": result_sets,
         "result_metadata": result_metadata,
         "selected_result_set_ids": selected_result_set_ids,
@@ -488,8 +524,10 @@ def _execute_analysis_code(
     }
 
     compiled = compile(python_code, "<result_analysis>", "exec")
-    exec(compiled, globals_dict, locals_dict)
-    raw_output = locals_dict.get("analysis_result")
+    # Helpers and comprehensions must resolve other helpers and inputs in the
+    # same namespace. Separate globals/locals give exec class-body semantics.
+    exec(compiled, execution_namespace)
+    raw_output = execution_namespace.get("analysis_result")
 
     if raw_output is None:
         raise ValueError("Analysis code must assign a dict to analysis_result")

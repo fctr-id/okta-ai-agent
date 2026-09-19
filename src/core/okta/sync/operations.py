@@ -661,6 +661,15 @@ class DatabaseOperations:
         try:
             total_factors = 0
             total_user_devices = 0
+            # Fetch existing rows once per bounded batch, not once per record.
+            existing_by_id = {}
+            record_ids = list({record['okta_id'] for record in records})
+            for offset in range(0, len(record_ids), 500):
+                result = await session.execute(select(model).where(
+                    model.tenant_id == tenant_id,
+                    model.okta_id.in_(record_ids[offset:offset + 500]),
+                ))
+                existing_by_id.update((row.okta_id, row) for row in result.scalars())
             
             for record in records:
                 # Extract factors if present (User model)
@@ -669,19 +678,12 @@ class DatabaseOperations:
                     total_factors += len(factors) if factors else 0
                 
                 # Extract user_devices if present (Device model) 
-                user_devices = record.pop('user_devices', []) if model == Device else None
+                user_devices = record.pop('user_devices', None) if model == Device else None
                 if model == Device:
                     total_user_devices += len(user_devices) if user_devices else 0
                 
                 # Process main record
-                stmt = select(model).where(
-                    and_(
-                        model.okta_id == record['okta_id'],
-                        model.tenant_id == tenant_id
-                    )
-                )
-                result = await session.execute(stmt)
-                existing = result.scalar_one_or_none()
+                existing = existing_by_id.get(record['okta_id'])
     
                 if existing:
                     for key, value in record.items():
@@ -700,13 +702,16 @@ class DatabaseOperations:
                         record['custom_attributes'] = {}
                     existing = model(**record)
                     session.add(existing)
+                    existing_by_id[record['okta_id']] = existing
                 
                 # Process factors if present
                 if factors:
                     await self._process_user_factors(session, existing, factors, tenant_id)
                     
                 # Process user-device relationships if present (Device model)
-                if user_devices:
+                if user_devices is not None:
+                    # The relationship FK requires new devices to exist first.
+                    await session.flush()
                     await self._process_device_user_relationships(session, existing, user_devices, tenant_id)                    
     
             # Logging
@@ -940,8 +945,7 @@ class DatabaseOperations:
         Notes:
             - Creates/updates user-device relationships
             - Validates that users exist before creating relationships
-            - Marks removed relationships as deleted
-            - Maintains relationship sync timestamps
+            - Deletes removed relationships within the caller's transaction
         """        
         try:
             logger.debug(f"Processing {len(user_devices)} user relationships for device {device.okta_id}")
@@ -983,7 +987,7 @@ class DatabaseOperations:
                     for key, value in user_device_data.items():
                         if hasattr(existing_relationship, key):
                             setattr(existing_relationship, key, value)
-                    existing_relationship.last_synced_at = datetime.utcnow()
+                    existing_relationship.updated_at = datetime.utcnow()
                 else:
                     # Create new relationship
                     new_relationship = UserDevice(**user_device_data)
@@ -991,7 +995,7 @@ class DatabaseOperations:
                 
                 relationship_keys.append((user_okta_id, device.okta_id))
     
-            # Mark deleted relationships (soft delete)
+            # UserDevice has no soft-delete columns; remove stale links physically.
             if relationship_keys:
                 # Build the condition for relationships that should remain active
                 active_conditions = [
@@ -1023,10 +1027,7 @@ class DatabaseOperations:
             deleted_relationships = result.scalars().all()
             
             for relationship in deleted_relationships:
-                relationship.is_deleted = True
-                relationship.last_synced_at = datetime.utcnow()
-    
-            await session.commit()
+                await session.delete(relationship)
     
         except Exception as e:
             logger.error(f"Error processing user relationships for device {device.okta_id}: {str(e)}")
@@ -1145,11 +1146,22 @@ class DatabaseOperations:
         result = await session.execute(query)
         return result.scalars().first()
 
+    async def get_latest_sync(self, session: AsyncSession, tenant_id: str) -> Optional[SyncHistory]:
+        """Return the latest attempt, including failures and cancellations."""
+        result = await session.execute(
+            select(SyncHistory).where(SyncHistory.tenant_id == tenant_id)
+            .order_by(SyncHistory.start_time.desc(), SyncHistory.id.desc()).limit(1)
+        )
+        return result.scalars().first()
+
     async def get_last_completed_sync(self, session: AsyncSession, tenant_id: str) -> Optional[SyncHistory]:
         """
-        Get the most recently completed sync
+        Get the most recently successfully completed sync.
         Returns SyncHistory object or None
-        
+
+        Use get_latest_sync for attempt status; this method supplies the last
+        successful snapshot's counts and timestamp independently of failures.
+
         Args:
             session: Active database session
             tenant_id: Tenant identifier
@@ -1157,7 +1169,7 @@ class DatabaseOperations:
         query = select(SyncHistory).where(
             and_(
                 SyncHistory.tenant_id == tenant_id,
-                SyncHistory.status.in_([SyncStatus.COMPLETED, SyncStatus.FAILED, SyncStatus.CANCELED])
+                SyncHistory.status == SyncStatus.COMPLETED
             )
         ).order_by(SyncHistory.end_time.desc()).limit(1)
         

@@ -33,64 +33,52 @@
 
         <!-- Data Table Display -->
         <div v-else-if="displayedItems.length > 0 || (isStreaming && (props.type === MessageType.TABLE || props.type === MessageType.STREAM))" class="table-content">
-            <v-data-table :headers="formattedHeaders" :items="displayedItems"
-                :loading="loading" :items-per-page="10" :search="search" :sort-by="sortBy" density="compact" hover>
+            <v-data-table class="results-table" :style="{ '--results-table-min-width': `${tableMinWidth}px` }"
+                :headers="formattedHeaders" :items="displayedItems"
+                :loading="loading" :items-per-page="10" :search="search" :sort-by="sortBy" items-per-page-text="Rows per page" density="compact" hover>
                 <template v-slot:top>
-                    <div class="table-header-container pb-6">
-                        <div class="search-row pl-4">
-                            <div class="header-actions">
-                                <div class="left-section">
-                                    <v-btn
-                                        v-if="showTableAction"
-                                        class="saved-results-btn"
-                                        :loading="tableActionLoading"
-                                        :disabled="tableActionLoading"
-                                        variant="flat"
-                                        @click="emit('table-action')"
-                                    >
-                                        <v-icon size="small" start>mdi-database-arrow-down-outline</v-icon>
-                                        {{ tableActionLabel }}
-                                    </v-btn>
-
-                                    <v-btn class="download-btn" @click="downloadCSV" variant="tonal">
-                                        <v-icon size="small" start>mdi-download</v-icon>
-                                        Download CSV
-                                    </v-btn>
-
-                                    <div class="sync-info">
-                                        <v-icon class="sync-icon" size="small">mdi-update</v-icon>
-                                        <span v-if="getDataSourceDisplay.showRealtime">
-                                            {{ getDataSourceDisplay.prefix }} {{ getDataSourceDisplay.source }}
-                                        </span>
-                                        <span v-else>
-                                            {{ getDataSourceDisplay.prefix }} {{ getDataSourceDisplay.source }} (synced: {{ getLastSyncTime }}){{ getDataSourceDisplay.suffix || '' }}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div class="right-section">
-                                    <!-- Streaming indicator in header -->
-                                    <div v-if="isStreaming" class="streaming-indicator me-3">
-                                        <v-progress-circular 
-                                            :model-value="streamingProgressPercent"
-                                            size="16" 
-                                            width="2" 
-                                            color="primary" 
-                                            class="me-2">
-                                        </v-progress-circular>
-                                        <span class="streaming-text">
-                                            Loading results ({{ streamingProgressPercent }}%)
-                                        </span>
-                                    </div>
-
-                                    <v-text-field v-model="search" density="comfortable" hide-details
-                                        placeholder="Search results" prepend-inner-icon="mdi-magnify" single-line
-                                        clearable variant="outlined" class="search-field"></v-text-field>
-                                </div>
+                    <div class="table-header-container" :class="{ 'is-preview': isResultsPreview }">
+                        <div class="results-heading">
+                            <div class="results-title">
+                                <h3>{{ isResultsPreview ? 'Results preview' : 'Results' }}</h3>
+                                <span class="record-count">{{ recordCountLabel }}</span>
+                            </div>
+                            <div class="sync-info">
+                                <span class="source-badge" :class="`source-${props.metadata?.data_source_type || 'api'}`">
+                                    <v-icon size="14" aria-hidden="true">{{ getDataSourceDisplay.showRealtime ? 'mdi-cloud-outline' : 'mdi-database-outline' }}</v-icon>
+                                    {{ getDataSourceDisplay.source }}{{ getDataSourceDisplay.suffix || '' }}
+                                </span>
+                                <span v-if="!getDataSourceDisplay.showRealtime && props.metadata?.data_source_type !== 'saved_session'" class="sync-time">Synced {{ getLastSyncTime }}</span>
                             </div>
                         </div>
-                        <!-- Remove the info-row div completely -->
+                        <div class="results-tools">
+                            <div v-if="isStreaming" class="streaming-indicator">
+                                <v-progress-circular :model-value="streamingProgressPercent" size="16" width="2" color="primary" class="me-2" />
+                                <span class="streaming-text">Loading results ({{ streamingProgressPercent }}%)</span>
+                            </div>
+                            <v-text-field v-model="search" density="compact" hide-details
+                                :aria-label="isResultsPreview ? 'Search preview' : 'Search results'"
+                                :placeholder="isResultsPreview ? 'Search preview' : 'Search results'"
+                                prepend-inner-icon="mdi-magnify" single-line clearable variant="outlined" class="search-field" />
+                            <v-btn class="download-btn" :class="{ 'preview-export': isResultsPreview }" @click="downloadCSV" variant="flat">
+                                <v-icon size="small" start aria-hidden="true">mdi-download</v-icon>
+                                {{ isResultsPreview ? 'Export preview' : 'Export CSV' }}
+                            </v-btn>
+                        </div>
+                        <p v-if="isResultsPreview" class="preview-description">
+                            {{ showTableAction ? 'Fetch all records to search and export the complete saved result.' : 'Search and export include only the records in this preview.' }}
+                        </p>
+                        <div v-if="showTableAction" class="table-action">
+                            <v-btn class="saved-results-btn" :loading="tableActionLoading" :disabled="tableActionLoading"
+                                variant="flat" @click="emit('table-action')">
+                                <v-icon size="small" start aria-hidden="true">mdi-database-arrow-down-outline</v-icon>
+                                {{ tableActionLabel }}
+                            </v-btn>
+                        </div>
                     </div>
+                </template>
+                <template v-for="header in formattedHeaders" :key="header.key" v-slot:[`item.${header.key}`]="{ value }">
+                    <ResultTableCell :value="value" :label="header.title" />
                 </template>
             </v-data-table>
         </div>
@@ -109,6 +97,7 @@
 import { marked } from 'marked'
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
+import ResultTableCell from './ResultTableCell.vue'
 
 marked.setOptions({
     breaks: true,    // Translate line breaks to <br>
@@ -171,6 +160,7 @@ const emit = defineEmits(['table-action'])
 
 // State management
 
+
 const search = ref('')
 const sortBy = ref([{ key: 'email', order: 'asc' }])
 
@@ -223,8 +213,32 @@ const displayedItems = computed(() => {
 // Keep track of last displayed items to prevent blank table
 const lastDisplayedItems = ref([]);
 
+const isResultsPreview = computed(() => props.metadata?.isPreview === true)
+const recordCountLabel = computed(() => {
+    const loaded = displayedItems.value.length
+    const count = loaded.toLocaleString()
+    if (isResultsPreview.value) {
+        const total = Number(props.metadata?.count)
+        return Number.isSafeInteger(total) && total > loaded
+            ? `${count} of ${total.toLocaleString()} records`
+            : `${count} shown`
+    }
+    return `${count} ${isStreaming.value ? 'loaded' : loaded === 1 ? 'record' : 'records'}`
+})
 
 
+// Keep technical identifiers readable without giving short statuses equal space.
+const normalizedColumn = key => String(key).replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase()
+const columnKind = key => {
+    const name = normalizedColumn(key)
+    if (/(^|_)status$/.test(name)) return 'status'
+    if (/(^|_)(id|kid)$/.test(name)) return 'identifier'
+    if (/(^|_)(email|login)$/.test(name)) return 'email'
+    if (/(^|_)(at|date|time)$/.test(name)) return 'timestamp'
+    if (/(^|_)(name|label)$/.test(name)) return 'name'
+    return 'text'
+}
+const columnWidth = key => ({ status: 140, identifier: 230, email: 250, timestamp: 230, name: 200, text: 180 }[columnKind(key)])
 // Formatted Headers
 const formattedHeaders = computed(() => {
     // Use metadata headers if available
@@ -234,7 +248,7 @@ const formattedHeaders = computed(() => {
             key: header.value,
             align: header.align || 'start',
             sortable: true,
-            width: header.width || 'auto'
+            width: header.width || columnWidth(header.value)
         }))
     }
 
@@ -245,12 +259,13 @@ const formattedHeaders = computed(() => {
             key: key,
             align: 'start',
             sortable: true,
-            width: 'auto'
+            width: columnWidth(key)
         }))
     }
 
     return []
 })
+const tableMinWidth = computed(() => formattedHeaders.value.reduce((total, header) => total + columnWidth(header.key), 0))
 
 // Formatted JSON content
 const formattedJson = computed(() => {
@@ -319,7 +334,7 @@ const getDataSourceDisplay = computed(() => {
             return {
                 showRealtime: false,
                 prefix: 'Data Source:',
-                source: 'Saved Session Preview'
+                source: 'Saved session'
             };
         case 'sql':
             return {
@@ -435,6 +450,7 @@ const getErrorContent = computed(() => {
 
 // Cleanup
 onBeforeUnmount(() => {
+
     search.value = ''
     sortBy.value = [{ key: 'email', order: 'asc' }]
 
@@ -516,7 +532,8 @@ const downloadCSV = () => {
 .data-display {
     margin: 0;
     width: 100%;
-    padding: 24px;
+    padding: 0;
+    min-width: 0;
 }
 
 .text-content {
@@ -596,55 +613,60 @@ const downloadCSV = () => {
 /* End of markdown content */
 
 .download-btn {
-    color: var(--primary);
+    color: #ffffff !important;
     text-transform: none;
     font-size: 13px;
+    letter-spacing: normal;
     font-weight: 500;
     padding: 0 14px !important;
     height: 34px;
-    border: 1px solid rgba(var(--primary-rgb), 0.15) !important;
-    background: rgba(255, 255, 255, 0.6) !important;
-    border-radius: 8px !important;
-    transition: all 0.2s ease;
+    border: 1px solid #375bcc !important;
+    background: var(--primary) !important;
+    border-radius: 9px !important;
+    box-shadow: 0 2px 4px rgba(62, 99, 221, 0.12);
+    transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .saved-results-btn {
-    color: var(--primary) !important;
+    color: #fff !important;
     text-transform: none;
+    letter-spacing: normal;
     font-size: 13px;
-    font-weight: 600;
-    padding: 0 14px !important;
-    height: 34px;
-    border: 1px solid rgba(var(--primary-rgb), 0.18) !important;
-    background: rgba(var(--primary-rgb), 0.1) !important;
+    font-weight: 500;
+    padding: 0 12px !important;
+    min-height: 34px;
+    border: 1px solid #375bcc !important;
+    background: var(--primary) !important;
     border-radius: 8px !important;
-    box-shadow: none !important;
-    transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+    box-shadow: 0 1px 2px rgba(23, 36, 58, .08) !important;
 }
-
-.saved-results-btn:hover {
-    background: rgba(var(--primary-rgb), 0.14) !important;
-    border-color: rgba(var(--primary-rgb), 0.26) !important;
-    transform: translateY(-1px);
-}
+.saved-results-btn:hover { background: var(--primary-hover) !important; }
+.download-btn.preview-export { background: #fff !important; color: #405779 !important; border-color: #cbd7ea !important; box-shadow: none; }
+.download-btn.preview-export:hover { background: #f7f9fd !important; border-color: #aebfe0 !important; }
 
 .download-btn:hover {
-    background: rgba(var(--primary-rgb), 0.08) !important;
-    transform: translateY(-1px);
-    box-shadow: none;
+    background: var(--primary-hover) !important;
+    border-color: #2948a8 !important;
 }
 
 .sync-info {
     display: flex;
     align-items: center;
     gap: 6px;
-    color: #666;
+    color: #5f6b7a;
     font-size: 12px;
-    white-space: nowrap;
-    padding: 6px 10px;
-    background: rgba(var(--primary-rgb), 0.06);
+    white-space: normal;
+    padding: 0;
+    background: transparent;
     border-radius: 6px;
+    flex-wrap: wrap;
 }
+
+.source-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 6px; background: #edf3ff; color: #385ea9; font-size: 12px; font-weight: 500; }
+.source-sql { color: #7754aa; background: #f2ecfa; }
+.source-hybrid { color: #276e78; background: #eaf5f5; }
+.source-saved_session { color: #566174; background: #eef1f5; }
+.sync-time { font-size: 12px; }
 
 .sync-icon {
     color: var(--primary);
@@ -739,144 +761,116 @@ const downloadCSV = () => {
 
 
 .table-header-container {
-    padding: 16px 0 8px 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 400px);
+    gap: 10px 24px;
+    padding: 20px 22px;
 }
 
-.header-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 0;
-}
+.results-heading, .results-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.results-heading { grid-column: 1; grid-row: 1; gap: 12px; flex-wrap: wrap; }
+.results-title h3 { color: #253248; font-size: 14px; font-weight: 600; margin: 0; }
+.record-count { border-radius: 20px; background: #f1f3f7; color: #586579; padding: 3px 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
 
-.left-section {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: nowrap;
-}
-
-.right-section {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex: 1;
-    justify-content: flex-end;
-}
+.results-tools { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; min-width: 0; }
+.preview-description { grid-column: 1; grid-row: 2; align-self: center; margin: 0; color: #5d6b7d; font-size: 12px; line-height: 1.5; }
+.table-action { grid-column: 2; grid-row: 2; display: flex; justify-content: flex-end; align-items: center; }
+.results-tools .streaming-indicator { flex-basis: 100%; text-align: right; }
 
 .search-field {
-    min-width: 280px;
-    max-width: 400px;
+    min-width: 160px;
+    max-width: 100%;
     flex-grow: 1;
 }
 
 :deep(.search-field .v-field__input) {
-    font-size: 14px;
+    font-size: 13px;
+    min-height: 34px;
+    padding-top: 6px;
+    padding-bottom: 6px;
 }
+
+:deep(.search-field input::placeholder) { color: #626b79; opacity: 1; }
 
 :deep(.search-field .v-field) {
-    border-radius: 6px;
-    border: 1px solid #eef1ff;
+    border-radius: 10px;
+    background: #f8fafc;
 }
+:deep(.search-field .v-field__outline) { color: #c8d1df; --v-field-border-opacity: 1; }
+:deep(.search-field .v-field--focused .v-field__outline) { color: var(--primary); }
+:deep(.search-field .v-field__prepend-inner .v-icon) { font-size: 19px; }
 
-/* 2026 Glassmorphism Data Table */
-:deep(.v-data-table) {
-    background: transparent !important;
-    box-shadow: none !important;
-}
-
-:deep(.v-data-table__wrapper) {
+/* Target Vuetify's current table markup, including its native scroll wrapper. */
+.table-content { width: 100%; min-width: 0; }
+.results-table { font-family: var(--font-family-body, inherit); }
+:deep(.results-table) { background: #fff; border: 1px solid var(--workspace-outline, #d6dce5); border-radius: 12px; overflow: hidden; box-shadow: none; font-size: 13px; }
+:deep(.results-table .v-table__wrapper) {
     overflow-x: auto;
-    border-radius: 14px;
-    background: #ffffff;
-    border: 1px solid #cbd5e1;
-    box-shadow: none;
+    border-top: 1px solid var(--workspace-outline, #d6dce5);
+    background: #fff;
 }
-
-/* 2026 Minimal Table Header */
-:deep(.v-data-table) th,
-:deep(.v-data-table-header th),
-:deep(.v-data-table-header__cell),
-:deep(.v-data-table) .v-data-table-header th {
-    transition: all 0.15s ease !important;
-    font-weight: 500 !important;
-    color: #555 !important;
-    font-size: 11px !important;
-    letter-spacing: 0.03em !important;
-    text-transform: uppercase !important;
-    position: relative !important;
-    background: rgba(248, 250, 252, 0.8) !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
-    padding: 14px 16px !important;
+:deep(.results-table .v-table__wrapper > table) {
+    width: 100%;
+    min-width: var(--results-table-min-width);
+    table-layout: fixed;
+    border-spacing: 0;
 }
-
-:deep(.v-data-table) th:hover,
-:deep(.v-data-table-header th:hover),
-:deep(.v-data-table-header__cell:hover),
-:deep(.v-data-table) .v-data-table-header th:hover {
-    background: rgba(var(--primary-rgb), 0.06) !important;
-    color: var(--primary) !important;
-    cursor: pointer !important;
+:deep(.results-table .v-table__wrapper > table > thead > tr > th) {
+    height: 40px;
+    padding: 10px 22px;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.035em;
+    line-height: 1.4;
+    color: #525866;
+    background: #f1f4f8;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    border-bottom: 1px solid var(--workspace-outline, #d6dce5);
 }
-
-:deep(.v-data-table) th:hover::after,
-:deep(.v-data-table-header th:hover::after),
-:deep(.v-data-table-header__cell:hover::after) {
-    content: '' !important;
-    position: absolute !important;
-    bottom: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    height: 2px !important;
-    background: var(--primary) !important;
-    opacity: 0.6 !important;
+:deep(.results-table .v-table__wrapper > table > tbody > tr > td) {
+    height: 44px;
+    padding: 11px 22px;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.6;
+    color: #202b3c;
+    vertical-align: top;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    border-bottom: 1px solid #e4e9f0;
 }
-
-/* Alternative approach using direct style attributes */
-:deep([role="columnheader"]) {
-    transition: background-color 0.2s ease !important;
+:deep(.results-table tbody > tr:nth-child(even)) { background: #fff; }
+:deep(.results-table tbody > tr:hover) { background: #f3f6fc; }
+:deep(.results-table tbody > tr:hover > td:first-child) { box-shadow: inset 2px 0 #7694df; }
+:deep(.results-table .v-data-table__th--sorted) { color: #3d61ac; }
+:deep(.results-table tbody > tr:last-child > td) { border-bottom: 0; }
+:deep(.results-table .v-data-table-footer) {
+    padding: 8px 16px;
+    font-size: 13px;
+    background: #fff;
+    border-top: 1px solid var(--workspace-outline, #d6dce5);
+    gap: 4px 12px;
 }
-
-:deep([role="columnheader"]:hover) {
-    background-color: rgba(var(--primary-rgb), 0.08) !important;
-    color: var(--primary) !important;
-}
-
-/* Clean row styles */
-:deep(.v-data-table-row) {
-    background: transparent !important;
-    transition: background 0.15s ease !important;
-}
-
-:deep(.v-data-table-row:hover) {
-    background: rgba(var(--primary-rgb), 0.04) !important;
-}
-
-:deep(.v-data-table .v-data-table-row td) {
-    padding: 12px 16px !important;
-    font-size: 13px !important;
-    color: #374151 !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.04) !important;
-    background: transparent !important;
-}
-
-/* Simplified Pagination */
-:deep(.v-data-table-footer) {
-    padding: 10px 16px !important;
-    background: rgba(248, 250, 252, 0.6) !important;
-    border-top: 1px solid rgba(0, 0, 0, 0.04) !important;
-    border-radius: 0 0 16px 16px !important;
-}
+:deep(.results-table .v-data-table-footer .v-field__input) { font-size: 13px; }
+:deep(.results-table .v-data-table-footer__items-per-page) { margin-inline-end: auto; gap: 10px; color: #5f6b7a; }
+:deep(.results-table .v-data-table-footer .v-field) { border-radius: 8px; background: #f8fafc; }
+:deep(.results-table .v-data-table-footer .v-field__outline) { color: #d4dce8; --v-field-border-opacity: 1; }
+:deep(.results-table .v-data-table-footer .v-field__input) { min-height: 32px; padding-top: 4px; padding-bottom: 4px; }
+:deep(.results-table .v-data-table-footer__info) { color: #657188; font-variant-numeric: tabular-nums; }
+:deep(.results-table .v-data-table-footer .v-btn) { width: 30px; height: 30px; border-radius: 7px; }
+:deep(.results-table .v-data-table-footer .v-btn:not(:disabled)) { border: 1px solid #e1e6ef; color: #596b89; }
+:deep(.results-table .v-data-table-footer .v-btn .v-icon) { font-size: 19px; }
 
 /* Compact markdown styling - text-first results */
 .markdown-shell {
     width: 100%;
-    background: rgba(255, 255, 255, 0.96);
-    border: 1px solid var(--border-color);
-    border-radius: 14px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
     box-shadow: none;
-    padding: 24px 28px;
+    padding: 8px 0;
     font-family: var(--font-family-body);
 }
 
@@ -886,7 +880,7 @@ const downloadCSV = () => {
     margin: 0;
     padding: 0;
     line-height: 1.78;
-    font-size: 15px;
+    font-size: 16px;
     color: #0f172a;
     overflow-wrap: anywhere;
     background: transparent;
@@ -1116,19 +1110,16 @@ const downloadCSV = () => {
 
 /* Responsive adjustments */
 @media (max-width: 992px) {
-    .header-actions {
-        flex-wrap: wrap;
-        gap: 16px;
-    }
+    .table-header-container { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .results-tools { grid-column: 1; grid-row: 2; }
+    .preview-description { grid-column: 1; grid-row: 2; }
+    .table-header-container.is-preview .results-tools { grid-row: 3; }
+    .table-action { grid-column: 1; grid-row: 4; }
+    .table-action .saved-results-btn { width: 100%; }
 
-    .right-section {
-        flex: 1 0 100%;
-        order: 1;
-    }
 
-    .left-section {
-        order: 2;
-    }
+
+
 }
 
 @media (max-width: 768px) {
@@ -1136,13 +1127,11 @@ const downloadCSV = () => {
         padding: 20px 18px;
     }
 
-    .right-section {
-        flex-direction: row-reverse;
-    }
+
 
     .markdown-content {
         max-width: 100%;
-        font-size: 14.25px;
+        font-size: 15px;
         line-height: 1.72;
     }
 
@@ -1161,20 +1150,16 @@ const downloadCSV = () => {
 }
 
 @media (max-width: 480px) {
+    .table-header-container { padding: 14px; }
+    .results-title { gap: 7px; }
     .markdown-shell {
         padding: 18px 14px;
         border-radius: 12px;
     }
 
-    .left-section {
-        flex-wrap: wrap;
-        gap: 8px;
-    }
 
-    .right-section {
-        flex-direction: column;
-        align-items: flex-start;
-    }
+
+
 
     .search-field {
         width: 100%;
