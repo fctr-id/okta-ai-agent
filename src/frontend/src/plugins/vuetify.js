@@ -23,8 +23,8 @@ export default createVuetify({
   defaults: {
     VTooltip: {
       contentClass: 'app-tooltip',
-      location: 'bottom',
-      offset: 8,
+      location: 'top center',
+      offset: 10,
       openDelay: 350,
       closeDelay: 100,
       openOnFocus: true,
