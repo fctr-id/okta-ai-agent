@@ -2,14 +2,14 @@
   <AppLayout :showHeader="true" :showLogout="false" contentClass="auth-content">
     <section class="auth-shell animate-entry">
       <div class="auth-hero">
-        <h1 class="auth-title">Login to Tako AI</h1>
-        <p class="auth-description">Use your admin credentials to continue into the Tako workspace.</p>
+        <h1 class="auth-title">Welcome to Tako.</h1>
+        <p class="auth-description">Your AI assistant for Okta.</p>
       </div>
 
       <div class="auth-card">
         <form @submit.prevent="handleLogin" class="auth-form">
           <transition name="fade-slide">
-            <div v-if="auth.error.value || validationError" class="status-alert status-alert-error">
+            <div v-if="auth.error.value || validationError" class="status-alert status-alert-error" role="alert">
               {{ auth.error.value || validationError }}
             </div>
           </transition>
@@ -48,14 +48,14 @@
                 :disabled="auth.loading.value"
                 @input="sanitizePasswordInput"
               />
-              <button type="button" class="password-toggle" @click="showPassword = !showPassword" tabindex="-1">
+              <button type="button" class="password-toggle" @click="showPassword = !showPassword" :aria-label="showPassword ? 'Hide password' : 'Show password'" :aria-pressed="showPassword">
                 <v-icon>{{ showPassword ? 'mdi-eye-off' : 'mdi-eye' }}</v-icon>
               </button>
             </div>
           </div>
 
           <button type="submit" class="auth-button" :disabled="auth.loading.value || !username || !password">
-            <span v-if="!auth.loading.value">Sign In</span>
+            <span v-if="!auth.loading.value">Sign in</span>
             <div v-else class="three-dots-loader">
               <div class="dot"></div>
               <div class="dot"></div>
@@ -140,13 +140,33 @@ const handleLogin = async () => {
 
 
 <style scoped>
+.password-toggle:focus-visible, .auth-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
 .auth-shell {
-  width: min(100%, 820px);
+  position: relative;
+  isolation: isolate;
+  width: min(100%, 408px);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 18px;
-  padding: 24px 24px 40px;
+  gap: 32px;
+  padding: 32px 24px;
+}
+
+.auth-shell::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  width: min(850px, 96vw);
+  height: 640px;
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  mask-image: radial-gradient(ellipse closest-side, #000 35%, transparent 100%);
+  background:
+    radial-gradient(ellipse at 28% 36%, rgba(119, 156, 241, 0.19), transparent 55%),
+    radial-gradient(ellipse at 72% 28%, rgba(173, 135, 224, 0.17), transparent 50%),
+    radial-gradient(ellipse at 65% 76%, rgba(101, 194, 172, 0.12), transparent 48%);
 }
 
 .animate-entry {
@@ -161,27 +181,27 @@ const handleLogin = async () => {
 .auth-title {
   margin: 0;
   color: var(--text-primary);
-  font-size: 42px;
-  font-weight: 700;
-  letter-spacing: 0;
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.035em;
   line-height: 1.08;
 }
 
 .auth-description {
   margin: 10px auto 0;
   max-width: 560px;
-  font-size: 15px;
-  font-weight: 450;
+  font-size: 14px;
+  font-weight: 400;
   line-height: 1.55;
   color: var(--text-secondary);
 }
 
 .auth-card {
-  width: min(100%, 620px);
-  background: #ffffff;
-  border: 2px solid rgba(15, 23, 42, 0.28);
+  width: 100%;
+  background: transparent;
+  border: 0;
   border-radius: 10px;
-  padding: 16px;
+  padding: 0;
   box-shadow: none;
 }
 
@@ -210,9 +230,10 @@ const handleLogin = async () => {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 52px;
+  min-height: 46px;
   background: #ffffff;
-  border: 1px solid rgba(15, 23, 42, 0.16);
+  border: 1px solid rgba(96, 112, 167, 0.22);
+  box-shadow: 0 3px 10px rgba(64, 80, 139, 0.035);
   border-radius: 10px;
   overflow: hidden;
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
@@ -224,7 +245,7 @@ const handleLogin = async () => {
 
 .input-wrapper:focus-within {
   border-color: rgba(var(--primary-rgb), 0.5);
-  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.12);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.08);
 }
 
 .input-wrapper input {
@@ -278,7 +299,7 @@ const handleLogin = async () => {
 
 .auth-button {
   width: 100%;
-  min-height: 52px;
+  min-height: 46px;
   margin-top: 10px;
   border: none;
   border-radius: 10px;
@@ -301,8 +322,8 @@ const handleLogin = async () => {
 }
 
 .auth-button:disabled {
-  background: var(--surface-muted);
-  color: var(--text-faint);
+  background: #e9edfc;
+  color: #8b97bd;
   cursor: not-allowed;
   box-shadow: none;
 }
@@ -379,19 +400,20 @@ const handleLogin = async () => {
 @media (max-width: 640px) {
   .auth-shell {
     padding: 16px 16px 28px;
-    gap: 16px;
+    gap: 28px;
   }
 
   .auth-title {
-    font-size: 32px;
+    font-size: 28px;
   }
 
   .auth-card {
-    padding: 14px;
+    padding: 0;
   }
 
   .auth-description {
     font-size: 14px;
   }
+  .input-wrapper input { font-size: 16px; }
 }
 </style>

@@ -16,10 +16,11 @@
 
 <script setup>
 import { onMounted } from 'vue'
+import fctrLogo from './assets/fctr-wordmark-primary.svg'
 
 onMounted(() => {
   // Preload key assets
-  const images = ['/src/assets/fctr-logo.png']
+  const images = [fctrLogo]
   images.forEach(src => {
     const img = new Image()
     img.src = src
@@ -35,11 +36,12 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  background: var(--bg-page, #ffffff);
 }
 
 .app-main {
   min-height: 100dvh;
-  background: var(--bg-page, #fbfbfa);
+  background: var(--bg-page, #ffffff);
 }
 
 .route-stage {
@@ -51,7 +53,7 @@ body {
 .route-layer {
   min-height: 100dvh;
   width: 100%;
-  will-change: opacity, transform, filter;
+  will-change: opacity;
 }
 
 /* Search container - converted from SCSS to CSS variables */
@@ -65,21 +67,17 @@ body {
 .page-swap-enter-active,
 .page-swap-leave-active {
   transition:
-    opacity 0.34s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 0.18s ease, transform 0.22s ease;
 }
 
 .page-swap-enter-from {
   opacity: 0;
-  transform: translateY(14px) scale(0.992);
-  filter: blur(10px);
+  transform: translateY(6px);
 }
 
 .page-swap-leave-to {
   opacity: 0;
-  transform: translateY(-8px) scale(1.004);
-  filter: blur(4px);
+  transform: translateY(-4px);
 }
 
 /* Alternative fade transition if needed for specific components */

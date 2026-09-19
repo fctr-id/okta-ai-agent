@@ -7,6 +7,7 @@
 
 import { ref, watch } from 'vue'
 import { useAuth } from './useAuth'
+import { applyApiTestProgress, interruptApiTests } from './apiTestProgress'
 
 // Use relative URL to go through Vite proxy
 const API_BASE_URL = ''
@@ -402,6 +403,8 @@ export function useReactStream() {
         if (lastStep && lastStep.tools) {
             lastStep.tools.push({
                 name: data.tool_name || 'unknown',
+                testId: data.test_id || null,
+                requests: [],
                 description: data.description || '',
                 timestamp: new Date((data.timestamp || Date.now()) * 1000).toLocaleTimeString()
             })
@@ -412,6 +415,7 @@ export function useReactStream() {
      * Handle STEP-PROGRESS event (subprocess execution)
      */
     const handleStepProgress = (data) => {
+        if (applyApiTestProgress(discoverySteps.value, data.details)) return
         // Check if this is a rate limit event
         if (data.progress_type === 'rate_limit' && data.wait_seconds) {
             rateLimitWarning.value = data.wait_seconds
@@ -734,6 +738,7 @@ export function useReactStream() {
      * Close SSE connection
      */
     const closeStream = () => {
+        interruptApiTests(discoverySteps.value)
         if (eventSource) {
             console.log('[useReactStream] Closing EventSource (readyState:', eventSource.readyState, ')')
             eventSource.close()

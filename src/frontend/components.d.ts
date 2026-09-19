@@ -15,6 +15,7 @@ declare module 'vue' {
     AppLayout: typeof import('./src/components/layout/AppLayout.vue')['default']
     ChatContainer: typeof import('./src/components/views/chatContainer.vue')['default']
     ChatInterfaceV2: typeof import('./src/components/ChatInterfaceV2.vue')['default']
+    ConversationCard: typeof import('./src/components/messages/ConversationCard.vue')['default']
     DataDisplay: typeof import('./src/components/messages/DataDisplay.vue')['default']
     DiscoveryPanel: typeof import('./src/components/messages/DiscoveryPanel.vue')['default']
     ExecutionPanel: typeof import('./src/components/messages/ExecutionPanel.vue')['default']

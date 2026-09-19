@@ -1,0 +1,10 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title" shape-rendering="geometricPrecision">
+  <title id="title">Fctr fingerprint avatar on cool cloud</title>
+  <rect width="512" height="512" fill="#eef3f8"/>
+  <rect x="3.2" y="3.2" width="505.6" height="505.6" fill="none" stroke="#d7e0eb" stroke-width="6.4"/>
+  <g transform="translate(56 62) scale(4)" fill="none" stroke-linecap="round">
+    <path d="M14 90V40A36 33 0 0 1 86 40V56" stroke="#17243a" stroke-width="12"/>
+    <path d="M36 44A14 12 0 0 1 64 44V72A14 12 0 0 1 36 72V68" stroke="#17243a" stroke-width="12"/>
+    <path d="M50 52V66" stroke="#16a6a1" stroke-width="12"/>
+  </g>
+</svg>

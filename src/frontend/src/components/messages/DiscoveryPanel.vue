@@ -1,477 +1,150 @@
 <template>
-  <div class="thinking-glass">
-    <!-- Minimal Header -->
-    <button class="glass-header" @click="isExpanded = !isExpanded">
-      <svg 
-        class="chevron" 
-        :class="{ expanded: isExpanded }" 
-        width="14" height="14" 
-        viewBox="0 0 24 24" 
-        fill="none" 
-        stroke="currentColor" 
-        stroke-width="2.5"
-      >
-        <path d="M9 18l6-6-6-6"/>
+  <section class="activity" aria-label="Tool activity">
+    <button type="button" class="activity-toggle" :aria-expanded="isExpanded"
+      :aria-controls="contentId" @click="isExpanded = !isExpanded">
+      <svg class="chevron" :class="{ expanded: isExpanded }" width="14" height="14"
+        viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="m9 5 7 7-7 7" />
       </svg>
-      <span class="header-text">Planning & Tools</span>
-      
-      <div class="header-spacer"></div>
-      
-      <!-- Status badges - right aligned -->
-      <span v-if="isThinking && steps.length === 0" class="status-badge processing">
-        <span class="badge-dots"><span></span><span></span><span></span></span>
-        PROCESSING
+      <span class="activity-label">Activity</span>
+      <span v-if="tools.length" class="activity-count">{{ tools.length }} tool {{ tools.length === 1 ? 'call' : 'calls' }}</span>
+      <span v-if="!isWorking || showWorkingStatus" class="activity-state" :class="{ completed: isComplete && !error }">
+        <span v-if="isWorking" class="busy-dot" aria-hidden="true"></span>
+        {{ error ? 'Stopped' : isComplete ? 'Completed' : 'Working' }}
       </span>
-      <span v-else-if="!isComplete && !error && steps.length > 0" class="status-badge processing">
-        <span class="badge-pulse"></span>
-        PROCESSING
-      </span>
-      <span v-if="isComplete && !error" class="status-badge completed">COMPLETED</span>
-      <span v-if="error" class="status-badge error">ERROR</span>
+      <span v-if="failedRequests" class="failed-count">{{ failedRequests }} failed {{ failedRequests === 1 ? 'attempt' : 'attempts' }}</span>
     </button>
-
-    <!-- Content -->
-    <transition name="slide">
-      <div v-show="isExpanded" class="glass-content">
-        <!-- Loading shimmer -->
-        <div v-if="isThinking && steps.length === 0" class="loading-shimmer">
-          <div class="shimmer-bar"></div>
-          <div class="shimmer-bar short"></div>
-        </div>
-
-        <!-- Steps -->
-        <div v-else-if="steps.length > 0" class="steps-list">
-          <div 
-            v-for="(step, index) in steps" 
-            :key="step.id || index" 
-            class="step-item"
-            :class="{ 
-              current: index === steps.length - 1 && !isComplete && !error,
-              error: step.status === 'failed'
-            }"
-          >
-            <p class="step-text">
-              {{ step.reasoning || step.text || step.title }}
-              <span 
-                v-if="index === steps.length - 1 && !isComplete && !error && !executionStarted" 
-                class="typing-cursor"
-              ></span>
-            </p>
-            
-            <!-- Tool calls - modern 2026 animated chips -->
-            <div v-if="step.tools && step.tools.length > 0" class="tool-chips">
-              <template v-for="(tool, i) in step.tools" :key="i">
-                <!-- Chevron separator between sequential tools -->
-                <span v-if="i > 0" class="tool-separator">›</span>
-                <div 
-                  class="tool-chip"
-                  :class="{ 
-                    active: !isComplete && index === steps.length - 1 && i === step.tools.length - 1,
-                    done: isComplete || index < steps.length - 1 || i < step.tools.length - 1
-                  }"
-                >
-                  <!-- Spinning sun when active, checkmark when done -->
-                  <svg v-if="!isComplete && index === steps.length - 1 && i === step.tools.length - 1" class="tool-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-                  </svg>
-                  <svg v-else class="tool-icon done" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                    <polyline points="20 6 9 17 4 12"/>
-                  </svg>
-                  <span class="tool-label">{{ tool.description || formatToolName(tool.name) }}</span>
-                </div>
-              </template>
+    <div v-show="isExpanded" :id="contentId" class="activity-body">
+      <p v-if="!tools.length" class="activity-placeholder">
+        {{ isWorking ? 'Preparing your request…' : 'No tool calls recorded.' }}
+      </p>
+      <ol v-else class="tool-list">
+        <li v-for="entry in tools" :key="entry.key" class="tool-entry">
+          <div class="tool-heading">
+            <svg class="tool-symbol" width="14" height="14" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-12-2 18" />
+            </svg>
+            <div class="tool-copy">
+              <span class="tool-label">{{ toolLabel(entry.tool) }}</span>
+              <p v-if="entry.tool.description && entry.tool.description !== toolLabel(entry.tool)" class="tool-description">{{ entry.tool.description }}</p>
             </div>
+            <span class="tool-source" :data-source="toolSource(entry.tool)">{{ toolSource(entry.tool) }}</span>
           </div>
-        </div>
-
-        <!-- Error -->
-        <div v-if="error" class="error-msg">{{ error }}</div>
-      </div>
-    </transition>
-  </div>
+          <ul v-if="entry.tool.requests?.length" class="request-list" aria-label="Tested endpoints">
+            <li v-for="request in entry.tool.requests" :key="request.id" :class="['request', request.status]">
+              <span class="request-indicator" aria-hidden="true"></span>
+              <span class="endpoint-name">{{ request.operation }}</span>
+              <span class="request-status">{{ requestStatusLabels[request.status] }}</span>
+            </li>
+          </ul>
+          <span v-else-if="entry.tool.testId" class="request-placeholder">No endpoint calls recorded.</span>
+        </li>
+      </ol>
+      <p v-if="error" class="activity-error">{{ error }}</p>
+    </div>
+  </section>
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, useId, watch } from 'vue'
+import { requestStatusLabels } from '../../composables/apiTestProgress'
 
 const props = defineProps({
-  steps: {
-    type: Array,
-    default: () => []
-  },
-  isThinking: {
-    type: Boolean,
-    default: false
-  },
-  isComplete: {
-    type: Boolean,
-    default: false
-  },
-  error: {
-    type: String,
-    default: null
-  },
-  executionStarted: {
-    type: Boolean,
-    default: false
-  },
-  shouldAutoCollapse: {
-    type: Boolean,
-    default: false
-  }
+  steps: { type: Array, default: () => [] },
+  isThinking: { type: Boolean, default: false },
+  isComplete: { type: Boolean, default: false },
+  error: { type: String, default: null },
+  executionStarted: { type: Boolean, default: false },
+  shouldAutoCollapse: { type: Boolean, default: false },
+  showWorkingStatus: { type: Boolean, default: true },
 })
-
-const isExpanded = ref(true)
-
-watch(() => props.shouldAutoCollapse, (shouldAutoCollapse) => {
-  if (shouldAutoCollapse) {
-    isExpanded.value = false
-  }
-}, { immediate: true })
-
-const formatToolName = (name) => {
-  return name.replace(/_/g, ' ').replace(/^okta /, '')
+const contentId = `activity-${useId()}`
+const isExpanded = ref(Boolean(props.error) || (!props.isComplete && !props.shouldAutoCollapse))
+const isWorking = computed(() => !props.isComplete && !props.error)
+// Only display tool activity. Step titles/text/reasoning may contain internal
+// supervisor deliberation, including in previously saved conversations.
+const tools = computed(() => props.steps.flatMap((step, stepIndex) =>
+  (step.tools || []).map((tool, toolIndex) => ({
+    tool, key: tool.testId || `${step.id || stepIndex}-${toolIndex}`,
+  })),
+))
+const failedRequests = computed(() => tools.value.reduce((count, entry) =>
+  count + (entry.tool.requests || []).filter(request => request.status === 'failed').length, 0,
+))
+watch(() => props.isComplete || props.shouldAutoCollapse, (finished) => {
+  if (finished) isExpanded.value = false
+})
+watch(() => props.error, (error) => {
+  if (error) isExpanded.value = true
+})
+const toolLabels = {
+  get_sql_context: 'Read database schema',
+  load_comprehensive_api_endpoints: 'Find available API endpoints',
+  filter_endpoints_by_operations: 'Select API endpoints',
+  execute_test_query_api: 'Test API endpoints',
+  execute_test_query_sql: 'Test database query',
+  load_artifacts: 'Read saved results',
+  save_artifact: 'Save results',
+}
+const formatToolName = (name = 'Tool call') => toolLabels[name] || name.replace(/_/g, ' ').replace(/^okta /, '')
+const toolLabel = (tool) => tool.testId
+  ? tool.description || 'Test API endpoints'
+  : tool.name && tool.name !== 'unknown' ? formatToolName(tool.name) : tool.description || 'Tool call'
+const toolSource = (tool) => {
+  if (tool.name?.includes('sql')) return 'Database'
+  if (tool.testId || /api|endpoint/.test(tool.name || '')) return 'API'
+  if (/artifact/.test(tool.name || '')) return 'Results'
+  return ''
 }
 </script>
 
 <style scoped>
-/* Thinking surface - structured, text-first */
-.thinking-glass {
-  margin: 1.25rem auto;
-  max-width: 900px;
-  border-radius: 12px;
-  background: var(--surface);
-  border: 1px solid rgba(var(--primary-rgb), 0.16);
-  box-shadow: none;
-  overflow: hidden;
+.activity { width: 100%; margin: 0; border: 1px solid var(--workspace-outline, #d6dce5); border-radius: 10px; background: #fff; color: var(--text-secondary, #61646c); font-size: 14px; line-height: 1.5; overflow: hidden; }
+.activity-toggle { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; padding: 11px 14px; background: #fff; border: 0; border-radius: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.activity-toggle:hover { background: rgba(127, 127, 127, 0.06); }
+.activity-toggle:focus-visible { outline: 2px solid var(--primary, #6366f1); outline-offset: -2px; }
+.activity-label { font-weight: 600; color: var(--text-primary, #27272a); }
+.activity-count { color: var(--text-muted, #71717a); }
+.activity-state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.activity-state.completed { padding: 4px 8px; border-radius: 6px; font-size: 12px; line-height: 1.3; color: #24694b; background: #e2f3e9; }
+.activity-state.completed::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.failed-count { color: #a15c0b; }
+.chevron { flex-shrink: 0; transition: transform 0.15s ease; }
+.chevron.expanded { transform: rotate(90deg); }
+.activity-body { margin: 0; padding: 4px 16px 12px; border-top: 1px solid var(--workspace-outline, #d6dce5); font-size: 13px; }
+.tool-list, .request-list { list-style: none; padding: 0; margin: 0; }
+.tool-entry { padding: 10px 0; border-top: 1px solid #e8ecf1; }
+.tool-entry:first-child { border-top: 0; }
+.tool-heading { display: flex; align-items: flex-start; gap: 8px; }
+.tool-symbol { flex-shrink: 0; margin-top: 2px; opacity: 0.7; }
+.tool-copy { flex: 1; min-width: 0; }
+.tool-label { overflow-wrap: anywhere; color: var(--text-primary, #27272a); }
+.tool-description { margin: 3px 0 0; font-size: 12px; overflow-wrap: anywhere; color: var(--text-secondary, #61646c); }
+.tool-source { flex-shrink: 0; font-size: 11px; font-weight: 500; color: var(--text-muted, #71717a); background: var(--bg-page, #f7f7f8); padding: 2px 7px; border-radius: 5px; }
+.tool-source[data-source="Database"] { color: #6d43a5; background: #f1ebfa; }
+.tool-source[data-source="API"] { color: #285eab; background: #eaf2fd; }
+.tool-source[data-source="Results"] { color: #17736a; background: #e7f5f1; }
+.tool-source:empty { display: none; }
+.request-list { margin: 5px 0 0 22px; }
+.request { display: flex; align-items: baseline; flex-wrap: wrap; gap: 5px 8px; padding: 3px 0; }
+.request-indicator, .busy-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #8b8e97; flex-shrink: 0; }
+.endpoint-name { min-width: 0; overflow-wrap: anywhere; color: var(--text-primary, #27272a); }
+.request-status { font-size: 12px; color: var(--text-muted, #71717a); }
+.success .request-indicator { background: #16834a; }
+.empty .request-indicator { background: #b7791f; }
+.failed .request-indicator { background: #d13f3f; }
+.failed .request-status, .activity-error { color: #b42318; }
+.running .request-indicator, .busy-dot { background: var(--primary, #6366f1); animation: pulse 1.4s ease-in-out infinite; }
+.activity-placeholder, .activity-error { margin: 6px 0; overflow-wrap: anywhere; }
+.request-placeholder { display: block; margin: 4px 0 0 22px; font-size: 11px; color: var(--text-muted, #71717a); }
+@keyframes pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .running .request-indicator, .busy-dot { animation: none; }
+  .chevron { transition: none; }
 }
-
-.glass-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 12px 16px;
-  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.14), rgba(var(--primary-rgb), 0.08));
-  border: none;
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.16);
-  cursor: pointer;
-  transition: background 0.15s ease;
-}
-
-.glass-header:hover {
-  background: linear-gradient(180deg, rgba(var(--primary-rgb), 0.18), rgba(var(--primary-rgb), 0.1));
-}
-
-.chevron {
-  color: var(--primary-dark);
-  transition: transform 0.25s ease;
-  flex-shrink: 0;
-}
-
-.chevron.expanded {
-  transform: rotate(90deg);
-}
-
-.header-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: 0;
-}
-
-.header-spacer {
-  flex: 1;
-}
-
-.status-badge {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-}
-
-.status-badge.processing {
-  background: rgba(15, 23, 42, 0.035);
-  border-color: rgba(15, 23, 42, 0.08);
-  color: var(--text-secondary);
-}
-
-.status-badge.completed {
-  background: #ffffff;
-  border-color: var(--border-strong);
-  color: var(--text-primary);
-}
-
-.status-badge.error {
-  background: rgba(239, 68, 68, 0.08);
-  border-color: rgba(239, 68, 68, 0.14);
-  color: #dc2626;
-}
-
-.badge-dots {
-  display: flex;
-  gap: 2px;
-}
-
-.badge-dots span {
-  width: 4px;
-  height: 4px;
-  background: currentColor;
-  border-radius: 50%;
-  animation: fade-pulse 1.4s ease-in-out infinite;
-}
-
-.badge-dots span:nth-child(2) { animation-delay: 0.2s; }
-.badge-dots span:nth-child(3) { animation-delay: 0.4s; }
-
-@keyframes fade-pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
-}
-
-.badge-pulse {
-  width: 6px;
-  height: 6px;
-  background: currentColor;
-  border-radius: 50%;
-  animation: soft-pulse 2s ease-in-out infinite;
-}
-
-@keyframes soft-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-/* Content */
-.glass-content {
-  padding: 14px 16px 16px;
-}
-
-/* Shimmer loading */
-.loading-shimmer {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.shimmer-bar {
-  height: 10px;
-  background: linear-gradient(90deg, 
-    rgba(15, 23, 42, 0.04) 0%, 
-    rgba(15, 23, 42, 0.08) 50%, 
-    rgba(15, 23, 42, 0.04) 100%
-  );
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease-in-out infinite;
-  border-radius: 4px;
-  width: 80%;
-}
-
-.shimmer-bar.short {
-  width: 50%;
-}
-
-@keyframes shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* Steps list */
-.steps-list {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.steps-list::before {
-  content: '';
-  position: absolute;
-  left: 11px;
-  top: 18px;
-  bottom: 18px;
-  width: 1px;
-  background: rgba(var(--primary-rgb), 0.28);
-}
-
-.step-item {
-  position: relative;
-  padding: 10px 12px 10px 32px;
-  background: transparent;
-  border: none;
-  border-radius: 10px;
-  transition: background 0.15s ease, color 0.15s ease;
-}
-
-.step-item::before {
-  content: '';
-  position: absolute;
-  left: 11px;
-  top: 8px;
-  width: 14px;
-  height: 12px;
-  border-left: 1px solid rgba(var(--primary-rgb), 0.28);
-  border-bottom: 1px solid rgba(var(--primary-rgb), 0.28);
-}
-
-.step-item.current {
-  background: rgba(var(--primary-rgb), 0.05);
-}
-
-.step-item.current::before {
-  border-left-color: rgba(var(--primary-rgb), 0.62);
-  border-bottom-color: rgba(var(--primary-rgb), 0.62);
-}
-
-.step-item.error {
-  background: rgba(239, 68, 68, 0.05);
-}
-
-.step-item.error::before {
-  border-left-color: rgba(239, 68, 68, 0.48);
-  border-bottom-color: rgba(239, 68, 68, 0.48);
-}
-
-.step-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--text-primary);
-  font-weight: 500;
-}
-
-.step-item.current .step-text {
-  color: var(--text-primary);
-}
-
-.step-item.error .step-text {
-  color: #b91c1c;
-}
-
-/* Typing cursor */
-.typing-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 14px;
-  background: rgba(15, 23, 42, 0.5);
-  margin-left: 4px;
-  vertical-align: middle;
-  animation: blink 1s step-end infinite;
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-/* Tool chips - structured events, not prose */
-.tool-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 10px;
-}
-
-.tool-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  background: #ffffff;
-  border: 1px solid rgba(var(--primary-rgb), 0.24);
-  border-radius: 8px;
-  font-size: 11.5px;
-  color: var(--text-primary);
-  font-weight: 500;
-  transition: all 0.2s ease;
-}
-
-.tool-chip:hover {
-  border-color: rgba(var(--primary-rgb), 0.38);
-}
-
-.tool-chip.active {
-  background: rgba(var(--primary-rgb), 0.08);
-  border-color: rgba(var(--primary-rgb), 0.48);
-  color: var(--primary-dark);
-  box-shadow: none;
-}
-
-.tool-chip.active .tool-icon {
-  animation: spin-slow 3s linear infinite;
-}
-
-.tool-chip.done {
-  background: rgba(34, 197, 94, 0.04);
-  border-color: rgba(34, 197, 94, 0.24);
-  color: var(--text-primary);
-}
-
-.tool-chip.done:hover {
-  border-color: rgba(34, 197, 94, 0.34);
-}
-
-.tool-icon.done {
-  color: #16a34a;
-}
-
-.tool-separator {
-  color: var(--text-muted);
-  font-size: 13px;
-  font-weight: 400;
-  margin: 0 2px;
-  opacity: 0.9;
-}
-
-@keyframes spin-slow {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.tool-icon {
-  flex-shrink: 0;
-  opacity: 0.9;
-}
-
-.tool-label {
-  white-space: nowrap;
-}
-
-.error-msg {
-  padding: 12px 16px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.12);
-  color: #b91c1c;
-  border-radius: 10px;
-  font-size: 12px;
-  margin-top: 8px;
-}
-
-/* Slide transition */
-.slide-enter-active,
-.slide-leave-active {
-  transition: all 0.3s ease;
-  overflow: hidden;
-}
-
-.slide-enter-from,
-.slide-leave-to {
-  opacity: 0;
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.slide-enter-to,
-.slide-leave-from {
-  opacity: 1;
-  max-height: 1000px;
+@media (max-width: 480px) {
+  .activity-count { display: none; }
+  .failed-count { flex-basis: 100%; padding-left: 22px; }
 }
 </style>

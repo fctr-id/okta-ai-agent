@@ -1,55 +1,53 @@
 <template>
     <div class="sync-status-container">
-        <v-menu v-model="showDropdown" :close-on-content-click="false" location="bottom end" max-width="320"
+        <v-menu v-model="showDropdown" :close-on-content-click="false" location="bottom end" max-width="340"
             transition="slide-y-transition" :offset="[10, 10]">
             <template v-slot:activator="{ props: menuProps }">
                 <v-btn v-bind="menuProps" class="sync-button" :class="[{ 'px-2': $vuetify.display.smAndDown }, `status-${statusColor}`]"
-                    variant="text" size="small">
+                    variant="text" size="small" :aria-label="`Okta data sync: ${statusText}`">
                     <div class="d-flex align-center">
                         <div class="status-indicator me-2" :class="statusColor"></div>
                         <span v-if="!$vuetify.display.smAndDown">{{ statusText }}</span>
+                        <v-icon class="sync-chevron" size="14" aria-hidden="true">mdi-chevron-down</v-icon>
                     </div>
                 </v-btn>
             </template>
 
-            <!-- Modern dropdown with enhanced aesthetics -->
-            <div class="modern-dropdown">
+            <div class="modern-dropdown" role="region" aria-label="Okta data sync">
                 <div class="modern-content">
-                    <!-- Header with gradient background -->
                     <div class="modern-header">
-                        <h3>Okta Data Sync</h3>
+                        <h3>Okta data sync</h3>
 
-                        <!-- Enhanced icon button with same styling as ChatInterface -->
-                        <v-tooltip text="Start Sync" location="bottom" v-if="!isSyncing">
+                            <v-tooltip text="Start Sync" location="bottom" v-if="!isSyncing">
                             <template v-slot:activator="{ props }">
-                                <button v-bind="props" class="action-btn primary" @click="handleStartSync"
+                                <button v-bind="props" type="button" class="action-btn primary" @click="handleStartSync"
                                     :disabled="isStarting">
-                                    <v-icon v-if="!isStarting">mdi-sync</v-icon>
-                                    <v-progress-circular v-else indeterminate size="20" width="2"
-                                        color="primary"></v-progress-circular>
+                                    <v-icon v-if="!isStarting" size="15" aria-hidden="true">mdi-sync</v-icon>
+                                    <v-progress-circular v-else indeterminate size="14" width="2"
+                                        color="white" aria-hidden="true"></v-progress-circular>
+                                    <span>{{ isStarting ? 'Starting…' : 'Sync now' }}</span>
                                 </button>
                             </template>
                         </v-tooltip>
 
-                        <!-- Enhanced stop button with same styling -->
-                        <v-tooltip text="Cancel Sync" location="bottom" v-else>
+                            <v-tooltip text="Cancel Sync" location="bottom" v-else>
                             <template v-slot:activator="{ props }">
-                                <button v-bind="props" class="action-btn error" @click="cancelSync">
-                                    <v-icon>mdi-stop</v-icon>
+                                <button v-bind="props" type="button" class="action-btn error" @click="cancelSync">
+                                    <v-icon size="15" aria-hidden="true">mdi-stop</v-icon>
+                                    <span>Stop sync</span>
                                 </button>
                             </template>
                         </v-tooltip>
                     </div>
 
-                    <!-- Enhanced Sync Progress with gradient background -->
-                    <div v-if="isSyncing" class="progress-section">
+                    <div v-if="isSyncing" class="progress-section" role="status">
                         <div class="sync-status-text">
                             <div class="pulse-dot"></div>
                             <span>Syncing data from Okta...</span>
                         </div>
                     </div>
 
-                    <!-- Entity Cards with enhanced visual appeal -->
+                    <!-- Counts share one compact grid, without nested cards. -->
                     <div class="entity-grid">
                         <div class="entity-card entity-1">
                             <div class="entity-icon">
@@ -125,7 +123,7 @@
 
                     <!-- Error message with user-friendly text -->
                     <transition name="fade">
-                        <div v-if="syncError" class="error-message">
+                        <div v-if="syncError" class="error-message" role="alert">
                             <v-icon size="small" class="me-1">mdi-alert-circle</v-icon>
                             <span>{{ friendlyErrorMessage }}</span>
                         </div>
@@ -142,46 +140,61 @@
 }
 
 .sync-button {
-    background: #ffffff !important;
-    color: var(--text-primary) !important;
+    --sync-surface: #f4f7fc;
+    --sync-border: #dce3ef;
+    --sync-ink: #53617a;
+    background: var(--sync-surface) !important;
+    color: var(--sync-ink) !important;
     box-shadow: none !important;
-    border: 1px solid var(--border-strong) !important;
-    border-radius: 8px !important;
+    border: 1px solid var(--sync-border) !important;
+    border-radius: 9px !important;
     font-weight: 500 !important;
-    font-size: 12.5px !important;
+    font-size: 12px !important;
     height: 32px !important;
     min-height: 32px !important;
-    padding: 0 12px !important;
+    padding: 0 10px !important;
     text-transform: none !important;
     letter-spacing: 0 !important;
+    transition: box-shadow 0.15s ease;
 }
 
 .sync-button:hover {
-    background: #ffffff !important;
-    border-color: rgba(var(--primary-rgb), 0.24) !important;
-    color: var(--text-primary) !important;
     transform: none !important;
-    box-shadow: none !important;
+    box-shadow: 0 0 0 2px var(--sync-surface) !important;
+}
+
+.sync-button:focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+}
+
+.sync-chevron {
+    margin-left: 6px;
+    opacity: 0.7;
 }
 
 .sync-button.status-green {
-    background: #f6fffa !important;
-    border-color: rgba(34, 197, 94, 0.24) !important;
+    --sync-surface: #eaf7f0;
+    --sync-border: #c4e5d4;
+    --sync-ink: #237453;
 }
 
 .sync-button.status-orange {
-    background: #fffaf2 !important;
-    border-color: rgba(245, 158, 11, 0.26) !important;
+    --sync-surface: #fff6e6;
+    --sync-border: #f1d8a9;
+    --sync-ink: #946314;
 }
 
 .sync-button.status-red {
-    background: #fff7f7 !important;
-    border-color: rgba(239, 68, 68, 0.22) !important;
+    --sync-surface: #fff0f0;
+    --sync-border: #efcdcd;
+    --sync-ink: #b34646;
 }
 
-.sync-button.status-grey,
 .sync-button.status-blue {
-    background: #ffffff !important;
+    --sync-surface: #edf2ff;
+    --sync-border: #d4dfff;
+    --sync-ink: #4563bb;
 }
 
 .sync-button .status-indicator {
@@ -190,8 +203,8 @@
 
 /* Minimal status indicator - 2026 style */
 .status-indicator {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
     transition: background-color 0.2s ease;
 }
@@ -231,349 +244,42 @@
     }
 }
 
-/* Minimal dropdown - 2026 style */
-.modern-dropdown {
-    background: #ffffff;
-    border-radius: 14px;
-    overflow: hidden;
-    box-shadow: none;
-    border: 1px solid var(--border-strong);
-    width: 300px;
-}
-
-.modern-content {
-    border-radius: 14px;
-    background: transparent;
-    overflow: hidden;
-}
-
-/* Clean header - 2026 style */
-.modern-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 18px 16px;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-}
-
-.modern-header h3 {
-    font-size: 15px;
-    font-weight: 600;
-    color: #0f172a;
-    margin: 0;
-    letter-spacing: -0.02em;
-}
-
-/* Minimal action buttons - 2026 style */
-.action-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 34px;
-    height: 34px;
-    border-radius: 10px;
-    border: none;
-    cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.action-btn.primary {
-    background: var(--primary);
-    color: white;
-    box-shadow: none;
-}
-
-.action-btn.primary:hover:not(:disabled) {
-    background: var(--primary-hover);
-    box-shadow: none;
-    transform: translateY(-1px);
-}
-
-.action-btn.primary:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.action-btn.error {
-    background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
-    color: white;
-    box-shadow: none;
-}
-
-.action-btn.error:hover {
-    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-    box-shadow: none;
-    transform: translateY(-1px);
-}
-
-/* Minimal progress section */
-.progress-section {
-    padding: 14px 18px;
-    background: rgba(99, 102, 241, 0.04);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-}
-
-.progress-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-}
-
-.sync-status-text {
-    display: flex;
-    align-items: center;
-}
-
-.sync-status-text span {
-    font-size: 13px;
-    font-weight: 500;
-    color: #52525b;
-}
-
-.pulse-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #f59e0b;
-    margin-right: 10px;
-    animation: pulse-subtle 1.5s infinite ease-in-out;
-}
-
-@keyframes pulse-subtle {
-    0%, 100% {
-        opacity: 1;
-    }
-    50% {
-        opacity: 0.5;
-    }
-}
-
-.progress-info span {
-    font-size: 13px;
-    color: #666;
-    letter-spacing: 0.2px;
-}
-
-.progress-percentage {
-    font-weight: 600;
-    font-size: 14px;
-    color: var(--primary);
-}
-
-/* Beautiful progress bar with gradient and animation */
-.progress-bar-container {
-    height: 6px;
-    width: 100%;
-    background: transparent;
-    border-radius: 10px;
-    overflow: hidden;
-    position: relative;
-}
-
-.progress-bar-background {
-    position: absolute;
-    inset: 0;
-    background: rgba(var(--primary-rgb), 0.12);
-    border-radius: 10px;
-}
-
-.progress-bar-filled {
-    height: 100%;
-    background: var(--primary);
-    border-radius: 10px;
-    transition: width 0.5s cubic-bezier(0.25, 1, 0.5, 1);
-    position: relative;
-    overflow: hidden;
-}
-
-.progress-bar-filled::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(90deg,
-            rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.3) 50%,
-            rgba(255, 255, 255, 0) 100%);
-    animation: shimmer 2s infinite;
-}
-
-@keyframes shimmer {
-    0% {
-        transform: translateX(-100%);
-    }
-
-    100% {
-        transform: translateX(100%);
-    }
-}
-
-/* Minimal entity grid - 2026 style */
-.entity-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    padding: 16px 18px;
-}
-
-.entity-card {
-    display: flex;
-    align-items: center;
-    padding: 14px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.6);
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    border: 1px solid rgba(148, 163, 184, 0.08);
-    min-width: 110px;
-    backdrop-filter: blur(8px);
-}
-
-.entity-card:hover {
-    background: rgba(255, 255, 255, 0.85);
-    border-color: rgba(148, 163, 184, 0.15);
-    transform: translateY(-1px);
-    box-shadow: none;
-}
-
-/* Calm blue tints for entity cards */
-.entity-1 {
-    background: rgba(var(--primary-rgb), 0.04);
-}
-.entity-1:hover {
-    background: rgba(var(--primary-rgb), 0.08);
-}
-
-.entity-2 {
-    background: rgba(var(--primary-rgb), 0.05);
-}
-.entity-2:hover {
-    background: rgba(var(--primary-rgb), 0.09);
-}
-
-.entity-3 {
-    background: rgba(var(--primary-rgb), 0.06);
-}
-.entity-3:hover {
-    background: rgba(var(--primary-rgb), 0.1);
-}
-
-.entity-4 {
-    background: rgba(var(--primary-rgb), 0.07);
-}
-.entity-4:hover {
-    background: rgba(var(--primary-rgb), 0.11);
-}
-
-.entity-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 10px;
-    margin-right: 12px;
-    flex-shrink: 0;
-    background: rgba(255, 255, 255, 0.92);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    box-shadow: none;
-}
-
-.entity-icon :deep(.v-icon) {
-    color: #64748b;
-    font-size: 16px;
-}
-
-.entity-details {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-    overflow: hidden;
-}
-
-.entity-count {
-    font-weight: 500;
-    font-size: 15px;
-    color: #0f172a;
-    line-height: 1;
-    margin-bottom: 4px;
-    white-space: nowrap;
-    letter-spacing: -0.02em;
-}
-
-.entity-label {
-    font-size: 11px;
-    color: #64748b;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    word-break: break-word;
-    line-height: 1.3;
-}
-
-.entity-count-large {
-    font-size: 13px;
-    letter-spacing: -0.02em;
-}
-
-/* Minimal last sync footer */
-.last-sync {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 18px;
-    border-top: 1px solid rgba(148, 163, 184, 0.15);
-    background: rgba(248, 250, 252, 0.5);
-}
-
-.last-sync-label {
-    font-size: 12px;
-    color: #64748b;
-    display: flex;
-    align-items: center;
-    font-weight: 500;
-}
-
-.last-sync-label :deep(.v-icon) {
-    color: #94a3b8;
-}
-
-.last-sync-time {
-    font-size: 12px;
-    font-weight: 600;
-    color: #334155;
-}
-
-/* Minimal error message */
-.error-message {
-    display: flex;
-    align-items: center;
-    padding: 12px 16px;
-    background: #fef2f2;
-    border-top: 1px solid #fecaca;
-    color: #dc2626;
-    font-size: 12px;
-}
-
-.error-message :deep(.v-icon) {
-    color: #dc2626;
-}
-
-/* Matching transitions from ChatInterface */
-.fade-enter-active,
-.fade-leave-active {
-    transition: opacity 0.3s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-    opacity: 0;
-}
+/* Match the white response surfaces and clearly defined section dividers. */
+.modern-dropdown { width: min(340px, calc(100vw - 32px)); border: 1px solid #96a5b9; border-radius: 12px; background: #fff; box-shadow: 0 8px 24px rgba(30, 48, 76, .10); overflow: hidden; }
+.modern-content { background: #f0f4f9; }
+.modern-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--workspace-outline, #b8c2cf); background: #f8fafc; }
+.modern-header h3 { margin: 0; color: #253248; font-size: 14px; font-weight: 600; line-height: 1.4; }
+.action-btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; min-height: 30px; padding: 0 9px; border: 1px solid transparent; border-radius: 7px; font: inherit; font-size: 11px; font-weight: 550; cursor: pointer; transition: background .15s, border-color .15s; }
+.action-btn.primary { background: var(--primary); border-color: #375bcc; color: #fff; }
+.action-btn.primary:hover:not(:disabled) { background: var(--primary-hover); border-color: #2948a8; }
+.action-btn:disabled { opacity: .55; cursor: default; }
+.action-btn.error { color: #aa3636; background: #fff0f0; border-color: #e6b8b8; }
+.action-btn.error:hover { background: #ffe3e3; border-color: #ce9595; }
+.action-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.progress-section { padding: 10px 16px; border-bottom: 1px solid #dbe3ef; background: #edf3ff; }
+.sync-status-text { display: flex; align-items: center; gap: 8px; color: #385ea9; font-size: 12px; }
+.pulse-dot { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; animation: pulse-subtle 1.5s ease-in-out infinite; }
+@keyframes pulse-subtle { 50% { opacity: .4; } }
+.entity-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.entity-card { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 16px; background: #f0f4f9; }
+.entity-card:nth-child(odd) { border-right: 1px solid #dde3eb; }
+.entity-card:nth-child(n+3) { border-top: 1px solid #dde3eb; }
+.entity-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0; background: #edf3ff; color: #4568b3; }
+.entity-2 .entity-icon { background: #f2ecfa; color: #7754aa; }
+.entity-4 .entity-icon { background: #eaf5f5; color: #276e78; }
+.entity-icon :deep(.v-icon) { font-size: 16px; }
+.entity-details { min-width: 0; }
+.entity-count { color: #253248; font-size: 20px; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.entity-count-large { font-size: 16px; }
+.entity-label { margin-top: 3px; color: #64748b; font-size: 11px; line-height: 1.4; }
+.last-sync { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 16px; border-top: 1px solid var(--workspace-outline, #b8c2cf); background: #f8fafc; }
+.last-sync-label { display: inline-flex; align-items: center; color: #64748b; font-size: 11px; }
+.last-sync-time { color: #46566f; font-size: 11px; font-weight: 500; }
+.error-message { display: flex; align-items: flex-start; gap: 5px; padding: 12px 16px; border-top: 1px solid #e6b8b8; background: #fff0f0; color: #a13333; font-size: 12px; overflow-wrap: anywhere; }
+.error-message :deep(.v-icon) { flex-shrink: 0; margin-top: 2px; }
+.fade-enter-active, .fade-leave-active { transition: opacity .15s; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) { .pulse-dot, .orange { animation: none; } .fade-enter-active, .fade-leave-active { transition: none; } }
 
 /* Tooltip matching */
 :deep(.v-tooltip .v-overlay__content) {

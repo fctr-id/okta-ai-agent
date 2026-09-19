@@ -1,11 +1,11 @@
 <template>
-    <div class="app-page">
+    <div class="app-page" :class="{ 'chat-page': contentClass === 'chat-content', 'auth-page': contentClass === 'auth-content' }">
         <!-- Header -->
         <header v-if="showHeader" class="floating-header">
             <div class="header-content">
-                <!-- Brand section: Wordmark + Tako AI -->
+                <!-- Brand section: Fctr lockup + Tako AI -->
                 <div class="brand">
-                    <img src="@/assets/fctr-wordmark.svg" alt="fctr" />
+                    <img src="@/assets/fctr-lockup-primary.svg" alt="Fctr" />
                     
                     <div class="brand-divider"></div>
                     <div class="title-with-badge">
@@ -44,7 +44,7 @@
                     fctr
                 </a>
                 <span class="version-tag">{{ appVersion }}</span>
-                <span class="disclaimer">• Responses may require verification</span>
+                <span class="disclaimer">• AI can make mistakes. Please validate the data provided.</span>
             </div>
         </footer>
         </div>
@@ -123,7 +123,7 @@ const handleNewSession = () => {
 
 <style>
 .app-page {
-    --sidebar-width: 280px;
+    --sidebar-width: 260px;
     --collapsed-sidebar-width: 48px;
     --header-height: 56px;
     min-height: 100vh;
@@ -147,7 +147,7 @@ const handleNewSession = () => {
     width: 100%;
     min-height: var(--header-height);
     background: var(--bg-page);
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--workspace-outline);
 }
 
 .header-content {
@@ -177,17 +177,20 @@ const handleNewSession = () => {
 
 .brand img {
     display: block;
-    height: 27px;
-    width: auto;
+    height: 16px;
+    width: 54.4px;
+    flex-shrink: 0;
     object-fit: contain;
+    transform: translateY(-1px);
 }
 
 .tako-name {
     font-family: var(--font-family-display);
-    font-weight: 625;
-    font-size: 18px;
+    font-weight: 600;
+    font-size: 14px;
     line-height: 1;
     letter-spacing: -0.02em;
+    white-space: nowrap;
     color: var(--text-primary);
     display: flex;
     align-items: center;
@@ -200,20 +203,20 @@ const handleNewSession = () => {
 }
 
 .brand-divider {
-    height: 18px;
+    height: 16px;
     width: 1px;
     background: var(--border-strong);
     align-self: center;
 }
 
 .beta-badge {
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-muted);
+    background: #edf2ff;
+    border: 1px solid #d4dfff;
+    color: #4563bb;
     font-size: 9px;
     font-weight: 600;
-    padding: 2px 6px;
-    border-radius: 4px;
+    padding: 4px 7px;
+    border-radius: 6px;
     letter-spacing: 0.06em;
     line-height: 1;
 }
@@ -222,23 +225,24 @@ const handleNewSession = () => {
     display: flex;
     align-items: center;
     gap: 6px;
-    background: #ffffff;
-    border: 1px solid var(--border-strong);
-    color: var(--text-primary);
+    background: #f8faff;
+    border: 1px solid #dce3ef;
+    color: #53617a;
     cursor: pointer;
-    padding: 6px 12px;
-    border-radius: 8px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 9px;
     font-family: var(--font-family-body);
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 500;
     box-shadow: none;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .logout-btn:hover {
-    background: #ffffff;
-    border-color: rgba(var(--primary-rgb), 0.24);
-    color: var(--text-primary);
+    background: #edf2ff;
+    border-color: #bdcdef;
+    color: #3556aa;
     box-shadow: none;
 }
 
@@ -253,12 +257,20 @@ const handleNewSession = () => {
     flex-direction: column;
     margin: 0;
     border-radius: 0;
-    background:
-        linear-gradient(rgba(15, 23, 42, 0.042) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(15, 23, 42, 0.042) 1px, transparent 1px),
-        var(--bg-page);
-    background-size: 28px 28px;
+    background: var(--surface);
 }
+
+/* One continuous canvas for login and conversation. */
+.auth-page .floating-header { border-bottom: 0; }
+.chat-page .page-footer { display: none; }
+.app-page :is(button, a):focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+    .app-page *, .app-page *::before, .app-page *::after { animation: none !important; transition: none !important; }
+}
+.chat-page,
+.chat-page .content-surface,
+.chat-page .main-content { background: var(--workspace-canvas); }
+.chat-page .floating-header { background: #ffffff; }
 
 /* Main content area */
 .main-content {
@@ -276,6 +288,8 @@ const handleNewSession = () => {
     flex-direction: column;
     transition: padding-left 0.38s cubic-bezier(0.16, 1, 0.3, 1), padding-right 0.38s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+.main-content.chat-content:not(.sidebar-expanded) { padding-left: calc(var(--collapsed-sidebar-width) + 32px); }
 
 /* Adjust content positioning when sidebar is expanded */
 /* Use padding instead of margin to maintain centering */
@@ -420,6 +434,8 @@ const handleNewSession = () => {
         padding-right: 16px;
     }
 
+    .main-content.chat-content:not(.sidebar-expanded) { padding-left: calc(var(--collapsed-sidebar-width) + 16px); }
+
     .main-content.sidebar-expanded {
         padding-left: calc(var(--collapsed-sidebar-width) + 16px);
     }
@@ -435,10 +451,4 @@ const handleNewSession = () => {
     }
 }
 
-/* For mobile responsiveness */
-@media (max-width: 600px) {
-  .tako-name {
-        font-size: 16px;
-  }
-}
 </style>

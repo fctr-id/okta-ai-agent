@@ -6,10 +6,11 @@
                 <!-- Hero title -->
                 <div class="hero-card" :class="{ hidden: hasResults || isReturningHome }">
                     <div class="title-wrapper">
-                        <h1 class="main-title gradient-title">
-                            Hey There! I'm Tako 
+                        <span class="workspace-eyebrow"><span aria-hidden="true"></span> Your AI assistant</span>
+                        <h1 class="main-title">
+                            Hi, I’m <span class="title-accent">Tako.</span>
                         </h1>
-                        <p class="main-subtitle">Ask your AI agent anything about your okta tenant.</p>
+                        <p class="main-subtitle">Let’s explore your Okta users, apps, and access.</p>
                     </div>
                 </div>
 
@@ -40,7 +41,8 @@
                                     @focus="isFocused = true"
                                     @blur="isFocused = false"
                                     @input="autoResizeTextarea"
-                                    placeholder="List all users in ACTIVE status"
+                                    :placeholder="hasResults ? 'Ask a follow-up…' : 'Ask Tako about your Okta tenant…'"
+                                    aria-label="Message Tako"
                                     class="query-textarea"
                                     rows="1"
                                 ></textarea>
@@ -65,17 +67,22 @@
                     <div v-if="!hasResults && !isReturningHome" class="suggestions-wrapper">
                         <div class="suggestions-grid">
                             <button 
-                                v-for="(suggestion, i) in suggestions" 
+                                v-for="(suggestion, i) in visibleSuggestions"
                                 :key="i" 
-                                class="suggestion-btn"
+                                class="suggestion-btn" :title="suggestion.query"
                                 @click="selectSuggestion(suggestion.query)"
                             >
-                                <span class="suggestion-text">{{ suggestion.query }}</span>
+                                <v-icon :icon="suggestion.icon" size="16" class="suggestion-symbol" />
+                                <span class="suggestion-text">{{ suggestion.label }}</span>
                             </button>
                         </div>
                         
                         <!-- Special Tools Button -->
                         <div class="special-tools-container">
+                            <button class="special-tools-btn" @click="showAllSuggestions = !showAllSuggestions" :aria-expanded="showAllSuggestions">
+                                <span>{{ showAllSuggestions ? 'Fewer ideas' : 'More ideas' }}</span>
+                                <v-icon :icon="showAllSuggestions ? 'mdi-chevron-up' : 'mdi-chevron-down'" size="16" />
+                            </button>
                             <button class="special-tools-btn" @click="showSpecialToolsModal = true">
                                 <v-icon icon="mdi-tools" size="18" />
                                 <span>Special Tools</span>
@@ -109,15 +116,6 @@
 
             <transition name="fade-up">
                 <div v-if="hasResults" class="transcript-shell">
-                    <div class="transcript-session-bar">
-                        <div class="transcript-session-label">
-                            <span class="transcript-session-label-caption">Current session</span>
-                            <span class="transcript-session-label-title" :title="activeSessionTitle || 'Untitled conversation'">
-                                {{ activeSessionTitle || 'Untitled conversation' }}
-                            </span>
-                        </div>
-                    </div>
-
                     <div v-if="sessionLoadOverlayVisible" class="session-load-overlay" role="status" aria-live="polite" aria-busy="true">
                         <div class="session-load-dialog">
                             <div class="session-load-header">
@@ -195,6 +193,13 @@
                         </article>
                     </div>
 
+                    <div v-if="conversationTurns.length > 1" class="transcript-actions">
+                        <button type="button" class="collapse-previous-btn" :disabled="!hasExpandedPreviousTurns" @click="collapsePreviousTurns">
+                            <v-icon size="15" aria-hidden="true">mdi-unfold-less-horizontal</v-icon>
+                            Collapse previous
+                        </button>
+                    </div>
+
                     <div v-if="conversationTurns.length > 0" class="transcript-list">
                         <article
                             v-for="turn in conversationTurns"
@@ -203,89 +208,91 @@
                             class="transcript-turn"
                             :class="{ 'is-active': turn.isActive }"
                         >
-                            <div class="question-header-container transcript-question-header">
-                                <div class="question-header">
-                                    <div class="question-copy">
-                                        <div class="question-text">{{ turn.queryText }}</div>
-                                    </div>
-                                    <div class="question-timestamp">{{ formatTurnTimestamp(turn) }}</div>
-                                </div>
-                            </div>
-
-                            <div v-if="showLivePanelsForTurn(turn)" class="react-panels mb-4 transcript-react-panels">
-                                <DiscoveryPanel
-                                        :steps="turn.steps"
-                                        :isThinking="turn.isActive && turn.steps.length === 0 && !turn.discoveryComplete && !turn.error"
-                                        :isComplete="turn.discoveryComplete"
-                                        :error="turn.error"
-                                        :executionStarted="turn.executionStarted"
-                                    :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
-                                />
-
-                                <ExecutionPanel
-                                        v-if="showExecutionPanelForTurn(turn)"
-                                        :validationStep="turn.validationStep"
-                                        :executionStarted="turn.executionStarted"
-                                        :isExecuting="turn.isExecuting"
-                                        :isComplete="turn.status === 'completed' && !turn.error"
-                                        :executionError="turn.error"
-                                        :executionMessage="turn.executionMessage"
-                                        :progressValue="turn.executionProgress"
-                                        :subprocessProgress="turn.subprocessProgress"
-                                        :resultCount="turn.results?.metadata?.count || turn.resultCount || 0"
-                                        :tokenUsage="turn.tokenUsage"
-                                        :rateLimitWarning="turn.rateLimitWarning"
-                                        :generatedScript="turn.generatedScript"
-                                        :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
-                                />
-                            </div>
-
-                            <div
-                                v-if="turn.results"
-                                :class="['results-container', 'transcript-results', getContentClass(turn.results.display_type)]"
+                            <ConversationCard
+                                :question="turn.queryText"
+                                :timestamp="formatTurnTimestamp(turn)"
+                                :status="turnHeaderStatus(turn)"
+                                :statusTone="turnHeaderTone(turn)"
+                                :resultSummary="turnHeaderResultSummary(turn)"
+                                :collapsed="collapsedTurnKeys.has(turn.key)"
+                                @update:collapsed="setTurnCollapsed(turn.key, $event)"
                             >
-                                <DataDisplay
-                                    :type="turn.results.display_type"
-                                    :content="turn.results.content"
-                                    :metadata="turn.results.metadata"
-                                    :showTableAction="shouldShowTurnResultsAction(turn) || turn.isLoadingFullResults"
-                                    :tableActionLabel="getTurnResultsActionLabel(turn)"
-                                    :tableActionLoading="turn.isLoadingFullResults"
-                                    @table-action="loadFullTurnResults(turn)"
-                                />
-                            </div>
+                                <div v-if="showLivePanelsForTurn(turn)" class="react-panels transcript-react-panels">
+                                    <DiscoveryPanel
+                                        :showWorkingStatus="false"
+                                            :steps="turn.steps"
+                                            :isThinking="turn.isActive && turn.steps.length === 0 && !turn.discoveryComplete && !turn.error"
+                                            :isComplete="turn.discoveryComplete"
+                                            :error="turn.error"
+                                            :executionStarted="turn.executionStarted"
+                                        :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
+                                    />
 
-                            <div v-else-if="turn.isHydratingResults" class="turn-loading-card">
-                                <div class="turn-summary-meta">
-                                    <span class="turn-status-pill turn-status-pill-muted">
-                                        Loading saved result
-                                    </span>
-                                    <span
-                                        v-if="turn.resultCount !== null && turn.resultCount !== undefined"
-                                        class="turn-status-pill turn-status-pill-muted"
-                                    >
-                                        {{ formatResultCount(turn.resultCount, turn.isPartialResult) }}
-                                    </span>
-                                </div>
-                                <v-progress-linear indeterminate color="primary" rounded height="6" />
-                            </div>
-
-                            <div v-else-if="shouldShowTurnSummary(turn)" class="turn-summary-card">
-                                <div class="turn-summary-meta">
-                                    <span class="turn-status-pill" :class="turnStatusClass(turn)">
-                                        {{ formatTurnStatus(turn) }}
-                                    </span>
-                                    <span
-                                        v-if="turn.resultCount !== null && turn.resultCount !== undefined"
-                                        class="turn-status-pill turn-status-pill-muted"
-                                    >
-                                        {{ formatResultCount(turn.resultCount, turn.isPartialResult) }}
-                                    </span>
+                                    <ExecutionPanel
+                                            v-if="showExecutionPanelForTurn(turn)"
+                                            :validationStep="turn.validationStep"
+                                            :executionStarted="turn.executionStarted"
+                                            :isExecuting="turn.isExecuting"
+                                            :isComplete="turn.status === 'completed' && !turn.error"
+                                            :executionError="turn.error"
+                                            :executionMessage="turn.executionMessage"
+                                            :progressValue="turn.executionProgress"
+                                            :subprocessProgress="turn.subprocessProgress"
+                                            :resultCount="turn.results?.metadata?.count || turn.resultCount || 0"
+                                            :tokenUsage="turn.tokenUsage"
+                                            :rateLimitWarning="turn.rateLimitWarning"
+                                            :generatedScript="turn.generatedScript"
+                                            :shouldAutoCollapse="shouldAutoCollapseTurnPanels(turn)"
+                                    />
                                 </div>
 
-                                <p class="turn-summary-text">{{ getTurnSummary(turn) }}</p>
-                                <p v-if="turn.resultsError || turn.error" class="turn-error-text">{{ turn.resultsError || turn.error }}</p>
-                            </div>
+                                <div
+                                    v-if="turn.results"
+                                    :class="['results-container', 'transcript-results', getContentClass(turn.results.display_type)]"
+                                >
+                                    <DataDisplay
+                                        :type="turn.results.display_type"
+                                        :content="turn.results.content"
+                                        :metadata="turn.results.metadata"
+                                        :showTableAction="shouldShowTurnResultsAction(turn) || turn.isLoadingFullResults"
+                                        :tableActionLabel="getTurnResultsActionLabel(turn)"
+                                        :tableActionLoading="turn.isLoadingFullResults"
+                                        @table-action="loadFullTurnResults(turn)"
+                                    />
+                                </div>
+
+                                <div v-else-if="turn.isHydratingResults" class="turn-loading-card">
+                                    <div class="turn-summary-meta">
+                                        <span class="turn-status-pill turn-status-pill-muted">
+                                            Loading saved result
+                                        </span>
+                                        <span
+                                            v-if="turn.resultCount !== null && turn.resultCount !== undefined"
+                                            class="turn-status-pill turn-status-pill-muted"
+                                        >
+                                            {{ formatResultCount(turn.resultCount, turn.isPartialResult) }}
+                                        </span>
+                                    </div>
+                                    <v-progress-linear indeterminate color="primary" rounded height="6" />
+                                </div>
+
+                                <div v-else-if="shouldShowTurnSummary(turn)" class="turn-summary-card">
+                                    <div class="turn-summary-meta">
+                                        <span class="turn-status-pill" :class="turnStatusClass(turn)">
+                                            {{ formatTurnStatus(turn) }}
+                                        </span>
+                                        <span
+                                            v-if="turn.resultCount !== null && turn.resultCount !== undefined"
+                                            class="turn-status-pill turn-status-pill-muted"
+                                        >
+                                            {{ formatResultCount(turn.resultCount, turn.isPartialResult) }}
+                                        </span>
+                                    </div>
+
+                                    <p class="turn-summary-text">{{ getTurnSummary(turn) }}</p>
+                                    <p v-if="turn.resultsError || turn.error" class="turn-error-text">{{ turn.resultsError || turn.error }}</p>
+                                </div>
+                            </ConversationCard>
                         </article>
                     </div>
                 </div>
@@ -370,6 +377,7 @@ import { useSanitize } from '@/composables/useSanitize'
 import { useReactStream } from '@/composables/useReactStream'
 import { useSpecialTools } from '@/composables/useSpecialTools'
 import { useHistory } from '@/composables/useHistory'
+import ConversationCard from '@/components/messages/ConversationCard.vue'
 import DataDisplay from '@/components/messages/DataDisplay.vue'
 import DiscoveryPanel from '@/components/messages/DiscoveryPanel.vue'
 import ExecutionPanel from '@/components/messages/ExecutionPanel.vue'
@@ -577,6 +585,25 @@ const activeSessionId = ref(null)
 const activeSessionTitle = ref('')
 const pendingSessionTitle = ref('')
 const conversationTurns = ref([])
+const collapsedTurnKeys = ref(new Set())
+const hasExpandedPreviousTurns = computed(() =>
+    conversationTurns.value.slice(0, -1).some(turn => !collapsedTurnKeys.value.has(turn.key))
+)
+const setTurnCollapsed = (key, collapsed) => {
+    const next = new Set(collapsedTurnKeys.value)
+    if (collapsed) next.add(key)
+    else next.delete(key)
+    collapsedTurnKeys.value = next
+}
+const collapsePreviousTurns = () => {
+    const next = new Set(collapsedTurnKeys.value)
+    conversationTurns.value.slice(0, -1).forEach(turn => next.add(turn.key))
+    collapsedTurnKeys.value = next
+}
+watch(() => conversationTurns.value.map(turn => turn.key), keys => {
+    const present = new Set(keys)
+    collapsedTurnKeys.value = new Set([...collapsedTurnKeys.value].filter(key => present.has(key)))
+})
 const sessionViewLoading = ref(false)
 const sessionViewError = ref(null)
 const activeTurnKey = ref(null)
@@ -1224,7 +1251,7 @@ const handleUserInputChange = (val) => {
  * @returns {string} CSS class name
  */
 const getContentClass = (type) => {
-    if (type === MessageType.STREAM || type === MessageType.TABLE) {
+    if (type === MessageType.STREAM || type === MessageType.TABLE || type === MessageType.BATCH) {
         return 'full-width-results';
     } else {
         return 'compact-results';
@@ -1264,6 +1291,25 @@ const formatTurnStatus = (turn) => {
     return String(statusValue)
         .replace(/_/g, ' ')
         .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+const turnHeaderStatus = (turn) => {
+    if (turn.error || turn.resultsError || turn.status === 'failed') return 'Failed'
+    if (turn.isHydratingResults) return 'Loading results'
+    if (turn.status === 'completed') return turn.isPartialResult ? 'Partial results' : 'Completed'
+    if (turn.isActive || ['running', 'created', 'active'].includes(turn.status)) return 'Working'
+    return formatTurnStatus(turn)
+}
+const turnHeaderTone = (turn) => {
+    if (turn.error || turn.resultsError || turn.status === 'failed') return 'error'
+    if (turn.isHydratingResults) return 'active'
+    if (turn.status === 'completed') return turn.isPartialResult ? 'muted' : 'success'
+    return turn.isActive || ['running', 'created', 'active'].includes(turn.status) ? 'active' : 'muted'
+}
+const turnHeaderResultSummary = (turn) => {
+    const count = turn.results?.metadata?.count ?? turn.resultCount
+    if (count === null || count === undefined) return ''
+    return formatResultCount(count, turn.isPartialResult)
 }
 
 const formatResultCount = (count, isPartial = false) => {
@@ -1413,17 +1459,19 @@ const ensureAuthenticatedSession = async () => {
 /**
  * Query suggestions - curated valid questions (rearranged for varied lengths)
  */
+const showAllSuggestions = ref(false)
 const suggestions = ref([
-    { query: 'Show me all okta admins in the tenant and list their roles', icon: 'mdi-shield-account-outline' },
-    { query: 'List all users along with their creation dates', icon: 'mdi-calendar-outline' },
-    { query: 'Show me all users in locked status', icon: 'mdi-lock-outline' },
-    { query: 'Show users with PUSH factor registered', icon: 'mdi-shield-check-outline' },
-    { query: 'Find the SAML certificate expiry date for all the active SAML applications', icon: 'mdi-certificate-outline' },
-    { query: 'Show applications assigned to user dan@fctr.io', icon: 'mdi-apps' },
-    { query: 'Find all users in Engineering group', icon: 'mdi-account-group-outline' },
-    { query: 'Find groups with more than 50 members', icon: 'mdi-account-multiple-outline' },
-    { query: 'Can john.smith@company.com access Salesforce?', icon: 'mdi-help-circle-outline' }
+    { label: 'Admins & roles', query: 'Show me all okta admins in the tenant and list their roles', icon: 'mdi-shield-account-outline' },
+    { label: 'Explore users', query: 'List all users along with their creation dates', icon: 'mdi-account-outline' },
+    { label: 'SAML certificates', query: 'Find the SAML certificate expiry date for all the active SAML applications', icon: 'mdi-certificate-outline' },
+    { label: 'Group membership', query: 'Find groups with more than 50 members', icon: 'mdi-account-group-outline' },
+    { label: 'Locked users', query: 'Show me all users in locked status', icon: 'mdi-lock-outline' },
+    { label: 'Push enrollment', query: 'Show users with PUSH factor registered', icon: 'mdi-shield-check-outline' },
+    { label: 'Assigned apps', query: 'Show applications assigned to user dan@fctr.io', icon: 'mdi-apps' },
+    { label: 'Engineering team', query: 'Find all users in Engineering group', icon: 'mdi-account-group-outline' },
+    { label: 'Check app access', query: 'Can john.smith@company.com access Salesforce?', icon: 'mdi-help-circle-outline' }
 ])
+const visibleSuggestions = computed(() => showAllSuggestions.value ? suggestions.value : suggestions.value.slice(0, 4))
 
 // ---------- API INTERACTION ----------
 
@@ -1863,6 +1911,14 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.workspace-eyebrow { display: inline-flex; align-items: center; gap: 7px; margin-bottom: 18px; padding: 6px 11px; border: 1px solid rgba(103, 105, 205, 0.14); border-radius: 999px; background: rgba(239, 239, 255, 0.8); color: #5354a0; font-size: 12px; }
+.title-accent { color: #5565c9; }
+.workspace-eyebrow > span { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+.suggestion-symbol { color: var(--suggestion-ink); opacity: 1; }
+.suggestion-btn:nth-child(3n) { --suggestion-ink: #8050b3; --suggestion-tint: #f5effc; --suggestion-border: #e6d8f6; }
+.suggestion-btn:nth-child(4n) { --suggestion-ink: #217d70; --suggestion-tint: #edf8f4; --suggestion-border: #d1eae2; }
+
+
 /* Search container */
 .chat-content {
     background: transparent;
@@ -1893,7 +1949,7 @@ onMounted(() => {
 
 .search-container {
     width: 100%;
-    max-width: 1080px;
+    max-width: 820px;
     padding: 0 24px 32px;
     transition: opacity 0.28s ease;
     z-index: 50;
@@ -1904,14 +1960,47 @@ onMounted(() => {
     width: 100%;
 }
 
+/* Localized color spills frame the welcome area without tinting result rows. */
+.content-area:not(.has-results) .search-container { position: relative; isolation: isolate; }
+.content-area:not(.has-results) .search-container::before {
+    content: '';
+    position: absolute;
+    z-index: -1;
+    pointer-events: none;
+    width: min(1120px, 110vw);
+    height: 640px;
+    left: 50%;
+    top: 45%;
+    transform: translate(-50%, -50%);
+    background:
+        radial-gradient(ellipse at 28% 48%, rgba(111, 151, 248, 0.19), transparent 54%),
+        radial-gradient(ellipse at 68% 30%, rgba(174, 135, 230, 0.18), transparent 51%),
+        radial-gradient(ellipse at 76% 73%, rgba(84, 193, 173, 0.13), transparent 48%);
+    mask-image: radial-gradient(ellipse closest-side, #000 35%, transparent 100%);
+    animation: welcome-color-in 700ms ease-out both;
+}
+.content-area:not(.has-results) .query-card {
+    border-color: rgba(112, 125, 184, 0.23);
+    box-shadow: 0 14px 40px -12px rgba(81, 95, 157, 0.22), 0 3px 9px rgba(69, 78, 119, 0.04);
+}
+.content-area:not(.has-results) .query-card.is-focused {
+    border-color: rgba(89, 109, 224, 0.5);
+    box-shadow: 0 0 0 3px rgba(101, 119, 232, 0.07), 0 18px 44px -14px rgba(81, 95, 157, 0.28);
+}
+.content-area:not(.has-results) .send-button:disabled { background: #edf0fd; color: #8796d0; }
+@keyframes welcome-color-in { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+    .content-area:not(.has-results) .search-container::before { animation: none; }
+}
+
 /* When results appear, fix search bar to bottom with space for footer */
 .composer-shell.moved {
     position: fixed;
-    bottom: 72px;
-    left: 32px;
+    bottom: 24px;
+    left: calc(var(--collapsed-sidebar-width) + 32px);
     right: 32px;
     width: auto;
-    max-width: 760px;
+    max-width: 860px;
     padding-bottom: 0;
     z-index: 90;
     margin-left: auto;
@@ -1924,18 +2013,21 @@ onMounted(() => {
     right: 32px;
 }
 
-/* Hide placeholder when in mini mode */
+/* Keep follow-up guidance visible in the docked composer. */
 .composer-shell.moved .query-textarea::placeholder {
-    opacity: 0;
+    opacity: 1;
 }
 
 /* Compact style when moved - Clean white bar */
 .composer-shell.moved .query-card {
     padding: 10px 12px;
-    border-radius: 10px;
+    border-radius: 16px;
     background: #ffffff;
-    box-shadow: none;
+    border-color: #bfcbdc;
+    box-shadow: 0 6px 22px rgba(34, 54, 91, 0.07), 0 1px 3px rgba(34, 54, 91, 0.04);
 }
+.composer-shell.moved .query-card:hover { border-color: #9fb3d3; }
+.composer-shell.moved .query-card:focus-within { border-color: #7698df; box-shadow: 0 0 0 3px rgba(62, 99, 221, 0.09), 0 6px 22px rgba(34, 54, 91, 0.06); }
 
 .composer-shell.moved .query-card::before {
     border-radius: 10px;
@@ -2015,8 +2107,8 @@ onMounted(() => {
 
 .hero-card {
     max-width: 760px;
-    margin: 0 auto 18px;
-    max-height: 140px;
+    margin: 0 auto 28px;
+    max-height: 220px;
     overflow: hidden;
     padding: 0;
     border-radius: 0;
@@ -2041,13 +2133,13 @@ onMounted(() => {
 
 .main-title {
     font-family: var(--font-family-display);
-    font-size: 36px;
-    font-weight: 700;
+    font-size: clamp(28px, 3vw, 36px);
+    font-weight: 500;
     margin-bottom: 8px;
     color: var(--text-primary);
     position: relative;
-    letter-spacing: 0;
-    line-height: 1.12;
+    letter-spacing: -0.04em;
+    line-height: 1.2;
 }
 
 .main-title.gradient-title {
@@ -2067,8 +2159,27 @@ onMounted(() => {
 }
 
 .content-area.has-results {
-    padding-top: 60px;
+    isolation: isolate;
+    padding-top: 24px;
     padding-bottom: var(--composer-clearance, 176px);
+}
+
+/* A restrained accent below the opaque response cards. */
+.content-area.has-results::before {
+    content: '';
+    position: fixed;
+    height: calc(min(140px, 16vh) + 40px);
+    bottom: 0;
+    left: var(--collapsed-sidebar-width, 48px);
+    right: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: url('../assets/workspace-waves.svg') center bottom / 100% 100% no-repeat;
+}
+.sidebar-expanded .content-area.has-results::before { left: var(--sidebar-width, 260px); }
+@media (max-width: 768px) {
+    .content-area.has-results::before { height: 90px; }
+    .sidebar-expanded .content-area.has-results::before { left: var(--collapsed-sidebar-width, 48px); }
 }
 
 /* Modern integrated search - Plain CSS Card */
@@ -2081,23 +2192,23 @@ onMounted(() => {
 .query-card {
     position: relative;
     background: white;
-    border-radius: 10px;
-    box-shadow: none;
-    padding: 14px;
+    border-radius: 20px;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.025);
+    padding: 20px;
     transition: border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-    border: 2px solid rgba(15, 23, 42, 0.28);
+    border: 1px solid rgba(15, 23, 42, 0.18);
     display: flex;
     flex-direction: column;
 }
 
 .query-card:hover {
-    border-color: rgba(15, 23, 42, 0.42);
+    border-color: rgba(15, 23, 42, 0.24);
     box-shadow: none;
 }
 
 .query-card.is-focused {
-    box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.14);
-    border-color: rgba(var(--primary-rgb), 0.62);
+    box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.05);
+    border-color: rgba(var(--primary-rgb), 0.36);
 }
 
 .query-label {
@@ -2206,7 +2317,7 @@ onMounted(() => {
 
 /* Modern 2026 Suggestion Cards - Clean minimal style */
 .suggestions-wrapper {
-    margin-top: 14px;
+    margin: 20px auto 0;
     padding: 0;
     width: 100%;
     max-width: 1040px;
@@ -2230,21 +2341,24 @@ onMounted(() => {
 }
 
 .suggestion-btn {
+    --suggestion-ink: #4668bd;
+    --suggestion-tint: #eff4ff;
+    --suggestion-border: #dce5f8;
     position: relative;
     padding: 8px 12px;
     width: auto;
     max-width: 100%;
     display: inline-flex;
     margin: 0;
-    background: #ffffff;
-    border: 1px solid var(--border-color);
-    box-shadow: none;
+    background: var(--suggestion-tint);
+    border: 1px solid var(--suggestion-border);
+    box-shadow: 0 2px 4px rgba(56, 65, 99, 0.025);
     border-radius: 10px;
     cursor: pointer;
     text-align: left;
     flex-direction: row;
     align-items: center;
-    gap: 0;
+    gap: 7px;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
@@ -2254,9 +2368,9 @@ onMounted(() => {
 
 .suggestion-btn:hover {
     background: #ffffff;
-    border-color: var(--border-strong);
-    box-shadow: none;
-    transform: translateY(-1px);
+    border-color: var(--suggestion-ink);
+    box-shadow: 0 4px 12px rgba(65, 78, 130, 0.08);
+    transform: translateY(-2px);
 }
 
 .suggestion-btn:hover::before {
@@ -2313,10 +2427,10 @@ onMounted(() => {
 }
 
 .transcript-shell {
-    --turn-content-max-width: 900px;
-    max-width: var(--max-width);
-    width: calc(100% - 40px);
-    margin: 0 auto var(--composer-clearance, 176px);
+    --turn-content-max-width: 860px;
+    max-width: var(--results-max-width, 1800px);
+    width: 100%;
+    margin: 0 auto;
     position: relative;
     isolation: isolate;
     min-height: 280px;
@@ -2417,41 +2531,6 @@ onMounted(() => {
     font-weight: 700;
 }
 
-.transcript-session-bar {
-    width: calc(100% - 40px);
-    max-width: 100%;
-    margin: 0 auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-}
-
-.transcript-session-label {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.transcript-session-label-caption {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--text-muted);
-}
-
-.transcript-session-label-title {
-    display: block;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 18px;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
 .transcript-state-card {
     width: 100%;
     padding: 20px 22px;
@@ -2472,7 +2551,7 @@ onMounted(() => {
 .transcript-list {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 32px;
 }
 
 .transcript-turn {
@@ -2482,19 +2561,26 @@ onMounted(() => {
     scroll-margin-bottom: var(--composer-clearance, 176px);
 }
 
+/* One shared edge for the question, activity and results in each turn. */
+.transcript-turn > * { width: 100%; min-width: 0; }
+.transcript-turn > .compact-results,
+.transcript-turn > .turn-summary-card,
+.transcript-turn > .turn-loading-card { max-width: var(--turn-content-max-width); margin-left: 0 !important; margin-right: auto !important; }
+
+
 .transcript-turn.is-active {
     scroll-margin-top: 96px;
 }
 
 .transcript-question-header {
-    margin: 0 auto;
-    width: calc(100% - 40px);
+    margin: 8px auto 12px;
+    width: 100%;
     max-width: 100%;
 }
 
 .transcript-question-header .question-header {
     width: fit-content;
-    max-width: 100%;
+    max-width: min(85%, var(--turn-content-max-width));
     justify-content: flex-start;
     align-items: center;
     margin-left: auto;
@@ -2510,9 +2596,22 @@ onMounted(() => {
 
 .transcript-react-panels {
     margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
 }
 
-.transcript-results {
+.assistant-heading { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+
+/* The question is the persistent header of each answer card. */
+.transcript-actions { display: flex; justify-content: flex-end; }
+.collapse-previous-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 9px; border: 1px solid #c3cddd; border-radius: 7px; background: #fff; color: #52627a; font: inherit; font-size: 12px; cursor: pointer; }
+.collapse-previous-btn:hover:not(:disabled) { color: var(--primary); background: #edf3ff; border-color: #9bb1d6; }
+.collapse-previous-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.collapse-previous-btn:disabled { opacity: .45; cursor: default; }
+
+.results-container.transcript-results {
     margin-top: 0;
     margin-bottom: 0 !important;
 }
@@ -2559,10 +2658,6 @@ onMounted(() => {
         border-radius: 16px;
     }
 
-    .transcript-session-bar {
-        align-items: flex-start;
-        flex-direction: column;
-    }
 }
 
 .turn-status-pill {
@@ -2618,10 +2713,11 @@ onMounted(() => {
 }
 
 .question-header {
-    background-color: var(--primary);
-    color: white;
-    padding: 10px 16px;
-    border-radius: 10px;
+    background-color: #dce9ff;
+    border: 1px solid #a9c5f6;
+    color: var(--text-primary);
+    padding: 12px 16px;
+    border-radius: 16px;
     width: fit-content;
     max-width: 88%;
     white-space: pre-wrap;
@@ -2635,14 +2731,14 @@ onMounted(() => {
 }
 
 .question-text {
-    font-weight: 500;
-    color: white;
+    font-weight: 400;
+    color: var(--text-primary);
 }
 
 .question-timestamp {
     font-size: 11px;
     opacity: 0.78;
-    color: rgba(255, 255, 255, 0.9);
+    color: var(--text-secondary);
     margin-left: 6px;
     white-space: nowrap;
 }
@@ -2661,8 +2757,8 @@ onMounted(() => {
 
 /* Results containers */
 .results-container {
-    max-width: var(--max-width);
-    width: calc(100% - 40px);
+    max-width: 100%;
+    width: 100%;
     margin-left: auto !important;
     margin-right: auto !important;
     margin-top: 12px;
@@ -2674,10 +2770,11 @@ onMounted(() => {
 }
 
 .full-width-results {
+    max-width: var(--results-max-width, 1800px);
     border-radius: var(--border-radius);
     box-shadow: none;
-    background: white;
-    border: 1px solid var(--border-color);
+    background: transparent;
+    border: none;
     overflow: hidden;
     width: 100%;
 }
@@ -2739,12 +2836,6 @@ onMounted(() => {
 }
 
 /* Responsive styles */
-@media (max-width: 1300px) {
-    .content-area {
-        max-width: 95% !important;
-    }
-}
-
 @media (max-width: 992px) {
     .search-container {
         max-width: 85%;
@@ -2753,7 +2844,8 @@ onMounted(() => {
 
 @media (max-width: 768px) {
     .content-area {
-        padding: 0 16px;
+        padding-left: 0;
+        padding-right: 0;
     }
 
     .search-container {
@@ -2762,7 +2854,7 @@ onMounted(() => {
 
     .composer-shell.moved {
         bottom: 20px;
-        left: 16px;
+        left: calc(var(--collapsed-sidebar-width) + 16px);
         right: 16px;
     }
 
@@ -2796,6 +2888,13 @@ onMounted(() => {
     .main-title {
         font-size: 24px;
     }
+}
+
+.has-results .search-container { padding: 0; }
+@media (max-width: 768px) {
+    .sidebar-expanded .composer-shell.moved { left: calc(var(--collapsed-sidebar-width) + 16px); right: 16px; }
+    .transcript-question-header .question-header { max-width: 100%; }
+    .question-timestamp { display: none; }
 }
 
 /* Error Block - Warm Solid Style */
@@ -2852,10 +2951,11 @@ onMounted(() => {
     color: #dc2626;
 }
 
-/* Special Tools Button */
+/* Quiet secondary actions beneath the prompt suggestions. */
 .special-tools-container {
-    margin-top: 16px;
+    margin-top: 14px;
     display: flex;
+    gap: 12px;
     justify-content: center;
 }
 
@@ -2865,12 +2965,12 @@ onMounted(() => {
     justify-content: center;
     gap: 8px;
     padding: 8px 12px;
-    background: #ffffff;
+    background: transparent;
     color: var(--text-secondary);
-    border: 1px solid var(--border-color);
+    border: 1px solid transparent;
     border-radius: 10px;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 400;
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
     box-shadow: none;
@@ -3021,5 +3121,13 @@ onMounted(() => {
 
 .example-item {
     display: none;
+}
+@media (max-width: 600px) {
+    .content-area:not(.has-results) .search-container { padding: 0 0 24px; }
+    .content-area:not(.has-results) .query-card { padding: 14px; }
+    .content-area:not(.has-results) .query-textarea { min-height: 68px; font-size: 16px; }
+    .suggestions-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .suggestion-btn { min-width: 0; padding: 10px; }
+    .suggestion-symbol { flex-shrink: 0; }
 }
 </style>
