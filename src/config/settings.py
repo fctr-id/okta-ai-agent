@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
 from datetime import datetime
 from typing import Optional, List
 from urllib.parse import urlparse
@@ -18,6 +19,7 @@ class Settings(BaseSettings):
     DB_DIR: str = str(os.getenv("DB_DIR", str(BASE_DIR / "sqlite_db")))
     DB_FILENAME: str = os.getenv("DB_FILENAME", "okta_sync.db")
     CHAT_SESSIONS_DIR: str = str(os.getenv("CHAT_SESSIONS_DIR", str(BASE_DIR / "chat_sessions")))
+    TEAMS_ENABLE: bool = False
     
     # No longer needed in .env - computed from DB_DIR and DB_FILENAME
     DATABASE_URL: Optional[str] = None  
@@ -68,6 +70,8 @@ class Settings(BaseSettings):
     SLACK_SIGNING_SECRET: str = os.getenv("SLACK_SIGNING_SECRET", "")
     SLACK_APP_TOKEN: str = os.getenv("SLACK_APP_TOKEN", "")  # Required when SLACK_OPERATION_MODE=socket
     
+    SLACK_SESSION_RETENTION_HOURS: int = Field(default=24, ge=1, le=8760)
+
     # Slack Access Control (deny-by-default)
     SLACK_ALLOWED_EMAILS: str = os.getenv("SLACK_ALLOWED_EMAILS", "")
     SLACK_ALLOWED_GROUPS: str = os.getenv("SLACK_ALLOWED_GROUPS", "")

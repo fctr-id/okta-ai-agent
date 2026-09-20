@@ -32,9 +32,14 @@ RUN apt-get update && apt-get install -y \
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy Python requirements and install dependencies with UV (10-100x faster)
-COPY requirements.txt .
+COPY requirements.txt requirements-teams.txt ./
+ARG INSTALL_TEAMS_BOT=false
 # flatdict >=4.1 provides a wheel; retain build isolation for source packages.
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN if [ "$INSTALL_TEAMS_BOT" = "true" ]; then \
+      uv pip install --system --no-cache -r requirements.txt -r requirements-teams.txt; \
+    else \
+      uv pip install --system --no-cache -r requirements.txt; \
+    fi
 
 # Copy main entry point
 COPY main.py /app/
@@ -50,6 +55,7 @@ COPY src/integrations /app/src/integrations
 
 # Copy scripts directory for CLI tools
 COPY scripts /app/scripts
+COPY teams-app /app/teams-app
 
 # Copy built frontend assets from the frontend builder stage
 # Frontend builds to ../api/static relative to the frontend directory

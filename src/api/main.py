@@ -118,8 +118,11 @@ async def lifespan(app: FastAPI):
     #logger.info("Using Modern Execution Manager - no background cleanup needed")
 
     # Start Slack Socket Mode if SLACK_OPERATION_MODE=socket (outbound WebSocket — no public URL needed)
+    _slack_cleanup_task = None
     _socket_task = None
     if os.environ.get("ENABLE_SLACK_BOT", "false").lower() == "true":
+        from src.integrations.slack.sessions import cleanup_sessions
+        _slack_cleanup_task = asyncio.create_task(cleanup_sessions())
         slack_mode = os.environ.get("SLACK_OPERATION_MODE", "socket").lower()
         if slack_mode == "socket":
             try:
@@ -131,7 +134,17 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("Slack running in HTTP mode (SLACK_OPERATION_MODE=http) — ensure server has a public URL")
     
-    yield
+    if teams_bot is not None:
+        await teams_bot.start()
+
+    try:
+        yield
+    finally:
+        if _slack_cleanup_task is not None:
+            _slack_cleanup_task.cancel()
+            await asyncio.gather(_slack_cleanup_task, return_exceptions=True)
+        if teams_bot is not None:
+            await teams_bot.close()
     
     # Shutdown code
     if _socket_task and not _socket_task.done():
@@ -180,6 +193,16 @@ if os.environ.get("ENABLE_SLACK_BOT", "false").lower() == "true":
         logger.info("Slack bot routes enabled")
     except Exception as e:
         logger.warning(f"Failed to enable Slack bot: {e}")
+
+# The integration is entirely absent unless enabled. Invalid enabled configuration
+# fails startup rather than exposing an anonymously accessible bot.
+teams_bot = None
+if settings.TEAMS_ENABLE:
+    from pathlib import Path
+    from src.integrations.teams.config import TeamsConfig
+    from src.integrations.teams.teams_app import TeamsBot
+    teams_bot = TeamsBot(TeamsConfig(), Path(settings.DB_DIR))
+    app.mount("/teams", teams_bot.http_app)
 
 # Mount static files
 app.mount("/assets", StaticFiles(directory="src/api/static/assets"), name="assets")

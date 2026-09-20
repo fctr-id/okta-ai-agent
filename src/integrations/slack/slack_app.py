@@ -34,6 +34,8 @@ from src.data.schemas.runtime_storage import (
     write_turn_summary,
 )
 from src.integrations.slack.event_handler import SlackEventHandler
+from src.integrations.slack import sessions
+from src.integrations.slack.interactions import register_conversation_handlers
 from src.integrations.slack.formatters import (
     format_error_message,
     format_sync_status_message,
@@ -379,6 +381,10 @@ def create_slack_app() -> Optional[AsyncApp]:
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
+    register_conversation_handlers(
+        app, check_access=_check_user_allowed, process_query=_process_query,
+        background_tasks=_background_tasks,
+    )
     logger.info("Slack Bolt app created successfully")
     return app
 
@@ -470,7 +476,16 @@ async def _replay_saved_script(
     )
     slack_handler._progress_message_ts = message_ts
 
+    async with sessions.reserve_thread(user_id, channel_id, message_ts):
+        await _run_saved_script(client, channel_id, user_id, query, script_code, correlation_id, message_ts, slack_handler)
+
+
+async def _run_saved_script(client, channel_id, user_id, query, script_code, correlation_id, message_ts, slack_handler):
+    runtime_paths = None
     try:
+        runtime_paths = await sessions.begin_turn(user_id, channel_id, message_ts, correlation_id, query)
+        slack_handler.runtime_paths = runtime_paths
+        update_turn_metadata(runtime_paths, channel_id=channel_id, thread_ts=message_ts, status="executing")
         # Security validation on the stored script before execution
         validation_result = validate_generated_code(script_code)
         if not validation_result.is_valid:
@@ -489,6 +504,13 @@ async def _replay_saved_script(
         )
 
         if script_results:
+            write_turn_summary(runtime_paths, {
+                "status": "completed", "user_query": query,
+                "final_response_summary": script_results.get("content") or f"Returned {script_results.get('count', 0)} records",
+                "display_type": script_results.get("display_type", "table"),
+                "result_count": script_results.get("count", 0),
+            })
+            update_turn_metadata(runtime_paths, status="completed", completed_at=time.time())
             await slack_handler.post_final_results(query, script_results)
             await slack_handler.post_script(script_code)
         else:
@@ -499,6 +521,14 @@ async def _replay_saved_script(
     except Exception as e:
         logger.error(f"[{correlation_id}] Error replaying saved script: {e}", exc_info=True)
         await slack_handler.post_error("An internal error occurred. Please try again.")
+    finally:
+        if runtime_paths is not None:
+            metadata = json.loads(runtime_paths.turn_metadata_file.read_text(encoding="utf-8"))
+            if metadata.get("status") == "executing":
+                update_turn_metadata(runtime_paths, status="error", completed_at=time.time())
+            await DatabaseOperations().mirror_runtime_turn_state(
+                tenant_id=settings.tenant_id, run_id=correlation_id, runtime_paths=runtime_paths,
+            )
 
 
 async def _process_query(
@@ -535,6 +565,17 @@ async def _process_query(
     )
     slack_handler._progress_message_ts = initial_response["ts"]
 
+    async with sessions.reserve_thread(user_id, channel_id, message_thread_ts) as acquired:
+        if not acquired:
+            await client.chat_update(channel=channel_id, ts=initial_response["ts"],
+                                     text="A question in this thread is still running. Please wait before asking a follow-up.")
+            return
+        await _run_query(client, channel_id, user_id, query, message_thread_ts, correlation_id, slack_handler)
+
+
+async def _run_query(client, channel_id, user_id, query, message_thread_ts, correlation_id, slack_handler):
+    runtime_paths = None
+    okta_client = None
     try:
         # Pre-query database health check — warn but don't block
         db_healthy = check_database_health()
@@ -548,11 +589,8 @@ async def _process_query(
                 ),
             )
 
-        runtime_paths = create_runtime_turn_paths(
-            user_id=f"slack-{user_id}",
-            session_id=message_thread_ts,
-            run_id=correlation_id,
-        )
+        runtime_paths = await sessions.begin_turn(user_id, channel_id, message_thread_ts, correlation_id, query)
+        slack_handler.runtime_paths = runtime_paths
         artifacts_file = runtime_paths.artifacts_file
         update_turn_metadata(
             runtime_paths,
@@ -589,6 +627,17 @@ async def _process_query(
                 "output_tokens": result.total_output_tokens,
                 "total_tokens": result.total_tokens,
             })
+
+        if result.outcome == "clarify":
+            question = result.user_message or "Could you clarify what you want to retrieve?"
+            await slack_handler.post_final_results(query, {"display_type": "markdown", "content": question})
+            write_turn_summary(runtime_paths, {
+                "status": "clarify_needed", "user_query": query,
+                "final_response_summary": question, "display_type": "markdown",
+                "outcome": result.outcome_metadata(),
+            })
+            update_turn_metadata(runtime_paths, status="clarify_needed", completed_at=time.time())
+            return
 
         # Handle failures
         if not result.success:
@@ -717,9 +766,23 @@ async def _process_query(
             await slack_handler.post_error("Script execution failed. Check logs for details.")
             update_turn_metadata(runtime_paths, status="error", error="Script execution failed", completed_at=time.time())
 
+    except asyncio.CancelledError:
+        if runtime_paths is not None:
+            update_turn_metadata(runtime_paths, status="interrupted", completed_at=time.time())
+        raise
     except Exception as e:
+        if runtime_paths is not None:
+            update_turn_metadata(runtime_paths, status="error", completed_at=time.time())
         logger.error(f"[{correlation_id}] Slack query processing error: {e}", exc_info=True)
         await slack_handler.post_error("An internal error occurred. Please try again later.")
+    finally:
+        if runtime_paths is not None:
+            # Includes failed/clarifying turns so the next answer has conversation context.
+            await DatabaseOperations().mirror_runtime_turn_state(
+                tenant_id=settings.tenant_id, run_id=correlation_id, runtime_paths=runtime_paths,
+            )
+        if okta_client is not None:
+            await okta_client.close_session()
 
 
 # ============================================================================

@@ -39,6 +39,7 @@ class SlackEventHandler:
         self.channel_id = channel_id
         self.thread_ts = thread_ts
         self.correlation_id = correlation_id
+        self.runtime_paths = None
         self._progress_message_ts: Optional[str] = None
         self._token_usage: Optional[Dict[str, Any]] = None
         self._last_update_time: float = 0
@@ -85,6 +86,15 @@ class SlackEventHandler:
             token_usage=self._token_usage,
         )
 
+        if self.runtime_paths is not None:
+            from src.integrations.slack.sessions import save_result
+            from src.integrations.slack.interactions import result_actions
+            save_result(self.runtime_paths, event_data)
+            blocks.extend(result_actions(
+                f"{self.runtime_paths.session_id}:{self.runtime_paths.turn_number}",
+                has_csv=event_data.get("display_type") != "markdown" and bool(event_data.get("results")),
+            ))
+
         # Post as a new message in the thread
         await self.client.chat_postMessage(
             channel=self.channel_id,
@@ -95,7 +105,7 @@ class SlackEventHandler:
 
         # Upload CSV for large table results
         results = event_data.get("results", [])
-        if event_data.get("display_type") != "markdown" and len(results) > 10:
+        if self.runtime_paths is None and event_data.get("display_type") != "markdown" and len(results) > 10:
             await self._upload_csv(results, event_data.get("headers", []))
 
         # Update the progress message to show completion

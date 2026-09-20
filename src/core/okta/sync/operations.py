@@ -1430,6 +1430,7 @@ class DatabaseOperations:
         parent_session_id: Optional[str] = None,
         handoff_reason: Optional[str] = None,
         started_from_query_history_id: Optional[int] = None,
+        schedule_retention: bool = True,
     ) -> Optional[ConversationSession]:
         """Create or return an existing conversation session for a user."""
         try:
@@ -1462,10 +1463,10 @@ class DatabaseOperations:
                 session.add(new_session)
                 await session.commit()
                 await session.refresh(new_session)
-                await self._schedule_conversation_retention_cleanup_if_needed(
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                )
+                if schedule_retention:
+                    await self._schedule_conversation_retention_cleanup_if_needed(
+                        tenant_id=tenant_id, user_id=user_id,
+                    )
                 return new_session
         except Exception as e:
             logger.error(f"Failed to create conversation session {session_id}: {e}", exc_info=True)
