@@ -17,6 +17,7 @@
 
 🔧 Optimizations and Fixes
 
+- **Session Signing Key Security**: Replaced the shared default JWT key with a random in-memory key when no key is configured or an old placeholder remains. Removed insecure signing and verification fallbacks. Automatic keys expire with the server process, requiring users to sign in again after a restart; accounts, conversations, and synced data are preserved. A configured random key keeps existing logins valid across restarts and must be shared by multiple workers or replicas. Explicit non-placeholder keys shorter than 32 bytes are rejected.
 - **Major Dependency Upgrades**: Refreshed backend and frontend dependencies for security and compatibility, including Pydantic AI 1.107.6 and cryptography 50.0.1, and simplified Docker dependency installation.
 - **Azure OpenAI API Compatibility**: Fixed Azure v1 Responses API configuration with the correct provider and endpoint normalization, using Azure deployment names without requiring a dated API version.
 - **More Reliable Agent Execution**: Fixed duplicate execution of API discovery tests, helper-function scope errors, and changes to escaped strings in generated scripts.

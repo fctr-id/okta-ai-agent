@@ -1,15 +1,30 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, field_validator
 from datetime import datetime
+from functools import lru_cache
 from typing import Optional, List
 from urllib.parse import urlparse
 from pathlib import Path
 import os, math
 import logging
+import secrets
 
 from src.config.environment import BASE_DIR, ENV_FILE, load_environment
 
 load_environment()
+
+
+@lru_cache(maxsize=1)
+def _process_jwt_secret() -> str:
+    """Share one ephemeral signing key across settings instances in this process."""
+    key = secrets.token_urlsafe(64)
+    logging.getLogger(__name__).warning(
+        "Using an automatically generated JWT signing key. Web users must sign in "
+        "again after a server restart. Set a shared JWT_SECRET_KEY for multiple "
+        "workers/replicas or to preserve login sessions across restarts."
+    )
+    return key
+
 
 class Settings(BaseSettings):
     OKTA_CLIENT_ORGURL: str
@@ -40,7 +55,7 @@ class Settings(BaseSettings):
     SYNC_OKTA_DEVICES: bool = os.getenv("SYNC_OKTA_DEVICES", "false").lower() == "true"
     
     # JWT Settings
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "CHANGE-THIS-KEY-IN-PRODUCTION-ENVIRONMENTS")
+    JWT_SECRET_KEY: str = Field(default="", repr=False, validate_default=True)
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
     JWT_ISSUER: str = os.getenv("JWT_ISSUER", "fctr-okta-ai-agent")
@@ -76,6 +91,21 @@ class Settings(BaseSettings):
     SLACK_ALLOWED_EMAILS: str = os.getenv("SLACK_ALLOWED_EMAILS", "")
     SLACK_ALLOWED_GROUPS: str = os.getenv("SLACK_ALLOWED_GROUPS", "")
     SLACK_ALLOW_ALL_USERS: bool = os.getenv("SLACK_ALLOW_ALL_USERS", "false").lower() == "true"
+
+    @field_validator("JWT_SECRET_KEY", mode="before")
+    @classmethod
+    def resolve_jwt_secret(cls, value):
+        if value is None or (isinstance(value, str) and value.strip().casefold() in {
+            "", "change-this-key-in-production-environments", "default_secret_insecure",
+        }):
+            return _process_jwt_secret()
+        if isinstance(value, str) and len(value.strip().encode("utf-8")) < 32:
+            raise ValueError(
+                "JWT_SECRET_KEY must contain at least 32 bytes; use a randomly "
+                "generated key, or leave it blank for an automatic key."
+            )
+        # Preserve explicit keys byte-for-byte so existing sessions stay valid.
+        return value
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -206,6 +236,7 @@ class Settings(BaseSettings):
         env_file = ENV_FILE
         env_file_encoding = 'utf-8'
         extra = "allow"  # Allow extra fields
+        hide_input_in_errors = True
 
 # Single instance for import
 settings = Settings()

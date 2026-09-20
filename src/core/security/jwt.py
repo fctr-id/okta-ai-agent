@@ -48,9 +48,8 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     logger.debug(f"Token audience being set: '{audience}'")
     logger.debug(f"Token issuer being set: '{issuer}'")
     
-    # Get JWT secret from settings with fallback
-    secret_key = getattr(settings, "JWT_SECRET_KEY", 
-                         getattr(settings, "SECRET_KEY", "default_secret_insecure"))
+    # Settings resolves the configured or process-lifetime random signing key.
+    secret_key = settings.JWT_SECRET_KEY
     
     # Get algorithm from settings with fallback
     algorithm = getattr(settings, "JWT_ALGORITHM", "HS256")
@@ -96,8 +95,7 @@ def decode_access_token(token: str, leeway: int = 30) -> Optional[Dict[str, Any]
     
     try:
         # Get JWT secret and algorithm 
-        secret_key = getattr(settings, "JWT_SECRET_KEY", 
-                            getattr(settings, "SECRET_KEY", "default_secret_insecure"))
+        secret_key = settings.JWT_SECRET_KEY
         algorithm = getattr(settings, "JWT_ALGORITHM", "HS256")
         
         #  Pass audience and issuer explicitly
