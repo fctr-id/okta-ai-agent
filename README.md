@@ -13,7 +13,7 @@
 
   <p>
     <a href="#quick-start-docker">Quick start</a> ·
-    <a href="#important-notes-for-v32">v3.2 upgrade notes</a> ·
+    <a href="#important-notes-for-v31">v3.1 upgrade notes</a> ·
     <a href="#why-tako">Why Tako</a> ·
     <a href="#demo">Demo</a> ·
     <a href="#ai-provider-support">AI providers</a> ·
@@ -30,6 +30,11 @@
     <a href="https://python.org">
       <img src="./media/badges/python.svg" alt="Python 3.11+" width="88" height="22">
     </a>
+  </p>
+
+  <p>
+    <strong>Tako v3.1 — the recommended upgrade for all users.</strong><br>
+    <sub>New to Tako? <a href="#quick-start-docker">Start here.</a> Already using Tako? See the <a href="#important-notes-for-v31">upgrade notes.</a></sub>
   </p>
 
   <p>Built by the Fctr Identity team · Not affiliated with Okta</p>
@@ -69,9 +74,9 @@ Results and savings vary by model, question, tenant size, and data freshness.
 
 Synced data includes users, groups, applications, policies, devices, enrolled authenticators, and their assignments. Large tenants may take longer to complete the first sync.
 
-<a id="important-notes-for-v32"></a>
+<a id="important-notes-for-v31"></a>
 
-## ⚠️ Important notes for v3.2
+## ⚠️ Important notes for v3.1
 
 Review these settings before upgrading. Expand a topic for details; restart Tako after changes.
 
@@ -178,7 +183,7 @@ For a local installation without Docker, see the [installation guide](https://gi
 - Access to a [supported AI provider](#ai-provider-support).
 
 > [!IMPORTANT]
-> Review the [important notes for v3.2](#important-notes-for-v32), especially login signing keys and your model's reasoning setting, before starting Tako.
+> Review the [important notes for v3.1](#important-notes-for-v31), especially login signing keys and your model's reasoning setting, before starting Tako.
 
 ### Installation
 
@@ -354,7 +359,7 @@ The bot is disabled by default. Follow the [Teams installation and setup guide](
 
 - OAuth 2.0 or API tokens — Queries use the permissions granted to your configured Okta credentials. Configure least-privilege read access for the data you need.
 - Initial admin setup — A one-time setup token gates creation of the first application admin account.
-- Web sessions — Signed using a configured private key or an automatically generated key. See [v3.2 upgrade notes](#important-notes-for-v32) for restart behavior and shared-key configuration.
+- Web sessions — Signed using a configured private key or an automatically generated key. See [v3.1 upgrade notes](#important-notes-for-v31) for restart behavior and shared-key configuration.
 - Optional Slack access — Explicit user or group allowlists control access to the bot.
 
 <details>
