@@ -80,11 +80,38 @@ class CompletedAnalysisTests(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertEqual(event['content'], output['answer'])
 
+    async def test_projection_label_preserves_all_emails_and_persists_subset_lineage(self):
+        from src.core.agents.result_analysis_agent import _load_candidate_result_sets, _load_result_records
+
+        with TemporaryDirectory() as tmp:
+            artifacts, delegation = await self.analyze(Path(tmp), "analysis_result = {'summary': 'Emails', 'derivation_kind': 'projection', 'rows': [{'email': row['email']} for row in result_sets['saved']]}")
+            candidates = _load_candidate_result_sets(artifacts, preferred_result_set_refs=delegation.result_set_refs)
+            derived = next(c for c in candidates if c['result_set_id'] == delegation.result_set_refs[0])
+            self.assertEqual(derived['derivation_kind'], 'subset')
+            self.assertEqual(derived['parent_result_set_ids'], ['saved'])
+            expected = [{'email': f'user{i}@example.test'} for i in range(320)]
+            self.assertEqual(_load_result_records(derived['storage_path']), expected)
+            event = await self.finish(artifacts, delegation)
+            self.assertEqual(event['count'], 320)
+            self.assertEqual(event['results'], expected)
+
+    def test_derivation_labels_remain_strict_except_for_projection_alias(self):
+        from pydantic import ValidationError
+        from src.core.agents.result_analysis_agent import ResultAnalysisExecutionOutput
+
+        for label in ('initial', 'filter', 'enrichment', 'join', 'aggregation', 'subset', 'unknown', None):
+            with self.subTest(label=label):
+                result = ResultAnalysisExecutionOutput(summary='Fixture', derivation_kind=label)
+                self.assertEqual(result.derivation_kind, label)
+        for label in ('invented_operation', '', ['projection']):
+            with self.subTest(invalid=label), self.assertRaises(ValidationError):
+                ResultAnalysisExecutionOutput(summary='Fixture', derivation_kind=label)
+
     async def test_supervised_followup_completes_without_sql_api_or_synthesis(self):
         from src.core.agents import orchestrator as orch
         from src.core.agents.supervisor_agent import SupervisorDecision
         with TemporaryDirectory() as tmp:
-            artifacts, delegation = await self.analyze(Path(tmp), "analysis_result = {'summary': 'Emails', 'rows': [{'email': row['email']} for row in result_sets['saved']]}")
+            artifacts, delegation = await self.analyze(Path(tmp), "analysis_result = {'summary': 'Emails', 'derivation_kind': 'projection', 'rows': [{'email': row['email']} for row in result_sets['saved']]}")
             with patch.object(orch, '_hydrate_session_result_set_context', AsyncMock(return_value=0)), \
                  patch.object(orch, 'get_database_runtime_summary', return_value={}), \
                  patch.object(orch, 'get_special_tool_capability_summary', return_value={}), \

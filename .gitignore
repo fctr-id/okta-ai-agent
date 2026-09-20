@@ -148,5 +148,8 @@ docs/Tako_Architecture_Deep_Analysis.md
 _backup_before_restore_20260108_165423/*
 conductor/*
 
+# Keep the standalone Teams builder's generated-output exclusions in source control.
+!/teams-app/.gitignore
+
 # Private local analysis and working documents
 /DO_NOT_SHARE/

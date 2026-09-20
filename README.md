@@ -13,6 +13,7 @@
 
   <p>
     <a href="#quick-start-docker">Quick start</a> ·
+    <a href="#important-notes-for-v31">v3.1 upgrade notes</a> ·
     <a href="#why-tako">Why Tako</a> ·
     <a href="#demo">Demo</a> ·
     <a href="#ai-provider-support">AI providers</a> ·
@@ -29,6 +30,11 @@
     <a href="https://python.org">
       <img src="./media/badges/python.svg" alt="Python 3.11+" width="88" height="22">
     </a>
+  </p>
+
+  <p>
+    <strong>Tako v3.1 — the recommended upgrade for all users.</strong><br>
+    <sub>New to Tako? <a href="#quick-start-docker">Start here.</a> Already using Tako? See the <a href="#important-notes-for-v31">upgrade notes.</a></sub>
   </p>
 
   <p>Built by the Fctr Identity team · Not affiliated with Okta</p>
@@ -67,6 +73,50 @@ Results and savings vary by model, question, tenant size, and data freshness.
 - Hybrid mode — Combine synced data with live API results when needed.
 
 Synced data includes users, groups, applications, policies, devices, enrolled authenticators, and their assignments. Large tenants may take longer to complete the first sync.
+
+<a id="important-notes-for-v31"></a>
+
+## ⚠️ Important notes for v3.1
+
+Review these settings before upgrading. Expand a topic for details; restart Tako after changes.
+
+<details>
+<summary><strong>Login sessions</strong></summary>
+
+Without a configured `JWT_SECRET_KEY`, Tako generates a new key at startup. Restarts require a fresh login; accounts, saved conversations, and synced data stay intact.
+
+- Multiple workers or containers must share the same configured key.
+- Changing the key signs users out. Old default placeholders are replaced automatically; custom keys shorter than 32 bytes must be replaced or cleared.
+- See [`.env.sample`](.env.sample) for the key-generation command.
+
+</details>
+
+<details>
+<summary><strong>AI reasoning</strong></summary>
+
+`AI_REASONING_EFFORT=high` can increase time and cost, and not all models support it. Set it to `none` or remove it to use model defaults. Some models still think automatically.
+
+See [tested models and thinking settings](#ai-provider-support).
+
+</details>
+
+<details>
+<summary><strong>Azure OpenAI</strong></summary>
+
+Use an `AZURE_OPENAI_ENDPOINT` ending in `/openai/v1/`, without `/responses`. Both Azure model settings take deployment names. `AZURE_OPENAI_VERSION` is no longer needed. See [`.env.sample`](.env.sample).
+
+</details>
+
+<details>
+<summary><strong>Slack &amp; Teams</strong></summary>
+
+- Existing Slack apps need [updated permissions and event settings](wiki/Slack-Bot-Setup.md#upgrading-an-existing-slack-app) for follow-ups and result buttons.
+- Teams is optional; enable it with the [Teams setup guide](wiki/Teams-Bot-Setup.md).
+- Bot context and local exports expire after 24 hours of inactivity by default. The guides explain retention settings; messages and files already delivered remain unaffected.
+
+</details>
+
+[Full release notes](VERSION.md)
 
 ## Demo
 
@@ -133,7 +183,7 @@ For a local installation without Docker, see the [installation guide](https://gi
 - Access to a [supported AI provider](#ai-provider-support).
 
 > [!IMPORTANT]
-> Not all models support the sample's `AI_REASONING_EFFORT=high` setting. If you see an error about unsupported thinking or reasoning effort, set it to `none` or remove the variable, then restart Tako. See [thinking settings](#reasoning-and-thinking-settings) for details.
+> Review the [important notes for v3.1](#important-notes-for-v31), especially login signing keys and your model's reasoning setting, before starting Tako.
 
 ### Installation
 
@@ -291,12 +341,25 @@ The bot is disabled by default. Set `ENABLE_SLACK_BOT=true` in your `.env` and c
 - Socket Mode — opens an outbound WebSocket to Slack, no public URL or port-forwarding required
 - Per-action authorization — access is checked for slash commands and button actions
 
+## Microsoft Teams Bot Integration
+
+Query your Okta tenant in a personal Teams chat, ask follow-up questions, and download results as CSV. Access is restricted to members of your allowed Microsoft Entra groups.
+
+The bot is disabled by default. Follow the [Teams installation and setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Teams-Bot-Setup) to install the integration, configure access, and deploy the Teams app package.
+
+### Security Highlights
+
+- Tenant restriction — requests must match your configured `TEAMS_TENANT_ID`.
+- Group allowlist — set `TEAMS_ALLOWED_GROUP_IDS` to comma-separated Entra group IDs; users must belong to at least one allowed group.
+- Verified membership — access is denied if group membership cannot be confirmed. An empty group allowlist prevents the enabled bot from starting.
+
 ## Security & Privacy
 
 ### Authentication and authorization
 
 - OAuth 2.0 or API tokens — Queries use the permissions granted to your configured Okta credentials. Configure least-privilege read access for the data you need.
 - Initial admin setup — A one-time setup token gates creation of the first application admin account.
+- Web sessions — Signed using a configured private key or an automatically generated key. See [v3.1 upgrade notes](#important-notes-for-v31) for restart behavior and shared-key configuration.
 - Optional Slack access — Explicit user or group allowlists control access to the bot.
 
 <details>
@@ -326,6 +389,7 @@ Queries such as enumerating admin role assignments may require permissions beyon
 | [Installation](https://github.com/fctr-id/okta-ai-agent/wiki/Installation) | Local setup and alternatives to Docker. |
 | [Authentication](https://github.com/fctr-id/okta-ai-agent/wiki/Authentication-&-Authorization-%E2%80%90-Oauth-2-and-API-tokens) | OAuth 2.0, API tokens, and Okta permissions. |
 | [Slack bot](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-&-Testing-Guide) | Bot configuration, access, and testing. |
+| [Teams bot](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Teams-Bot-Setup) | Installation, Entra group access, and Teams app setup. |
 | [Supported endpoints](https://github.com/fctr-id/okta-ai-agent/wiki/Tako:-Supported-Okta-API-Endpoints) | Okta API coverage. |
 | [Version history](VERSION.md) | Releases, migrations, and security fixes. |
 

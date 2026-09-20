@@ -1,0 +1,6 @@
+# Optional Teams transport; install after requirements.txt.
+microsoft-teams-apps==2.1.0
+# Keep the SDK's companion packages on the same tested release.
+microsoft-teams-api==2.1.0
+microsoft-teams-common==2.1.0
+microsoft-teams-cards==2.1.0

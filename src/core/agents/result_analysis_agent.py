@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_ai import RunContext, UsageLimits
+from pydantic_ai.exceptions import UsageLimitExceeded
 
 from src.config.settings import settings
 from src.core.agents import build_agent
@@ -77,6 +78,8 @@ Code rules:
     - persist_result: optional boolean
     - derivation_kind: optional one of initial/filter/enrichment/join/aggregation/subset/unknown
     - metadata: optional dict with compact structured facts
+- Use derivation_kind='subset' for column selection, such as extracting emails.
+  Do not emit 'projection' or invent new labels.
 
 If prior results are not enough:
 - use mode=request_specialist
@@ -170,6 +173,15 @@ class ResultAnalysisExecutionOutput(BaseModel):
     persist_result: bool = False
     derivation_kind: Optional[DerivationKind] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("derivation_kind", mode="before")
+    @classmethod
+    def normalize_column_projection(cls, value: Any) -> Any:
+        # Column selection uses the existing subset lineage contract. Accept
+        # this common model label without relaxing validation for other values.
+        if isinstance(value, str) and value == "projection":
+            return "subset"
+        return value
 
 
 @dataclass
@@ -265,6 +277,8 @@ async def execute_result_analysis(
             deps=deps,
             usage_limits=RESULT_ANALYSIS_USAGE_LIMITS,
         )
+    except UsageLimitExceeded:
+        raise
     except Exception as exc:
         logger.error(f"Result analysis agent failed: {exc}", exc_info=True)
         return (

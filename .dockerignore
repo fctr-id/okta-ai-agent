@@ -133,3 +133,6 @@ scripts/test_*.py
 # Experimental prompt variants (keep main prompts only)
 src/core/agents/prompts/*_new.txt
 src/core/agents/prompts/*_old.txt
+
+# Generated customer-specific Teams upload packages are not runtime dependencies.
+teams-app/output/

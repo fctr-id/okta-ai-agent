@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_ai import RunContext, UsageLimits
+from pydantic_ai.exceptions import UsageLimitExceeded
 
 from src.core.agents import build_agent
 from src.core.models.model_picker import ModelType
@@ -507,6 +508,9 @@ async def supervise_query(
             f"Supervisor initial decision: mode={decision.mode}, target={decision.target} - {decision.reasoning}"
         )
         return decision, run_result.usage
+    except UsageLimitExceeded:
+        # Preserve budget exhaustion for the shared user-facing hard stop.
+        raise
     except Exception as exc:
         logger.error(f"Supervisor initial decision failed: {exc}", exc_info=True)
         return SupervisorDecision(
@@ -568,6 +572,9 @@ async def supervise_next_step(
             f"Supervisor next decision: mode={decision.mode}, target={decision.target} - {decision.reasoning}"
         )
         return decision, run_result.usage
+    except UsageLimitExceeded:
+        # Do not hide this behind an earlier specialist error or start more work.
+        raise
     except Exception as exc:
         logger.error(f"Supervisor next-step decision failed: {exc}", exc_info=True)
         return _fallback_after_delegation_decision(latest_delegation_result, str(exc)), None

@@ -32,6 +32,9 @@ Security boundaries (required)
 - No urllib, requests, httpx, os, subprocess, shutil, or other unlisted modules.
 - No eval, exec, dynamic imports, shell commands, arbitrary file access, or
   credential inspection. Configuration is inherited by the subprocess/client.
+- Never use __import__() or importlib, including in exception handlers. Import
+  allowed modules normally at the top. For error output, use `import sys` and
+  `print(..., file=sys.stderr)`, never `file=__import__('sys').stderr`.
 - SQL is read-only SELECT, including read-only WITH statements. No database writes
   or schema changes. Open SQLite in read-only mode.
 - All Okta retrieval uses the validated GET patterns through OktaAPIClient.

@@ -119,13 +119,94 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error, str(error))
         self.assertEqual(result.outcome, "fail")
+        self.assertEqual(result.user_message, orch.BUDGET_EXHAUSTED_USER_MESSAGE)
+        self.assertNotIn("tool_calls_limit", result.user_message)
         api.assert_not_awaited()
         supervisor.assert_not_awaited()
         synthesis.assert_not_awaited()
         self.assertTrue(any(
             call.args[0] == "step_end" and call.args[1]["title"] == "Execution Stopped"
+            and call.args[1]["text"] == orch.BUDGET_EXHAUSTED_USER_MESSAGE
             for call in events.await_args_list
         ))
+
+    async def test_supervisor_budget_is_not_hidden_by_fallback_or_previous_error(self):
+        from src.core.agents import supervisor_agent as supervisor
+        from src.data.schemas.artifact_manifest import DelegationResult
+
+        error = UsageLimitExceeded("The next request would exceed the request_limit of 2")
+        latest = DelegationResult(success=False, source_specialist="analysis", result_mode="failed",
+                                  summary="Analysis failed", error="Invalid derivation_kind: projection")
+        with TemporaryDirectory() as tmp, \
+             patch.object(supervisor, "_load_supervisor_conversation_context", AsyncMock(return_value={})), \
+             patch.object(supervisor, "supervisor_agent", SimpleNamespace(run=AsyncMock(side_effect=error))), \
+             patch.object(supervisor, "_fallback_after_delegation_decision") as fallback:
+            with self.assertRaises(UsageLimitExceeded) as initial:
+                await supervisor.supervise_query("List users", correlation_id="contract")
+            with self.assertRaises(UsageLimitExceeded) as followup:
+                await supervisor.supervise_next_step(
+                    "Show emails", correlation_id="contract", artifacts_file=Path(tmp) / "artifacts.json",
+                    delegation_results=[], latest_delegation_result=latest)
+        self.assertIs(initial.exception, error)
+        self.assertIs(followup.exception, error)
+        fallback.assert_not_called()
+
+    async def test_analysis_and_synthesis_preserve_budget_exhaustion(self):
+        from src.core.agents import result_analysis_agent as analysis
+        from src.core.agents import synthesis_agent as synthesis
+
+        error = UsageLimitExceeded("The next request would exceed the request_limit of 2")
+        with TemporaryDirectory() as tmp:
+            artifact_file = Path(tmp) / "artifacts.json"
+            artifact_file.write_text("[]", encoding="utf-8")
+            with patch.object(analysis, "_load_candidate_result_sets", return_value=[{"result_set_id": "fixture"}]), \
+                 patch.object(analysis, "_load_conversation_context", AsyncMock(return_value={})), \
+                 patch.object(analysis, "result_analysis_agent", SimpleNamespace(run=AsyncMock(side_effect=error))):
+                with self.assertRaises(UsageLimitExceeded) as raised:
+                    await analysis.execute_result_analysis("Show emails", correlation_id="contract",
+                                                           artifacts_file=artifact_file)
+                self.assertIs(raised.exception, error)
+            with patch.object(synthesis, "synthesis_agent", SimpleNamespace(run=AsyncMock(side_effect=error))):
+                with self.assertRaises(UsageLimitExceeded) as raised:
+                    await synthesis.execute_synthesis("Show emails", synthesis.SynthesisDeps(
+                        correlation_id="contract", artifacts_file=artifact_file))
+                self.assertIs(raised.exception, error)
+
+    async def test_initial_supervisor_budget_returns_clear_error_without_discovery(self):
+        from src.core.agents import orchestrator as orch
+        from src.core.agents import supervisor_agent as supervisor
+
+        error = UsageLimitExceeded("The next request would exceed the request_limit of 2")
+        events = AsyncMock()
+        with TemporaryDirectory() as tmp, \
+             patch.object(orch, "_load_api_endpoints", return_value=[]), \
+             patch.object(orch, "get_database_runtime_summary", return_value={"usable_for_sql": True}), \
+             patch.object(orch, "get_special_tool_capability_summary", return_value={}), \
+             patch.object(orch, "_hydrate_session_result_set_context", AsyncMock(return_value=0)), \
+             patch.object(supervisor, "_load_supervisor_conversation_context", AsyncMock(return_value={})), \
+             patch.object(supervisor, "supervisor_agent", SimpleNamespace(run=AsyncMock(side_effect=error))), \
+             patch.object(orch, "execute_sql_discovery", AsyncMock()) as sql:
+            result = await orch.execute_multi_agent_query(
+                "List users", "contract", Path(tmp) / "artifacts.json", okta_client=None,
+                cancellation_check=lambda: False, event_callback=events)
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, str(error))
+        self.assertEqual(result.user_message, orch.BUDGET_EXHAUSTED_USER_MESSAGE)
+        sql.assert_not_awaited()
+        self.assertTrue(any(call.args[0] == "step_end"
+                            and call.args[1]["text"] == orch.BUDGET_EXHAUSTED_USER_MESSAGE
+                            for call in events.await_args_list))
+
+    def test_processing_limits_do_not_mislabel_provider_rate_limits(self):
+        from src.core.agents.orchestrator import _is_processing_limit
+
+        for error in (UsageLimitExceeded("Token allowance exhausted"),
+                      RuntimeError("Global tool call limit exceeded (30/30)."),
+                      "SQL test query limit exceeded (10/10).",
+                      "API test query limit exceeded (10/10)."):
+            self.assertTrue(_is_processing_limit(error))
+        self.assertFalse(_is_processing_limit(RuntimeError("Okta rate limit exceeded (429)")))
+        self.assertFalse(_is_processing_limit("Provider rate limit exceeded"))
 
     async def test_api_discovery_returns_model_output_and_usage(self):
         from src.core.agents import api_discovery_agent as api
@@ -177,6 +258,66 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
         ):
             with self.subTest(query=query):
                 self.assertFalse(validate_user_sql(query)[0])
+
+    def test_synthesis_rejects_dynamic_import_and_accepts_normal_stderr(self):
+        from pydantic_ai import ModelRetry
+        from src.core.agents import synthesis_agent as synthesis
+
+        bad_code = "print('QUERY RESULTS')\nprint('Error', file=__import__('sys').stderr)\n"
+        with self.assertRaisesRegex(ModelRetry, "failed security validation") as raised:
+            synthesis.validate_synthesis_output(synthesis.SynthesisResult(success=True, script_code=bad_code))
+        self.assertIn("__import__", str(raised.exception))
+        self.assertIn("file=sys.stderr", str(raised.exception))
+
+        good_code = "import sys\nprint('QUERY RESULTS')\nprint('Error', file=sys.stderr)\n"
+        output = synthesis.SynthesisResult(success=True, script_code=good_code)
+        self.assertIs(synthesis.validate_synthesis_output(output), output)
+
+    async def test_synthesis_security_feedback_retries_once_and_accepts_correction(self):
+        from pydantic_ai.messages import ModelResponse, RetryPromptPart, ToolCallPart
+        from pydantic_ai.models.function import FunctionModel
+        from src.core.agents import synthesis_agent as synthesis
+
+        bad_code = "print('QUERY RESULTS')\nprint('Error', file=__import__('sys').stderr)\n"
+        good_code = "import sys\nprint('QUERY RESULTS')\nprint('Error', file=sys.stderr)\n"
+        calls = []
+
+        def model(messages, info):
+            calls.append(messages)
+            if len(calls) == 2:
+                feedback = [part.content for message in messages for part in message.parts
+                            if isinstance(part, RetryPromptPart)]
+                self.assertTrue(any("failed security validation" in str(item) for item in feedback))
+            code = bad_code if len(calls) == 1 else good_code
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                                                    {"success": True, "script_code": code})])
+
+        with synthesis.synthesis_agent.override(model=FunctionModel(model)):
+            result = await synthesis.synthesis_agent.run("Generate a fixture script",
+                                                        usage_limits=synthesis.SYNTHESIS_USAGE_LIMITS)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result.output.script_code, good_code)
+
+    async def test_synthesis_stops_when_security_correction_still_fails(self):
+        from pydantic_ai.exceptions import UnexpectedModelBehavior
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        from pydantic_ai.models.function import FunctionModel
+        from src.core.agents import synthesis_agent as synthesis
+
+        calls = []
+
+        def model(messages, info):
+            calls.append(messages)
+            return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+                "success": True,
+                "script_code": "print('QUERY RESULTS')\n__import__('sys')\n",
+            })])
+
+        with synthesis.synthesis_agent.override(model=FunctionModel(model)):
+            with self.assertRaises(UnexpectedModelBehavior):
+                await synthesis.synthesis_agent.run("Generate a fixture script",
+                                                    usage_limits=synthesis.SYNTHESIS_USAGE_LIMITS)
+        self.assertEqual(len(calls), 2)
 
     def test_generated_script_security_rejects_commands_and_unlisted_clients(self):
         from src.utils.security_config import validate_generated_code

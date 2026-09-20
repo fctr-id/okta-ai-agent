@@ -13,6 +13,7 @@ Output: SynthesisResult with script code
 import ast
 
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, UsageLimits
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic import BaseModel, Field
 from typing import Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from pathlib import Path
 import time
 
 from src.utils.logging import get_logger
+from src.utils.security_config import validate_generated_code
 from src.utils.timezone_context import timezone_instructions
 from src.core.agents.agent_callbacks import (
     notify_progress_to_user,
@@ -134,6 +136,15 @@ def validate_synthesis_output(result: SynthesisResult) -> SynthesisResult:
         if "QUERY RESULTS" not in script_code:
             raise ModelRetry(
                 "Synthesis output must print JSON between the exact 'QUERY RESULTS' markers expected by the runtime parser"
+            )
+        validation = validate_generated_code(script_code)
+        if not validation.is_valid:
+            raise ModelRetry(
+                "Generated script failed security validation: "
+                + "; ".join(validation.violations)
+                + ". Correct the script without bypassing the security rules. "
+                "Use ordinary imports for allowed modules, never __import__() or importlib. "
+                "For stderr, use import sys and print(..., file=sys.stderr)."
             )
         return result
 
@@ -322,6 +333,8 @@ db_path = next((p for p in possible_paths if p.exists()), None)
         
         return result.output, usage
         
+    except UsageLimitExceeded:
+        raise
     except Exception as e:
         logger.error(f"[{deps.correlation_id}] Synthesis failed: {e}", exc_info=True)
         return SynthesisResult(

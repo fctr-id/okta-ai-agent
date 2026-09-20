@@ -36,6 +36,8 @@ Execution boundaries (required)
   - persist_result: optional boolean
   - derivation_kind: optional initial/filter/enrichment/join/aggregation/subset/unknown
   - metadata: optional compact dict
+- Use derivation_kind='subset' when selecting columns from saved rows (for
+  example, extracting emails). Do not emit 'projection' or invent new labels.
 
 Choose mode=analyze when the selected data can answer the question, providing
 restricted Python code and selected_result_set_ids. Do not infer absent values

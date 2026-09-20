@@ -4,10 +4,12 @@
 
 **Status**: Unreleased
 
-**Recommended upgrade for all Tako users.** This release delivers a refreshed interface and important fixes for incomplete sync data, repeated API calls, timezone handling, and misleading error states.
+**Recommended upgrade for all Tako users.** This release adds Microsoft Teams support and continued conversations in Slack, alongside a refreshed interface and important fixes for incomplete sync data, repeated API calls, timezone handling, and misleading error states.
 
 ✨ Highlights
 
+- **New Microsoft Teams Bot**: Query Okta in a personal Teams chat, continue with follow-up questions or clarification answers, and download retrieved results as CSV. Includes ten-row previews, a New Query action, Entra group access controls, and a package builder with a [setup guide](wiki/Teams-Bot-Setup.md).
+- **Continued Conversations in Slack**: Reply in a result thread to refine your question or answer a clarification while retaining prior context. New Query starts a fresh thread, and Download CSV exports saved results without rerunning the query. See the [updated Slack setup guide](wiki/Slack-Bot-Setup.md) for required message subscriptions and button configuration.
 - **Refreshed Conversation Experience**: Questions, activity, execution details, and results now sit together in collapsible conversation cards. Earlier turns collapse when you ask a follow-up, repeated completion badges are reduced, and the query bar stays separate from scrolling results.
 - **Optional AI Thinking**: The sample sets `AI_REASONING_EFFORT=high`. If your model does not support it, set it to `none` or remove the variable and restart Tako to use the model's defaults. See [thinking settings and tested models](README.md#ai-provider-support).
 - **Clearer Tables and Navigation**: Improved table readability, expandable long values, clearer saved-result previews, and updated sidebar, login, setup, and sync interfaces. Longer conversation titles and consistent tooltips with keyboard support make controls easier to understand.
@@ -17,6 +19,8 @@
 
 🔧 Optimizations and Fixes
 
+- **Session Signing Key Security**: Replaced the shared default JWT key with a random in-memory key when no key is configured or an old placeholder remains. Removed insecure signing and verification fallbacks. Automatic keys expire with the server process, requiring users to sign in again after a restart; accounts, conversations, and synced data are preserved. A configured random key keeps existing logins valid across restarts and must be shared by multiple workers or replicas. Explicit non-placeholder keys shorter than 32 bytes are rejected.
+- **Persistent Bot Sessions with Automatic Cleanup**: Slack and Teams retain conversation context across server restarts when their storage is preserved. Configurable retention defaults to 24 hours of inactivity, with cleanup at startup and hourly to remove expired local session data while protecting active work.
 - **Major Dependency Upgrades**: Refreshed backend and frontend dependencies for security and compatibility, including Pydantic AI 1.107.6 and cryptography 50.0.1, and simplified Docker dependency installation.
 - **Azure OpenAI API Compatibility**: Fixed Azure v1 Responses API configuration with the correct provider and endpoint normalization, using Azure deployment names without requiring a dated API version.
 - **More Reliable Agent Execution**: Fixed duplicate execution of API discovery tests, helper-function scope errors, and changes to escaped strings in generated scripts.
