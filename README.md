@@ -33,9 +33,6 @@
   </p>
 
   <p>
-    <strong>Tako v3.1 — the recommended upgrade for all users.</strong><br>
-    <sub>New to Tako? <a href="#quick-start-docker">Start here.</a> Already using Tako? See the <a href="#important-notes-for-v31">upgrade notes.</a></sub>
-  </p>
 
   <p>Built by the Fctr Identity team · Not affiliated with Okta</p>
 </div>
