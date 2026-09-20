@@ -22,7 +22,7 @@
 
   <p>
     <a href="VERSION.md">
-      <img src="./media/badges/preview.svg" alt="v3.1.0-beta — Unreleased" width="170" height="22">
+      <img src="./media/badges/preview.svg" alt="v3.1.0-beta" width="170" height="22">
     </a>
     <a href="docker-compose.yml">
       <img src="./media/badges/docker.svg" alt="Docker: AMD64 and ARM64" width="144" height="22">
