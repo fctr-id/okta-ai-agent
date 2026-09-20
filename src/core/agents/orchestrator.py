@@ -68,6 +68,21 @@ from src.data.schemas.runtime_storage import RUNTIME_ROOT
 
 logger = get_logger("okta_ai_agent")
 
+BUDGET_EXHAUSTED_USER_MESSAGE = (
+    "Tako reached its processing limit before completing this request. "
+    "Please try again, or split the request into smaller questions. "
+    "If this keeps happening, contact your Tako administrator."
+)
+
+
+def _is_processing_limit(error: object) -> bool:
+    """Recognize local budgets without confusing provider/Okta rate limits."""
+    return isinstance(error, UsageLimitExceeded) or str(error).startswith((
+        "Global tool call limit exceeded (",
+        "API test query limit exceeded (",
+        "SQL test query limit exceeded (",
+    ))
+
 
 # ============================================================================
 # Orchestrator Result
@@ -1006,9 +1021,13 @@ class EventAggregator:
     
     async def step_end(self, event: Dict[str, Any]):
         """Forward step_end event with renumbered step"""
-        if self.current_phase and self.event_callback:
-            offset = self.phase_offsets.get(self.current_phase, 0)
-            event['step'] = event.get('step', 1) + offset
+        if self.event_callback:
+            if self.current_phase:
+                offset = self.phase_offsets.get(self.current_phase, 0)
+                event['step'] = event.get('step', 1) + offset
+            else:
+                # Initial planning can stop before any specialist phase starts.
+                event['step'] = 0
             await self.event_callback('step_end', event)
     
     async def tool_call(self, event: Dict[str, Any]):
@@ -1079,10 +1098,10 @@ async def _run_initial_sql_discovery(
         error_msg = result.sql_result.error or "SQL phase failed"
         logger.error(f"SQL phase failed: {error_msg}")
 
-        if "limit exceeded" in error_msg.lower():
+        if _is_processing_limit(error_msg):
             await aggregator.step_end({
                 "title": "Execution Stopped",
-                "text": f"Error: {error_msg}",
+                "text": BUDGET_EXHAUSTED_USER_MESSAGE,
                 "timestamp": time.time()
             })
             result.error = error_msg
@@ -1090,7 +1109,7 @@ async def _run_initial_sql_discovery(
                 result,
                 "fail",
                 reason="SQL discovery stopped after a deterministic runtime limit.",
-                user_message=error_msg,
+                user_message=BUDGET_EXHAUSTED_USER_MESSAGE,
             )
             return phase, global_tool_calls_counter, initial_sql_usage, True
 
@@ -1344,10 +1363,10 @@ async def _run_api_loop_step(
             )
             return _RuntimeStepResult(api_delegation, global_tool_calls_counter=global_tool_calls_counter, should_stop=True)
 
-        if "limit exceeded" in error_msg.lower():
+        if _is_processing_limit(error_msg):
             await aggregator.step_end({
                 "title": "Execution Stopped",
-                "text": f"Error: {error_msg}",
+                "text": BUDGET_EXHAUSTED_USER_MESSAGE,
                 "timestamp": time.time()
             })
             result.error = error_msg
@@ -1355,7 +1374,7 @@ async def _run_api_loop_step(
                 result,
                 "fail",
                 reason="API discovery stopped after a deterministic runtime limit.",
-                user_message=error_msg,
+                user_message=BUDGET_EXHAUSTED_USER_MESSAGE,
             )
             return _RuntimeStepResult(api_delegation, global_tool_calls_counter=global_tool_calls_counter, should_stop=True)
 
@@ -1444,10 +1463,10 @@ async def _run_sql_followup_loop_step(
 
     if not result.sql_result.success:
         error_msg = result.sql_result.error or "SQL phase failed"
-        if "limit exceeded" in error_msg.lower():
+        if _is_processing_limit(error_msg):
             await aggregator.step_end({
                 "title": "Execution Stopped",
-                "text": f"Error: {error_msg}",
+                "text": BUDGET_EXHAUSTED_USER_MESSAGE,
                 "timestamp": time.time()
             })
             result.error = error_msg
@@ -1455,7 +1474,7 @@ async def _run_sql_followup_loop_step(
                 result,
                 "fail",
                 reason="SQL discovery stopped after a deterministic runtime limit.",
-                user_message=error_msg,
+                user_message=BUDGET_EXHAUSTED_USER_MESSAGE,
             )
             return _RuntimeStepResult(sql_delegation, global_tool_calls_counter=global_tool_calls_counter, should_stop=True)
         if sql_delegation.unresolved_requirements:
@@ -2187,18 +2206,21 @@ async def execute_multi_agent_query(
     except (RuntimeError, UsageLimitExceeded) as e:
         # Tool call limit exceeded or other hard stop
         error_msg = str(e)
+        budget_exhausted = _is_processing_limit(e)
+        user_message = BUDGET_EXHAUSTED_USER_MESSAGE if budget_exhausted else error_msg
         logger.error(f"Hard stop triggered: {error_msg}")
         result.error = error_msg
+        result.success = False
         _set_result_outcome(
             result,
             "fail",
-            reason="Runtime hard stop triggered.",
-            user_message=error_msg,
+            reason="Processing limit reached." if budget_exhausted else "Runtime hard stop triggered.",
+            user_message=user_message,
         )
         # Notify frontend with proper error format
         await aggregator.step_end({
             "title": "Execution Stopped",
-            "text": f"Error: {error_msg}",
+            "text": user_message if budget_exhausted else f"Error: {error_msg}",
             "timestamp": time.time()
         })
         return result
