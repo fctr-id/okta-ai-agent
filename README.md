@@ -342,6 +342,12 @@ Query your Okta tenant in a personal Teams chat, ask follow-up questions, and do
 
 The bot is disabled by default. Follow the [Teams installation and setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Teams-Bot-Setup) to install the integration, configure access, and deploy the Teams app package.
 
+### Security Highlights
+
+- Tenant restriction — requests must match your configured `TEAMS_TENANT_ID`.
+- Group allowlist — set `TEAMS_ALLOWED_GROUP_IDS` to comma-separated Entra group IDs; users must belong to at least one allowed group.
+- Verified membership — access is denied if group membership cannot be confirmed. An empty group allowlist prevents the enabled bot from starting.
+
 ## Security & Privacy
 
 ### Authentication and authorization

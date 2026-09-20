@@ -2,7 +2,14 @@
 
 Connect your own Tako instance to a bot in your Microsoft 365 tenant. Users can ask Okta questions in a personal chat; access is limited to the Entra groups you choose.
 
-This guide covers the Teams personal-chat integration, including follow-up conversations and CSV downloads. Live validation of the latest conversation and download features is still pending.
+This guide covers installation, continued conversations, New Query, CSV downloads, and session cleanup. Tako currently supports personal chats in the commercial Microsoft 365 cloud; group chats, channels, and meetings are not supported.
+
+## Upgrading an existing installation
+
+1. Update Tako and install the optional Teams dependencies in your server environment, or rebuild your Docker image with Teams enabled (Part 4).
+2. Rebuild the Teams ZIP using the same Entra client ID and upload the new package (Part 5). Package version **0.2.0** enables the file support needed for CSV downloads. Keep the same Teams app ID when updating an existing installation.
+3. Restart Tako. For Docker, recreate the container when its image or environment variables change; preserve your database and session volumes.
+4. Open Tako's personal chat and run the checks in Part 6. Previously posted cards do not gain new buttons automatically.
 
 ## Before you start
 
@@ -10,7 +17,7 @@ You need a working Tako instance, an Azure subscription, and permission to creat
 
 Tako needs a public HTTPS address that Microsoft can reach, such as `https://tako.example.com`. Use a trusted TLS certificate and forward requests to the Tako server through your proxy. For local testing, you can use an HTTPS development tunnel. Keep the web app's existing login protection enabled.
 
-## 1. Register the application in Entra ID
+## Part 1 — Register the application in Entra ID
 
 1. Open the [Microsoft Entra admin center](https://entra.microsoft.com/) and select the directory where your Teams users belong.
 2. Go to **Identity → Applications → App registrations → New registration**.
@@ -32,7 +39,7 @@ In the app registration, open **Certificates & secrets → Client secrets → Ne
 
 Copy the secret's **Value** immediately into your server's secret configuration as `TEAMS_CLIENT_SECRET`. The **Secret ID** is not the password. The value is only shown when created; record the expiration so you can rotate it before it expires. Never put it in the Teams app package or repository. This version of Tako uses client-secret authentication. [Microsoft credential instructions](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials)
 
-## 2. Grant permissions and choose who can use the bot
+## Part 2 — Grant permissions and choose who can use the bot
 
 In the same app registration:
 
@@ -46,7 +53,7 @@ Next, open **Entra ID → Groups → All groups**. Create or select a security g
 
 You can list multiple group GUIDs separated by commas. Membership in **any** listed group grants access, including nested membership. Start with a normal security group; hidden-membership groups require additional Graph access. Installing the Teams app alone does not grant access.
 
-## 3. Create and configure the Azure Bot
+## Part 3 — Create and configure the Azure Bot
 
 Open the [Azure portal](https://portal.azure.com/) in the same directory:
 
@@ -103,7 +110,19 @@ Setting the messaging endpoint alone does **not** enable Teams. Direct Line and 
 
 The Azure Bot connects Teams to your running Tako server; creating it does not deploy the Tako application. Microsoft's [Azure Bot setup instructions](https://learn.microsoft.com/en-us/microsoftteams/platform/teams-sdk/teams/azure-configuration) cover the portal flow.
 
-## 4. Enable Teams in Tako
+### Local testing with ngrok
+
+Start Tako first. If its startup log shows `https://0.0.0.0:8001`, run this in another terminal after installing and configuring ngrok:
+
+```console
+ngrok http https://localhost:8001
+```
+
+Copy ngrok's public **HTTPS forwarding URL**, append `/teams/messages`, and save that URL as the Azure Bot messaging endpoint. Keep both Tako and ngrok running. Match the upstream URL to your actual local scheme and port; use `http://localhost:<port>` if Tako serves plain HTTP.
+
+This integration uses Azure Bot's HTTPS messaging endpoint. Enabling **Streaming Endpoint** does not replace the tunnel or enable Slack-style Socket Mode.
+
+## Part 4 — Enable Teams in Tako
 
 For a Python installation, activate Tako's virtual environment and install the optional integration:
 
@@ -128,29 +147,37 @@ TEAMS_ALLOWED_GROUP_IDS=your-security-group-guid
 TEAMS_SESSION_RETENTION_HOURS=24
 ```
 
-`TEAMS_ENABLE` defaults to `false`. Restart Tako after changing the configuration. With it disabled, the bot endpoint is not mounted. With it enabled, all four identity/access settings are required.
+`TEAMS_ENABLE` defaults to `false`. Restart Tako after changing the configuration. With it disabled, the bot endpoint is not mounted. With it enabled, all four identity/access settings are required. **An empty `TEAMS_ALLOWED_GROUP_IDS` does not allow everyone: enabled Teams configuration fails startup until a valid group list is supplied.**
 
 Run **one API worker and one replica** for this initial integration. Keep the database and chat-session directories persistent. When using Docker, pass the environment variables into the running container; the build argument only installs dependencies.
 
-Teams runtime sessions expire after 24 hours of inactivity by default, including when `TEAMS_SESSION_RETENTION_HOURS` is not set. Set it to 1–8760 hours to change retention. Tako checks at startup and hourly, without needing another message. Active requests and downloads are protected; expired session folders, exports, and associated conversation records are removed. This does not remove messages or files already delivered to Teams or OneDrive.
+## Part 5 — Build and install the Teams package
 
-Cleanup runs inside the Python application; no separate cron job is needed. It stops when the container stops or crashes and checks saved timestamps on the next startup. Restarting does not reset the expiry clock. Persist both `DB_DIR` and `CHAT_SESSIONS_DIR` in Docker volumes if conversations should survive container replacement.
+Teams accepts a **ZIP containing `manifest.json` and two PNG icons**, not XML.
 
-## 5. Build and install the Teams package
+**Script location:** `<repository-root>/scripts/build_teams_package.py`. The repository root is the `okta-ai-agent` folder you cloned, containing `main.py` and `requirements.txt`. The builder uses the template and icons in `<repository-root>/teams-app/`; keep that folder in place.
 
-Teams accepts a **ZIP containing `manifest.json` and two PNG icons**, not XML. The repository's **`teams-app` folder** bundles the template, icons, and build script. From the repository root, run:
+Open a terminal in the repository root and run:
 
 ```console
-python teams-app/build.py
+python scripts/build_teams_package.py
 ```
 
-Enter your **Entra Application (client) ID** when prompted. The script creates `teams-app/output/Tako-AI-Teams-<client-id>.zip` and prints its full path and upload instructions. Only Python is needed; there are no additional builder dependencies. You can also copy the whole folder elsewhere and run `python build.py` inside it.
+If your terminal is already inside `<repository-root>/scripts/`, run this instead:
+
+```console
+python build_teams_package.py
+```
+
+Enter your **Entra Application (client) ID** when prompted. From either location, the script creates `<repository-root>/teams-app/output/Tako-AI-Teams-<client-id>.zip` and prints its full path and upload instructions. Only Python is needed; there are no additional builder dependencies. You can also copy the whole folder elsewhere and run `python build.py` inside it.
 
 For an unattended build or a custom destination, use:
 
 ```console
-python teams-app/build.py --client-id YOUR-CLIENT-GUID --output path/to/Tako-AI-Teams.zip
+python scripts/build_teams_package.py --client-id YOUR-CLIENT-GUID --output path/to/Tako-AI-Teams.zip
 ```
+
+When upgrading an app that used a custom Teams app ID, pass `--app-id YOUR-EXISTING-TEAMS-APP-GUID` as well. The builder otherwise derives a stable Teams app ID from your client ID.
 
 The bundled icons already have the required sizes. The template supplies the personal-chat scope and supported commands. The package never includes your client secret.
 
@@ -158,7 +185,7 @@ Website, privacy, and terms URLs are required by the [Teams manifest schema](htt
 
 Import and validate the ZIP in [Teams Developer Portal](https://dev.teams.microsoft.com/). For a permitted test installation, open **Teams → Apps → Manage your apps → Upload an app → Upload a custom app**, select the ZIP, and add it for personal use. If upload is unavailable, ask your Teams administrator to enable it for testing or distribute the package through your organization's app catalog. [Microsoft upload instructions](https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/deploy-and-publish/apps-upload)
 
-## 6. Check that it works
+## Part 6 — Check that it works
 
 Sign in to Teams as a member of the allowed group and open the bot's personal chat:
 
@@ -172,24 +199,27 @@ Sign in to Teams as a member of the allowed group and open the bot's personal ch
 
 Also test with a user outside the allowed groups; the bot should deny access. Use Teams for these checks: Azure's **Test in Web Chat** uses a different channel, which Tako intentionally rejects.
 
-| Problem | Check |
+## Part 7 — Conversations and CSV downloads
+
+Type below a result to refine your request or answer a clarification. Tako retains your personal-chat session across server restarts until it expires. **New Query** (or `new`) starts fresh for your next message. The confirmation reads:
+
+> **New session started**
+>
+> Previous questions and results are no longer part of this session. Type your next question below.
+
+This resets the context used for future questions; it does not delete the messages or result cards already visible in Teams. After a reset, include any details you want Tako to use in your new question.
+
+| Command or action | What it does |
 | --- | --- |
-| Bot does not respond | Tako is running with `TEAMS_ENABLE=true`; the public HTTPS endpoint is reachable; the Teams channel is enabled. Inspect the Tako server log. |
-| Message returns HTTP 400 | Check `logs/okta_ai_agent.log` for `Teams incoming rejected` and its reason. Empty or oversized text, incoming files, and unrecognized card actions are rejected. Tako's result buttons and native file-consent replies are supported. Ordinary text with Teams' HTML companion is accepted. No Azure diagnostics setting is needed. |
-| Authentication fails | The Entra client ID, Azure Bot Microsoft App ID, and package `botId` match; tenant IDs match; the secret **Value** is correct and unexpired. |
-| Access denied | The sender belongs to an allowed Entra group, and the setting contains the group's Object ID. |
-| Access cannot be verified | Both Graph application permissions have admin consent, and the server can reach Microsoft identity and Graph endpoints. |
-| Package upload fails | Validate the ZIP in Developer Portal; check the icon dimensions, required URLs, and custom-app policy. |
-| **Invalid Bot — Please make sure the bot is registered and Teams channel is enabled** | Open Azure Bot → Settings → Channels and enable Microsoft Teams. Confirm it is listed as Healthy, verify the package's `botId` matches the Azure Bot's Microsoft App ID, then retry installation. |
-| A follow-up question needs clarification | Reply below with the missing details. Use **New Query** (or type `new`) to start fresh. |
-| Download CSV is missing | The button appears on table results containing rows. Restart Tako with the updated backend and update the Teams app package. Older result cards do not gain buttons automatically. |
-| CSV cannot be saved to OneDrive | Confirm your work account has OneDrive for Business provisioned and can open it. Confirm the updated package enables file support. Try **Download CSV** again for a new consent request; ask your administrator to inspect the server log if it still fails. |
-| Results or download consent have expired | Consent is single-use and lasts one hour. Select **Download CSV** again while the saved result remains available. If the result itself has expired, run a new query. |
+| Type a question | Starts a query or continues the current personal-chat session. |
+| Reply to a clarification | Supplies the missing details so Tako can continue. |
+| **New Query** or `new` | Starts a fresh session for the next question. |
+| `help` | Shows the available commands and conversation guidance. |
+| `status` | Shows data sync information. |
+| `cancel` | Stops your pending or running query. |
+| **Download CSV** | Delivers the saved rows for that specific result through the flow below. |
 
-
-## Follow-ups and CSV downloads
-
-Type below a result to refine your request or answer a clarification. Tako retains your personal-chat session across server restarts until it expires. **New Query** (or `new`) starts fresh for your next message; existing result cards remain visible.
+### Download the retrieved data
 
 **Download CSV** exports the saved retrieved rows from that result, without running the query again:
 
@@ -201,11 +231,15 @@ Type below a result to refine your request or answer a clarification. Tako retai
 
 Your work account needs a provisioned OneDrive for Business account. Consent is single-use and expires after one hour; select **Download CSV** again if needed. Declining does not discard your result or end your conversation. Each download remains tied to the requesting user, personal chat, and saved result.
 
-A direct download link hosted by Tako could avoid the OneDrive step, but would require a separate protected download endpoint and access checks. That alternative is not implemented; the current integration uses the native Teams flow and does not publish CSVs at public download URLs.
-
 The preview is limited to ten rows and four columns; the CSV contains all retrieved rows and columns. A partial answer remains partial in its CSV. AI can make mistakes. Please validate the data provided.
 
-For existing installations, rebuild and upload **app package version 0.2.0**, which enables `supportsFiles=true`. The client ID and Teams app ID stay the same. Restart Tako for the backend changes. No additional Graph file permissions or streaming-endpoint setting are required. [Microsoft Teams file-consent documentation](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/how-to/bots-filesv4)
+File delivery requires `supportsFiles=true`, included in package **0.2.0**. No additional Graph file permissions or streaming-endpoint setting are required. [Microsoft Teams file-consent documentation](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/how-to/bots-filesv4)
+
+## Part 8 — Session retention and Docker storage
+
+Teams runtime sessions expire after 24 hours of inactivity by default, including when `TEAMS_SESSION_RETENTION_HOURS` is not set. Set it to 1–8760 hours to change retention. Tako checks at startup and hourly, without needing another message. Active requests and downloads are protected; expired session folders, exports, and associated conversation records are removed. This does not remove messages or files already delivered to Teams or OneDrive.
+
+Cleanup runs inside the Python application; no separate cron job is needed. It stops when the container stops or crashes and checks saved timestamps on the next startup. Restarting does not reset the expiry clock. Persist both `DB_DIR` and `CHAT_SESSIONS_DIR` in Docker volumes if conversations should survive container replacement.
 
 Session cleanup also removes local exports and conversation records. It does not delete files already delivered to OneDrive or messages already in Teams. An expired result button asks you to run a new query.
 
@@ -215,3 +249,20 @@ Session cleanup also removes local exports and conversation records. It does not
 | Generated CSV before delivery | Local session storage, covered by the same cleanup |
 | CSV after an allowed upload | Your OneDrive, subject to your organization's Microsoft 365 retention policies |
 | Result and file cards | Teams chat history, subject to your organization's Teams retention policies |
+
+## Troubleshooting
+
+| Problem | Check |
+| --- | --- |
+| Chat composer is disabled after a package update | Confirm you opened Tako AI for personal use. Compare Teams web with desktop using the same account, then restart the affected client. If both remain disabled, check the app installation and organization policies. The wording “Chat is turned off for this meeting” alone does not identify the cause. |
+| Bot does not respond | Tako is running with `TEAMS_ENABLE=true`; the public HTTPS endpoint is reachable; the Teams channel is enabled. Inspect the Tako server log. |
+| Message returns HTTP 400 | Check `logs/okta_ai_agent.log` for `Teams incoming rejected` and its reason. Empty or oversized text, incoming files, and unrecognized card actions are rejected. Tako's result buttons and native file-consent replies are supported. Ordinary text with Teams' HTML companion is accepted. No Azure diagnostics setting is needed. |
+| Authentication fails | The Entra client ID, Azure Bot Microsoft App ID, and package `botId` match; tenant IDs match; the secret **Value** is correct and unexpired. |
+| Access denied | The sender belongs to an allowed Entra group, and the setting contains the group's Object ID. |
+| Access cannot be verified | Both Graph application permissions have admin consent, and the server can reach Microsoft identity and Graph endpoints. |
+| Package upload fails | Validate the ZIP in Developer Portal; check the icon dimensions, required URLs, and custom-app policy. |
+| **Invalid Bot — Please make sure the bot is registered and Teams channel is enabled** | Open Azure Bot → Settings → Channels and enable Microsoft Teams. Confirm it is listed as Healthy, verify the package's `botId` matches the Azure Bot's Microsoft App ID, then retry installation. |
+| A follow-up question needs clarification | Reply below with the missing details. Use **New Query** (or type `new`) to start fresh. |
+| Download CSV is missing | The button appears on table results containing rows. Restart Tako with the updated backend and update the Teams app package. Older result cards do not gain buttons automatically. |
+| CSV cannot be saved to OneDrive | Confirm your work account has OneDrive for Business provisioned and can open it. Confirm the updated package enables file support. Try **Download CSV** again for a new consent request; ask your administrator to inspect the server log if it still fails. |
+| Results or download consent have expired | Consent is single-use and lasts one hour. Select **Download CSV** again while the saved result remains available. If the result itself has expired, run a new query. |

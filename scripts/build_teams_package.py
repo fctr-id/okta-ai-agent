@@ -1,4 +1,4 @@
-"""Compatibility entry point; the standalone builder lives in teams-app/."""
+"""Repository CLI for building the Teams package; shares the standalone teams-app builder."""
 from pathlib import Path
 from runpy import run_path
 

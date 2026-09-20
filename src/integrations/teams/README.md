@@ -54,13 +54,17 @@ opt-in and has not yet been validated against a live customer Teams tenant.
 5. Run **one API process/worker and one replica**, with persistent `DB_DIR` and
    `CHAT_SESSIONS_DIR`. A process lock prevents two workers sharing the Teams inbox.
    Separate database directories do not provide multi-replica coordination.
-6. Generate the installation package using the bundled `teams-app` folder:
+6. The script is at `<repository-root>/scripts/build_teams_package.py`. Open a
+   terminal in the cloned `okta-ai-agent` root (containing `main.py`) and run:
 
    ```powershell
-   python teams-app/build.py
+   python scripts/build_teams_package.py
    ```
 
-   Enter your Entra Application (client) ID when prompted. The folder contains the
+   If already in `<repository-root>/scripts/`, use `python build_teams_package.py`
+   instead. Both commands write to `<repository-root>/teams-app/output/`.
+
+   Enter your Entra Application (client) ID when prompted. The `teams-app` folder contains the
    icons and manifest template; no extra Python packages are needed. The script
    creates `teams-app/output/Tako-AI-Teams-<client-id>.zip` and prints the full path
    to upload. Defaults link to the project's repository, privacy information, and

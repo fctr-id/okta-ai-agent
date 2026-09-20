@@ -5,16 +5,23 @@ builder, manifest template, and Fctr icons. It can be copied independently of th
 Tako server. Python 3.10 or newer is sufficient; no package installation, virtual
 environment, network access, or secrets are needed to build the ZIP.
 
-From this folder, run:
+**Script location:** `<repository-root>/scripts/build_teams_package.py`. The repository
+root is the cloned `okta-ai-agent` folder containing `main.py` and `requirements.txt`.
+Keep the sibling `teams-app/` folder in place; it supplies the builder and assets.
+
+From the repository root, run:
 
 ```console
-python build.py
+python scripts/build_teams_package.py
 ```
+
+If already inside `<repository-root>/scripts/`, run `python build_teams_package.py` instead.
+Both commands write to `<repository-root>/teams-app/output/`.
 
 Paste the **Application (client) ID** from your Entra app registration when
 prompted. Use the same ID configured in your Azure Bot and `TEAMS_CLIENT_ID`.
 
-The script creates `output/Tako-AI-Teams-<client-id>.zip` and prints its full path.
+The script creates `teams-app/output/Tako-AI-Teams-<client-id>.zip` and prints its full path.
 Upload that ZIP in **Teams → Apps → Manage your apps → Upload an app → Upload a
 custom app**. Do not extract it. Your organization's policies must allow the upload.
 
@@ -23,11 +30,12 @@ from **Available Channels**, complete and save its configuration, and confirm it
 appears as **Healthy**. A configured messaging endpoint alone is not enough; a
 missing Teams channel can cause the **Invalid Bot** installation error.
 
-From the repository root, the equivalent command is `python teams-app/build.py`.
-To build without a prompt or choose where the file goes:
+If you copy this folder separately, run `python build.py` inside that folder.
+Its ZIP is written to that folder's `output/` directory.
+From the repository root, to build without a prompt or choose where the file goes:
 
 ```console
-python build.py --client-id YOUR-CLIENT-GUID --output path/to/Tako-AI-Teams.zip
+python scripts/build_teams_package.py --client-id YOUR-CLIENT-GUID --output path/to/Tako-AI-Teams.zip
 ```
 
 The template uses Tako's public repository, Security & Privacy section, and license
