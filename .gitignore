@@ -149,7 +149,7 @@ _backup_before_restore_20260108_165423/*
 conductor/*
 
 # Keep the standalone Teams builder's generated-output exclusions in source control.
-!/teams-app/.gitignore
+!/src/integrations/teams/app_package/.gitignore
 
 # Private local analysis and working documents
 /DO_NOT_SHARE/

@@ -74,7 +74,7 @@ def main(argv=None):
         parser.add_argument(f"--{name}", type=https_url, help="Override the bundled project URL")
     parser.add_argument("--color-icon", help="Optional replacement 192x192 PNG")
     parser.add_argument("--outline-icon", help="Optional replacement 32x32 transparent PNG")
-    parser.add_argument("--output", help="Destination ZIP; default: output/Tako-AI-Teams-<client-id>.zip inside the teams-app folder")
+    parser.add_argument("--output", help="Destination ZIP; default: output/Tako-AI-Teams-<client-id>.zip inside the app_package folder")
     args = vars(parser.parse_args(argv))
     try:
         while not args["bot_id"]:

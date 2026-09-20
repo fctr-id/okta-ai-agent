@@ -55,7 +55,6 @@ COPY src/integrations /app/src/integrations
 
 # Copy scripts directory for CLI tools
 COPY scripts /app/scripts
-COPY teams-app /app/teams-app
 
 # Copy built frontend assets from the frontend builder stage
 # Frontend builds to ../api/static relative to the frontend directory

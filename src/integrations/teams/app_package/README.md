@@ -7,7 +7,7 @@ environment, network access, or secrets are needed to build the ZIP.
 
 **Script location:** `<repository-root>/scripts/build_teams_package.py`. The repository
 root is the cloned `okta-ai-agent` folder containing `main.py` and `requirements.txt`.
-Keep the sibling `teams-app/` folder in place; it supplies the builder and assets.
+Keep the repository's `src/integrations/teams/app_package/` folder in place; it supplies the builder and assets.
 
 From the repository root, run:
 
@@ -16,12 +16,12 @@ python scripts/build_teams_package.py
 ```
 
 If already inside `<repository-root>/scripts/`, run `python build_teams_package.py` instead.
-Both commands write to `<repository-root>/teams-app/output/`.
+Both commands write to `<repository-root>/src/integrations/teams/app_package/output/`.
 
 Paste the **Application (client) ID** from your Entra app registration when
 prompted. Use the same ID configured in your Azure Bot and `TEAMS_CLIENT_ID`.
 
-The script creates `teams-app/output/Tako-AI-Teams-<client-id>.zip` and prints its full path.
+The script creates `src/integrations/teams/app_package/output/Tako-AI-Teams-<client-id>.zip` and prints its full path.
 Upload that ZIP in **Teams → Apps → Manage your apps → Upload an app → Upload a
 custom app**. Do not extract it. Your organization's policies must allow the upload.
 

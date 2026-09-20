@@ -32,8 +32,6 @@
     </a>
   </p>
 
-  <p>
-
   <p>Built by the Fctr Identity team · Not affiliated with Okta</p>
 </div>
 
@@ -107,8 +105,8 @@ Use an `AZURE_OPENAI_ENDPOINT` ending in `/openai/v1/`, without `/responses`. Bo
 <details>
 <summary><strong>Slack &amp; Teams</strong></summary>
 
-- Existing Slack apps need [updated permissions and event settings](wiki/Slack-Bot-Setup.md#upgrading-an-existing-slack-app) for follow-ups and result buttons.
-- Teams is optional; enable it with the [Teams setup guide](wiki/Teams-Bot-Setup.md).
+- Existing Slack apps need [updated permissions and event settings](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-%26-Testing-Guide#upgrading-an-existing-slack-app) for follow-ups and result buttons.
+- Teams is optional; enable it with the [Teams setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Teams-Bot-Setup).
 - Bot context and local exports expire after 24 hours of inactivity by default. The guides explain retention settings; messages and files already delivered remain unaffected.
 
 </details>
@@ -343,6 +341,18 @@ The bot is disabled by default. Set `ENABLE_SLACK_BOT=true` in your `.env` and c
 Query your Okta tenant in a personal Teams chat, ask follow-up questions, and download results as CSV. Access is restricted to members of your allowed Microsoft Entra groups.
 
 The bot is disabled by default. Follow the [Teams installation and setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Teams-Bot-Setup) to install the integration, configure access, and deploy the Teams app package.
+
+### Build the Teams app package
+
+The script is at `<repository-root>/scripts/build_teams_package.py`. From the cloned `okta-ai-agent` repository root, run:
+
+```bash
+python scripts/build_teams_package.py
+```
+
+If already in the `scripts` folder, run `python build_teams_package.py`. Enter your Entra **Application (client) ID** when prompted.
+
+The builder and package assets live in `src/integrations/teams/app_package/`. The ZIP is saved to `src/integrations/teams/app_package/output/Tako-AI-Teams-<client-id>.zip`, and the script prints the full path. Upload that ZIP to Teams as described in the setup guide.
 
 ### Security Highlights
 

@@ -1,8 +1,8 @@
-"""Repository CLI for building the Teams package; shares the standalone teams-app builder."""
+"""Repository CLI for building the Teams package; shares the standalone app_package builder."""
 from pathlib import Path
 from runpy import run_path
 
-_builder = run_path(str(Path(__file__).resolve().parents[1] / "teams-app" / "build.py"))
+_builder = run_path(str(Path(__file__).resolve().parents[1] / "src" / "integrations" / "teams" / "app_package" / "build.py"))
 build_package = _builder["build_package"]
 main = _builder["main"]
 

@@ -62,11 +62,11 @@ opt-in and has not yet been validated against a live customer Teams tenant.
    ```
 
    If already in `<repository-root>/scripts/`, use `python build_teams_package.py`
-   instead. Both commands write to `<repository-root>/teams-app/output/`.
+   instead. Both commands write to `<repository-root>/src/integrations/teams/app_package/output/`.
 
-   Enter your Entra Application (client) ID when prompted. The `teams-app` folder contains the
+   Enter your Entra Application (client) ID when prompted. The `src/integrations/teams/app_package` folder contains the
    icons and manifest template; no extra Python packages are needed. The script
-   creates `teams-app/output/Tako-AI-Teams-<client-id>.zip` and prints the full path
+   creates `src/integrations/teams/app_package/output/Tako-AI-Teams-<client-id>.zip` and prints the full path
    to upload. Defaults link to the project's repository, privacy information, and
    license; use `--website`, `--privacy`, and `--terms` for deployment-specific URLs.
 

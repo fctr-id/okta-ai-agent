@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from zipfile import ZipFile
 
-SOURCE = Path(__file__).resolve().parents[1] / "teams-app"
+SOURCE = Path(__file__).resolve().parents[1] / "src" / "integrations" / "teams" / "app_package"
 CLIENT = "11111111-1111-1111-1111-111111111111"
 
 
