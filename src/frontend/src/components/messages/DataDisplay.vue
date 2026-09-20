@@ -34,8 +34,10 @@
         <!-- Data Table Display -->
         <div v-else-if="displayedItems.length > 0 || (isStreaming && (props.type === MessageType.TABLE || props.type === MessageType.STREAM))" class="table-content">
             <v-data-table class="results-table" :style="{ '--results-table-min-width': `${tableMinWidth}px` }"
-                :headers="formattedHeaders" :items="displayedItems"
-                :loading="loading" :items-per-page="10" :search="search" :sort-by="sortBy" items-per-page-text="Rows per page" density="compact" hover>
+                :headers="tableHeaders" :items="displayedItems"
+                :loading="loading" :items-per-page="10" :search="search" v-model:sort-by="sortBy" multi-sort
+                v-model:page="tablePage" :group-by="groupBy" v-model:opened="openedGroups"
+                items-per-page-text="Rows per page" density="compact" hover>
                 <template v-slot:top>
                     <div class="table-header-container" :class="{ 'is-preview': isResultsPreview }">
                         <div class="results-heading">
@@ -75,7 +77,25 @@
                                 {{ tableActionLabel }}
                             </v-btn>
                         </div>
+                        <div class="table-view-controls">
+                            <v-select v-model="groupColumn" :items="groupOptions" label="Group by"
+                                aria-label="Group results by column" density="compact" variant="outlined"
+                                hide-details class="group-field" />
+                            <span class="sort-hint">Click headers to sort by multiple columns. Numbers show priority.</span>
+                        </div>
                     </div>
+                </template>
+                <template #group-header="{ item, columns, toggleGroup, isGroupOpen }">
+                    <tr class="result-group-row">
+                        <td :colspan="columns.length">
+                            <button type="button" class="result-group-toggle" :aria-expanded="isGroupOpen(item)"
+                                @click="toggleGroup(item)">
+                                <v-icon size="18" aria-hidden="true">{{ isGroupOpen(item) ? 'mdi-chevron-down' : 'mdi-chevron-right' }}</v-icon>
+                                <span>{{ groupLabel(item.value) }}</span>
+                                <span class="group-count">{{ item.items.length.toLocaleString() }} {{ item.items.length === 1 ? 'record' : 'records' }}</span>
+                            </button>
+                        </td>
+                    </tr>
                 </template>
                 <template v-for="header in formattedHeaders" :key="header.key" v-slot:[`item.${header.key}`]="{ value }">
                     <ResultTableCell :value="value" :label="header.title" />
@@ -95,7 +115,7 @@
 
 <script setup>
 import { marked } from 'marked'
-import { computed, ref, onBeforeUnmount } from 'vue'
+import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
 import ResultTableCell from './ResultTableCell.vue'
 
@@ -163,6 +183,14 @@ const emit = defineEmits(['table-action'])
 
 const search = ref('')
 const sortBy = ref([{ key: 'email', order: 'asc' }])
+const tablePage = ref(1)
+const groupColumn = ref('')
+const openedGroups = ref([])
+
+watch([groupColumn, search], () => {
+    tablePage.value = 1
+    openedGroups.value = []
+})
 
 // Type checks with simplified logic
 const isJsonData = computed(() => {
@@ -266,6 +294,22 @@ const formattedHeaders = computed(() => {
     return []
 })
 const tableMinWidth = computed(() => formattedHeaders.value.reduce((total, header) => total + columnWidth(header.key), 0))
+
+// Group scalar values only; nested objects and arrays do not make useful group labels.
+const groupOptions = computed(() => [
+    { title: 'None', value: '' },
+    ...formattedHeaders.value
+        .filter(header => displayedItems.value.every(row => row[header.key] == null || typeof row[header.key] !== 'object'))
+        .map(header => ({ title: header.title, value: header.key }))
+])
+const groupBy = computed(() => groupColumn.value && groupOptions.value.some(option => option.value === groupColumn.value)
+    ? [{ key: groupColumn.value, order: 'asc' }]
+    : [])
+const groupLabel = value => value == null || value === '' ? '(Empty)' : String(value)
+const tableHeaders = computed(() => groupBy.value.length
+    ? [{ key: 'data-table-group', title: '', width: 44, sortable: false,
+        headerProps: { class: 'group-spacer' }, cellProps: { class: 'group-spacer' } }, ...formattedHeaders.value]
+    : formattedHeaders.value)
 
 // Formatted JSON content
 const formattedJson = computed(() => {
@@ -526,6 +570,11 @@ const downloadCSV = () => {
     }
 }
 
+// Result schemas vary by question; never retain a hidden sort or obsolete grouping column.
+watch(() => formattedHeaders.value.map(header => header.key), keys => {
+    sortBy.value = sortBy.value.filter(sort => keys.includes(sort.key))
+    if (groupColumn.value && !keys.includes(groupColumn.value)) groupColumn.value = ''
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -776,6 +825,19 @@ const downloadCSV = () => {
 .preview-description { grid-column: 1; grid-row: 2; align-self: center; margin: 0; color: #5d6b7d; font-size: 12px; line-height: 1.5; }
 .table-action { grid-column: 2; grid-row: 2; display: flex; justify-content: flex-end; align-items: center; }
 .results-tools .streaming-indicator { flex-basis: 100%; text-align: right; }
+.table-view-controls { grid-column: 1 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; }
+.group-field { flex: 0 1 220px; min-width: 160px; }
+.sort-hint { margin-inline-start: auto; text-align: right; color: #5d6b7d; font-size: 12px; line-height: 1.5; }
+:deep(.group-field .v-field) { border-radius: 10px; background: #f8fafc; }
+:deep(.group-field .v-field__input) { font-size: 13px; min-height: 38px; padding-top: 7px; padding-bottom: 7px; }
+:deep(.group-field .v-field__outline) { color: #c8d1df; --v-field-border-opacity: 1; }
+:deep(.group-field .v-label) { color: #526077; opacity: 1; }
+.result-group-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; color: #253248; font: inherit; font-weight: 600; border-radius: 4px; }
+.result-group-toggle:focus-visible { outline: 2px solid #3d61ac; outline-offset: 4px; }
+.group-count { color: #586579; font-size: 12px; font-weight: 400; }
+:deep(.results-table .v-table__wrapper > table > tbody > .result-group-row > td) { background: #f5f7fb; vertical-align: middle; }
+:deep(.results-table .v-table__wrapper > table > thead > tr > .group-spacer),
+:deep(.results-table .v-table__wrapper > table > tbody > tr > .group-spacer) { width: 44px; padding: 0; }
 
 .search-field {
     min-width: 160px;

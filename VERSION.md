@@ -2,7 +2,7 @@
 
 ## v3.1.0-beta - "Catch of the Day"
 
-**Status**: Unreleased
+**Release Date**: September 20, 2026
 
 **Recommended upgrade for all Tako users.** This release adds Microsoft Teams support and continued conversations in Slack, alongside a refreshed interface and important fixes for incomplete sync data, repeated API calls, timezone handling, and misleading error states.
 
@@ -13,6 +13,7 @@
 - **Refreshed Conversation Experience**: Questions, activity, execution details, and results now sit together in collapsible conversation cards. Earlier turns collapse when you ask a follow-up, repeated completion badges are reduced, and the query bar stays separate from scrolling results.
 - **Optional AI Thinking**: The sample sets `AI_REASONING_EFFORT=high`. If your model does not support it, set it to `none` or remove the variable and restart Tako to use the model's defaults. See [thinking settings and tested models](README.md#ai-provider-support).
 - **Clearer Tables and Navigation**: Improved table readability, expandable long values, clearer saved-result previews, and updated sidebar, login, setup, and sync interfaces. Longer conversation titles and consistent tooltips with keyboard support make controls easier to understand.
+- **Multi-Column Sorting and Result Grouping**: Sort web results by multiple columns with visible sort priorities, or group by a column into collapsible sections with record counts that update with search. Both work on the displayed data, with previews clearly labeled.
 - **Direct Follow-up Results**: Completed analyses of saved data can return their results directly in the web app, CLI, and Slack without generating another script. Full results remain available for later follow-ups and export.
 - **Clarification Without False Errors**: Clarification questions appear as normal conversational responses, allowing users to answer and continue.
 - **Timezone-Aware Answers**: Browser timezone context and daylight-saving-aware conversion support local-time requests while preserving explicit timestamp offsets.

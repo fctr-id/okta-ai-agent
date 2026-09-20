@@ -131,8 +131,10 @@ https://github.com/user-attachments/assets/7a27ebc4-39a0-400f-bf16-505afca7ca3d
 - Visible progress — Inspect discovery, execution, tables, and generated scripts.
 - History and favorites — Revisit recent queries and save frequent ones.
 - CSV and Python export — Export results for reports or download reusable Python scripts.
+- Interactive results — Sort by multiple columns and group rows into collapsible sections with record counts.
 - CLI automation — Run queries and database syncs from scheduled jobs.
 - Optional Slack bot — Query your tenant with `/tako`; disabled by default.
+- Optional Teams bot — Query Okta in personal chats, continue conversations, and download CSV results; disabled by default.
 - Docker deployment — Self-host on AMD64 or ARM64 with your chosen AI provider.
 
 ## AI Provider Support
@@ -143,7 +145,7 @@ Choose a provider and fill in its section in `.env`. You can use the same model 
 
 ### Tested models
 
-The Fctr Identity team has tested the following models with Tako for the upcoming v3.1.0-beta release:
+The Fctr Identity team has tested the following models with Tako v3.1.0-beta:
 
 | Provider | Tested model |
 |---|---|
