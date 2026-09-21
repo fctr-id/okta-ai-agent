@@ -7,15 +7,20 @@ import os
 from pathlib import Path
 from typing import Any, cast
 
+import pydantic_ai
 from pydantic_ai import Agent
 from pydantic_ai.settings import ModelSettings, ThinkingLevel
 
 from src.core.models.model_picker import ModelConfig, ModelType
 
+# Tako owns its console output; hide the SDK banner without changing logging.
+pydantic_ai.BANNER_ENABLED = False
+
 
 DEFAULT_AGENT_KWARGS: dict[str, Any] = {
-	"retries": 0,
-	"output_retries": 1,
+	"retries": {"tools": 0, "output": 1},
+	# Preserve v1 behavior: stop after validated output instead of executing sibling tool calls.
+	"end_strategy": "early",
 }
 
 # Shared default for fast local tools only.

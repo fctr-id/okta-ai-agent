@@ -4,6 +4,7 @@ from urllib.parse import urlsplit, urlunsplit
 from pydantic import BaseModel
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 from pydantic_ai.models.openai import OpenAIResponsesModel, OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.providers.azure import AzureProvider
@@ -12,7 +13,7 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.bedrock import BedrockConverseModel
 from pydantic_ai.providers.bedrock import BedrockProvider
 import os, json
-import httpx
+import httpx2
 import ssl
 from dotenv import load_dotenv
 from src.utils.logging import logger
@@ -73,13 +74,13 @@ def get_ca_bundle_path() -> Optional[str]:
     logger.debug("Using system default CA store")
     return None
 
-def create_http_client_with_ssl_config() -> httpx.AsyncClient:
+def create_http_client_with_ssl_config() -> httpx2.AsyncClient:
     """Create HTTP client with SSL configuration supporting multiple CA sources."""
     verify_ssl = os.getenv('VERIFY_SSL', 'true').lower() == 'true'
     
     if not verify_ssl:
         logger.warning("SSL verification DISABLED - ignoring all certificate errors")
-        return httpx.AsyncClient(verify=False, timeout=httpx.Timeout(60.0))
+        return httpx2.AsyncClient(verify=False, timeout=httpx2.Timeout(60.0))
     
     # Check for custom CA bundle first
     ca_filename = os.getenv('SSL_CA_BUNDLE_FILENAME')
@@ -117,17 +118,18 @@ def create_http_client_with_ssl_config() -> httpx.AsyncClient:
             logger.info("Falling back to system-only CA certificates")
             # Context still has system CAs, so continue
         
-        return httpx.AsyncClient(verify=context, timeout=httpx.Timeout(60.0))
+        return httpx2.AsyncClient(verify=context, timeout=httpx2.Timeout(60.0))
     
     # Standard fallback - system CAs only
     ca_bundle = get_ca_bundle_path()
     if ca_bundle:
         cert_count = _count_certificates(ca_bundle)
         logger.info(f"Using system-only CA bundle with {cert_count} certificates: {ca_bundle}")
-        return httpx.AsyncClient(verify=ca_bundle, timeout=httpx.Timeout(60.0))
+        context = ssl.create_default_context(cafile=ca_bundle)
+        return httpx2.AsyncClient(verify=context, timeout=httpx2.Timeout(60.0))
     
     logger.info("Using system default SSL configuration")
-    return httpx.AsyncClient(timeout=httpx.Timeout(60.0))
+    return httpx2.AsyncClient(timeout=httpx2.Timeout(60.0))
 
 
 def parse_headers() -> Dict[str, str]:
@@ -213,9 +215,8 @@ class ModelConfig:
                 scopes=['https://www.googleapis.com/auth/cloud-platform']
             )
             
-            vertex_provider = GoogleProvider(
+            vertex_provider = GoogleCloudProvider(
                 credentials=credentials,
-                vertexai=True,
                 project=os.getenv('VERTEX_AI_PROJECT'),
                 location=os.getenv('VERTEX_AI_LOCATION', 'global')
             )

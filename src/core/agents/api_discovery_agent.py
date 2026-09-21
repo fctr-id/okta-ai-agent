@@ -12,6 +12,7 @@ Output: APIDiscoveryResult with success status
 """
 
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, ToolReturn, UsageLimits
+from pydantic_ai.capabilities import PrepareTools
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -270,7 +271,7 @@ api_discovery_agent = build_agent(
     instructions=BASE_SYSTEM_PROMPT,
     output_type=APIDiscoveryResult,
     deps_type=APIDiscoveryDeps,
-    prepare_tools=prepare_api_tools,
+    capabilities=[PrepareTools(prepare_api_tools)],
 )
 
 

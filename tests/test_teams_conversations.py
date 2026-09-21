@@ -89,6 +89,62 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.db.hydrate_session_result_set_context_for_run(
             tenant_id=sessions.settings.tenant_id, run_id=fresh.run_id, artifacts_file=fresh.artifacts_file), 0)
 
+    async def test_narrative_followup_hydrates_complete_evidence_with_bounded_preview(self):
+        from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets, build_artifact_prompt_context
+
+        first = job(query="Assess the saved evidence")
+        evidence = {"observations": ["fixture" * 100] * 20 + ["late evidence"], "limit": "Sample only"}
+        narrative = "Assessment. " * 500
+
+        async def orchestrate(**kwargs):
+            append_artifacts_with_result_sets(kwargs["artifacts_file"], [{
+                "key": "assessment_evidence", "category": "special_results", "content": json.dumps(evidence),
+            }], source_specialist="special")
+            result = answer()
+            result.completed_result_event = lambda: {"display_type": "markdown", "content": narrative}
+            return result
+
+        await runtime.run_query(first, orchestrate=orchestrate)
+        second = job(session_id=first["session_id"], query="Explain the evidence without retrieving again")
+        paths = await sessions.begin_turn(second)
+        count = await self.db.hydrate_session_result_set_context_for_run(
+            tenant_id=sessions.settings.tenant_id, run_id=second["id"], artifacts_file=paths.artifacts_file)
+        self.assertEqual(count, 1)
+        refs = json.loads((paths.results_dir / "index.json").read_text(encoding="utf-8"))
+        self.assertEqual(refs[0]["entity_type"], "narrative")
+        saved = json.loads(Path(refs[0]["storage_path"]).read_text(encoding="utf-8"))
+        self.assertEqual(saved["data"]["answer"], narrative)
+        self.assertEqual(saved["data"]["supporting_evidence"][0]["data"], evidence)
+        preview = build_artifact_prompt_context(paths.artifacts_file)
+        self.assertNotIn("late evidence", preview)
+        self.assertLess(len(preview), 9000)
+        self.assertTrue(saved["inspection"]["sample_rows"][0]["answer_truncated"])
+        from pydantic_ai.models.test import TestModel
+        with patch("src.core.models.model_picker.ModelConfig.get_model", return_value=TestModel()):
+            from src.core.agents.result_analysis_agent import _execute_analysis_code, validate_result_analysis_code
+        code = ("saved = result_sets[selected_result_set_ids[0]][0]\n"
+                "analysis_result = {'summary': 'Saved evidence', "
+                "'answer': saved['supporting_evidence'][0]['data']['observations'][-1]}")
+        self.assertTrue(validate_result_analysis_code(code).is_valid)
+        output = _execute_analysis_code(
+            user_query=second["query"], python_code=code,
+            selected_candidates={refs[0]["result_set_id"]: refs[0]},
+            selected_result_set_ids=[refs[0]["result_set_id"]])
+        self.assertEqual(output.answer, "late evidence")
+
+    async def test_failed_and_clarifying_narratives_are_not_saved_evidence(self):
+        for outcome in ("fail", "clarify", "empty"):
+            with self.subTest(outcome=outcome):
+                first = job()
+                result = SimpleNamespace(success=outcome == "empty", outcome=outcome,
+                                         no_data_found=outcome == "empty", error="fixture",
+                                         user_message="Not a completed assessment")
+                await runtime.run_query(first, orchestrate=AsyncMock(return_value=result))
+                second = job(session_id=first["session_id"])
+                paths = await sessions.begin_turn(second)
+                self.assertEqual(await self.db.hydrate_session_result_set_context_for_run(
+                    tenant_id=sessions.settings.tenant_id, run_id=second["id"], artifacts_file=paths.artifacts_file), 0)
+
     async def test_saved_download_is_scoped_and_contains_all_rows(self):
         request = job()
         rows = [{"email": f"person{i}@example.test"} for i in range(25)]
