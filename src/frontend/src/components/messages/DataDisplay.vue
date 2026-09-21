@@ -1,5 +1,6 @@
 <template>
     <div class="data-display">
+        <p v-if="resultSummary" class="result-explanation">{{ resultSummary }}</p>
         <!-- Text Message Display -->
         <div v-if="isTextData" class="markdown-shell">
             <div class="markdown-content" v-html="renderedMarkdown"></div>
@@ -202,6 +203,13 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['table-action'])
+
+// Render as text: generated explanations must never become HTML.
+const resultSummary = computed(() => {
+    if (props.metadata?.isStreaming) return ''
+    if (props.type !== MessageType.TABLE && props.metadata?.outcome !== 'empty') return ''
+    return typeof props.metadata?.summary === 'string' ? props.metadata.summary.trim() : ''
+})
 
 // State management
 
@@ -826,6 +834,16 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
     /* Center content inside */
     text-align: center;
     /* Center text */
+}
+
+.result-explanation {
+    margin: 0;
+    padding: 16px 20px;
+    color: #334155;
+    font-size: 14px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    border-bottom: 1px solid var(--workspace-outline, #e2e8f0);
 }
 
 .no-results {

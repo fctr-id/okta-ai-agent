@@ -115,6 +115,8 @@ class OrchestratorResult:
         self.sql_result: Optional[SQLDiscoveryResult] = None
         self.api_result: Optional[APIDiscoveryResult] = None
         self.synthesis_result: Optional[SynthesisResult] = None
+        self.reusable_procedure: Optional[dict] = None
+        self.procedure_reuse: Optional[str] = None
         
         # Phases executed
         self.phases_executed: List[str] = []
@@ -139,6 +141,8 @@ class OrchestratorResult:
             metadata["outcome_reason"] = self.outcome_reason
         if self.user_message:
             metadata["user_message"] = self.user_message
+        if self.procedure_reuse:
+            metadata['procedure_reuse'] = self.procedure_reuse
         return metadata
 
     def completed_result_event(self) -> Dict[str, Any]:
@@ -1011,6 +1015,8 @@ class EventAggregator:
     async def step_start(self, event: Dict[str, Any]):
         """Forward step_start event with renumbered step"""
         if self.event_callback:
+            # Stable phase identifier for public progress; never display model reasoning.
+            event['phase'] = self.current_phase or 'planning'
             if self.current_phase:
                 offset = self.phase_offsets.get(self.current_phase, 0)
                 event['step'] = event.get('step', 1) + offset
@@ -1153,6 +1159,10 @@ async def _ask_supervisor_after_delegation(
     workflow_state: Dict[str, Any],
     aggregator: EventAggregator,
 ) -> Optional[str]:
+    aggregator.set_phase('review')
+    await aggregator.step_start({
+        'title': 'Review', 'text': 'Checking whether the results answer your question',
+    })
     supervisor_decision, supervisor_usage = await supervise_next_step(
         user_query,
         correlation_id=correlation_id,
@@ -2033,6 +2043,7 @@ async def execute_multi_agent_query(
     event_callback: Optional[callable] = None,
     cli_mode: bool = False,
     user_timezone: Optional[str] = None,
+    allow_procedure_reuse: bool = True,
 ) -> OrchestratorResult:
     """
     Execute multi-agent query workflow.
@@ -2114,11 +2125,54 @@ async def execute_multi_agent_query(
                 "hydrated_session_result_set_count": hydrated_session_result_sets,
                 "remaining_tool_calls": max_tool_calls,
                 "max_tool_calls": max_tool_calls,
+                "disable_procedure_reuse": not allow_procedure_reuse,
             },
             step_start_callback=aggregator.step_start,
         )
         result.supervisor_decisions.append(result.initial_supervisor_decision.model_dump())
         _add_usage_to_result(result, supervisor_usage)
+
+        if result.initial_supervisor_decision.reuse_procedure_id:
+            from src.core.procedure_reuse import execute_selected_procedure
+            selected_id = result.initial_supervisor_decision.reuse_procedure_id
+            aggregator.set_phase('reuse')
+            await aggregator.step_start({'title': 'Saved query', 'text': 'Running a matching saved query against current data'})
+            reused = await execute_selected_procedure(
+                run_id=correlation_id, procedure_id=selected_id, artifacts_file=artifacts_file,
+                cancellation_check=cancellation_check,
+            )
+            if reused:
+                candidate, payload = reused
+                result.reusable_procedure = candidate
+                result.success = True
+                result.procedure_reuse = 'used'
+                result.script_code = candidate['script_code']
+                result.completed_result = payload
+                result.display_type = 'table'
+                result.data_source_type = candidate['data_source']
+                if result.data_source_type in {'sql', 'hybrid'}:
+                    result.last_sync_time = get_last_sync_timestamp()
+                payload['metadata'].update(data_source=result.data_source_type, last_sync=result.last_sync_time)
+                result.phases_executed.append('reuse')
+                _set_result_outcome(result, 'success', reason='Executed a compatible saved retrieval procedure.')
+                append_artifacts_with_result_sets(artifacts_file, [{
+                    'key': 'turn_output_final', 'category': 'turn_output', 'display_type': 'table',
+                    'canonical_turn_output': True, 'content': json.dumps(payload, default=str),
+                    'row_count': payload['count'], 'metadata': payload['metadata'],
+                }], source_specialist='synthesis')
+                return result
+            result.procedure_reuse = 'fallback'
+            await aggregator.step_start({'title': 'Discovery', 'text': 'The saved query was unavailable or failed; retrieving the data again'})
+            # One fresh routing decision with reuse disabled; no recursive retry loop.
+            result.initial_supervisor_decision, fallback_usage = await supervise_query(
+                user_query, correlation_id=correlation_id, artifacts_file=artifacts_file,
+                db_runtime_summary=db_runtime_summary, special_tool_capabilities=special_tool_capabilities,
+                workflow_state={'disable_procedure_reuse': True, 'user_timezone': result.user_timezone,
+                                'remaining_tool_calls': max_tool_calls},
+                step_start_callback=aggregator.step_start,
+            )
+            result.supervisor_decisions.append(result.initial_supervisor_decision.model_dump())
+            _add_usage_to_result(result, fallback_usage)
         
         decision_mode = result.initial_supervisor_decision.mode
         phase = result.initial_supervisor_decision.target

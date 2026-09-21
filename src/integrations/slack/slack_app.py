@@ -740,6 +740,10 @@ async def _run_query(client, channel_id, user_id, query, message_thread_ts, corr
                 metadata = {}
             metadata.update(result.outcome_metadata())
             script_results["metadata"] = metadata
+            from src.core.query_procedures import save_successful_procedure
+            await save_successful_procedure(
+                run_id=correlation_id, result=result, event=script_results, artifacts_file=artifacts_file,
+            )
             await slack_handler.post_final_results(query, script_results)
             await slack_handler.post_script(result.script_code)
             await _save_history(

@@ -94,7 +94,26 @@ The script prints exactly this envelope; the parser depends on QUERY RESULTS:
     print('=' * 80)
 
 For lists, output is:
-    {'display_type': 'table', 'data': rows, 'headers': headers, 'count': len(rows)}
+    {'display_type': 'table', 'data': rows, 'headers': headers, 'count': len(rows),
+     'summary': '<one or two concise sentences explaining the returned data>'}
+Generate summary in the script's executed output, after retrieval and filtering.
+This is end-user-facing text displayed above the results. In one or two concise
+sentences, explain what the returned data means in relation to the user's current
+question and relevant follow-up context, including any material gap in coverage.
+Lead with the answer in everyday language. Never include internal result-set IDs,
+turn numbers, artifact names, schema fields, agent names, or processing steps.
+Mention the source briefly only when relevant to interpretation; do not narrate
+how the answer was calculated or explain an unrequested breakdown.
+Describe the actual population, source, and material filters/exclusions or partial
+retrieval limitations. For follow-ups, explain whether this is refreshed data,
+an unchanged saved population, or only a correction/subset. Use plain text, not
+Markdown, technical diagnostics, or a restatement of the question. Keep it brief
+(at most 600 characters). Counts or comparisons, if included, must be calculated
+from executed data, never copied from discovery samples or predicted beforehand.
+Do not claim "all", completeness, or a reason for missing records without evidence.
+If coverage cannot be established, state the specific uncertainty rather than
+inventing an exclusion. This explanation provides context; it is not a substitute
+for preserving the requested scope. Empty tables should also explain their scope.
 rows is a list of flat dicts. Flatten nested arrays/objects into meaningful joined
 names/IDs or counts; preserve the requested relationships and distinguish missing
 data from an empty collection.
@@ -130,3 +149,24 @@ may expand statuses (ACTIVE -> Active) and roles (SUPER_ADMIN -> Super
 Administrator, ORG_ADMIN -> Organization Administrator, APP_ADMIN -> Application
 Administrator). Existing factor labels: signed_nonce -> WebAuthn, sms -> SMS,
 token:software:totp -> Okta Verify.
+
+RETRIEVAL CLASSIFICATION (structured agent output, not script output):
+For successful table scripts, also populate procedure_metadata in SynthesisResult.
+Use the current question, relevant follow-up context, supported retrieval scope,
+and output field names. Do not copy result rows, sample values, result counts,
+or personal identifier values into this metadata. No additional lookup is needed.
+- purpose: one concise sentence describing the retrieval.
+- entities: canonical names from the supplied catalog, including related entities
+  actually needed for the question. Do not invent entity names.
+- scope: population, filters, relationships, requested freshness and exclusions.
+- parameters: names of variable inputs, without values.
+- classification: generic for a self-contained reusable question without specific
+  input values; parameterized when particular identifiers/filter values must be
+  supplied; conversation_dependent when prior results/context are necessary and
+  a self-contained retrieval cannot be established.
+- contains_sensitive_literals: true when the question, follow-up context or
+  retrieval contains personal identifiers or private literals. Asking for a column
+  that can contain personal data does not by itself mean the question contains PII.
+This classification describes a candidate for later reuse; it does not authorize
+sharing or execution. The backend records fields and execution status after running
+the script. Failures and non-table answers should leave procedure_metadata null.

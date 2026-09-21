@@ -463,6 +463,9 @@ async def _execute_script(
                     "success": True,
                     "display_type": "markdown",
                     "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                    "count": 0,
+                    "headers": results_data.get("headers", []),
+                    "metadata": {**script_empty_payload, **results_data.get("metadata", {})},
                     **script_empty_payload,
                     "timestamp": time.time()
                 }
@@ -471,7 +474,7 @@ async def _execute_script(
                 result_count = results_data.get("count", 0)
                 
                 # Build metadata with data source information
-                metadata = {}
+                metadata = dict(results_data.get("metadata", {}))
                 if orchestrator_result and hasattr(orchestrator_result, 'data_source_type'):
                     if orchestrator_result.data_source_type:
                         metadata["data_source_type"] = orchestrator_result.data_source_type
@@ -537,7 +540,17 @@ def _parse_script_output(stdout: str) -> Dict[str, Any]:
                     "count": len(parsed_output)
                 }
             elif isinstance(parsed_output, dict):
-                # Already has the right structure
+                # The executed rows determine the count, not a model's estimate.
+                if parsed_output.get("display_type", "table") == "table":
+                    rows = parsed_output.get("data", parsed_output.get("results"))
+                    if isinstance(rows, list):
+                        parsed_output["data"] = rows
+                        parsed_output["count"] = len(rows)
+                    summary = parsed_output.get("summary")
+                    # Carry only the user-facing explanation from generated metadata.
+                    parsed_output["metadata"] = {}
+                    if isinstance(summary, str) and summary.strip():
+                        parsed_output["metadata"]["summary"] = summary.strip()
                 return parsed_output
             
     except Exception as e:
@@ -741,6 +754,7 @@ async def stream_react_updates(
                     sse_event = {
                         "type": "STEP-START",
                         "step": event_data.get("step", 0),
+                        "phase": event_data.get("phase"),
                         "title": event_data.get("title", ""),
                         "text": text,
                         "tools": event_data.get("tools", []),  # Tool calls for frontend
@@ -1243,6 +1257,11 @@ async def stream_react_updates(
                 "timestamp": time.time()
             }
             yield f"data: {json.dumps(execution_success)}\n\n"
+            from src.core.query_procedures import save_successful_procedure
+            await save_successful_procedure(
+                run_id=process_id, result=result, event=final_execution_event,
+                artifacts_file=artifacts_file,
+            )
             _persist_turn_output_artifact(
                 artifacts_file=artifacts_file,
                 complete_event=final_execution_event,

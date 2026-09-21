@@ -1,5 +1,5 @@
 <template>
-  <section class="activity" aria-label="Tool activity">
+  <section class="activity" aria-label="Query activity">
     <button type="button" class="activity-toggle" :aria-expanded="isExpanded"
       :aria-controls="contentId" @click="isExpanded = !isExpanded">
       <svg class="chevron" :class="{ expanded: isExpanded }" width="14" height="14"
@@ -15,11 +15,18 @@
       <span v-if="failedRequests" class="failed-count">{{ failedRequests }} failed {{ failedRequests === 1 ? 'attempt' : 'attempts' }}</span>
     </button>
     <div v-show="isExpanded" :id="contentId" class="activity-body">
-      <p v-if="!tools.length" class="activity-placeholder">
+      <p v-if="!sections.length" class="activity-placeholder">
         {{ isWorking ? 'Preparing your request…' : 'No tool calls recorded.' }}
       </p>
-      <ol v-else class="tool-list">
-        <li v-for="entry in tools" :key="entry.key" class="tool-entry">
+      <ol v-else class="phase-list" aria-label="Query progress">
+        <li v-for="(section, index) in sections" :key="section.key" class="phase-section">
+          <div v-if="section.label" class="phase-heading" aria-live="polite">
+            <span v-if="isWorking && index === sections.length - 1" class="busy-dot" aria-hidden="true"></span>
+            <h3 class="phase-label">{{ section.label }}</h3>
+            <span class="phase-status">{{ index === sections.length - 1 && error ? 'Stopped' : isWorking && index === sections.length - 1 ? 'In progress' : 'Completed' }}</span>
+          </div>
+          <ol v-if="section.tools.length" class="tool-list" :class="{ 'phase-tools': section.label }">
+        <li v-for="entry in section.tools" :key="entry.key" class="tool-entry">
           <div class="tool-heading">
             <svg class="tool-symbol" width="14" height="14" viewBox="0 0 24 24"
               fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
@@ -39,6 +46,8 @@
             </li>
           </ul>
           <span v-else-if="entry.tool.testId" class="request-placeholder">No endpoint calls recorded.</span>
+        </li>
+          </ol>
         </li>
       </ol>
       <p v-if="error && showError" class="activity-error">{{ error }}</p>
@@ -65,13 +74,37 @@ const contentId = `activity-${useId()}`
 const isExpanded = ref(Boolean(props.error) || (!props.isComplete && !props.shouldAutoCollapse))
 watch(() => props.collapseRevision, () => { isExpanded.value = false })
 const isWorking = computed(() => !props.isComplete && !props.error)
-// Only display tool activity. Step titles/text/reasoning may contain internal
-// supervisor deliberation, including in previously saved conversations.
-const tools = computed(() => props.steps.flatMap((step, stepIndex) =>
-  (step.tools || []).map((tool, toolIndex) => ({
+// Display only known phase labels and tool activity. Never render step
+// titles/text/reasoning, including those from older saved conversations.
+const phaseLabels = {
+  planning: 'Understanding your question',
+  sql: 'Checking the database',
+  api: 'Checking live data',
+  processor: 'Processing saved results',
+  analysis: 'Analyzing saved results',
+  review: 'Planning next step',
+  special: 'Running a specialized check',
+  synthesis: 'Preparing the answer',
+  reuse: 'Running a saved query',
+}
+const sections = computed(() => props.steps.reduce((entries, step, stepIndex) => {
+  const phase = Object.hasOwn(phaseLabels, step.phase) ? step.phase : null
+  const stepTools = (step.tools || []).map((tool, toolIndex) => ({
     tool, key: tool.testId || `${step.id || stepIndex}-${toolIndex}`,
-  })),
-))
+  }))
+  // Old steps without phase metadata retain their tools, without guessing a phase.
+  if (!phase && !stepTools.length) return entries
+  let section = entries.at(-1)
+  if (!section || section.phase !== phase) {
+    const source = section?.phase === 'sql' ? 'Database' : section?.phase === 'api' ? 'API' : null
+    const label = phase === 'review' && source ? `${phaseLabels.review} · ${source}` : phaseLabels[phase]
+    section = { key: step.id || `phase-${stepIndex}`, phase, label, tools: [] }
+    entries.push(section)
+  }
+  section.tools.push(...stepTools)
+  return entries
+}, []))
+const tools = computed(() => sections.value.flatMap(section => section.tools))
 const failedRequests = computed(() => tools.value.reduce((count, entry) =>
   count + (entry.tool.requests || []).filter(request => request.status === 'failed').length, 0,
 ))
@@ -115,6 +148,13 @@ const toolSource = (tool) => {
 .chevron.expanded { transform: rotate(90deg); }
 .activity-body { margin: 0; padding: 4px 16px 12px; border-top: 1px solid var(--workspace-outline, #d6dce5); font-size: 13px; }
 .tool-list, .request-list { list-style: none; padding: 0; margin: 0; }
+.phase-list { list-style: none; padding: 0; margin: 0; }
+.phase-section { padding: 10px 0; border-top: 1px solid #e8ecf1; }
+.phase-section:first-child { border-top: 0; }
+.phase-heading { display: flex; align-items: center; gap: 8px; }
+.phase-label { margin: 0; font-size: inherit; font-weight: 500; color: #4b5563; }
+.phase-tools { margin: 4px 0 0 14px; }
+.phase-status { margin-left: auto; font-size: 12px; color: #626b79; }
 .tool-entry { padding: 10px 0; border-top: 1px solid #e8ecf1; }
 .tool-entry:first-child { border-top: 0; }
 .tool-heading { display: flex; align-items: flex-start; gap: 8px; }

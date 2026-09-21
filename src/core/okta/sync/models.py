@@ -482,6 +482,38 @@ class AuthUser(Base):
     def __repr__(self):
         return f"<AuthUser username={self.username}, role={self.role}>"
 
+class QueryProcedure(Base):
+    """Private retrieval procedures, retained independently of conversation rows."""
+    __tablename__ = "query_procedures"
+
+    procedure_id = Column(String(36), primary_key=True)
+    tenant_id = Column(String, nullable=False)
+    owner_id = Column(String(255), nullable=False)
+    sharing_scope = Column(String(32), nullable=False, default="private")
+    query_text = Column(Text, nullable=False)
+    description = Column(Text, nullable=False)
+    script_code = Column(Text, nullable=False)
+    content_hash = Column(String(64), nullable=False)
+    compatibility_key = Column(String(64), nullable=False)
+    evidence_json = Column(JSON, nullable=False)
+    classification_json = Column(JSON, nullable=False)
+    output_fields_json = Column(JSON, nullable=False)
+    result_summary = Column(Text, nullable=False)
+    data_source = Column(String(32), nullable=False)
+    source = Column(String(32), nullable=False)
+    originating_run_id = Column(String(255), nullable=False)
+    parent_procedure_id = Column(String(36), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=get_utc_now)
+    last_used_at = Column(DateTime(timezone=True), nullable=False, default=get_utc_now)
+    execution_count = Column(Integer, nullable=False, default=1)
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'owner_id', 'sharing_scope', 'compatibility_key', 'content_hash', name='uix_query_procedure_content'),
+        Index('idx_query_procedure_owner', 'tenant_id', 'owner_id', 'sharing_scope'),
+        Index('idx_query_procedure_retention', 'tenant_id', 'last_used_at'),
+    )
+
+
 class QueryHistory(Base):
     """Table to store rolling history of queries and their results"""
     __tablename__ = "query_history"
@@ -619,5 +651,3 @@ class ConversationResultSetParent(Base):
     child_result_set_id = Column(String(255), ForeignKey('conversation_result_sets.result_set_id', ondelete='CASCADE'), primary_key=True)
     parent_result_set_id = Column(String(255), ForeignKey('conversation_result_sets.result_set_id', ondelete='CASCADE'), primary_key=True)
     created_at = Column(DateTime(timezone=True), default=get_utc_now, nullable=False)
-
-        

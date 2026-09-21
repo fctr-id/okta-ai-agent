@@ -14,7 +14,7 @@ import ast
 
 from pydantic_ai import RunContext, FunctionToolset, ModelRetry, UsageLimits
 from pydantic_ai.exceptions import UsageLimitExceeded
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from typing import Any, Optional, Callable, Awaitable, List
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -31,6 +31,7 @@ from src.core.agents.agent_callbacks import (
 from src.core.agents import build_agent
 from src.core.models.model_picker import ModelType
 from src.data.schemas.artifact_manifest import build_artifact_prompt_context, load_artifacts_file
+from src.data.schemas.query_procedure import ProcedureMetadata, entity_catalog
 
 logger = get_logger("okta_ai_agent")
 
@@ -48,6 +49,8 @@ class SynthesisResult(BaseModel):
     script_code: Optional[str] = None
     display_type: str = "table"  # "table" or "markdown"
     summary: Optional[str] = None
+    procedure_metadata: Optional[ProcedureMetadata] = None
+    _response_models: list[str] = PrivateAttr(default_factory=list)
     artifact_keys: List[str] = Field(default_factory=list)
     result_set_refs: List[str] = Field(default_factory=list)
     error: Optional[str] = None
@@ -236,6 +239,7 @@ async def execute_synthesis(
 
 Generate the final production Python script using the artifacts above.
 Follow all patterns from synthesis_prompt.txt."""
+        context += "\nCanonical entity catalog for procedure_metadata: " + ", ".join(sorted(entity_catalog()))
         
         # Dynamically inject CLI portability instructions (only when cli_mode=True)
         if deps.cli_mode:
@@ -289,6 +293,10 @@ db_path = next((p for p in possible_paths if p.exists()), None)
             deps=deps,
             usage_limits=SYNTHESIS_USAGE_LIMITS,
         )
+        result.output._response_models = sorted({
+            message.model_name for message in result.all_messages()
+            if getattr(message, 'kind', None) == 'response' and getattr(message, 'model_name', None)
+        })
         
         logger.info(f"[{deps.correlation_id}] Synthesis complete: success={result.output.success}")
         

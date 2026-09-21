@@ -76,6 +76,9 @@ class Settings(BaseSettings):
     # AI Provider
     AI_PROVIDER: str = os.getenv("AI_PROVIDER", "openai_compatible")
     USE_PRE_REASONING: bool = os.getenv("USE_PRE_REASONING", "true").lower() == "true"
+    QUERY_PROCEDURES_ENABLED: bool = False
+    QUERY_PROCEDURES_MAX_PER_TENANT: int = Field(default=100, ge=1, le=500)
+    QUERY_PROCEDURES_CATALOG_CHARS: int = Field(default=32000, ge=1000, le=100000)
 
     # Slack Bot Configuration
     ENABLE_SLACK_BOT: bool = os.getenv("ENABLE_SLACK_BOT", "false").lower() == "true"

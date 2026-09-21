@@ -343,6 +343,7 @@ def _build_markdown_turn_preview(turn: ConversationTurn) -> Optional[Conversatio
                 display_type="markdown",
                 content=artifact_content,
                 metadata={
+                    **(turn_output_artifact.get("metadata") if isinstance(turn_output_artifact.get("metadata"), dict) else {}),
                     "source": "saved_turn_output",
                     "isPreview": False,
                 },
