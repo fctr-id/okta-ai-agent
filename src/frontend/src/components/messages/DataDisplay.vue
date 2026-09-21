@@ -34,8 +34,8 @@
         <!-- Data Table Display -->
         <div v-else-if="displayedItems.length > 0 || (isStreaming && (props.type === MessageType.TABLE || props.type === MessageType.STREAM))" class="table-content">
             <v-data-table class="results-table" :style="{ '--results-table-min-width': `${tableMinWidth}px` }"
-                :headers="tableHeaders" :items="displayedItems"
-                :loading="loading" :items-per-page="10" :search="search" v-model:sort-by="sortBy" multi-sort
+                :headers="tableHeaders" :items="searchedItems" :item-value="rowKey"
+                :loading="loading" :items-per-page="10" v-model:sort-by="sortBy" multi-sort
                 v-model:page="tablePage" :group-by="groupBy" v-model:opened="openedGroups"
                 items-per-page-text="Rows per page" density="compact" hover>
                 <template v-slot:top>
@@ -62,7 +62,8 @@
                                 :aria-label="isResultsPreview ? 'Search preview' : 'Search results'"
                                 :placeholder="isResultsPreview ? 'Search preview' : 'Search results'"
                                 prepend-inner-icon="mdi-magnify" single-line clearable variant="outlined" class="search-field" />
-                            <v-btn class="download-btn" :class="{ 'preview-export': isResultsPreview }" @click="downloadCSV" variant="flat">
+                            <v-btn class="download-btn" :class="{ 'preview-export': isResultsPreview }" @click="downloadCSV" variant="flat"
+                                :title="`Export all ${displayedItems.length.toLocaleString()} loaded records and all result columns, including hidden fields`">
                                 <v-icon size="small" start aria-hidden="true">mdi-download</v-icon>
                                 {{ isResultsPreview ? 'Export preview' : 'Export CSV' }}
                             </v-btn>
@@ -81,6 +82,29 @@
                             <v-select v-model="groupColumn" :items="groupOptions" label="Group by"
                                 aria-label="Group results by column" density="compact" variant="outlined"
                                 hide-details class="group-field" />
+                            <v-menu :close-on-content-click="false">
+                                <template #activator="{ props: menuProps }">
+                                    <v-btn v-bind="menuProps" variant="outlined" class="columns-button" prepend-icon="mdi-view-column-outline">
+                                        Columns {{ visibleHeaders.length }}/{{ formattedHeaders.length }}
+                                    </v-btn>
+                                </template>
+                                <div class="column-menu">
+                                    <div class="column-presets" aria-label="Column presets">
+                                        <v-btn size="small" variant="tonal" @click="selectColumns(5)">5 columns</v-btn>
+                                        <v-btn size="small" variant="tonal" @click="selectColumns(7)">7 columns</v-btn>
+                                        <v-btn size="small" variant="text" @click="selectColumns(formattedHeaders.length)">All</v-btn>
+                                    </div>
+                                    <p>CSV includes all result columns, even hidden ones.</p>
+                                    <div class="column-options" role="group" aria-label="Visible columns">
+                                        <label v-for="header in formattedHeaders" :key="header.key">
+                                            <input type="checkbox" :checked="visibleKeys.has(header.key)"
+                                                :disabled="visibleKeys.has(header.key) && visibleHeaders.length === 1"
+                                                @change="toggleColumn(header.key)">
+                                            {{ header.title }}
+                                        </label>
+                                    </div>
+                                </div>
+                            </v-menu>
                             <span class="sort-hint">Click headers to sort by multiple columns. Numbers show priority.</span>
                         </div>
                     </div>
@@ -97,7 +121,7 @@
                         </td>
                     </tr>
                 </template>
-                <template v-for="header in formattedHeaders" :key="header.key" v-slot:[`item.${header.key}`]="{ value }">
+                <template v-for="header in visibleHeaders" :key="header.key" v-slot:[`item.${header.key}`]="{ value }">
                     <ResultTableCell :value="value" :label="header.title" />
                 </template>
             </v-data-table>
@@ -118,6 +142,7 @@ import { marked } from 'marked'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
 import ResultTableCell from './ResultTableCell.vue'
+import { resultColumnKeys, resultRowsCsv, resultValueText } from './resultTable.js'
 
 marked.setOptions({
     breaks: true,    // Translate line breaks to <br>
@@ -186,6 +211,13 @@ const sortBy = ref([{ key: 'email', order: 'asc' }])
 const tablePage = ref(1)
 const groupColumn = ref('')
 const openedGroups = ref([])
+const selectedColumns = ref(null)
+const rowKeys = new WeakMap()
+let nextRowKey = 0
+const rowKey = item => {
+    if (!rowKeys.has(item)) rowKeys.set(item, ++nextRowKey)
+    return rowKeys.get(item)
+}
 
 watch([groupColumn, search], () => {
     tablePage.value = 1
@@ -282,7 +314,7 @@ const formattedHeaders = computed(() => {
 
     // Generate headers from data if available
     if (displayedItems.value.length > 0) {
-        return Object.keys(displayedItems.value[0]).map(key => ({
+        return resultColumnKeys(displayedItems.value).map(key => ({
             title: key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
             key: key,
             align: 'start',
@@ -293,12 +325,34 @@ const formattedHeaders = computed(() => {
 
     return []
 })
-const tableMinWidth = computed(() => formattedHeaders.value.reduce((total, header) => total + columnWidth(header.key), 0))
+const visibleKeys = computed(() => new Set(selectedColumns.value ?? formattedHeaders.value.slice(0, 7).map(header => header.key)))
+const visibleHeaders = computed(() => formattedHeaders.value.filter(header => visibleKeys.value.has(header.key)))
+const selectColumns = count => { selectedColumns.value = formattedHeaders.value.slice(0, count).map(header => header.key) }
+const toggleColumn = key => {
+    const keys = new Set(visibleKeys.value)
+    if (keys.has(key)) { if (keys.size > 1) keys.delete(key) } else keys.add(key)
+    selectedColumns.value = [...keys]
+}
+watch(() => formattedHeaders.value.map(header => header.key).join('\0'), () => {
+    selectedColumns.value = null
+})
+watch(visibleHeaders, headers => {
+    const keys = new Set(headers.map(header => header.key))
+    sortBy.value = sortBy.value.filter(sort => keys.has(sort.key))
+    if (!keys.has(groupColumn.value)) groupColumn.value = ''
+})
+const searchedItems = computed(() => {
+    const term = (search.value || '').trim().toLocaleLowerCase()
+    return term ? displayedItems.value.filter(row => formattedHeaders.value.some(header =>
+        resultValueText(row[header.key]).toLocaleLowerCase().includes(term))) : displayedItems.value
+})
+const tableMinWidth = computed(() => visibleHeaders.value.reduce((total, header) => total + columnWidth(header.key),
+    groupBy.value.length ? 44 : 0))
 
 // Group scalar values only; nested objects and arrays do not make useful group labels.
 const groupOptions = computed(() => [
     { title: 'None', value: '' },
-    ...formattedHeaders.value
+    ...visibleHeaders.value
         .filter(header => displayedItems.value.every(row => row[header.key] == null || typeof row[header.key] !== 'object'))
         .map(header => ({ title: header.title, value: header.key }))
 ])
@@ -306,10 +360,11 @@ const groupBy = computed(() => groupColumn.value && groupOptions.value.some(opti
     ? [{ key: groupColumn.value, order: 'asc' }]
     : [])
 const groupLabel = value => value == null || value === '' ? '(Empty)' : String(value)
-const tableHeaders = computed(() => groupBy.value.length
-    ? [{ key: 'data-table-group', title: '', width: 44, sortable: false,
-        headerProps: { class: 'group-spacer' }, cellProps: { class: 'group-spacer' } }, ...formattedHeaders.value]
-    : formattedHeaders.value)
+const tableHeaders = computed(() => [
+    ...(groupBy.value.length ? [{ key: 'data-table-group', title: '', width: 44, sortable: false,
+        headerProps: { class: 'group-spacer' }, cellProps: { class: 'group-spacer' } }] : []),
+    ...visibleHeaders.value,
+])
 
 // Formatted JSON content
 const formattedJson = computed(() => {
@@ -508,28 +563,8 @@ const downloadCSV = () => {
     }
 
     try {
-        // Generate headers from first item
-        const firstItem = displayedItems.value[0]
-        const headers = Object.keys(firstItem).map(key => ({
-            text: key.replace(/_/g, ' ').toUpperCase(),
-            value: key
-        }))
-
-        // Create CSV content
-        const headerRow = headers
-            .map(h => `"${h.text}"`)
-            .join(',')
-
-        const dataRows = displayedItems.value.map(item =>
-            headers
-                .map(h => {
-                    const value = item[h.value]
-                    return `"${value ?? ''}"`
-                })
-                .join(',')
-        )
-
-        const csvContent = [headerRow, ...dataRows].join('\n')
+        // Export the full loaded dataset, independent of pagination and display controls.
+        const csvContent = resultRowsCsv(displayedItems.value, formattedHeaders.value)
 
         // Create local timestamp for filename
         const now = new Date()
@@ -863,7 +898,14 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
 :deep(.search-field .v-field__prepend-inner .v-icon) { font-size: 19px; }
 
 /* Target Vuetify's current table markup, including its native scroll wrapper. */
-.table-content { width: 100%; min-width: 0; }
+.table-content { width: 100%; min-width: 0; container-type: inline-size; }
+.columns-button { height: 40px; border-color: #d4dce8; color: #40516b; text-transform: none; letter-spacing: 0; }
+.column-menu { background: #fff; border: 1px solid #d6dce5; border-radius: 10px; padding: 16px; max-width: min(360px, 90vw); box-shadow: 0 8px 28px #182b491f; color: #253248; }
+.column-presets { display: flex; gap: 6px; }
+.column-menu p { font-size: 12px; color: #64748b; margin: 12px 0; }
+.column-options { display: grid; max-height: 280px; overflow-y: auto; gap: 4px; }
+.column-options label { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font-size: 13px; cursor: pointer; }
+.column-options input { width: 16px; height: 16px; accent-color: #3e63dd; }
 .results-table { font-family: var(--font-family-body, inherit); }
 :deep(.results-table) { background: #fff; border: 1px solid var(--workspace-outline, #d6dce5); border-radius: 12px; overflow: hidden; box-shadow: none; font-size: 13px; }
 :deep(.results-table .v-table__wrapper) {
@@ -1171,6 +1213,15 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
 }
 
 /* Responsive adjustments */
+@container (max-width: 900px) {
+    .table-header-container { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .results-tools { grid-column: 1; grid-row: 2; }
+    .preview-description { grid-column: 1; grid-row: 2; }
+    .table-header-container.is-preview .results-tools { grid-row: 3; }
+    .table-action { grid-column: 1; grid-row: 4; }
+    .table-action .saved-results-btn { width: 100%; }
+}
+
 @media (max-width: 992px) {
     .table-header-container { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .results-tools { grid-column: 1; grid-row: 2; }
