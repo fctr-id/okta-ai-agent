@@ -15,6 +15,7 @@
 - **Provider Compatibility**: Updated Google Cloud/Vertex provider configuration, custom certificate handling, and HTTP retries for the new SDK interfaces. Explicit early termination preserves the previous behavior when an agent produces a validated final output.
 - **More Reliable CSV Formatting**: Correctly escapes quotes and multiline values, serializes nested data, preserves fields that appear in later rows when columns are inferred, and treats formula-like text as text in spreadsheet exports.
 - **Cleaner Startup Output**: Disabled the Pydantic AI startup banner while retaining application logging.
+- **Clean-Clone Docker Builds**: Removed an obsolete copy step for a local-only certificate directory, allowing builds from a fresh repository checkout.
 
 ---
 
