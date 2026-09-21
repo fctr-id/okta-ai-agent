@@ -64,6 +64,29 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
         output = self.module.APIDiscoveryResult(success=True, api_data_retrieved=True, found_data=["users"])
         self.module.validate_api_discovery_output(SimpleNamespace(deps=self.deps), output)
 
+    async def test_prepare_tools_capability_filters_event_lookup_per_run(self):
+        from pydantic_ai.messages import ModelResponse, ToolCallPart
+        from pydantic_ai.models.function import FunctionModel
+
+        for allow_lookup in (False, True):
+            with self.subTest(allow_lookup=allow_lookup):
+                self.deps.allow_event_type_lookup = allow_lookup
+
+                def model(messages, info):
+                    names = {tool.name for tool in info.function_tools}
+                    self.assertEqual("get_detailed_events_from_keys" in names, allow_lookup)
+                    self.assertIn("execute_test_query", names)
+                    return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {
+                        "success": False, "error": "fixture: no retrieval requested",
+                    })])
+
+                with self.module.api_discovery_agent.override(model=FunctionModel(model)):
+                    result = await self.module.api_discovery_agent.run(
+                        "fixture request", deps=self.deps,
+                        toolsets=[self.module.create_api_toolset(self.deps)],
+                    )
+                self.assertFalse(result.output.success)
+
     async def test_truncation_is_logged_without_changing_tool_content(self):
         data = [{"id": "private-id", "description": "private-value" * 500}]
         self.client.make_request.return_value = {"status": "success", "data": data}

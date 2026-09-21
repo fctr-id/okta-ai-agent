@@ -94,6 +94,44 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
                         await execute("Fixture request", deps)
                 self.assertIs(raised.exception, error)
 
+    async def test_multistep_discovery_receives_each_current_assignment(self):
+        from src.core.agents import orchestrator as orch
+
+        def delegate(target, task):
+            return orch.SupervisorDecision(mode="delegate", target=target, requested_data=[task], reasoning=task)
+
+        steps = [delegate("API", "Fetch the starting population"),
+                 delegate("SQL", "Select matching records from the starting population"),
+                 delegate("API", "Enrich only the database selection")]
+        api_results = [(orch.APIDiscoveryResult(success=True, found_data=["population"], needs_sql=["selection"]), RunUsage()),
+                       (orch.APIDiscoveryResult(success=True, found_data=["enrichment"]), RunUsage())]
+        sql_result = orch.SQLDiscoveryResult(success=True, found_data=["selection"], needs_api=["enrichment"], reasoning="Selection saved")
+        next_steps = [(step, RunUsage()) for step in steps[1:]] + [
+            (orch.SupervisorDecision(mode="complete", target="SYNTHESIS", reasoning="All steps done"), RunUsage())]
+        query = "Retrieve a population, select it in the database, then enrich that selection."
+        with TemporaryDirectory() as tmp, \
+             patch.object(orch, "execute_api_discovery", AsyncMock(side_effect=api_results)) as api, \
+             patch.object(orch, "execute_sql_discovery", AsyncMock(return_value=(sql_result, RunUsage()))) as sql, \
+             patch.object(orch, "supervise_next_step", AsyncMock(side_effect=next_steps)):
+            result = orch.OrchestratorResult()
+            result.supervisor_decisions.append(steps[0].model_dump())
+            await orch._run_discovery_loop(
+                result=result, phase="API", initial_sql_usage=None, user_query=query,
+                correlation_id="contract", artifacts_file=Path(tmp) / "artifacts.json",
+                okta_client=None, cancellation_check=lambda: False,
+                aggregator=orch.EventAggregator(None), endpoints_list=[],
+                db_runtime_summary={"usable_for_sql": True}, special_tool_capabilities={},
+                global_tool_calls_counter=0, max_tool_calls=30)
+        self.assertEqual(result.phases_executed, ["api", "sql", "api"])
+        for call, step in zip([api.await_args_list[0], sql.await_args, api.await_args_list[1]], steps):
+            prompt = call.args[0]
+            self.assertIn(query, prompt)
+            assignment = prompt.split("Current supervisor assignment:\n", 1)[1]
+            self.assertIn(step.requested_data[0], assignment)
+            for other in steps:
+                if other is not step:
+                    self.assertNotIn(other.requested_data[0], assignment)
+
     async def test_sql_budget_exhaustion_stops_without_api_fallback(self):
         from src.core.agents import orchestrator as orch
         from src.core.agents import sql_discovery_agent as sql

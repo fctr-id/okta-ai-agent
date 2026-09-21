@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-import httpx
+import httpx2
 from pydantic_ai import Agent
 from pydantic_ai.providers.azure import AzureProvider
 
@@ -51,7 +51,7 @@ class AzureModelConfigTests(unittest.IsolatedAsyncioTestCase):
         def respond(request):
             requests.append(request)
             body = json.loads(request.content)
-            return httpx.Response(200, json={
+            return httpx2.Response(200, json={
                 'id': 'resp_fixture', 'object': 'response', 'created_at': 0,
                 'model': body['model'], 'status': 'completed',
                 'output': [{
@@ -73,7 +73,7 @@ class AzureModelConfigTests(unittest.IsolatedAsyncioTestCase):
             # Existing installations may still have this obsolete setting.
             'AZURE_OPENAI_VERSION': '2024-07-08',
         }
-        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        async with httpx2.AsyncClient(transport=httpx2.MockTransport(respond)) as client:
             def provider(**kwargs):
                 return AzureProvider(**kwargs, http_client=client)
 

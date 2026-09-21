@@ -110,7 +110,7 @@ class HttpCompatibilityTests(unittest.TestCase):
 
 
 class AgentCompatibilityTests(unittest.IsolatedAsyncioTestCase):
-    async def test_latest_one_x_executes_tools_and_retains_message_history(self):
+    async def test_v2_executes_tools_and_retains_message_history(self):
         agent = Agent(TestModel(call_tools=['lookup'], custom_output_text='fixture result'))
         calls = []
 

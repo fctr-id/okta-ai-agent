@@ -1,20 +1,26 @@
 <template>
     <div class="result-cell">
-        <div :id="contentId" ref="contentRef" class="cell-value" :class="{ 'is-collapsed': !expanded }">{{ value }}</div>
+        <div :id="contentId" ref="contentRef" class="cell-value" :class="{ 'is-collapsed': !isList && !expanded }">
+            <ul v-if="isList" class="cell-list">
+                <li v-for="(entry, index) in visibleValues" :key="index">{{ resultValueText(entry) }}</li>
+            </ul>
+            <template v-else>{{ resultValueText(value) }}</template>
+        </div>
         <button
-            v-if="hasOverflow"
+            v-if="canExpand"
             type="button"
             class="cell-toggle"
             :aria-expanded="expanded"
             :aria-controls="contentId"
             :aria-label="`${expanded ? 'Show less' : 'View all'} ${label}`"
             @click="expanded = !expanded"
-        >{{ expanded ? 'Show less' : 'View all' }}</button>
+        >{{ expanded ? 'Show less' : isList ? `Show ${value.length - 5} more` : 'View all' }}</button>
     </div>
 </template>
 
 <script setup>
-import { onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
+import { resultValueText } from './resultTable.js'
 
 const props = defineProps({
     value: { default: null },
@@ -24,6 +30,9 @@ const contentId = `result-cell-${useId()}`
 const contentRef = ref(null)
 const expanded = ref(false)
 const hasOverflow = ref(false)
+const isList = computed(() => Array.isArray(props.value))
+const visibleValues = computed(() => expanded.value ? props.value : props.value.slice(0, 5))
+const canExpand = computed(() => isList.value ? props.value.length > 5 : hasOverflow.value)
 let observer
 
 const measureOverflow = () => {
@@ -51,6 +60,8 @@ onBeforeUnmount(() => observer?.disconnect())
 <style scoped>
 .result-cell { min-width: 0; }
 .cell-value { line-height: 1.6; overflow-wrap: anywhere; }
+.cell-list { margin: 0; padding-left: 16px; }
+.cell-list li + li { margin-top: 3px; }
 .cell-value.is-collapsed {
     display: -webkit-box;
     -webkit-box-orient: vertical;

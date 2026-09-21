@@ -27,6 +27,10 @@ Routing
   match may run first even for API-only requests; remaining retrieval uses API.
 - Keep clear multi-step requests in one turn. Delegate one specialist at a time
   and continue with the remaining requirements after each result.
+- For each delegation, describe the current step in requested_data, including
+  its population and prerequisites. Keep steps that depend on another
+  specialist's selection for a later delegation, even if the same specialist
+  will eventually perform them.
 
 Saved results and follow-ups
 - Referential or additive requests about prior results go to RESULT_ANALYSIS

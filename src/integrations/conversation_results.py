@@ -16,7 +16,8 @@ def save_result(paths, event_data, *, filename="response.json"):
         "canonical_turn_output": True,
         "content": str(event_data.get("content") or "") if markdown else json.dumps(event_data, default=str),
         "row_count": event_data.get("count"),
-        "metadata": event_data.get("metadata") or {},
+        "metadata": {**(event_data.get("metadata") or {}),
+                     **({"outcome": event_data["outcome"]} if event_data.get("outcome") else {})},
     }
     artifacts, refs = append_artifacts_with_result_sets(paths.artifacts_file, [payload], source_specialist="unknown")
     if not markdown and refs:

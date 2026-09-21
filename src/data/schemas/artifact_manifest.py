@@ -227,6 +227,7 @@ def append_artifacts_with_result_sets(
             enriched_artifact,
             source_specialist=source_specialist,
             sequence_in_turn=sequence + 1,
+            supporting_artifacts=existing + saved_artifacts,
         )
         if materialized:
             result_ref, inspection, manifest = materialized
@@ -371,20 +372,53 @@ def _materialize_result_set(
     *,
     source_specialist: SourceSpecialist,
     sequence_in_turn: int,
+    supporting_artifacts: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[tuple[ResultSetRef, ResultSetInspection, ArtifactManifest]]:
     content = artifact.get("content")
     if not isinstance(content, str):
         return None
 
-    try:
-        payload = json.loads(content)
-    except json.JSONDecodeError:
-        return None
+    narrative = artifact.get("category") == "turn_output" and artifact.get("display_type") == "markdown"
+    if narrative:
+        metadata = artifact.get("metadata") or {}
+        if not content.strip() or metadata.get("outcome") in {"fail", "clarify", "empty"}:
+            return None
+        evidence = []
+        for source in supporting_artifacts or []:
+            # Only this turn's discovery/analysis evidence. Do not recursively
+            # embed earlier final answers or hydrated session-reference wrappers.
+            if source.get("category") in {"turn_output", "session_result_refs"}:
+                continue
+            source_content = source.get("content")
+            if not isinstance(source_content, str):
+                continue
+            try:
+                source_data = json.loads(source_content)
+            except json.JSONDecodeError:
+                source_data = source_content
+            evidence.append({"artifact_key": source.get("key"), "category": source.get("category"), "data": source_data})
+        payload = {"answer": content, "supporting_evidence": evidence}
+    else:
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return None
 
     artifact_key = str(artifact.get("key") or artifact.get("artifact_key") or "artifact")
-    entity_type = _infer_entity_type(artifact)
+    entity_type = "narrative" if narrative else _infer_entity_type(artifact)
     records = extract_records(payload)
     inspection = inspect_records(records, entity_type=entity_type)
+    if narrative:
+        # Keep complete evidence on disk; never inject its full payload as a sample.
+        inspection.sample_rows = [{
+            "answer": content[:4000],
+            "answer_truncated": len(content) > 4000,
+            "supporting_evidence": [{
+                "artifact_key": item["artifact_key"], "category": item["category"],
+                "preview": json.dumps(item["data"], default=str)[:500],
+            } for item in payload["supporting_evidence"][:3]],
+            "supporting_evidence_count": len(payload["supporting_evidence"]),
+        }]
     turn_number, run_id, session_id = _infer_runtime_identity(results_dir / "placeholder.json")
     result_set_id = build_result_set_id(
         prefix=f"rs_{source_specialist}",

@@ -13,7 +13,7 @@
 
   <p>
     <a href="#quick-start-docker">Quick start</a> ·
-    <a href="#important-notes-for-v31">v3.1 upgrade notes</a> ·
+    <a href="#important-notes-for-v311">v3.1.1 upgrade notes</a> ·
     <a href="#why-tako">Why Tako</a> ·
     <a href="#demo">Demo</a> ·
     <a href="#ai-provider-support">AI providers</a> ·
@@ -22,7 +22,7 @@
 
   <p>
     <a href="VERSION.md">
-      <img src="./media/badges/preview.svg" alt="v3.1.0-beta" width="170" height="22">
+      <img src="./media/badges/preview.svg" alt="v3.1.1-beta" width="170" height="22">
     </a>
     <a href="docker-compose.yml">
       <img src="./media/badges/docker.svg" alt="Docker: AMD64 and ARM64" width="144" height="22">
@@ -70,8 +70,9 @@ Results and savings vary by model, question, tenant size, and data freshness.
 Synced data includes users, groups, applications, policies, devices, enrolled authenticators, and their assignments. Large tenants may take longer to complete the first sync.
 
 <a id="important-notes-for-v31"></a>
+<a id="important-notes-for-v311"></a>
 
-## ⚠️ Important notes for v3.1
+## ⚠️ Important notes for v3.1.1
 
 Review these settings before upgrading. Expand a topic for details; restart Tako after changes.
 
@@ -131,7 +132,7 @@ https://github.com/user-attachments/assets/7a27ebc4-39a0-400f-bf16-505afca7ca3d
 - Visible progress — Inspect discovery, execution, tables, and generated scripts.
 - History and favorites — Revisit recent queries and save frequent ones.
 - CSV and Python export — Export results for reports or download reusable Python scripts.
-- Interactive results — Sort by multiple columns and group rows into collapsible sections with record counts.
+- Interactive results — Choose visible columns, expand long lists within cells, sort by multiple columns, and group rows into collapsible sections with record counts.
 - CLI automation — Run queries and database syncs from scheduled jobs.
 - Optional Slack bot — Query your tenant with `/tako`; disabled by default.
 - Optional Teams bot — Query Okta in personal chats, continue conversations, and download CSV results; disabled by default.
@@ -180,7 +181,7 @@ For a local installation without Docker, see the [installation guide](https://gi
 - Access to a [supported AI provider](#ai-provider-support).
 
 > [!IMPORTANT]
-> Review the [important notes for v3.1](#important-notes-for-v31), especially login signing keys and your model's reasoning setting, before starting Tako.
+> Review the [important notes for v3.1.1](#important-notes-for-v311), especially login signing keys and your model's reasoning setting, before starting Tako.
 
 ### Installation
 
@@ -368,7 +369,7 @@ The builder and package assets live in `src/integrations/teams/app_package/`. Th
 
 - OAuth 2.0 or API tokens — Queries use the permissions granted to your configured Okta credentials. Configure least-privilege read access for the data you need.
 - Initial admin setup — A one-time setup token gates creation of the first application admin account.
-- Web sessions — Signed using a configured private key or an automatically generated key. See [v3.1 upgrade notes](#important-notes-for-v31) for restart behavior and shared-key configuration.
+- Web sessions — Signed using a configured private key or an automatically generated key. See [v3.1.1 upgrade notes](#important-notes-for-v311) for restart behavior and shared-key configuration.
 - Optional Slack access — Explicit user or group allowlists control access to the bot.
 
 <details>

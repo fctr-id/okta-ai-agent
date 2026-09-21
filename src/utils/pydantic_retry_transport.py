@@ -1,7 +1,7 @@
 """
 PydanticAI Native Retry System - HTTP Transport Layer Retry
 
-This module implements PydanticAI's native retry functionality using AsyncTenacityTransport
+This module implements PydanticAI's native retry functionality using AsyncHTTPX2TenacityTransport
 to handle rate limits at the HTTP transport layer before they reach the agent.
 
 Features:
@@ -19,14 +19,14 @@ Usage:
     
     # Use with any provider
     provider = OpenAIProvider(http_client=client)
-    model = OpenAIModel('gpt-4', provider=provider)
+    model = OpenAIChatModel('gpt-4', provider=provider)
 """
 
 import asyncio
 from typing import Optional, Callable
-import httpx
-from tenacity import AsyncRetrying, stop_after_attempt, retry_if_exception_type
-from pydantic_ai.retries import AsyncTenacityTransport, wait_retry_after, wait_exponential
+import httpx2
+from tenacity import stop_after_attempt, retry_if_exception_type, wait_exponential
+from pydantic_ai.retries import AsyncHTTPX2TenacityTransport, RetryConfig, wait_retry_after
 
 from src.utils.logging import get_logger
 
@@ -38,7 +38,7 @@ def create_retrying_http_client(
     max_attempts: int = 3,
     correlation_id: str = None,
     agent_type: str = "ai_agent"
-) -> httpx.AsyncClient:
+) -> httpx2.AsyncClient:
     """
     Create an HTTP client with PydanticAI native retry functionality.
     
@@ -50,7 +50,7 @@ def create_retrying_http_client(
         agent_type: Type of agent for logging (planning_agent, sql_agent, etc.)
         
     Returns:
-        httpx.AsyncClient configured with retry transport
+        httpx2.AsyncClient configured with retry transport
         
     Example:
         client = create_retrying_http_client(
@@ -59,7 +59,7 @@ def create_retrying_http_client(
             agent_type="planning_agent"
         )
         provider = OpenAIProvider(http_client=client)
-        model = OpenAIModel('gpt-4', provider=provider)
+        model = OpenAIChatModel('gpt-4', provider=provider)
     """
     
     def retry_before_sleep_callback(retry_state):
@@ -105,10 +105,10 @@ def create_retrying_http_client(
             # Raise HTTPStatusError for retry mechanism to catch
             response.raise_for_status()
     
-    # Create the AsyncRetrying controller with PydanticAI's smart wait strategy
-    async_retrying = AsyncRetrying(
+    # Configure the transport with PydanticAI's smart wait strategy.
+    retry_config = RetryConfig(
         # Retry on HTTP errors (429, 5xx) and connection issues
-        retry=retry_if_exception_type((httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException)),
+        retry=retry_if_exception_type((httpx2.HTTPStatusError, httpx2.ConnectError, httpx2.TimeoutException)),
         
         # Smart waiting: respects Retry-After headers, falls back to exponential backoff
         wait=wait_retry_after(
@@ -126,16 +126,16 @@ def create_retrying_http_client(
         reraise=True
     )
     
-    # Create the AsyncTenacityTransport
-    transport = AsyncTenacityTransport(
-        controller=async_retrying,
+    # Create the AsyncHTTPX2TenacityTransport
+    transport = AsyncHTTPX2TenacityTransport(
+        config=retry_config,
         validate_response=should_retry_response
     )
     
     # Create HTTP client with retry transport
-    client = httpx.AsyncClient(
+    client = httpx2.AsyncClient(
         transport=transport,
-        timeout=httpx.Timeout(60.0)  # 60 second timeout per request
+        timeout=httpx2.Timeout(60.0)  # 60 second timeout per request
     )
     
     logger.info(f"[{correlation_id or 'unknown'}] Created retrying HTTP client for {agent_type} with {max_attempts} max attempts")
@@ -143,7 +143,7 @@ def create_retrying_http_client(
     return client
 
 
-def create_simple_retrying_http_client(max_attempts: int = 3) -> httpx.AsyncClient:
+def create_simple_retrying_http_client(max_attempts: int = 3) -> httpx2.AsyncClient:
     """
     Create a simple HTTP client with retry functionality without callbacks.
     
@@ -151,7 +151,7 @@ def create_simple_retrying_http_client(max_attempts: int = 3) -> httpx.AsyncClie
         max_attempts: Maximum number of retry attempts
         
     Returns:
-        httpx.AsyncClient configured with basic retry transport
+        httpx2.AsyncClient configured with basic retry transport
     """
     return create_retrying_http_client(
         retry_callback=None,
@@ -162,7 +162,7 @@ def create_simple_retrying_http_client(max_attempts: int = 3) -> httpx.AsyncClie
 
 
 # Predefined retry clients for common scenarios
-def create_planning_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx.AsyncClient:
+def create_planning_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx2.AsyncClient:
     """Create retrying HTTP client specifically for planning agent"""
     return create_retrying_http_client(
         retry_callback=retry_callback,
@@ -171,7 +171,7 @@ def create_planning_agent_http_client(correlation_id: str, retry_callback: Optio
     )
 
 
-def create_sql_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx.AsyncClient:
+def create_sql_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx2.AsyncClient:
     """Create retrying HTTP client specifically for SQL agent"""
     return create_retrying_http_client(
         retry_callback=retry_callback,
@@ -180,7 +180,7 @@ def create_sql_agent_http_client(correlation_id: str, retry_callback: Optional[C
     )
 
 
-def create_api_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx.AsyncClient:
+def create_api_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx2.AsyncClient:
     """Create retrying HTTP client specifically for API code gen agent"""
     return create_retrying_http_client(
         retry_callback=retry_callback,
@@ -189,7 +189,7 @@ def create_api_agent_http_client(correlation_id: str, retry_callback: Optional[C
     )
 
 
-def create_api_sql_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx.AsyncClient:
+def create_api_sql_agent_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx2.AsyncClient:
     """Create retrying HTTP client specifically for API-SQL agent"""
     return create_retrying_http_client(
         retry_callback=retry_callback,
@@ -198,7 +198,7 @@ def create_api_sql_agent_http_client(correlation_id: str, retry_callback: Option
     )
 
 
-def create_results_formatter_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx.AsyncClient:
+def create_results_formatter_http_client(correlation_id: str, retry_callback: Optional[Callable] = None) -> httpx2.AsyncClient:
     """Create retrying HTTP client specifically for results formatter agent"""
     return create_retrying_http_client(
         retry_callback=retry_callback,

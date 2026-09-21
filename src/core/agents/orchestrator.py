@@ -1041,6 +1041,27 @@ class EventAggregator:
             await self.event_callback('progress', event)
 
 
+def _discovery_assignment(result: OrchestratorResult, user_query: str, target: str) -> str:
+    """Pass the current delegation, rather than just the entire multi-step goal."""
+    decision = result.supervisor_decisions[-1] if result.supervisor_decisions else {}
+    if decision.get("mode") != "delegate" or decision.get("target") != target:
+        return user_query
+    assignment = {
+        "target": target,
+        "requested_data": decision.get("requested_data") or [],
+        "reasoning": decision.get("reasoning") or "",
+    }
+    return (
+        f"Overall user request (context):\n{user_query}\n\n"
+        f"Current supervisor assignment:\n{json.dumps(assignment, ensure_ascii=False)}\n\n"
+        "Carry out this assigned step and its necessary prerequisites. Preserve the user's "
+        "population, filters, and dependency order. Do not prefetch a later step that depends "
+        "on another specialist's output. Save this step's evidence and report remaining "
+        "requirements to the supervisor; success here means this step is complete, not "
+        "that the entire request is complete."
+    )
+
+
 async def _run_initial_sql_discovery(
     *,
     result: OrchestratorResult,
@@ -1089,7 +1110,9 @@ async def _run_initial_sql_discovery(
         max_global_tool_calls=max_tool_calls,
     )
 
-    result.sql_result, initial_sql_usage = await execute_sql_discovery(user_query, sql_deps)
+    result.sql_result, initial_sql_usage = await execute_sql_discovery(
+        _discovery_assignment(result, user_query, "SQL"), sql_deps
+    )
     global_tool_calls_counter = sql_deps.global_tool_calls
     logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
     _add_usage_to_result(result, initial_sql_usage)
@@ -1334,7 +1357,9 @@ async def _run_api_loop_step(
         max_global_tool_calls=max_tool_calls
     )
 
-    result.api_result, api_usage = await execute_api_discovery(user_query, api_deps)
+    result.api_result, api_usage = await execute_api_discovery(
+        _discovery_assignment(result, user_query, "API"), api_deps
+    )
     global_tool_calls_counter = api_deps.global_tool_calls
     logger.info(f"Tool calls after API: {global_tool_calls_counter}/{max_tool_calls}")
 
@@ -1453,7 +1478,9 @@ async def _run_sql_followup_loop_step(
         max_global_tool_calls=max_tool_calls
     )
 
-    result.sql_result, sql_usage = await execute_sql_discovery(user_query, sql_deps)
+    result.sql_result, sql_usage = await execute_sql_discovery(
+        _discovery_assignment(result, user_query, "SQL"), sql_deps
+    )
     global_tool_calls_counter = sql_deps.global_tool_calls
     logger.info(f"Tool calls after SQL: {global_tool_calls_counter}/{max_tool_calls}")
 

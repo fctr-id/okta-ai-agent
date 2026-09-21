@@ -7,6 +7,10 @@ metadata, and samples. A canonical turn_output is the authoritative user-visible
 cohort, ahead of intermediate discovery samples from the same turn. Samples
 describe structure; your code operates on the selected full sets in memory.
 Correlate sets when needed and persist compact derived rows only when useful.
+Saved narrative results contain an answer and supporting_evidence. The answer
+is a prior interpretation; use the supporting evidence for factual checks and
+preserve its limits. Previews can be truncated; the complete narrative and
+evidence are available in the selected result_sets, without new retrieval.
 
 Project derived rows to the requested fields and relevant Okta identifiers;
 exclude local database bookkeeping fields even if earlier saved rows contain
