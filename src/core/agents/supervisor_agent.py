@@ -255,6 +255,8 @@ def _normalize_initial_decision(
 class SupervisorDecision(BaseModel):
     """Typed control-plane decision for the current turn."""
 
+    scope_interpretation: Optional[str] = Field(default=None, description="Brief requested population, relationship/measure and time boundary, grounded in the question or established context. Do not invent a definition from available data.")
+    scope_questions: List[str] = Field(default_factory=list, description="Unresolved USER choices that materially change the answer. Identify missing business definitions, populations or time boundaries before delegating. Empty only if scope is sufficiently defined; factual identifiers/schema lookups are not user choices.")
     mode: SupervisorMode
     target: SupervisorTarget = "NONE"
     reasoning: str
@@ -285,13 +287,21 @@ class SupervisorDecision(BaseModel):
             normalized["confidence"] = _normalize_confidence(normalized["confidence"])
         return normalized
 
-    @field_validator("requested_data", "evidence_artifact_keys", "evidence_result_set_refs", mode="before")
+    @field_validator("requested_data", "evidence_artifact_keys", "evidence_result_set_refs", "scope_questions", mode="before")
     @classmethod
     def normalize_string_lists(cls, value: Any) -> Any:
         return _clean_string_list(value)
 
     @model_validator(mode="after")
     def validate_decision(self) -> "SupervisorDecision":
+        if self.scope_questions:
+            self.mode = 'clarify'
+            self.target = 'NONE'
+            self.result_mode = 'needs_clarification'
+            self.user_message = ' '.join(self.scope_questions)
+            self.reuse_procedure_id = None
+            self.adapt_procedure = False
+            return self
         if self.adapt_procedure and not self.reuse_procedure_id:
             raise ValueError('Adaptation requires an inspected saved procedure ID')
         if self.reuse_procedure_id and (self.mode != 'complete' or self.target != 'SYNTHESIS'):
@@ -696,7 +706,8 @@ def _normalize_after_delegation_decision(
             user_message=latest_delegation_result.direct_answer or latest_delegation_result.summary,
         )
 
-    if latest_delegation_result.success and latest_delegation_result.status == "empty" and decision.mode != "empty":
+    if (latest_delegation_result.success and latest_delegation_result.status == "empty"
+            and decision.mode == "complete" and not _has_latest_gaps(latest_delegation_result)):
         return SupervisorDecision(
             mode="empty",
             target="NONE",
@@ -766,21 +777,12 @@ def _normalize_after_delegation_decision(
     if latest_delegation_result.success and not latest_delegation_result.needs_specialists:
         latest_target = _specialist_to_target(latest_delegation_result.source_specialist)
 
-        if latest_delegation_result.result_mode == "empty" and decision.mode == "delegate":
-            return SupervisorDecision(
-                mode="empty",
-                target="NONE",
-                result_mode="empty",
-                reasoning="Latest specialist returned a validated empty result with no further specialist needs.",
-                evidence_artifact_keys=latest_delegation_result.artifact_keys,
-                evidence_result_set_refs=latest_delegation_result.result_set_refs,
-            )
-
         if decision.mode == "delegate" and decision.target in _DELEGATE_TARGETS and decision.target != "PROCESSOR":
             # Allow valid cross-specialist follow-up work like SPECIAL -> SQL or SQL -> API.
             # Only collapse the decision when the supervisor is replaying the same specialist
             # without explicit unresolved specialist needs from the latest result.
-            if decision.target == latest_target:
+            if (decision.target == latest_target and latest_delegation_result.status != "empty"
+                    and latest_delegation_result.result_mode != "empty"):
                 return SupervisorDecision(
                     mode="complete",
                     target="SYNTHESIS",

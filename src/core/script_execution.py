@@ -9,6 +9,12 @@ from src.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def execution_evidence(code: str) -> dict:
+    """Bounded source evidence of a successful run, scoped to its conversation."""
+    return {'script': code[:16000], 'script_truncated': len(code) > 16000,
+            'description': 'Source executed successfully for this saved result; not proof of completeness or current data.'}
+
+
 def parse_output(stdout: str) -> dict:
     marker = "QUERY RESULTS"
     lines = stdout.splitlines()
@@ -70,10 +76,14 @@ async def execute_script(code: str, directory: Path, *, timeout=120, cancellatio
                 raise TimeoutError('Retrieval script timed out')
             await asyncio.wait({communication}, timeout=min(0.2, remaining))
         stdout, stderr = communication.result()
+        from src.core.retrieval_outcomes import check_retrieval_outcomes
+        check_retrieval_outcomes(stderr.decode("utf-8", errors="replace"))
         if proc.returncode:
             logger.error("Retrieval script failed (exit %s): %s", proc.returncode, stderr.decode("utf-8", errors="replace")[-2000:])
             raise ValueError("Script execution failed")
-        return parse_output(stdout.decode("utf-8", errors="replace"))
+        payload = parse_output(stdout.decode("utf-8", errors="replace"))
+        payload['metadata'] = {**(payload.get('metadata') or {}), 'execution_evidence': execution_evidence(code)}
+        return payload
     finally:
         if proc is not None and proc.returncode is None:
             proc.kill()

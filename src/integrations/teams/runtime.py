@@ -15,6 +15,7 @@ logger = get_logger(__name__)
 
 
 from src.core.script_execution import parse_output, execute_script
+from src.core.retrieval_outcomes import RetrievalFailure
 
 
 async def run_query(job: dict, *, orchestrate=None) -> dict:
@@ -47,7 +48,29 @@ async def run_query(job: dict, *, orchestrate=None) -> dict:
         elif result.is_special_tool:
             response = {"display_type": "markdown", "content": result.script_code or result.user_message or "Completed."}
         elif result.script_code:
-            response = await execute_script(result.script_code, paths.turn_dir / "execution")
+            try:
+                response = await execute_script(result.script_code, paths.turn_dir / "execution")
+            except RetrievalFailure as exc:
+                from src.core.execution_recovery import recover_failed_execution
+                try:
+                    response = await recover_failed_execution(
+                        result=result, failure=exc, user_query=job['query'], correlation_id=job['id'],
+                        artifacts_file=paths.artifacts_file, okta_client=client,
+                        cancellation_check=lambda: False, user_timezone=job.get('timezone'),
+                        orchestrate=orchestrate,
+                    )
+                    outcome = result.outcome
+                except RetrievalFailure as final_failure:
+                    exc = final_failure
+                    response = None
+                if response is None:
+                    result.success = False
+                    result.outcome = outcome = 'fail'
+                    result.result_mode = 'failed'
+                    result.is_degraded_success = False
+                    result.error = result.outcome_reason = str(exc)
+                    result.user_message = str(exc)
+                    response = {'display_type': 'markdown', 'content': str(exc), 'success': False}
         else:
             raise ValueError("Successful orchestration returned no result or script")
         response["outcome"] = outcome

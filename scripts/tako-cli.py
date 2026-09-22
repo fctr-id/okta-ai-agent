@@ -33,6 +33,7 @@ else:
 
 from src.config.settings import settings
 from src.core.agents.orchestrator import execute_multi_agent_query
+from src.core.retrieval_outcomes import RetrievalFailure
 from src.core.okta.client import OktaClient
 from src.data.schemas.runtime_storage import (
     create_runtime_turn_paths,
@@ -212,6 +213,8 @@ async def execute_generated_script(
         stdout, stderr = await proc.communicate()
         stdout_str = stdout.decode('utf-8', errors='replace')
         stderr_str = stderr.decode('utf-8', errors='replace')
+        from src.core.retrieval_outcomes import check_retrieval_outcomes
+        check_retrieval_outcomes(stderr_str)
         
         if proc.returncode != 0:
             error_msg = stderr_str
@@ -228,8 +231,12 @@ async def execute_generated_script(
             print(f"{Colors.WARNING}Warning: Could not parse script output{Colors.ENDC}")
             return None
         
+        from src.core.script_execution import execution_evidence
+        results['metadata'] = {**(results.get('metadata') or {}), 'execution_evidence': execution_evidence(script_code)}
         return results
         
+    except RetrievalFailure:
+        raise
     except Exception as e:
         logger.error(f"Script execution error: {e}")
         print(f"{Colors.FAIL}Error executing script: {e}{Colors.ENDC}")
@@ -400,7 +407,24 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
             print("Using completed analysis of saved results; no script execution needed.")
     else:
         print(f"\n{Colors.OKGREEN}Discovery complete. Executing script...{Colors.ENDC}")
-        results_data = await execute_generated_script(result.script_code, date_str, query)
+        from src.core.retrieval_outcomes import RetrievalFailure
+        from src.core.execution_recovery import recover_failed_execution
+        try:
+            results_data = await execute_generated_script(result.script_code, date_str, query)
+        except RetrievalFailure as exc:
+            try:
+                results_data = await recover_failed_execution(
+                    result=result, failure=exc, user_query=query, correlation_id=correlation_id,
+                    artifacts_file=artifacts_file, okta_client=okta_client,
+                    cancellation_check=check_cancelled, event_callback=event_callback, cli_mode=True,
+                )
+                results_data['data'] = results_data.get('results', results_data.get('data', []))
+                if evaluation:
+                    evaluation.observe(result)
+            except RetrievalFailure as final_failure:
+                print(str(final_failure))
+                update_turn_metadata(runtime_paths, status='error', error=str(final_failure))
+                return 1
     
     if not results_data:
         print(f"\n{Colors.WARNING}No results returned from script execution{Colors.ENDC}")

@@ -30,13 +30,14 @@ class ResultExplanationTests(unittest.IsolatedAsyncioTestCase):
             '_build_turn_output_summary', '_build_turn_output_artifact_payload',
         }, self.ns)
 
-    async def execute(self, root, rows, summary=None):
+    async def execute(self, root, rows, summary=None, stderr=''):
         output = {'display_type': 'table', 'data': rows, 'count': 999, 'summary': summary}
         stdout = ('QUERY RESULTS\n====\n' + json.dumps(output) + '\n====\n').encode()
         process = SimpleNamespace(returncode=0, wait=AsyncMock(),
                                   stdout=asyncio.StreamReader(), stderr=asyncio.StreamReader())
         process.stdout.feed_data(stdout)
         process.stdout.feed_eof()
+        process.stderr.feed_data(stderr.encode())
         process.stderr.feed_eof()
         script = root / 'execution.py'
         script.touch()
@@ -46,6 +47,17 @@ class ResultExplanationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(asyncio, 'create_subprocess_exec', AsyncMock(return_value=process)):
             events = [event async for event in self.ns['_execute_script']('fixture', str(script), lambda: False, result)]
         return events[-1]
+
+    async def test_failed_retrieval_is_not_rendered_as_completed_or_empty(self):
+        from src.core.retrieval_outcomes import RetrievalFailure, SENTINEL
+        stderr = '\n'.join(SENTINEL + json.dumps(event) for event in [
+            {'request': 'a' * 64, 'state': 'started'},
+            {'request': 'a' * 64, 'state': 'error', 'category': 'transient'},
+        ])
+        for rows in ([], [{'id': 'one'}]):
+            with self.subTest(rows=rows), TemporaryDirectory() as tmp:
+                with self.assertRaises(RetrievalFailure):
+                    await self.execute(Path(tmp), rows, 'All done', stderr)
 
     async def test_executed_count_and_scope_survive_saved_result_compaction(self):
         summary = 'Live API records excluding deprovisioned accounts.'

@@ -274,7 +274,8 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
         ast.parse(code)
         output = synthesis.SynthesisResult(success=True, script_code=code)
         synthesis.validate_synthesis_output(output)
-        run = AsyncMock(return_value=SimpleNamespace(output=output, usage=RunUsage(requests=1)))
+        run = AsyncMock(return_value=SimpleNamespace(
+            output=output, usage=RunUsage(requests=1), all_messages=lambda: []))
         with TemporaryDirectory() as tmp, patch.object(synthesis, "synthesis_agent", SimpleNamespace(run=run)):
             artifact_file = Path(tmp) / "artifacts.json"
             artifact_file.write_text("[]", encoding="utf-8")
@@ -332,6 +333,7 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
 
         with synthesis.synthesis_agent.override(model=FunctionModel(model)):
             result = await synthesis.synthesis_agent.run("Generate a fixture script",
+                                                        deps=synthesis.SynthesisDeps(correlation_id="contract", artifacts_file=Path("unused-fixture.json")),
                                                         usage_limits=synthesis.SYNTHESIS_USAGE_LIMITS)
         self.assertEqual(len(calls), 2)
         self.assertEqual(result.output.script_code, good_code)
@@ -354,6 +356,7 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
         with synthesis.synthesis_agent.override(model=FunctionModel(model)):
             with self.assertRaises(UnexpectedModelBehavior):
                 await synthesis.synthesis_agent.run("Generate a fixture script",
+                                                    deps=synthesis.SynthesisDeps(correlation_id="contract", artifacts_file=Path("unused-fixture.json")),
                                                     usage_limits=synthesis.SYNTHESIS_USAGE_LIMITS)
         self.assertEqual(len(calls), 2)
 

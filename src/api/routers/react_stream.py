@@ -425,6 +425,8 @@ async def _execute_script(
         # logger.debug(f"[{process_id}] Process exited with returncode: {proc.returncode}")
         
         # Check for errors
+        from src.core.retrieval_outcomes import check_retrieval_outcomes
+        check_retrieval_outcomes('\n'.join(stderr_lines))
         if proc.returncode != 0:
             error_msg = '\n'.join(stderr_lines[-10:]) if stderr_lines else "Script failed"
             raise Exception(f"Script execution failed: {error_msg}")
@@ -442,6 +444,9 @@ async def _execute_script(
         outcome_payload = orchestrator_result.outcome_metadata() if orchestrator_result else {}
         
         if results_data:
+            from src.core.script_execution import execution_evidence
+            results_data.setdefault('metadata', {})['execution_evidence'] = execution_evidence(
+                script_path_obj.read_text(encoding='utf-8'))
             # Check if script returned markdown format (for summaries/special responses)
             if results_data.get("display_type") == "markdown":
                 logger.info(f"[{process_id}] Script returned markdown format")
@@ -450,6 +455,7 @@ async def _execute_script(
                     "success": True,
                     "display_type": "markdown",
                     "content": results_data.get("content", ""),
+                    "metadata": results_data.get("metadata", {}),
                     **outcome_payload,
                     "timestamp": time.time()
                 }
@@ -1198,16 +1204,49 @@ async def stream_react_updates(
             execution_succeeded = False
             final_execution_event = None
             
-            async for execution_event in _execute_script(process_id, script_path, check_cancelled, result):
-                yield f"data: {json.dumps(execution_event)}\n\n"
-                
-                # Track final completion event for history save
-                if execution_event.get("type") == "COMPLETE" and execution_event.get("success"):
-                    execution_succeeded = True
-                    final_execution_event = execution_event
-
-                if execution_event.get("type") == "ERROR":
-                    final_execution_event = execution_event
+            from src.core.retrieval_outcomes import RetrievalFailure
+            try:
+                async for execution_event in _execute_script(process_id, script_path, check_cancelled, result):
+                    yield f"data: {json.dumps(execution_event)}\n\n"
+                    if execution_event.get("type") == "COMPLETE" and execution_event.get("success"):
+                        execution_succeeded = True
+                        final_execution_event = execution_event
+                    if execution_event.get("type") == "ERROR":
+                        final_execution_event = execution_event
+            except RetrievalFailure as failure:
+                from src.core.execution_recovery import recover_failed_execution
+                repair_task = asyncio.create_task(recover_failed_execution(
+                    result=result, failure=failure, user_query=process['query'], correlation_id=process_id,
+                    artifacts_file=artifacts_file, okta_client=okta_client,
+                    cancellation_check=check_cancelled, event_callback=event_callback,
+                    user_timezone=process.get('user_timezone'),
+                ))
+                try:
+                    while not repair_task.done() or not event_queue.empty():
+                        if check_cancelled():
+                            raise asyncio.CancelledError()
+                        try:
+                            event = await asyncio.wait_for(event_queue.get(), timeout=0.2)
+                            if event is not None:
+                                yield f"data: {json.dumps(event)}\n\n"
+                        except asyncio.TimeoutError:
+                            continue
+                    payload = await repair_task
+                finally:
+                    if not repair_task.done():
+                        repair_task.cancel()
+                    await asyncio.gather(repair_task, return_exceptions=True)
+                token_event.update(input_tokens=result.total_input_tokens, output_tokens=result.total_output_tokens,
+                                   total_tokens=result.total_tokens, requests=result.total_requests)
+                yield f"data: {json.dumps(token_event)}\n\n"
+                if result.script_code and result.outcome != 'clarify':
+                    repaired_script_event = {'type': 'SCRIPT-GENERATED', 'script_code': result.script_code,
+                                             'script_length': len(result.script_code), 'timestamp': time.time()}
+                    yield f"data: {json.dumps(repaired_script_event)}\n\n"
+                final_execution_event = {**payload, 'type': 'COMPLETE', 'success': True,
+                                         **result.outcome_metadata(), 'timestamp': time.time()}
+                execution_succeeded = True
+                yield f"data: {json.dumps(final_execution_event)}\n\n"
 
             if not execution_succeeded or not final_execution_event:
                 failure_reason = (
@@ -1367,6 +1406,7 @@ async def stream_react_updates(
             
         except Exception as e:
             logger.error(f"[{process_id}] Stream error: {e}", exc_info=True)
+            from src.core.retrieval_outcomes import RetrievalFailure
             process["status"] = "error"
             if runtime_paths:
                 update_turn_metadata(runtime_paths, status="error", error=str(e), completed_at=time.time())
@@ -1374,7 +1414,7 @@ async def stream_react_updates(
             
             error_data = {
                 "type": "ERROR",
-                "error": "An internal error has occurred. Please try again later.",
+                "error": str(e) if isinstance(e, RetrievalFailure) else "An internal error has occurred. Please try again later.",
                 "timestamp": time.time()
             }
             yield f"data: {json.dumps(error_data)}\n\n"

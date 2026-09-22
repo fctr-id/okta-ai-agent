@@ -70,12 +70,53 @@ class ReuseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIsNone(result.reusable_procedure)
                     self.assertEqual(supervisor.await_count, 2)
                     self.assertTrue(supervisor.call_args_list[1].kwargs['workflow_state']['disable_procedure_reuse'])
+                    self.assertTrue(result.execution_repair_attempted)
                     discovery.assert_awaited_once()
 
     def test_adaptation_requires_selected_procedure(self):
         from src.core.agents.supervisor_agent import SupervisorDecision
         with self.assertRaises(ValueError):
             SupervisorDecision(mode='complete', target='SYNTHESIS', reasoning='No candidate', adapt_procedure=True)
+
+    async def test_api_failure_policy_stops_outages_and_rediscovers_bad_requests_once(self):
+        from src.core.agents import orchestrator as orch
+        from src.core.agents.supervisor_agent import SupervisorDecision
+        from src.core import procedure_reuse as reuse
+        from src.core.retrieval_outcomes import RetrievalFailure
+        for category in ('request', 'missing', 'pagination_limit', 'access', 'transient'):
+            with self.subTest(category=category), TemporaryDirectory() as tmp, ExitStack() as stack:
+                chosen = SupervisorDecision(mode='complete', target='SYNTHESIS', reasoning='Match', reuse_procedure_id='fixture')
+                fallback = SupervisorDecision(mode='delegate', target='SQL', reasoning='Repair retrieval')
+                async def synthesize(**kwargs):
+                    kwargs['result'].success = True
+                    kwargs['result'].script_code = CODE
+                for name, value in (('_hydrate_session_result_set_context', AsyncMock(return_value=0)),
+                                    ('get_database_runtime_summary', lambda: {}), ('get_special_tool_capability_summary', lambda: {}),
+                                    ('_run_discovery_loop', AsyncMock(return_value=(None, False))),
+                                    ('_validate_discovery_before_synthesis', AsyncMock(return_value=SimpleNamespace(should_stop=False, post_processing_succeeded=False))),
+                                    ('_run_synthesis_phase', synthesize)):
+                    stack.enter_context(patch.object(orch, name, value))
+                supervisor = stack.enter_context(patch.object(orch, 'supervise_query', AsyncMock(side_effect=[(chosen, None), (fallback, None)])))
+                discovery = stack.enter_context(patch.object(orch, '_run_initial_sql_discovery', AsyncMock(return_value=('SQL', 0, None, False))))
+                stack.enter_context(patch.object(reuse, 'inspect_procedure', AsyncMock(return_value={'script_code': CODE})))
+                stack.enter_context(patch.object(reuse, 'execute_script', AsyncMock(side_effect=RetrievalFailure({category}))))
+                record = stack.enter_context(patch.object(reuse, 'record_procedure_reuse', AsyncMock()))
+                result = await orch.execute_multi_agent_query('fixture', 'run', Path(tmp)/'artifacts.json', None, lambda: False)
+                record.assert_awaited_once_with('run', 'fixture', failed=True)
+                if category in ('access', 'transient'):
+                    self.assertFalse(result.success)
+                    self.assertEqual(result.outcome, 'fail')
+                    self.assertIn('Could not retrieve all required data', result.user_message)
+                    supervisor.assert_awaited_once()
+                    discovery.assert_not_awaited()
+                else:
+                    self.assertTrue(result.success)
+                    self.assertEqual(result.procedure_reuse, 'fallback')
+                    self.assertEqual(supervisor.await_count, 2)
+                    self.assertTrue(supervisor.call_args_list[1].kwargs['workflow_state']['disable_procedure_reuse'])
+                    self.assertEqual(supervisor.call_args_list[1].kwargs['workflow_state']['execution_failure']['categories'], [category])
+                    self.assertTrue(result.execution_repair_attempted)
+                    discovery.assert_awaited_once()
 
     async def test_validated_current_execution_and_failure_fallback(self):
         from src.core import procedure_reuse as reuse

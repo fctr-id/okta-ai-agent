@@ -30,6 +30,10 @@ class RequestProgressTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.observed.test_mode)
         self.assertEqual([e["details"]["status"] for e in self.events], ["running", "success"])
         self.assertEqual(self.events[0]["details"]["operation"], "application_credential.list_keys")
+        expected_label = next(e["name"] for e in CATALOG
+                              if e["entity"] == "application_credential" and e["operation"] == "list_keys")
+        self.assertEqual(self.events[0]["details"]["label"], expected_label)
+        self.assertEqual(self.events[1]["details"]["label"], expected_label)
         self.assertNotIn("private", json.dumps(self.events))
 
     async def test_concurrent_repeated_calls_keep_individual_status(self):
@@ -66,6 +70,7 @@ class RequestProgressTests(unittest.IsolatedAsyncioTestCase):
         self.client.make_request.return_value = {"unexpected": "payload"}
         await self.observed.make_request("/unknown/private-id?q=private-value")
         self.assertEqual(self.events[0]["details"]["operation"], "Uncatalogued endpoint")
+        self.assertEqual(self.events[0]["details"]["label"], "Other API request")
         self.assertEqual(self.events[-1]["details"]["status"], "unknown")
         self.assertNotIn("private", json.dumps(self.events))
 

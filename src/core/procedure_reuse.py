@@ -5,13 +5,15 @@ from pydantic_ai.exceptions import UsageLimitExceeded
 
 from src.core.query_procedures import inspect_procedure, record_procedure_reuse
 from src.core.script_execution import execute_script
+from src.core.retrieval_outcomes import RetrievalFailure
 from src.data.schemas.query_procedure import executed_fields
 from src.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-async def execute_selected_procedure(*, run_id, procedure_id, artifacts_file, cancellation_check, adapt_script=None):
+async def execute_selected_procedure(*, run_id, procedure_id, artifacts_file, cancellation_check, adapt_script=None,
+                                     on_retrieval_failure=None):
     candidate = await inspect_procedure(run_id, procedure_id)
     if candidate is None:
         return None
@@ -35,6 +37,8 @@ async def execute_selected_procedure(*, run_id, procedure_id, artifacts_file, ca
         if adapt_script is None and rows and set(fields) != set(candidate['output_fields']):
             raise ValueError('Reused script output fields changed; rediscovery required')
         payload['metadata'] = {
+            **({'execution_evidence': payload['metadata']['execution_evidence']}
+               if payload.get('metadata', {}).get('execution_evidence') else {}),
             'summary': payload.get('summary', ''),
             ('parent_procedure_id' if adapt_script else 'procedure_id'): procedure_id,
             'procedure_reuse': 'adapted' if adapt_script else 'used',
@@ -47,6 +51,16 @@ async def execute_selected_procedure(*, run_id, procedure_id, artifacts_file, ca
         raise
     except UsageLimitExceeded:
         raise
+    except RetrievalFailure as exc:
+        await record_procedure_reuse(run_id, procedure_id, failed=True)
+        if not exc.rediscover:
+            # Replanning cannot fix credentials, throttling, or an outage.
+            raise
+        if on_retrieval_failure:
+            on_retrieval_failure(candidate['script_code'], exc)
+        logger.warning('[%s] Saved retrieval failed (%s); using normal discovery once',
+                       run_id, ', '.join(sorted(exc.categories)))
+        return None
     except Exception:
         logger.exception('[%s] Procedure execution failed; using normal discovery once: %s', run_id, procedure_id)
         await record_procedure_reuse(run_id, procedure_id, failed=True)

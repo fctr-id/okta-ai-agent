@@ -9,10 +9,11 @@ export function applyApiTestProgress(steps, event) {
     tool.requests ||= []
     const request = tool.requests.find(request => request.id === event.request_id)
     if (request) {
+        if (!request.label && event.label) request.label = event.label
         // Ignore duplicate/stale starts; never undo a terminal status.
         if (request.status === 'running') request.status = event.status
     } else {
-        tool.requests.push({ id: event.request_id, operation: event.operation, status: event.status })
+        tool.requests.push({ id: event.request_id, operation: event.operation, label: event.label, status: event.status })
     }
     return true
 }

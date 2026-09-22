@@ -2428,7 +2428,6 @@ class DatabaseOperations:
                             ConversationResultSet.tenant_id == tenant_id,
                             ConversationResultSet.session_id == conversation_turn.session_id,
                             ConversationResultSet.turn_number < conversation_turn.turn_number,
-                            ConversationResultSet.is_empty.is_(False),
                         )
                     )
                     .order_by(

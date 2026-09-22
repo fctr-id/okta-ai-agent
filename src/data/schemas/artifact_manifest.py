@@ -308,6 +308,8 @@ def _compact_artifact_for_prompt(
         compact["result_set_inspection"] = artifact.get("result_set_inspection")
     if artifact.get("artifact_manifest"):
         compact["artifact_manifest"] = artifact.get("artifact_manifest")
+    if (artifact.get("metadata") or {}).get("execution_evidence"):
+        compact["execution_evidence"] = artifact["metadata"]["execution_evidence"]
 
     if not compact.get("result_set_inspection") and isinstance(artifact.get("content"), str):
         content = artifact["content"]
@@ -381,7 +383,9 @@ def _materialize_result_set(
     narrative = artifact.get("category") == "turn_output" and artifact.get("display_type") == "markdown"
     if narrative:
         metadata = artifact.get("metadata") or {}
-        if not content.strip() or metadata.get("outcome") in {"fail", "clarify", "empty"}:
+        if not content.strip() or metadata.get("outcome") in {"fail", "clarify"}:
+            return None
+        if metadata.get("outcome") == "empty" and not metadata.get("execution_evidence"):
             return None
         evidence = []
         for source in supporting_artifacts or []:
@@ -443,7 +447,9 @@ def _materialize_result_set(
         run_id=run_id,
         turn_number=turn_number,
         sequence_in_turn=sequence_in_turn,
-        metadata={"artifact_category": artifact.get("category")},
+        metadata={"artifact_category": artifact.get("category"),
+                  **({"execution_evidence": artifact['metadata']['execution_evidence']}
+                     if (artifact.get('metadata') or {}).get('execution_evidence') else {})},
     )
     manifest = ArtifactManifest(
         artifact_key=artifact_key,

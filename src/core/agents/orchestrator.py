@@ -117,6 +117,8 @@ class OrchestratorResult:
         self.synthesis_result: Optional[SynthesisResult] = None
         self.reusable_procedure: Optional[dict] = None
         self.procedure_reuse: Optional[str] = None
+        self.execution_repair_attempted: bool = False
+        self.execution_recovery_context: Optional[dict] = None
         
         # Phases executed
         self.phases_executed: List[str] = []
@@ -143,6 +145,8 @@ class OrchestratorResult:
             metadata["user_message"] = self.user_message
         if self.procedure_reuse:
             metadata['procedure_reuse'] = self.procedure_reuse
+        if self.execution_repair_attempted:
+            metadata['execution_repair_attempted'] = True
         return metadata
 
     def completed_result_event(self) -> Dict[str, Any]:
@@ -1051,6 +1055,8 @@ class EventAggregator:
 
 def _discovery_assignment(result: OrchestratorResult, user_query: str, target: str) -> str:
     """Pass the current delegation, rather than just the entire multi-step goal."""
+    from src.core.execution_recovery import recovery_instructions
+    user_query += recovery_instructions(result.execution_recovery_context)
     decision = result.supervisor_decisions[-1] if result.supervisor_decisions else {}
     if decision.get("mode") != "delegate" or decision.get("target") != target:
         return user_query
@@ -1173,7 +1179,7 @@ async def _ask_supervisor_after_delegation(
         latest_delegation_result=latest_delegation,
         db_runtime_summary=db_runtime_summary,
         special_tool_capabilities=special_tool_capabilities,
-        workflow_state=workflow_state,
+        workflow_state={**workflow_state, 'execution_failure': result.execution_recovery_context},
         step_start_callback=aggregator.step_start,
     )
     result.supervisor_decisions.append(supervisor_decision.model_dump())
@@ -1963,7 +1969,9 @@ async def _run_synthesis_phase(
         cli_mode=cli_mode
     )
 
-    result.synthesis_result, synthesis_usage = await execute_synthesis(user_query, synthesis_deps)
+    from src.core.execution_recovery import recovery_instructions
+    result.synthesis_result, synthesis_usage = await execute_synthesis(
+        user_query + recovery_instructions(result.execution_recovery_context), synthesis_deps)
     _add_usage_to_result(result, synthesis_usage)
 
     if not result.synthesis_result.success:
@@ -2046,6 +2054,7 @@ async def execute_multi_agent_query(
     cli_mode: bool = False,
     user_timezone: Optional[str] = None,
     allow_procedure_reuse: bool = True,
+    execution_failure: Optional[dict] = None,
 ) -> OrchestratorResult:
     """
     Execute multi-agent query workflow.
@@ -2078,6 +2087,10 @@ async def execute_multi_agent_query(
     logger.info(f"Query: {user_query}")
     
     result = OrchestratorResult()
+    result.execution_recovery_context = execution_failure
+    result.execution_repair_attempted = bool(execution_failure)
+    if execution_failure:
+        allow_procedure_reuse = False
     result.user_timezone = normalize_user_timezone(user_timezone)
     
     # Initialize global tool call limits from environment
@@ -2128,6 +2141,7 @@ async def execute_multi_agent_query(
                 "remaining_tool_calls": max_tool_calls,
                 "max_tool_calls": max_tool_calls,
                 "disable_procedure_reuse": not allow_procedure_reuse,
+                "execution_failure": execution_failure,
             },
             step_start_callback=aggregator.step_start,
         )
@@ -2158,10 +2172,16 @@ async def execute_multi_agent_query(
             aggregator.set_phase('reuse_adapt' if adapting else 'reuse')
             await aggregator.step_start({'title': 'Saved query', 'text':
                 'Adapting a saved query to your question' if adapting else 'Running a matching saved query against current data'})
+            def record_reuse_failure(code, failure):
+                from src.core.execution_recovery import recovery_context
+                result.execution_recovery_context = recovery_context(code, failure)
+                result.execution_repair_attempted = True
+
             reused = await execute_selected_procedure(
                 run_id=correlation_id, procedure_id=selected_id, artifacts_file=artifacts_file,
                 cancellation_check=cancellation_check,
                 adapt_script=adapt_saved_script if adapting else None,
+                on_retrieval_failure=record_reuse_failure,
             )
             if reused:
                 candidate, payload = reused
@@ -2186,6 +2206,7 @@ async def execute_multi_agent_query(
                 }], source_specialist='synthesis')
                 return result
             result.procedure_reuse = 'fallback'
+            result.execution_repair_attempted = True
             aggregator.set_phase('planning')
             await aggregator.step_start({'title': 'Discovery', 'text': 'The saved query was unavailable or failed; retrieving the data again'})
             # One fresh routing decision with reuse disabled; no recursive retry loop.
@@ -2193,6 +2214,7 @@ async def execute_multi_agent_query(
                 user_query, correlation_id=correlation_id, artifacts_file=artifacts_file,
                 db_runtime_summary=db_runtime_summary, special_tool_capabilities=special_tool_capabilities,
                 workflow_state={'disable_procedure_reuse': True, 'user_timezone': result.user_timezone,
+                                'execution_failure': result.execution_recovery_context,
                                 'remaining_tool_calls': max_tool_calls},
                 step_start_callback=aggregator.step_start,
             )

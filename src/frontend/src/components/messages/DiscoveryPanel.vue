@@ -41,7 +41,7 @@
           <ul v-if="entry.tool.requests?.length" class="request-list" aria-label="Tested endpoints">
             <li v-for="request in entry.tool.requests" :key="request.id" :class="['request', request.status]">
               <span class="request-indicator" aria-hidden="true"></span>
-              <span class="endpoint-name">{{ request.operation }}</span>
+              <span class="endpoint-name">{{ request.label || request.operation }}</span>
               <span class="request-status">{{ requestStatusLabels[request.status] }}</span>
             </li>
           </ul>
@@ -89,6 +89,7 @@ const phaseLabels = {
   reuse_adapt: 'Adapting a saved query',
   reuse_search: 'Matching saved queries',
   reuse_inspect: 'Evaluating query fit',
+  execution_repair: 'Refining retrieval',
 }
 const sections = computed(() => props.steps.reduce((entries, step, stepIndex) => {
   const phase = Object.hasOwn(phaseLabels, step.phase) ? step.phase : null

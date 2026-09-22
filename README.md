@@ -137,6 +137,7 @@ https://github.com/user-attachments/assets/7a27ebc4-39a0-400f-bf16-505afca7ca3d
 
 ## Features
 
+- Deeper API understanding across 107 Okta endpoints — Ask more complex questions about policies, applications, groups, devices, and authenticators. Expanded endpoint guidance helps Tako find the right data with less trial and error, distinguish similar resources, and handle paginated results and relationships more reliably.
 - Unified conversation UI — Keep questions, activity, summaries, and results together; reopen saved conversations with compact, collapsed turns.
 - Dedicated AI Summary — Understand what the results mean for your question and follow-ups, including relevant filters or limitations.
 - Interactive results — Choose visible columns, expand long lists within cells, sort by multiple columns, and group rows into collapsible sections with record counts.
