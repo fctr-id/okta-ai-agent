@@ -137,21 +137,14 @@ https://github.com/user-attachments/assets/7a27ebc4-39a0-400f-bf16-505afca7ca3d
 
 ## Features
 
-- Deeper API understanding across 107 Okta endpoints — Ask more complex questions about policies, applications, groups, devices, and authenticators. Expanded endpoint guidance helps Tako find the right data with less trial and error, distinguish similar resources, and handle paginated results and relationships more reliably.
-- Unified conversation UI — Keep questions, activity, summaries, and results together; reopen saved conversations with compact, collapsed turns.
-- Dedicated AI Summary — Understand what the results mean for your question and follow-ups, including relevant filters or limitations.
-- Interactive results — Choose visible columns, expand long lists within cells, sort by multiple columns, and group rows into collapsible sections with record counts.
-- CSV and Python export — Export results for reports or download reusable Python scripts. CSV includes all loaded rows and fields, including hidden columns; saved previews are clearly labeled.
-- Conversation and follow-ups — Refine questions using saved results, answer clarification requests, and continue within the same session.
-- Visible progress — Follow database, API, analysis, and saved-query steps, with tool calls grouped under each phase.
-- Saved-query reuse — Optionally rerun or adapt successful retrieval scripts for new questions, saving time and LLM tokens by reducing repeated discovery. Generic queries can be shared within the tenant; scripts retrieve data again.
-- Smarter query library — Background AI checks skip duplicate queries while keeping useful variants; pending checks survive restarts.
-- History and favorites — Revisit recent queries and save frequent ones.
-- CLI automation — Run queries and database syncs from scheduled jobs.
-- Optional Slack bot — Query your tenant with `/tako`, refine results in a thread, start a new query, and download CSV results; disabled by default.
-- Optional Teams bot — Query Okta in personal chats, continue conversations, and download CSV results; disabled by default.
-- Pydantic AI 2 runtime — Updated agent and provider integrations support the supervisor-led workflow.
-- Docker deployment — Self-host on AMD64 or ARM64 with your chosen AI provider.
+- **107 Okta endpoints** — Detailed API guidance helps answer complex questions with less trial and error and more reliable retrieval.
+- **Faster repeat queries** — Optionally rerun or adapt saved scripts to save time and tokens. Generic queries are reusable within the tenant; background checks reduce duplicates. Data is retrieved again.
+- **Continued conversations** — Refine earlier answers, reopen saved sessions, and keep frequent queries as favorites.
+- **AI Summary and progress** — Get a concise explanation of each answer, including relevant limitations, and follow database, API, and reuse activity.
+- **Interactive tables and exports** — Choose columns, sort by multiple fields, group results, and export CSV or Python scripts. CSV retains all loaded rows and fields; previews are clearly labeled.
+- **Slack and Teams** — Optional bots support follow-ups and CSV downloads in Slack threads and Teams personal chats.
+- **CLI automation** — Run queries and database syncs from scripts or scheduled jobs.
+- **Self-hosted deployment** — Run Docker on AMD64 or ARM64 with your preferred cloud or local AI provider.
 
 ## AI Provider Support
 
