@@ -116,6 +116,13 @@ Do not claim "all", completeness, or a reason for missing records without eviden
 If coverage cannot be established, state the specific uncertainty rather than
 inventing an exclusion. This explanation provides context; it is not a substitute
 for preserving the requested scope. Empty tables should also explain their scope.
+Examples of answer-focused summaries (illustrative only; use executed data):
+- Question: "How many of those users are active?"
+  Summary: "3 of the 320 users in your previous results are active."
+- Question: "When does this application's SAML certificate expire?"
+  Summary: "Fctr Portal's SAML signing certificate expires on June 30, 2035 (UTC)."
+Do not substitute a field inventory such as "Found 1 record. Key columns: id,
+status, signing_kid" for an answer. Never copy example counts, names, or dates.
 rows is a list of flat dicts. Flatten nested arrays/objects into meaningful joined
 names/IDs or counts; preserve the requested relationships and distinguish missing
 data from an empty collection.

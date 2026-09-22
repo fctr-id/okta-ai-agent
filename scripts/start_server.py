@@ -3,6 +3,8 @@ import threading
 import sys
 import os
 import argparse
+import signal
+import time
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
@@ -18,13 +20,27 @@ def stream_output(stream, prefix):
     finally:
         stream.close()
 
+def wait_for_process(process, timeout=None):
+    """Return to Python regularly so Windows can dispatch console interrupts."""
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        try:
+            return process.wait(timeout=0.2 if remaining is None else min(0.2, remaining))
+        except subprocess.TimeoutExpired:
+            pass
+
+
 def run_command(command):
     """Run a shell command and print output from both stdout and stderr"""
     print(f"Executing: {command}")
     
     process = subprocess.Popen(
         command,
-        shell=True,  # Allow shell for cross-platform string commands
+        shell=False,  # Signal the Python server directly, not an intermediate shell
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -47,40 +63,26 @@ def run_command(command):
     
     try:
         # Wait for the process to complete
-        return_code = process.wait()
+        return_code = wait_for_process(process)
     except KeyboardInterrupt:
-        print("\nStopping server...")
+        print("\nStopping server...", flush=True)
         
-        # On Windows, CTRL_C_EVENT doesn't work reliably with subprocess
-        # Skip graceful shutdown and go straight to terminate
-        if os.name == 'nt':
-            print("Terminating server process...")
-            process.terminate()
-            try:
-                return_code = process.wait(timeout=2)
-                print("Server stopped.")
-            except subprocess.TimeoutExpired:
-                print("Force killing server...")
+        # Windows gives the server its own process group; Ctrl+Break is handled
+        # by Uvicorn as a graceful shutdown. Unix children already receive Ctrl+C.
+        try:
+            if os.name == 'nt' and process.poll() is None:
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+            return_code = wait_for_process(process, timeout=15)
+            print("Server stopped.")
+        except (subprocess.TimeoutExpired, KeyboardInterrupt):
+            print("Graceful shutdown timed out or was interrupted; stopping server process tree...")
+            if os.name == 'nt':
+                subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                               check=False, capture_output=True, timeout=5)
+            else:
                 process.kill()
-                process.wait(timeout=1)  # Final wait after kill
-                return_code = 1
-        else:
-            # Unix: Try graceful SIGINT first
-            import signal
-            process.send_signal(signal.SIGINT)
-            try:
-                return_code = process.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                print("Forcing termination...")
-                process.terminate()
-                try:
-                    return_code = process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    print("Force killing...")
-                    process.kill()
-                    process.wait(timeout=1)
-                    return_code = 1
-    
+            return_code = wait_for_process(process, timeout=5)
+
     # Give the threads a moment to finish printing any remaining output
     stdout_thread.join(1)
     stderr_thread.join(1)
@@ -195,21 +197,15 @@ if __name__ == "__main__":
     # Run the FastAPI server
     print("Starting server...")
     
+    command = [sys.executable, "-m", "uvicorn", "src.api.main:app",
+               "--host", args.host, "--port", str(args.port),
+               "--log-level", args.log_level, "--timeout-graceful-shutdown", "2"]
+    if args.reload:
+        command.append("--reload")
     if args.no_https:
         print("WARNING: Running without HTTPS. This is not recommended for production use.")
-        reload_flag = " --reload" if args.reload else ""
-        command = f"{sys.executable} -m uvicorn src.api.main:app --host {args.host} --port {args.port} --log-level {args.log_level} --timeout-graceful-shutdown 2{reload_flag}"
-        run_command(command)
     else:
-        # Generate certificates if needed
         key_path, cert_path = ensure_certificates()
         print(f"Starting secure server on https://{args.host}:{args.port}")
-        
-        # Run with HTTPS
-        reload_flag = " --reload" if args.reload else ""
-        command = (
-            f"{sys.executable} -m uvicorn src.api.main:app --host {args.host} "
-            f"--port {args.port} --log-level {args.log_level} "
-            f"--ssl-keyfile {key_path} --ssl-certfile {cert_path} --timeout-graceful-shutdown 2{reload_flag}"
-        )
-        run_command(command)
+        command.extend(["--ssl-keyfile", key_path, "--ssl-certfile", cert_path])
+    run_command(command)

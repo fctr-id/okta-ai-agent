@@ -85,6 +85,39 @@ class ResultExplanationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(parsed['count'], 1)
             self.assertNotIn('summary', parsed['metadata'])
 
+    def test_restored_tables_use_answer_summary_and_never_inspection_summary(self):
+        from src.data.schemas.artifact_manifest import extract_records
+
+        load_functions('src/api/routers/history.py', {
+            '_build_table_turn_preview', '_build_turn_full_result',
+        }, self.ns)
+        with TemporaryDirectory() as tmp:
+            sidecar_path = Path(tmp) / 'results.json'
+            sidecar_path.touch()
+            self.ns.update(
+                PREVIEW_ROW_LIMIT=25,
+                extract_records=extract_records,
+                _list_matching_result_entries=lambda turn: [{'storage_path': str(sidecar_path), 'row_count': 1}],
+                _resolve_safe_runtime_path=lambda path: Path(path),
+                _load_json_payload=lambda *args: {
+                    'data': [{'email': 'a@example.test'}],
+                    'inspection': {'summary': 'Found 1 records. Key columns: email.'},
+                },
+                _load_turn_output_json_payload=lambda turn: None,
+                _coerce_int=lambda value: int(value) if value is not None else None,
+                _build_preview_headers=lambda rows: ['email'],
+                _normalize_headers=lambda headers, rows: ['email'],
+                ConversationTurnResultPreviewResponse=lambda **kw: SimpleNamespace(**kw),
+            )
+            for summary in ['One user matched your email filter.', None, '', '   ']:
+                turn = SimpleNamespace(display_type='table', completion_mode='completed',
+                                       final_response_summary=summary)
+                for builder in ['_build_table_turn_preview', '_build_turn_full_result']:
+                    with self.subTest(summary=summary, builder=builder):
+                        restored = self.ns[builder](turn)
+                        self.assertEqual(restored.metadata['summary'], (summary or '').strip() or None)
+                        self.assertEqual(restored.content, [{'email': 'a@example.test'}])
+
 
 if __name__ == '__main__':
     unittest.main()

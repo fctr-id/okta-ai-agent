@@ -4,7 +4,7 @@
 
 ✨ Highlights
 
-- **Reusable Queries**: Optionally reuse successful retrieval scripts or adapt supported changes to filters, dates, and output fields, reducing repeat discovery. Scripts run again against the configured data sources; generic queries can be shared within the tenant. Enable with `QUERY_PROCEDURES_ENABLED=true`.
+- **Reusable Queries — Faster Answers, Fewer Tokens**: Reuse successful retrieval scripts or adapt supported changes to filters, dates, and output fields. Skipping repeated discovery can substantially reduce response time and LLM token usage, especially for complex queries. Scripts run again against the configured data sources; generic queries can be shared within the tenant. Enable with `QUERY_PROCEDURES_ENABLED=true`.
 - **Smarter Query Library**: A background AI check compares questions, scope, and output fields to skip duplicates while retaining useful variants. Pending checks survive restarts without delaying web, Slack, or Teams answers.
 - **Clearer Answers and Progress**: Concise result explanations add context to the answer. Activity groups tool calls under their database, API, analysis, and query-reuse steps, including follow-ups.
 

@@ -431,7 +431,10 @@ async def start_socket_mode() -> None:
         from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
         handler = AsyncSocketModeHandler(app, app_token)
         logger.info("Starting Slack Socket Mode (outbound WebSocket to Slack)")
-        await handler.start_async()
+        try:
+            await handler.start_async()
+        finally:
+            await handler.close_async()
     except ImportError:
         logger.error(
             "Failed to import AsyncSocketModeHandler. "

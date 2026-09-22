@@ -1,6 +1,8 @@
 <template>
     <div class="data-display">
-        <p v-if="resultSummary" class="result-explanation">{{ resultSummary }}</p>
+        <p v-if="resultSummary" class="result-explanation">
+            <strong class="result-explanation-label"><v-icon size="16" class="result-explanation-icon" aria-hidden="true">mdi-creation</v-icon> AI Summary:</strong> {{ resultSummary }}
+        </p>
         <!-- Text Message Display -->
         <div v-if="isTextData" class="markdown-shell">
             <div class="markdown-content" v-html="renderedMarkdown"></div>
@@ -733,7 +735,7 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
     box-shadow: 0 1px 2px rgba(23, 36, 58, .08) !important;
 }
 .saved-results-btn:hover { background: var(--primary-hover) !important; }
-.download-btn.preview-export { background: #fff !important; color: #405779 !important; border-color: #cbd7ea !important; box-shadow: none; }
+.download-btn.preview-export { background: #fff !important; color: #405779 !important; border-color: #aebcd0 !important; box-shadow: none; }
 .download-btn.preview-export:hover { background: #f7f9fd !important; border-color: #aebfe0 !important; }
 
 .download-btn:hover {
@@ -846,6 +848,15 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
     border-bottom: 1px solid var(--workspace-outline, #e2e8f0);
 }
 
+.result-explanation-label {
+    color: #2563eb;
+    font-weight: 600;
+    margin-inline-end: 4px;
+    white-space: nowrap;
+}
+
+.result-explanation-icon { margin-inline-end: 3px; vertical-align: -2px; }
+
 .no-results {
     padding: 24px 16px;
     text-align: center;
@@ -883,7 +894,7 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
 .sort-hint { margin-inline-start: auto; text-align: right; color: #5d6b7d; font-size: 12px; line-height: 1.5; }
 :deep(.group-field .v-field) { border-radius: 10px; background: #f8fafc; }
 :deep(.group-field .v-field__input) { font-size: 13px; min-height: 38px; padding-top: 7px; padding-bottom: 7px; }
-:deep(.group-field .v-field__outline) { color: #c8d1df; --v-field-border-opacity: 1; }
+:deep(.group-field .v-field__outline) { color: #aebcd0; --v-field-border-opacity: 1; }
 :deep(.group-field .v-label) { color: #526077; opacity: 1; }
 .result-group-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: transparent; cursor: pointer; text-align: left; color: #253248; font: inherit; font-weight: 600; border-radius: 4px; }
 .result-group-toggle:focus-visible { outline: 2px solid #3d61ac; outline-offset: 4px; }
@@ -911,13 +922,13 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
     border-radius: 10px;
     background: #f8fafc;
 }
-:deep(.search-field .v-field__outline) { color: #c8d1df; --v-field-border-opacity: 1; }
+:deep(.search-field .v-field__outline) { color: #aebcd0; --v-field-border-opacity: 1; }
 :deep(.search-field .v-field--focused .v-field__outline) { color: var(--primary); }
 :deep(.search-field .v-field__prepend-inner .v-icon) { font-size: 19px; }
 
 /* Target Vuetify's current table markup, including its native scroll wrapper. */
 .table-content { width: 100%; min-width: 0; container-type: inline-size; }
-.columns-button { height: 40px; border-color: #d4dce8; color: #40516b; text-transform: none; letter-spacing: 0; }
+.columns-button { height: 40px; border-color: #aebcd0; color: #40516b; text-transform: none; letter-spacing: 0; }
 .column-menu { background: #fff; border: 1px solid #d6dce5; border-radius: 10px; padding: 16px; max-width: min(360px, 90vw); box-shadow: 0 8px 28px #182b491f; color: #253248; }
 .column-presets { display: flex; gap: 6px; }
 .column-menu p { font-size: 12px; color: #64748b; margin: 12px 0; }
@@ -978,11 +989,11 @@ watch(() => formattedHeaders.value.map(header => header.key), keys => {
 :deep(.results-table .v-data-table-footer .v-field__input) { font-size: 13px; }
 :deep(.results-table .v-data-table-footer__items-per-page) { margin-inline-end: auto; gap: 10px; color: #5f6b7a; }
 :deep(.results-table .v-data-table-footer .v-field) { border-radius: 8px; background: #f8fafc; }
-:deep(.results-table .v-data-table-footer .v-field__outline) { color: #d4dce8; --v-field-border-opacity: 1; }
+:deep(.results-table .v-data-table-footer .v-field__outline) { color: #aebcd0; --v-field-border-opacity: 1; }
 :deep(.results-table .v-data-table-footer .v-field__input) { min-height: 32px; padding-top: 4px; padding-bottom: 4px; }
 :deep(.results-table .v-data-table-footer__info) { color: #657188; font-variant-numeric: tabular-nums; }
 :deep(.results-table .v-data-table-footer .v-btn) { width: 30px; height: 30px; border-radius: 7px; }
-:deep(.results-table .v-data-table-footer .v-btn:not(:disabled)) { border: 1px solid #e1e6ef; color: #596b89; }
+:deep(.results-table .v-data-table-footer .v-btn:not(:disabled)) { border: 1px solid #b8c2cf; color: #596b89; }
 :deep(.results-table .v-data-table-footer .v-btn .v-icon) { font-size: 19px; }
 
 /* Compact markdown styling - text-first results */

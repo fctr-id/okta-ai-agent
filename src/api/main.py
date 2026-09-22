@@ -145,20 +145,19 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if _procedure_admission_task is not None:
-            _procedure_admission_task.cancel()
-            await asyncio.gather(_procedure_admission_task, return_exceptions=True)
-        if _slack_cleanup_task is not None:
-            _slack_cleanup_task.cancel()
-            await asyncio.gather(_slack_cleanup_task, return_exceptions=True)
+        from .shutdown import stop_services
+        logger.info("Shutting down Okta AI Agent API")
+        closers = {}
         if teams_bot is not None:
-            await teams_bot.close()
-    
-    # Shutdown code
-    if _socket_task and not _socket_task.done():
-        _socket_task.cancel()
-        logger.info("Slack Socket Mode task cancelled")
-    logger.info("Shutting down Okta AI Agent API")
+            closers["Teams"] = teams_bot.close
+        await stop_services({
+            "query admission": _procedure_admission_task,
+            "Slack session cleanup": _slack_cleanup_task,
+            "Slack Socket Mode": _socket_task,
+        }, closers)
+        await db.close()
+        engine.dispose()
+        logger.info("Application service cleanup finished")
 
 # Create FastAPI app with lifespan manager
 app = FastAPI(

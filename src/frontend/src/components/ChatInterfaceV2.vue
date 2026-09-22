@@ -112,13 +112,14 @@
 
                     <div v-if="conversationTurns.length > 0" class="transcript-list">
                         <article
-                            v-for="turn in conversationTurns"
+                            v-for="(turn, turnIndex) in conversationTurns"
                             :key="turn.key"
                             :ref="(element) => setTranscriptTurnElement(turn.key, element)"
                             class="transcript-turn"
                             :class="{ 'is-active': turn.isActive }"
                         >
                             <ConversationCard
+                                :followUp="turnIndex > 0"
                                 :question="turn.queryText"
                                 :timestamp="formatTurnTimestamp(turn)"
                                 :status="turnHeaderStatus(turn)"
