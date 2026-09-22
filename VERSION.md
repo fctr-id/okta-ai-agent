@@ -1,5 +1,21 @@
 # Version History
 
+## v3.2.0-beta (Planned)
+
+✨ Highlights
+
+- **Reusable Queries**: Optionally reuse successful retrieval scripts or adapt supported changes to filters, dates, and output fields, reducing repeat discovery. Scripts run again against the configured data sources; generic queries can be shared within the tenant. Enable with `QUERY_PROCEDURES_ENABLED=true`.
+- **Smarter Query Library**: A background AI check compares questions, scope, and output fields to skip duplicates while retaining useful variants. Pending checks survive restarts without delaying web, Slack, or Teams answers.
+- **Clearer Answers and Progress**: Concise result explanations add context to the answer. Activity groups tool calls under their database, API, analysis, and query-reuse steps, including follow-ups.
+
+🔧 Optimizations and Fixes
+
+- **More Reliable Reuse**: Saved scripts remain subject to current validation, with discovery fallback when reuse fails. Temporary failures no longer disable entries, and prompt wording changes no longer invalidate the library. Retention balances successful reuse with recent additions.
+- **Preserve Requested Scope**: Removed default ACTIVE-only guidance so unspecified status does not silently exclude other account or application states.
+- **Cleaner Saved Conversations**: Reopened turns and their activity panels start collapsed. Uncertain historical status badges are hidden instead of suggesting an old query is still running.
+
+---
+
 ## v3.1.1-beta - "Steady Course"
 
 ✨ Highlights
