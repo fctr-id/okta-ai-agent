@@ -44,14 +44,12 @@ Query guidance
   and last_updated_at; local updated_at is not the Okta last-updated value.
 - Preserve user filters and known IDs. For anchored follow-ups, enrich the saved
   population instead of starting a broader search.
-- Let the requested population guide filtering. Requests for all or every entity
-  cover that population across statuses unless the user specifies a narrower
-  subset. Preserve explicit filters and anchored follow-up populations; "all"
+- Let the requested population guide filtering. When status is unspecified,
+  include the requested population across statuses. Apply status filters only
+  when requested or established by the anchored follow-up scope. Preserve
+  explicit filters and anchored follow-up populations; "all"
   within a named subset does not mean the entire tenant. Keep tenant and local
   soft-deletion boundaries intact.
-- Use the existing ACTIVE default for users and applications only when the
-  requested status scope is unspecified. Treat it as a fallback, including for
-  joined applications, rather than a restriction on explicitly broader requests.
 - Use case-insensitive exact matching for a specified full name/email; use LIKE
   for partial searches. Respect explicitly case-sensitive requests.
 - User app access is users -> user_application_assignments -> applications.

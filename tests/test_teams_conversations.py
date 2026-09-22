@@ -132,6 +132,26 @@ class ConversationTests(unittest.IsolatedAsyncioTestCase):
             selected_result_set_ids=[refs[0]["result_set_id"]])
         self.assertEqual(output.answer, "late evidence")
 
+    async def test_empty_executed_result_retains_method_for_followup(self):
+        from src.core.script_execution import execution_evidence
+        from src.data.schemas.artifact_manifest import build_artifact_prompt_context
+        first = job(query='Find matching fixtures')
+        script = "rows = [item for item in all_items if item['matches']]"
+        result = answer()
+        result.completed_result_event = lambda: {
+            'display_type': 'table', 'results': [], 'count': 0,
+            'metadata': {'execution_evidence': execution_evidence(script)}}
+        await runtime.run_query(first, orchestrate=AsyncMock(return_value=result))
+        second = job(session_id=first['session_id'], query='Which fixtures did you check?')
+        paths = await sessions.begin_turn(second)
+        count = await self.db.hydrate_session_result_set_context_for_run(
+            tenant_id=sessions.settings.tenant_id, run_id=second['id'], artifacts_file=paths.artifacts_file)
+        self.assertEqual(count, 1)
+        self.assertIn(script, build_artifact_prompt_context(paths.artifacts_file))
+        refs = json.loads((paths.results_dir / 'index.json').read_text())
+        self.assertEqual(refs[0]['row_count'], 0)
+        self.assertEqual(refs[0]['metadata']['execution_evidence']['script'], script)
+
     async def test_failed_and_clarifying_narratives_are_not_saved_evidence(self):
         for outcome in ("fail", "clarify", "empty"):
             with self.subTest(outcome=outcome):

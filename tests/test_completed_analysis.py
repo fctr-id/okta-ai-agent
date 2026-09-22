@@ -55,6 +55,7 @@ class CompletedAnalysisTests(unittest.IsolatedAsyncioTestCase):
             artifacts, delegation = await self.analyze(root, "analysis_result = {'summary': 'Emails', 'rows': [{'email': row['email']} for row in result_sets['saved']]}")
             event = await self.finish(artifacts, delegation)
             self.assertEqual(event['count'], 320)
+            self.assertEqual(event['metadata']['summary'], 'Emails')
             self.assertEqual(event['headers'], ['email'])
             self.assertEqual(event['results'], [{'email': f'user{i}@example.test'} for i in range(320)])
             saved = json.loads(artifacts.read_text())[-1]

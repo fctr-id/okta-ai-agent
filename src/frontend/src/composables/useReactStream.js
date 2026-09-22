@@ -354,6 +354,7 @@ export function useReactStream() {
             
             discoverySteps.value.push({
                 id: `step-${discoverySteps.value.length + 1}`,
+                phase: data.phase,
                 step: data.step || discoverySteps.value.length + 1,
                 title: cleanText || data.title, // Use cleaned text as title
                 reasoning: cleanText || data.reasoning || null, // Use cleaned text as reasoning
@@ -606,7 +607,7 @@ export function useReactStream() {
             console.log('[useReactStream] Results set to:', results.value)
         }
         // Check if this is a chunked response (no results) or non-chunked (has results)
-        else if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+        else if (Array.isArray(data.results)) {
             // Non-chunked response - small dataset, all data in COMPLETE event
             results.value = {
                 display_type: data.display_type || 'table',

@@ -30,6 +30,7 @@ export function useConversationCollapse(turns) {
         collapsedTurnKeys, sectionCollapseRevisions, setTurnCollapsed,
         hasExpandedPreviousTurns: computed(() => turns.value.slice(0, -1).some(turn => !collapsedTurnKeys.value.has(turn.key))),
         collapsePreviousTurns: () => collapseTurns(turns.value.slice(0, -1)),
+        collapseRestoredTurns: () => collapseTurns(turns.value),
         collapseForFollowUp: () => collapseTurns(turns.value),
     }
 }

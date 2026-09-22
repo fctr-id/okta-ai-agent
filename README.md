@@ -13,7 +13,7 @@
 
   <p>
     <a href="#quick-start-docker">Quick start</a> ·
-    <a href="#important-notes-for-v311">v3.1.1 upgrade notes</a> ·
+    <a href="#important-notes-for-v32">v3.2 upgrade notes</a> ·
     <a href="#why-tako">Why Tako</a> ·
     <a href="#demo">Demo</a> ·
     <a href="#ai-provider-support">AI providers</a> ·
@@ -22,7 +22,7 @@
 
   <p>
     <a href="VERSION.md">
-      <img src="./media/badges/preview.svg" alt="v3.1.1-beta" width="170" height="22">
+      <img src="./media/badges/preview.svg" alt="v3.2.0-beta" width="170" height="22">
     </a>
     <a href="docker-compose.yml">
       <img src="./media/badges/docker.svg" alt="Docker: AMD64 and ARM64" width="144" height="22">
@@ -58,6 +58,7 @@ It supplies Okta-specific context, tests retrieval queries, and reuses earlier r
 | Efficient data handling | Works with large results without repeatedly sending every record to the model. |
 | Checked queries | Checks generated queries before using them to prepare your answer. |
 | Result reuse | Builds follow-ups on earlier results instead of starting over. |
+| Saved-query reuse (optional) | Reruns or adapts successful retrieval scripts to reduce repeated discovery, response time, and token usage. |
 
 Results and savings vary by model, question, tenant size, and data freshness.
 
@@ -69,10 +70,11 @@ Results and savings vary by model, question, tenant size, and data freshness.
 
 Synced data includes users, groups, applications, policies, devices, enrolled authenticators, and their assignments. Large tenants may take longer to complete the first sync.
 
-<a id="important-notes-for-v31"></a>
-<a id="important-notes-for-v311"></a>
+<a id="important-notes-for-v32"></a>
 
-## ⚠️ Important notes for v3.1.1
+## ⚠️ Important notes for v3.2
+
+This branch prepares v3.2.0-beta; see the [planned release notes](VERSION.md).
 
 Review these settings before upgrading. Expand a topic for details; restart Tako after changes.
 
@@ -112,6 +114,13 @@ Use an `AZURE_OPENAI_ENDPOINT` ending in `/openai/v1/`, without `/responses`. Bo
 
 </details>
 
+<details>
+<summary><strong>Saved-query reuse (optional)</strong></summary>
+
+Set `QUERY_PROCEDURES_ENABLED=true` to enable the query library. Successful scripts are validated before reuse and run again against configured data sources. Generic queries may be reused across users within the same tenant. Reuse failures fall back to discovery. Savings vary by query and model.
+
+</details>
+
 [Full release notes](VERSION.md)
 
 ## Demo
@@ -128,14 +137,20 @@ https://github.com/user-attachments/assets/7a27ebc4-39a0-400f-bf16-505afca7ca3d
 
 ## Features
 
-- Conversation and follow-ups — Build on saved results within a session.
-- Visible progress — Inspect discovery, execution, tables, and generated scripts.
-- History and favorites — Revisit recent queries and save frequent ones.
-- CSV and Python export — Export results for reports or download reusable Python scripts.
+- Deeper API understanding across 107 Okta endpoints — Ask more complex questions about policies, applications, groups, devices, and authenticators. Expanded endpoint guidance helps Tako find the right data with less trial and error, distinguish similar resources, and handle paginated results and relationships more reliably.
+- Unified conversation UI — Keep questions, activity, summaries, and results together; reopen saved conversations with compact, collapsed turns.
+- Dedicated AI Summary — Understand what the results mean for your question and follow-ups, including relevant filters or limitations.
 - Interactive results — Choose visible columns, expand long lists within cells, sort by multiple columns, and group rows into collapsible sections with record counts.
+- CSV and Python export — Export results for reports or download reusable Python scripts. CSV includes all loaded rows and fields, including hidden columns; saved previews are clearly labeled.
+- Conversation and follow-ups — Refine questions using saved results, answer clarification requests, and continue within the same session.
+- Visible progress — Follow database, API, analysis, and saved-query steps, with tool calls grouped under each phase.
+- Saved-query reuse — Optionally rerun or adapt successful retrieval scripts for new questions, saving time and LLM tokens by reducing repeated discovery. Generic queries can be shared within the tenant; scripts retrieve data again.
+- Smarter query library — Background AI checks skip duplicate queries while keeping useful variants; pending checks survive restarts.
+- History and favorites — Revisit recent queries and save frequent ones.
 - CLI automation — Run queries and database syncs from scheduled jobs.
-- Optional Slack bot — Query your tenant with `/tako`; disabled by default.
+- Optional Slack bot — Query your tenant with `/tako`, refine results in a thread, start a new query, and download CSV results; disabled by default.
 - Optional Teams bot — Query Okta in personal chats, continue conversations, and download CSV results; disabled by default.
+- Pydantic AI 2 runtime — Updated agent and provider integrations support the supervisor-led workflow.
 - Docker deployment — Self-host on AMD64 or ARM64 with your chosen AI provider.
 
 ## AI Provider Support
@@ -146,7 +161,7 @@ Choose a provider and fill in its section in `.env`. You can use the same model 
 
 ### Tested models
 
-The Fctr Identity team has tested the following models with Tako v3.1.0-beta:
+Models previously tested with Tako by the Fctr Identity team include:
 
 | Provider | Tested model |
 |---|---|
@@ -181,11 +196,13 @@ For a local installation without Docker, see the [installation guide](https://gi
 - Access to a [supported AI provider](#ai-provider-support).
 
 > [!IMPORTANT]
-> Review the [important notes for v3.1.1](#important-notes-for-v311), especially login signing keys and your model's reasoning setting, before starting Tako.
+> Review the [important notes for v3.2](#important-notes-for-v32), especially login signing keys and your model's reasoning setting, before starting Tako.
 
 ### Installation
 
 Docker images support AMD64 (Intel/AMD) and ARM64 (Apple Silicon, AWS Graviton).
+
+The Compose file targets `3.2.0-beta`. Until that image is published, build this branch locally with `docker compose up --build --pull never -d`.
 
 Choose your operating system:
 
@@ -369,7 +386,7 @@ The builder and package assets live in `src/integrations/teams/app_package/`. Th
 
 - OAuth 2.0 or API tokens — Queries use the permissions granted to your configured Okta credentials. Configure least-privilege read access for the data you need.
 - Initial admin setup — A one-time setup token gates creation of the first application admin account.
-- Web sessions — Signed using a configured private key or an automatically generated key. See [v3.1.1 upgrade notes](#important-notes-for-v311) for restart behavior and shared-key configuration.
+- Web sessions — Signed using a configured private key or an automatically generated key. See [v3.2 upgrade notes](#important-notes-for-v32) for restart behavior and shared-key configuration.
 - Optional Slack access — Explicit user or group allowlists control access to the bot.
 
 <details>

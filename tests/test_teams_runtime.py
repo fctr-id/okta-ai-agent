@@ -102,6 +102,47 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("result_reference", answer)
             execute.assert_not_awaited()
 
+    async def test_incomplete_api_retrieval_returns_failure_without_table(self):
+        from src.core.retrieval_outcomes import RetrievalFailure
+        from src.data.schemas import runtime_storage
+        failed_result = result(script_code='fixture')
+        with patch.object(runtime_storage, "create_runtime_turn_paths", functools.partial(runtime_storage.create_runtime_turn_paths, root=self.root)), \
+             patch("src.core.okta.client.OktaClient", return_value=SimpleNamespace(close_session=AsyncMock())), \
+             patch.object(runtime, "execute_script", AsyncMock(side_effect=RetrievalFailure({'transient'}))), \
+             patch('src.core.query_procedures.save_successful_procedure', AsyncMock()) as admission:
+            answer = await runtime.run_query({'id': str(uuid4()), 'tenant': 'tenant', 'user': 'user', 'query': 'fixture'},
+                                             orchestrate=AsyncMock(return_value=failed_result))
+        self.assertEqual(answer['outcome'], 'fail')
+        self.assertFalse(answer['success'])
+        self.assertNotIn('results', answer)
+        self.assertIn('Please try again later', answer['content'])
+        self.assertFalse(admission.call_args.kwargs['result'].success)
+        self.assertEqual(admission.call_args.kwargs['result'].result_mode, 'failed')
+
+    async def test_recoverable_execution_routes_again_and_saves_only_repaired_answer(self):
+        from src.core.agents.orchestrator import OrchestratorResult
+        from src.data.schemas import runtime_storage
+        from src.core.retrieval_outcomes import RetrievalFailure
+        initial, repaired = OrchestratorResult(), OrchestratorResult()
+        for item in (initial, repaired):
+            item.success = True
+            item.outcome = 'success'
+            item.script_code = 'fixture'
+        repaired.script_code = 'repaired fixture'
+        route = AsyncMock(side_effect=[initial, repaired])
+        with patch.object(runtime_storage, 'create_runtime_turn_paths', functools.partial(runtime_storage.create_runtime_turn_paths, root=self.root)), \
+             patch('src.core.okta.client.OktaClient', return_value=SimpleNamespace(close_session=AsyncMock())), \
+             patch.object(runtime, 'execute_script', AsyncMock(side_effect=RetrievalFailure({'request'}))), \
+             patch('src.core.execution_recovery.execute_script', AsyncMock(return_value={'display_type': 'table', 'results': [{'id': 'fixed'}], 'count': 1})), \
+             patch('src.core.query_procedures.save_successful_procedure', AsyncMock()) as admission:
+            answer = await runtime.run_query({'id': str(uuid4()), 'tenant': 'tenant', 'user': 'user', 'query': 'fixture'}, orchestrate=route)
+        self.assertEqual(route.await_count, 2)
+        self.assertEqual(answer['outcome'], 'success')
+        self.assertEqual(answer['results'], [{'id': 'fixed'}])
+        self.assertTrue(answer['metadata']['execution_repair_attempted'])
+        admission.assert_awaited_once()
+        self.assertEqual(admission.call_args.kwargs['result'].script_code, 'repaired fixture')
+
     async def test_real_guid_owners_keep_portable_paths_and_tenant_isolation(self):
         from src.data.schemas import runtime_storage
         # Match a realistic checkout-root length without a machine-specific path.

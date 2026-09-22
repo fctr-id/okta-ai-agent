@@ -25,6 +25,7 @@ from src.core.agents.orchestrator import (
 )
 from src.core.agents.sql_discovery_agent import check_database_health, get_last_sync_timestamp
 from src.core.okta.client import OktaClient
+from src.core.retrieval_outcomes import RetrievalFailure, check_retrieval_outcomes
 from src.core.okta.sync.operations import DatabaseOperations
 from src.api.routers.sync import run_sync_operation
 from src.data.schemas.runtime_storage import (
@@ -431,7 +432,10 @@ async def start_socket_mode() -> None:
         from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
         handler = AsyncSocketModeHandler(app, app_token)
         logger.info("Starting Slack Socket Mode (outbound WebSocket to Slack)")
-        await handler.start_async()
+        try:
+            await handler.start_async()
+        finally:
+            await handler.close_async()
     except ImportError:
         logger.error(
             "Failed to import AsyncSocketModeHandler. "
@@ -520,7 +524,8 @@ async def _run_saved_script(client, channel_id, user_id, query, script_code, cor
             )
     except Exception as e:
         logger.error(f"[{correlation_id}] Error replaying saved script: {e}", exc_info=True)
-        await slack_handler.post_error("An internal error occurred. Please try again.")
+        await slack_handler.post_error(str(e) if isinstance(e, RetrievalFailure) else
+                                       "An internal error occurred. Please try again.")
     finally:
         if runtime_paths is not None:
             metadata = json.loads(runtime_paths.turn_metadata_file.read_text(encoding="utf-8"))
@@ -730,9 +735,19 @@ async def _run_query(client, channel_id, user_id, query, message_thread_ts, corr
             return
 
         # Execute the generated script
-        script_results = await _execute_script_for_slack(
-            correlation_id, result.script_code, result
-        )
+        try:
+            script_results = await _execute_script_for_slack(
+                correlation_id, result.script_code, result
+            )
+        except RetrievalFailure as exc:
+            from src.core.execution_recovery import recover_failed_execution
+            script_results = await recover_failed_execution(
+                result=result, failure=exc, user_query=query, correlation_id=correlation_id,
+                artifacts_file=artifacts_file, okta_client=okta_client,
+                cancellation_check=check_cancelled, event_callback=event_callback,
+            )
+            slack_handler.set_token_usage({'input_tokens': result.total_input_tokens,
+                'output_tokens': result.total_output_tokens, 'total_tokens': result.total_tokens})
 
         if script_results:
             metadata = script_results.get("metadata")
@@ -740,8 +755,13 @@ async def _run_query(client, channel_id, user_id, query, message_thread_ts, corr
                 metadata = {}
             metadata.update(result.outcome_metadata())
             script_results["metadata"] = metadata
+            from src.core.query_procedures import save_successful_procedure
+            await save_successful_procedure(
+                run_id=correlation_id, result=result, event=script_results, artifacts_file=artifacts_file,
+            )
             await slack_handler.post_final_results(query, script_results)
-            await slack_handler.post_script(result.script_code)
+            if result.script_code and result.outcome != 'clarify':
+                await slack_handler.post_script(result.script_code)
             await _save_history(
                 correlation_id, query, result.script_code, user_id,
                 channel_id=channel_id, thread_ts=message_thread_ts
@@ -774,7 +794,8 @@ async def _run_query(client, channel_id, user_id, query, message_thread_ts, corr
         if runtime_paths is not None:
             update_turn_metadata(runtime_paths, status="error", completed_at=time.time())
         logger.error(f"[{correlation_id}] Slack query processing error: {e}", exc_info=True)
-        await slack_handler.post_error("An internal error occurred. Please try again later.")
+        await slack_handler.post_error(str(e) if isinstance(e, RetrievalFailure) else
+                                       "An internal error occurred. Please try again later.")
     finally:
         if runtime_paths is not None:
             # Includes failed/clarifying turns so the next answer has conversation context.
@@ -1126,6 +1147,7 @@ async def _execute_script_for_slack(
         )
         stdout_str = stdout_bytes.decode("utf-8", errors="replace")
         stderr_str = stderr_bytes.decode("utf-8", errors="replace")
+        check_retrieval_outcomes(stderr_str)
 
         if proc.returncode != 0:
             error_msg = stderr_str[-500:]
@@ -1137,21 +1159,26 @@ async def _execute_script_for_slack(
         if not results_data:
             return None
 
+        from src.core.script_execution import execution_evidence
+        run_evidence = execution_evidence(script_code)
+
         # Build event_data in same format as react_stream.py COMPLETE events
         if results_data.get("display_type") == "markdown":
             return {
                 "display_type": "markdown",
                 "content": results_data.get("content", ""),
+                "metadata": {"execution_evidence": run_evidence},
             }
 
         if results_data.get("count", 0) == 0:
             return {
                 "display_type": "markdown",
                 "content": "## No Results Found\n\nYour query completed successfully, but no matching data was found.",
+                "metadata": {"execution_evidence": run_evidence, "outcome": "empty"},
             }
 
         # Build metadata
-        metadata = {}
+        metadata = {"execution_evidence": run_evidence}
         if orchestrator_result.data_source_type:
             metadata["data_source_type"] = orchestrator_result.data_source_type
             if (
@@ -1168,6 +1195,8 @@ async def _execute_script_for_slack(
             "metadata": metadata,
         }
 
+    except RetrievalFailure:
+        raise
     except asyncio.TimeoutError:
         logger.error(f"[{correlation_id}] Script execution timed out")
         return None

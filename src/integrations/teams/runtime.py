@@ -14,65 +14,8 @@ from src.config.settings import settings
 logger = get_logger(__name__)
 
 
-def parse_output(stdout: str) -> dict:
-    marker = "QUERY RESULTS"
-    lines = stdout.splitlines()
-    try:
-        start = next(i for i, line in enumerate(lines) if line.strip() == marker) + 1
-    except StopIteration as exc:
-        raise ValueError("Script produced no results envelope") from exc
-    payload = []
-    for line in lines[start:]:
-        if line.strip().startswith("===="):
-            if payload:
-                break
-            continue
-        if line.strip():
-            payload.append(line)
-    result = json.loads("\n".join(payload))
-    if isinstance(result, list):
-        result = {"display_type": "table", "data": result}
-    if not isinstance(result, dict):
-        raise ValueError("Invalid script result")
-    if result.get("display_type") == "markdown" and isinstance(result.get("content"), str):
-        return result
-    rows = result.get("data", result.get("results"))
-    if not isinstance(rows, list):
-        raise ValueError("Script result is missing rows")
-    return {**result, "display_type": "table", "results": rows, "count": len(rows)}
-
-
-async def execute_script(code: str, directory: Path, *, timeout=120) -> dict:
-    from src.data.schemas.runtime_storage import prepare_runtime_script_code
-    from src.utils.security_config import validate_generated_code
-
-    validation = validate_generated_code(code)
-    if not validation.is_valid:
-        logger.error("Teams generated script rejected: %s", validation.violations)
-        raise ValueError("Generated script failed security validation")
-    project_root = Path(__file__).resolve().parents[3]
-    directory.mkdir(parents=True, exist_ok=True)
-    script = directory / "execution.py"
-    helper = directory / "base_okta_api_client.py"
-    proc = None
-    try:
-        shutil.copy2(project_root / "src/core/okta/client/base_okta_api_client.py", helper)
-        script.write_text(prepare_runtime_script_code(code), encoding="utf-8")
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-u", str(script.resolve()), cwd=project_root,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
-        if proc.returncode:
-            logger.error("Teams script failed (exit %s): %s", proc.returncode, stderr.decode("utf-8", errors="replace")[-2000:])
-            raise ValueError("Script execution failed")
-        return parse_output(stdout.decode("utf-8", errors="replace"))
-    finally:
-        if proc is not None and proc.returncode is None:
-            proc.kill()
-            await proc.wait()
-        script.unlink(missing_ok=True)
-        helper.unlink(missing_ok=True)
+from src.core.script_execution import parse_output, execute_script
+from src.core.retrieval_outcomes import RetrievalFailure
 
 
 async def run_query(job: dict, *, orchestrate=None) -> dict:
@@ -105,12 +48,38 @@ async def run_query(job: dict, *, orchestrate=None) -> dict:
         elif result.is_special_tool:
             response = {"display_type": "markdown", "content": result.script_code or result.user_message or "Completed."}
         elif result.script_code:
-            response = await execute_script(result.script_code, paths.turn_dir / "execution")
+            try:
+                response = await execute_script(result.script_code, paths.turn_dir / "execution")
+            except RetrievalFailure as exc:
+                from src.core.execution_recovery import recover_failed_execution
+                try:
+                    response = await recover_failed_execution(
+                        result=result, failure=exc, user_query=job['query'], correlation_id=job['id'],
+                        artifacts_file=paths.artifacts_file, okta_client=client,
+                        cancellation_check=lambda: False, user_timezone=job.get('timezone'),
+                        orchestrate=orchestrate,
+                    )
+                    outcome = result.outcome
+                except RetrievalFailure as final_failure:
+                    exc = final_failure
+                    response = None
+                if response is None:
+                    result.success = False
+                    result.outcome = outcome = 'fail'
+                    result.result_mode = 'failed'
+                    result.is_degraded_success = False
+                    result.error = result.outcome_reason = str(exc)
+                    result.user_message = str(exc)
+                    response = {'display_type': 'markdown', 'content': str(exc), 'success': False}
         else:
             raise ValueError("Successful orchestration returned no result or script")
         response["outcome"] = outcome
         if hasattr(result, "outcome_metadata"):
             response["metadata"] = {**(response.get("metadata") or {}), **result.outcome_metadata()}
+        from src.core.query_procedures import save_successful_procedure
+        await save_successful_procedure(
+            run_id=job['id'], result=result, event=response, artifacts_file=paths.artifacts_file,
+        )
         save_result(paths, response)
         write_turn_summary(paths, {
             "source": "teams", "status": outcome, "user_query": job["query"],

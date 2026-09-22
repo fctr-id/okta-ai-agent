@@ -33,6 +33,7 @@ else:
 
 from src.config.settings import settings
 from src.core.agents.orchestrator import execute_multi_agent_query
+from src.core.retrieval_outcomes import RetrievalFailure
 from src.core.okta.client import OktaClient
 from src.data.schemas.runtime_storage import (
     create_runtime_turn_paths,
@@ -212,6 +213,8 @@ async def execute_generated_script(
         stdout, stderr = await proc.communicate()
         stdout_str = stdout.decode('utf-8', errors='replace')
         stderr_str = stderr.decode('utf-8', errors='replace')
+        from src.core.retrieval_outcomes import check_retrieval_outcomes
+        check_retrieval_outcomes(stderr_str)
         
         if proc.returncode != 0:
             error_msg = stderr_str
@@ -228,8 +231,12 @@ async def execute_generated_script(
             print(f"{Colors.WARNING}Warning: Could not parse script output{Colors.ENDC}")
             return None
         
+        from src.core.script_execution import execution_evidence
+        results['metadata'] = {**(results.get('metadata') or {}), 'execution_evidence': execution_evidence(script_code)}
         return results
         
+    except RetrievalFailure:
+        raise
     except Exception as e:
         logger.error(f"Script execution error: {e}")
         print(f"{Colors.FAIL}Error executing script: {e}{Colors.ENDC}")
@@ -267,7 +274,7 @@ async def event_callback(event_type: str, event_data: Dict[str, Any]):
         tool_name = clean_cli_text(event_data.get('tool_name') or event_data.get('name') or 'unknown_tool')
         print(f"  {Colors.OKGREEN}Using tool: {tool_name}{Colors.ENDC}")
 
-async def run_query(query: str, script_only: bool = False, session_id: Optional[str] = None) -> int:
+async def run_query(query: str, script_only: bool = False, session_id: Optional[str] = None, evaluation=None) -> int:
     """Execute a query and return 0 on success (including empty results), or 1 on failure."""
     correlation_id = generate_correlation_id()
     set_correlation_id(correlation_id)
@@ -284,6 +291,9 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     )
     artifacts_file = runtime_paths.artifacts_file
     update_turn_metadata(runtime_paths, status="executing", user_query=query)
+    if getattr(settings, 'QUERY_PROCEDURES_ENABLED', False):
+        from src.core.query_procedure_evaluation import register_cli_turn
+        await register_cli_turn(runtime_paths, query)
         
     okta_client = OktaClient()
     
@@ -300,8 +310,13 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         okta_client=okta_client,
         cancellation_check=check_cancelled,
         event_callback=event_callback,
-        cli_mode=True
+        cli_mode=True,
+        allow_procedure_reuse=not script_only,
     )
+
+    if evaluation:
+        evaluation.report['run_id'] = correlation_id
+        evaluation.observe(result)
 
     if not result.success:
         logger.error(f"Query failed: {result.error}")
@@ -384,16 +399,43 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     if result.completed_result is not None:
         results_data = result.completed_result_event()
         results_data["data"] = results_data.get("results", [])
-        print("Using completed analysis of saved results; no script execution needed.")
+        reuse_mode = getattr(result, 'procedure_reuse', None)
+        if reuse_mode in {'used', 'adapted'}:
+            print("Executed an adapted saved query against current data." if reuse_mode == 'adapted'
+                  else "Executed a matching saved query against current data.")
+        else:
+            print("Using completed analysis of saved results; no script execution needed.")
     else:
         print(f"\n{Colors.OKGREEN}Discovery complete. Executing script...{Colors.ENDC}")
-        results_data = await execute_generated_script(result.script_code, date_str, query)
+        from src.core.retrieval_outcomes import RetrievalFailure
+        from src.core.execution_recovery import recover_failed_execution
+        try:
+            results_data = await execute_generated_script(result.script_code, date_str, query)
+        except RetrievalFailure as exc:
+            try:
+                results_data = await recover_failed_execution(
+                    result=result, failure=exc, user_query=query, correlation_id=correlation_id,
+                    artifacts_file=artifacts_file, okta_client=okta_client,
+                    cancellation_check=check_cancelled, event_callback=event_callback, cli_mode=True,
+                )
+                results_data['data'] = results_data.get('results', results_data.get('data', []))
+                if evaluation:
+                    evaluation.observe(result)
+            except RetrievalFailure as final_failure:
+                print(str(final_failure))
+                update_turn_metadata(runtime_paths, status='error', error=str(final_failure))
+                return 1
     
     if not results_data:
         print(f"\n{Colors.WARNING}No results returned from script execution{Colors.ENDC}")
         update_turn_metadata(runtime_paths, status="error", error="No results returned from script execution", completed_at=datetime.now().isoformat())
         return 1
     
+    if getattr(settings, 'QUERY_PROCEDURES_ENABLED', False):
+        from src.core.query_procedures import save_successful_procedure
+        await save_successful_procedure(
+            run_id=correlation_id, result=result, event=results_data, artifacts_file=artifacts_file,
+        )
     # Display results summary
     record_count = results_data.get("count", 0)
     display_type = results_data.get("display_type", "table")
@@ -428,7 +470,7 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
             for i, row in enumerate(data[:3]):
                 print(f"  {i+1}. {row}")
 
-    final_response_summary = markdown_content or f"Found {record_count} results"
+    final_response_summary = markdown_content or results_data.get('summary') or f"Found {record_count} results"
 
     write_turn_summary(runtime_paths, {
         "status": "completed",
@@ -447,6 +489,15 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         },
     })
     update_turn_metadata(runtime_paths, status="completed", completed_at=datetime.now().isoformat())
+    if getattr(settings, 'QUERY_PROCEDURES_ENABLED', False):
+        from src.core.okta.sync.operations import DatabaseOperations
+        await DatabaseOperations().mirror_runtime_turn_state(
+            tenant_id=settings.tenant_id, run_id=correlation_id, runtime_paths=runtime_paths,
+        )
+        from src.core.procedure_admission import finish_cli_admission
+        await finish_cli_admission(results_data)
+    if evaluation:
+        evaluation.output(results_data)
     return 0
 
 
@@ -455,9 +506,23 @@ async def main() -> int:
     parser.add_argument("query", nargs="?", help="The query to execute")
     parser.add_argument("--scriptonly", action="store_true", help="Only generate the script, do not execute")
     parser.add_argument("--session-id", help="Optional session id for grouping CLI turns")
+    parser.add_argument("--evaluate-procedures", type=Path, metavar="REPORT_JSON",
+                        help="Enable candidate storage for this run and record model/classification/fields without result rows")
     parser.add_argument("-i", "--interactive", action="store_true", help="Run in interactive mode")
     
     args = parser.parse_args()
+    if args.evaluate_procedures:
+        if not args.query or args.interactive or args.scriptonly:
+            parser.error('--evaluate-procedures requires one executed query')
+        from src.core.query_procedure_evaluation import ProcedureEvaluation
+        evaluation = ProcedureEvaluation(args.evaluate_procedures, args.query)
+        settings.QUERY_PROCEDURES_ENABLED = True
+        exit_code = 1
+        try:
+            exit_code = await run_query(args.query, session_id=args.session_id, evaluation=evaluation)
+            return exit_code
+        finally:
+            evaluation.finish(exit_code)
     
     if args.interactive:
         print(f"{Colors.HEADER}{Colors.BOLD}Tako CLI Agent Interactive Mode{Colors.ENDC}")

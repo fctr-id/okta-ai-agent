@@ -119,6 +119,7 @@ class StreamOutcomeTests(unittest.IsolatedAsyncioTestCase):
                     result.script_code = 'exec("print(1)")'
                     result.is_special_tool = False
                 if outcome == 'analysis':
+                    result.procedure_reuse = None
                     result.completed_result = {'type': 'COMPLETE', 'display_type': 'table', 'count': 320,
                         'headers': ['email'], 'results': [{'email': f'user{i}@example.test'} for i in range(320)]}
                     result.completed_result_event = lambda: result.completed_result

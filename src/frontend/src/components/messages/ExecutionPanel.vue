@@ -159,7 +159,7 @@ const props = defineProps({
 })
 
 const contentId = `execution-${useId()}`
-const isExpanded = ref(Boolean(props.executionError) || (!props.isComplete && !props.shouldAutoCollapse))
+const isExpanded = ref(props.collapseRevision === 0 && (Boolean(props.executionError) || (!props.isComplete && !props.shouldAutoCollapse)))
 const isScriptExpanded = ref(false)
 watch(() => props.collapseRevision, () => {
   isExpanded.value = false

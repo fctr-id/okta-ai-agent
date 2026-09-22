@@ -343,6 +343,7 @@ def _build_markdown_turn_preview(turn: ConversationTurn) -> Optional[Conversatio
                 display_type="markdown",
                 content=artifact_content,
                 metadata={
+                    **(turn_output_artifact.get("metadata") if isinstance(turn_output_artifact.get("metadata"), dict) else {}),
                     "source": "saved_turn_output",
                     "isPreview": False,
                 },
@@ -470,8 +471,7 @@ def _build_table_turn_preview(turn: ConversationTurn) -> Optional[ConversationTu
 
         if row_count == 0 and not preview_rows:
             summary_text = str(
-                inspection.get("summary")
-                or turn.final_response_summary
+                turn.final_response_summary
                 or "No matching data was found for this turn."
             ).strip()
             return ConversationTurnResultPreviewResponse(
@@ -494,7 +494,8 @@ def _build_table_turn_preview(turn: ConversationTurn) -> Optional[ConversationTu
             "isStreaming": False,
             "previewRowCount": len(preview_rows),
             "isTruncated": bool(row_count is not None and row_count > len(preview_rows)),
-            "summary": inspection.get("summary") or turn.final_response_summary,
+            # Inspection summaries describe schema for agents, not the answer for users.
+            "summary": str(turn.final_response_summary or "").strip() or None,
             "entity_type": entry.get("entity_type") or inspection.get("entity_type"),
             "key_columns": list(entry.get("key_columns") or inspection.get("key_columns") or []),
             "data_source_type": "saved_session",
@@ -569,8 +570,7 @@ def _build_turn_full_result(
 
         if row_count == 0 and not full_rows:
             summary_text = str(
-                inspection.get("summary")
-                or turn.final_response_summary
+                turn.final_response_summary
                 or "No matching data was found for this turn."
             ).strip()
             return ConversationTurnResultPreviewResponse(
@@ -594,7 +594,7 @@ def _build_turn_full_result(
             "count": total_count,
             "isPreview": False,
             "isStreaming": False,
-            "summary": inspection.get("summary") or turn.final_response_summary,
+            "summary": str(turn.final_response_summary or "").strip() or None,
             "entity_type": entry.get("entity_type") or inspection.get("entity_type"),
             "key_columns": list(entry.get("key_columns") or inspection.get("key_columns") or []),
             "data_source_type": payload_metadata.get("data_source_type") or "saved_session",

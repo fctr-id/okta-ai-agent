@@ -421,6 +421,7 @@ async def execute_result_analysis(
         }
     completed_result["metadata"] = {
         **execution_output.metadata,
+        "summary": execution_output.summary,
         "data_source_type": "analysis",
         "result_set_refs": result_set_refs,
         "entity_type": execution_output.entity_type or plan.result_entity_type,

@@ -1,5 +1,5 @@
 <template>
-    <section class="response-card" :class="{ 'is-collapsed': collapsed }">
+    <section class="response-card" :class="{ 'is-collapsed': collapsed, 'is-follow-up': followUp }">
         <button
             type="button"
             class="turn-header"
@@ -17,7 +17,7 @@
             </span>
             <span class="turn-heading-summary">
                 <span v-if="resultSummary" class="turn-record-count">{{ resultSummary }}</span>
-                <span class="turn-header-status" :data-tone="statusTone" role="status">
+                <span v-if="status" class="turn-header-status" :data-tone="statusTone" role="status">
                     <span class="turn-status-dot" aria-hidden="true"></span>{{ status }}
                 </span>
             </span>
@@ -39,21 +39,23 @@ defineProps({
     statusTone: { type: String, default: 'active' },
     resultSummary: { type: String, default: '' },
     collapsed: { type: Boolean, default: false },
+    followUp: { type: Boolean, default: false },
 })
 defineEmits(['update:collapsed'])
 const bodyId = `turn-body-${useId()}`
 </script>
 
 <style scoped>
-.response-card { min-width: 0; border: 1px solid #dce3eb; border-radius: 12px; background: #fff; overflow: hidden; }
-.turn-header { display: flex; align-items: center; gap: 12px; width: 100%; padding: 17px 22px; border: 0; background: #eef3fc; color: #243957; font: inherit; text-align: left; cursor: pointer; transition: background .15s ease; }
+.response-card { min-width: 0; border: 1px solid #b8c2cf; border-radius: 12px; background: #fff; overflow: hidden; }
+.turn-header { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 22px; border: 0; background: #eef3fc; color: #243957; font: inherit; text-align: left; cursor: pointer; transition: background .15s ease; }
+.is-follow-up .turn-header { padding-block: 8px; }
 .turn-header:hover { background: #e6edfa; }
 .is-collapsed .turn-header { background: #f7f9fd; }
 .is-collapsed .turn-header:hover { background: #eef3fc; }
 .turn-header:focus-visible { outline: 2px solid var(--primary, #3e63dd); outline-offset: -3px; }
 .turn-chevron { flex-shrink: 0; color: #4c67a1; transition: transform .15s ease; }
 .turn-chevron.expanded { transform: rotate(90deg); }
-.turn-heading-copy { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }
+.turn-heading-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
 .turn-question { font-size: 14px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .is-collapsed .turn-question { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .turn-author { font-size: 12px; color: #596b82; line-height: 1.5; }
@@ -65,7 +67,7 @@ const bodyId = `turn-body-${useId()}`
 .turn-header-status[data-tone="active"] { background: #bcd2ff; color: #173f87; font-weight: 600; box-shadow: inset 0 0 0 1px #8baeea; }
 .turn-status-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
 .turn-header-status[data-tone="active"] .turn-status-dot { animation: status-pulse 1.5s ease-in-out infinite; }
-.response-body { border-top: 1px solid #dce3eb; min-width: 0; }
+.response-body { border-top: 1px solid #b8c2cf; min-width: 0; }
 .response-body :deep(.transcript-react-panels) { gap: 0; }
 .response-body :deep(.activity),
 .response-body :deep(.exec-glass),
@@ -86,7 +88,8 @@ const bodyId = `turn-body-${useId()}`
 @keyframes status-pulse { 50% { opacity: .65; } }
 @media (prefers-reduced-motion: reduce) { .turn-chevron { transition: none; } .turn-header-status .turn-status-dot { animation: none; } }
 @media (max-width: 600px) {
-    .turn-header { flex-wrap: wrap; gap: 8px; padding: 14px; }
+    .turn-header { flex-wrap: wrap; gap: 8px; padding: 12px 14px; }
+    .is-follow-up .turn-header { padding-block: 10px; }
     .turn-chevron { align-self: flex-start; margin-top: 3px; }
     .turn-heading-summary { width: 100%; max-width: none; justify-content: flex-start; padding-left: 24px; }
     .response-body :deep(.activity-toggle), .response-body :deep(.glass-header) { padding: 11px 14px; }

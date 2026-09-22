@@ -112,13 +112,14 @@
 
                     <div v-if="conversationTurns.length > 0" class="transcript-list">
                         <article
-                            v-for="turn in conversationTurns"
+                            v-for="(turn, turnIndex) in conversationTurns"
                             :key="turn.key"
                             :ref="(element) => setTranscriptTurnElement(turn.key, element)"
                             class="transcript-turn"
                             :class="{ 'is-active': turn.isActive }"
                         >
                             <ConversationCard
+                                :followUp="turnIndex > 0"
                                 :question="turn.queryText"
                                 :timestamp="formatTurnTimestamp(turn)"
                                 :status="turnHeaderStatus(turn)"
@@ -198,7 +199,7 @@
 
                                 <div v-else-if="shouldShowTurnSummary(turn)" class="turn-summary-card">
                                     <div class="turn-summary-meta">
-                                        <span class="turn-status-pill" :class="turnStatusClass(turn)">
+                                        <span v-if="formatTurnStatus(turn)" class="turn-status-pill" :class="turnStatusClass(turn)">
                                             {{ formatTurnStatus(turn) }}
                                         </span>
                                         <span
@@ -396,7 +397,7 @@ import { useAuth } from '@/composables/useAuth'
 import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useConversationCollapse } from '@/composables/useConversationCollapse'
-import { isClarificationTurn, isClarification, hasUnassignedError } from '@/composables/turnFeedback'
+import { isClarificationTurn, isClarification, hasUnassignedError, turnStatusPresentation } from '@/composables/turnFeedback'
 
 // ---------- STATE MANAGEMENT ----------
 
@@ -517,7 +518,7 @@ const pendingSessionTitle = ref('')
 const conversationTurns = ref([])
 const {
     collapsedTurnKeys, sectionCollapseRevisions, setTurnCollapsed,
-    hasExpandedPreviousTurns, collapsePreviousTurns, collapseForFollowUp,
+    hasExpandedPreviousTurns, collapsePreviousTurns, collapseRestoredTurns, collapseForFollowUp,
 } = useConversationCollapse(conversationTurns)
 const showGlobalError = computed(() => hasUnassignedError(reactError.value, activeTurnKey.value, conversationTurns.value))
 const sessionViewLoading = ref(false)
@@ -992,6 +993,7 @@ const loadConversationSession = async (sessionId, options = {}) => {
         conversationTurns.value = prepareSessionTurnsForHydration(sessionDetail.turns || [])
         sortConversationTurns()
         activeTurnKey.value = null
+        collapseRestoredTurns()
 
         await hydrateSessionTurnResults(sessionDetail.session_id, conversationTurns.value, requestId)
         if (requestId !== sessionLoadRequestId) {
@@ -1192,28 +1194,9 @@ const formatTurnTimestamp = (turn) => {
     return timestamp.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-const formatTurnStatus = (turn) => {
-    const statusValue = turn.completionMode || turn.status || 'active'
-    return String(statusValue)
-        .replace(/_/g, ' ')
-        .replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-const turnHeaderStatus = (turn) => {
-    if (isClarificationTurn(turn)) return 'Needs clarification'
-    if (turn.error || turn.resultsError || turn.status === 'failed') return 'Failed'
-    if (turn.isHydratingResults) return 'Loading results'
-    if (turn.status === 'completed') return turn.isPartialResult ? 'Partial results' : 'Completed'
-    if (turn.isActive || ['running', 'created', 'active'].includes(turn.status)) return 'Working'
-    return formatTurnStatus(turn)
-}
-const turnHeaderTone = (turn) => {
-    if (isClarificationTurn(turn)) return 'muted'
-    if (turn.error || turn.resultsError || turn.status === 'failed') return 'error'
-    if (turn.isHydratingResults) return 'active'
-    if (turn.status === 'completed') return turn.isPartialResult ? 'muted' : 'success'
-    return turn.isActive || ['running', 'created', 'active'].includes(turn.status) ? 'active' : 'muted'
-}
+const formatTurnStatus = (turn) => turnStatusPresentation(turn).label
+const turnHeaderStatus = formatTurnStatus
+const turnHeaderTone = (turn) => turnStatusPresentation(turn).tone
 const turnHeaderResultSummary = (turn) => {
     const count = turn.results?.metadata?.count ?? turn.resultCount
     if (count === null || count === undefined) return ''
@@ -1301,21 +1284,7 @@ const shouldAutoCollapseTurnPanels = (turn) => {
     return Boolean(turn.status === 'completed' && turn.results && !turn.error)
 }
 
-const turnStatusClass = (turn) => {
-    if (turn.error || turn.status === 'failed') {
-        return 'turn-status-pill-error'
-    }
-
-    if (turn.status === 'completed') {
-        return 'turn-status-pill-success'
-    }
-
-    if (turn.isActive || turn.status === 'running' || turn.status === 'created') {
-        return 'turn-status-pill-active'
-    }
-
-    return 'turn-status-pill-muted'
-}
+const turnStatusClass = (turn) => `turn-status-pill-${turnStatusPresentation(turn).tone}`
 
 /**
  * Handle authentication errors by redirecting to login

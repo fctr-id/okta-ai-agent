@@ -39,6 +39,7 @@ class DiscoveryTestClient:
         self._diagnostic_callback = diagnostic_callback
         self._request_count = 0
         self._operations = []
+        self._operation_labels = {}
         for endpoint in endpoints or []:
             template = endpoint.get("url_pattern", "")
             entity, operation = endpoint.get("entity"), endpoint.get("operation")
@@ -49,6 +50,7 @@ class DiscoveryTestClient:
             specificity = sum(len(part) for part in parts if not part.startswith("{"))
             self._operations.append((specificity, endpoint.get("method", "GET").upper(),
                                      re.compile(pattern), f"{entity}.{operation}"))
+            self._operation_labels[f"{entity}.{operation}"] = endpoint.get("name") or f"{entity}.{operation}"
         # Prefer literal routes over placeholder routes that also match.
         self._operations.sort(key=lambda item: item[0], reverse=True)
 
@@ -72,6 +74,7 @@ class DiscoveryTestClient:
                 await self._progress_callback({"details": {
                     "kind": "api_test_request", "test_id": self._test_id,
                     "request_id": request_id, "operation": operation, "status": status,
+                    "label": self._operation_labels.get(operation, "Other API request"),
                 }})
             except Exception:
                 # A disconnected UI must not change the request result.

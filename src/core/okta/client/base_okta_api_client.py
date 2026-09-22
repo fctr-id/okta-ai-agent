@@ -5,8 +5,9 @@ import aiohttp
 import re
 import logging
 import random
+import hashlib
 from typing import Dict, Any, Optional
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from datetime import datetime, timezone
 import json  # NEW: for structured progress events
 import importlib
@@ -452,7 +453,69 @@ class OktaAPIClient:
         except KeyError:
             pass
     
-    async def make_request(self, 
+    @staticmethod
+    def _failure_category(result):
+        status = result.get('http_status')
+        code = result.get('error_code')
+        if status in (401, 403) or code in ('E0000011', 'E0000006'):
+            return 'access'
+        if status == 429 or (isinstance(status, int) and status >= 500) or code in (
+                'E0000047', 'E0000009', 'TIMEOUT', 'NETWORK_ERROR'):
+            return 'transient'
+        if code == 'PAGINATION_LIMIT':
+            return 'pagination_limit'
+        if status == 404 or code == 'E0000007':
+            return 'missing'
+        if status in (400, 405, 422):
+            return 'request'
+        return 'unknown'
+
+    async def make_request(self, endpoint: str, method: str = "GET",
+                          params: Optional[Dict] = None, body: Optional[Dict] = None,
+                          max_results: Optional[int] = None,
+                          entity_label: Optional[str] = None) -> Dict[str, Any]:
+        """Record every logical retrieval independently of generated error handling."""
+        # Hash the complete scope so a different filter cannot mask a failure.
+        # Never emit query parameters, credentials, or returned records.
+        scope = [self.base_url, endpoint, method.upper(), params, body, max_results,
+                 self.max_pages, self.test_mode]
+        request_key = hashlib.sha256(json.dumps(scope, sort_keys=True, default=str).encode()).hexdigest()
+
+        def record(state, category=None, result=None):
+            event = {'request': request_key, 'state': state}
+            if category:
+                event['category'] = category
+                # Bounded diagnostic evidence for rediscovery, not the response body.
+                path = urlsplit(endpoint).path
+                if path.startswith('/api/') and len(path) <= 512:
+                    event['endpoint'] = path
+                event['method'] = method.upper()
+                if result:
+                    event['http_status'] = result.get('http_status')
+                    event['error_code'] = str(result.get('error_code') or '')[:80]
+                    message = str(result.get('error') or '')[:1000]
+                    message = re.sub(r'https?://\S+', '[URL]', message)
+                    message = re.sub(r'(?i)(bearer|ssws)\s+\S+', '[credential]', message)
+                    message = re.sub(r'[\w.+-]+@[\w.-]+', '[email]', message)
+                    message = re.sub(r'(?i)((?:token|secret|password|authorization|api[_-]?key)\s*[=:]\s*)\S+', r'\1[redacted]', message)
+                    event['message'] = message
+            print('__TAKO_RETRIEVAL__' + json.dumps(event), file=sys.stderr, flush=True)
+
+        record('started')
+        try:
+            result = await self._make_request(endpoint, method, dict(params) if params is not None else None,
+                                              body, max_results, entity_label)
+        except Exception:
+            record('error', 'unknown')
+            raise
+        category = self._failure_category(result) if result.get('status') != 'success' else None
+        record('error' if category else 'success', category, result)
+        # Preserve fatal discovery errors, after recording their structured cause.
+        if category == 'access' or result.get('http_status') == 400:
+            raise RuntimeError(f"{result.get('error', 'API request failed')} (Code: {result.get('error_code')})")
+        return result
+
+    async def _make_request(self,
                           endpoint: str,
                           method: str = "GET", 
                           params: Optional[Dict] = None,
@@ -504,23 +567,9 @@ class OktaAPIClient:
                 self.increment_entity_errors(entity_label, 1)
                 self.logger.debug(f"Auto-tracked error for entity batch '{entity_label}': {result.get('error', 'Unknown error')}")
             
-            # CRITICAL: Raise exceptions for fatal auth/permission errors so the LLM sees them
-            # instead of swallowing them in the generated code.
-            if result.get("status") == "error":
-                error_code = result.get("error_code")
-                http_status = result.get("http_status")
-                
-                # 401 (Invalid Token) or 403 (Forbidden) or 400 (Bad Request/Invalid Client)
-                if error_code in ["E0000011", "E0000006"] or http_status == 400:
-                    raise Exception(f"{result.get('error')} (Code: {error_code})")
-            
             return result
                 
         except Exception as e:
-            # If we just raised it above, re-raise it
-            if "Code: E0000011" in str(e) or "Code: E0000006" in str(e) or "HTTP 400" in str(e):
-                raise
-
             self.logger.error(f"API request failed for {endpoint}: {str(e)}")
             sys.stderr.flush()  # Flush error logs immediately
             error_result = {
@@ -649,6 +698,11 @@ class OktaAPIClient:
             # Handle empty pages (stops infinite pagination)
             if not page_data or (isinstance(page_data, list) and len(page_data) == 0):
                 self.logger.info(f"Empty page {page_count} detected, stopping pagination")
+                current_link = page_result.get("link_header", "")
+                # System Log polling keeps a next link even when caught up.
+                # https://developer.okta.com/docs/reference/system-log-query/
+                if urlsplit(endpoint).path.rstrip('/') == '/api/v1/logs':
+                    current_link = ''
                 break
             
             # Add page data
@@ -705,6 +759,12 @@ class OktaAPIClient:
             
             # Small delay between requests
             await asyncio.sleep(0.2)
+
+        if self._extract_next_url(current_link):
+            # A safety stop is not evidence that every page was retrieved.
+            return {"status": "error", "error_code": "PAGINATION_LIMIT",
+                    "error": "Pagination stopped before all pages were retrieved",
+                    "data": all_data, "is_partial": True}
 
         # Remove old pagination_complete event - replaced by entity_complete
         self.logger.info(f"Pagination complete for {endpoint}: {len(all_data)} total items across {page_count} pages")
@@ -848,6 +908,12 @@ class OktaAPIClient:
                         
                         # Process response with comprehensive error handling
                         result = await self._process_response(response)
+                        result['http_status'] = response.status
+                        if (method.upper() == 'GET' and response.status >= 500
+                                and retry_count < 2):
+                            await asyncio.sleep(0.5 * (2 ** retry_count))
+                            retry_count += 1
+                            continue
                         
                         # Add Link header and rate limit info for pagination detection
                         if result["status"] == "success":
@@ -867,6 +933,10 @@ class OktaAPIClient:
                         return result
                         
                 except asyncio.TimeoutError:
+                    if method.upper() == 'GET' and retry_count < 2:
+                        await asyncio.sleep(0.5 * (2 ** retry_count))
+                        retry_count += 1
+                        continue
                     self.logger.error(f"Request timeout after {self.timeout} seconds for {endpoint}")
                     sys.stderr.flush()  # Flush error logs immediately
                     return {
@@ -875,6 +945,10 @@ class OktaAPIClient:
                         "error_code": "TIMEOUT"
                     }
                 except aiohttp.ClientError as e:
+                    if method.upper() == 'GET' and retry_count < 2:
+                        await asyncio.sleep(0.5 * (2 ** retry_count))
+                        retry_count += 1
+                        continue
                     self.logger.error(f"Network error for {endpoint}: {str(e)}")
                     sys.stderr.flush()  # Flush error logs immediately
                     return {

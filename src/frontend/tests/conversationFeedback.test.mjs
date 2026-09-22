@@ -5,7 +5,23 @@ import { renderToString } from 'vue/server-renderer'
 import { createServer } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { useConversationCollapse } from '../src/composables/useConversationCollapse.js'
-import { isClarification, isClarificationTurn, clarificationResult, hasUnassignedError } from '../src/composables/turnFeedback.js'
+import { isClarification, isClarificationTurn, clarificationResult, hasUnassignedError, turnStatusPresentation } from '../src/composables/turnFeedback.js'
+
+test('saved in-progress status is not a live execution or proof of completion', () => {
+    for (const status of ['executing', 'running', 'created', 'active']) {
+        assert.deepEqual(turnStatusPresentation({ status }), { label: '', tone: 'muted' })
+        assert.deepEqual(turnStatusPresentation({ status, results: { metadata: { count: 3 } } }),
+            { label: '', tone: 'muted' })
+        assert.deepEqual(turnStatusPresentation({ status, isActive: true }), { label: 'Working', tone: 'active' })
+    }
+    assert.equal(turnStatusPresentation({}).label, '')
+    assert.equal(turnStatusPresentation({ status: 'unknown' }).label, '')
+    assert.deepEqual(turnStatusPresentation({ status: 'completed' }), { label: 'Completed', tone: 'success' })
+    assert.equal(turnStatusPresentation({ status: 'completed', isPartialResult: true }).label, 'Partial results')
+    assert.equal(turnStatusPresentation({ status: 'error' }).label, 'Failed')
+    assert.equal(turnStatusPresentation({ status: 'cancelled' }).label, 'Cancelled')
+    assert.equal(turnStatusPresentation({ status: 'completed', completionMode: 'clarify' }).label, 'Needs clarification')
+})
 
 test('follow-up collapses every existing turn and resets sections, while the new turn stays open', async () => {
     const scope = effectScope()

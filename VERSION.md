@@ -1,5 +1,25 @@
 # Version History
 
+## v3.2.0-beta - "Catch & Reuse" (Planned)
+
+✨ Highlights
+
+- **Reusable Queries — Faster Answers, Fewer Tokens**: Reuse successful retrieval scripts or adapt supported changes to filters, dates, and output fields. Skipping repeated discovery can substantially reduce response time and LLM token usage, especially for complex queries. Scripts run again against the configured data sources; generic queries can be shared within the tenant. Enable with `QUERY_PROCEDURES_ENABLED=true`.
+- **Deeper API Understanding Across 107 Okta Endpoints**: Ask more complex questions about policies, applications, groups, devices, and authenticators. Expanded and corrected guidance for every read-only endpoint in Tako's catalog helps agents find the right data with less trial and error, distinguish similar resources, and handle paginated results and relationships more reliably.
+- **Smarter Query Library**: A background AI check compares questions, scope, and output fields to skip duplicates while retaining useful variants. Pending checks survive restarts without delaying web, Slack, or Teams answers.
+- **Dedicated AI Summary**: A clearly labeled AI Summary above the results explains what the answer means in the context of your question and follow-ups, including relevant filters or limitations.
+- **Clearer Progress**: Activity groups tool calls under their database, API, analysis, and query-reuse steps, including follow-ups.
+
+🔧 Optimizations and Fixes
+
+- **Bounded Retrieval Recovery**: Detect incomplete API retrievals even when a generated script returns a table. Recoverable failures can return to discovery for one repair attempt; access errors and exhausted transient retries report a clear failure instead of repeatedly replanning.
+- **More Reliable Reuse**: Saved scripts remain subject to current validation, with discovery fallback when reuse fails. Temporary failures no longer disable entries, and prompt wording changes no longer invalidate the library. Retention balances successful reuse with recent additions.
+- **Preserve Requested Scope**: Removed default ACTIVE-only guidance so unspecified status does not silently exclude other account or application states.
+- **Cleaner Saved Conversations**: Reopened turns and their activity panels start collapsed. Uncertain historical status badges are hidden instead of suggesting an old query is still running.
+- **More Predictable Shutdown**: Bounded background-task cleanup and improved Ctrl+C handling help the local server stop without hanging indefinitely.
+
+---
+
 ## v3.1.1-beta - "Steady Course"
 
 ✨ Highlights

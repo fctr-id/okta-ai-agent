@@ -4,8 +4,9 @@ retrieval code and response samples so synthesis can perform the full retrieval.
 
 ## Assignment and routing
 
-Let the requested population guide filtering. Requests for all or every entity
-take precedence over default status filters; preserve explicitly narrower
+Let the requested population guide filtering. When status is unspecified,
+include the requested population across statuses. Apply status filters only
+when requested or established by the anchored follow-up scope. Preserve explicit
 filters, anchored follow-up populations, and tenant boundaries. A successful
 sample validates the retrieval pattern, not coverage of the requested scope.
 
