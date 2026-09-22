@@ -1,9 +1,7 @@
 """Bounded retrieval evidence; generic procedures are shared within their tenant."""
 from datetime import datetime, timezone
-from functools import lru_cache
 import hashlib
 import json
-from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy import select, delete, text, func, update, case
@@ -20,21 +18,14 @@ from src.utils.security_config import validate_generated_code
 logger = get_logger(__name__)
 MAX_SCRIPT_CHARS = 40000
 MAX_EVIDENCE_CHARS = 24000
+# Bump only for breaking schema, API-client, execution or security contracts.
+# Prompt wording and ordinary implementation changes do not change this version.
+PROCEDURE_CONTRACT_VERSION = 'query-procedures-v1'
 
 
-@lru_cache(maxsize=1)
 def compatibility_key():
-    """Invalidate old procedures when the source/schema/validation contract changes."""
-    root = Path(__file__).resolve().parents[2]
-    digest = hashlib.sha256(b'query-procedures-v1')
-    for relative in (
-        'src/core/okta/sync/models.py', 'src/utils/security_config.py',
-        'src/data/schemas/Okta_API_entitity_endpoint_reference_GET_ONLY.json',
-        'src/core/agents/prompts/synthesis_prompt.txt',
-        'src/core/okta/client/base_okta_api_client.py',
-    ):
-        digest.update((root / relative).read_bytes())
-    return digest.hexdigest()
+    """Explicit retrieval contract version; independent of prompts and file hashes."""
+    return PROCEDURE_CONTRACT_VERSION
 
 
 def retrieval_evidence(artifacts_file, previous=None):
@@ -62,6 +53,17 @@ class ProcedureStore:
                    ConversationTurn.run_id == run_id))).first()
         return row
 
+    def compatible(self):
+        key = QueryProcedure.compatibility_key
+        matches = key == self.compatibility
+        if self.compatibility == 'query-procedures-v1':
+            # Existing v1 entries used SHA-256 file hashes. Keep them available
+            # without rewriting stored scripts/history. They still pass current
+            # validation and supervisor scope checks. A future version bump
+            # deliberately excludes both these hashes and explicit v1 entries.
+            matches = matches | ((func.length(key) == 64) & ~key.op('GLOB')('*[^0-9a-f]*'))
+        return matches
+
     def eligible(self, owner):
         # Classification is the sharing policy. Include legacy generic entries
         # saved as private so existing candidates need no migration or re-save.
@@ -69,7 +71,7 @@ class ProcedureStore:
         accessible = ((QueryProcedure.owner_id == owner) | generic)
         return (QueryProcedure.tenant_id == self.tenant_id, accessible,
                 QueryProcedure.sharing_scope.in_(['private', 'tenant']),
-                QueryProcedure.compatibility_key == self.compatibility,
+                self.compatible(),
                 QueryProcedure.classification_json['_reuse_disabled'].as_boolean().is_not(True))
 
     async def catalog(self, run_id, entities):
@@ -132,7 +134,7 @@ class ProcedureStore:
     async def _prune(self, session):
         """Protect up to 80% by successful reuse; fill remaining slots by recency."""
         tenant = QueryProcedure.tenant_id == self.tenant_id
-        usable = ((QueryProcedure.compatibility_key == self.compatibility)
+        usable = (self.compatible()
                   & QueryProcedure.classification_json['_reuse_disabled'].as_boolean().is_not(True))
         reuses = func.coalesce(QueryProcedure.classification_json['_successful_reuses'].as_integer(), 0)
         recent_order = (QueryProcedure.last_used_at.desc(), QueryProcedure.procedure_id)
@@ -192,6 +194,7 @@ class ProcedureStore:
             await session.execute(stmt)
             procedure_id = (await session.execute(select(QueryProcedure.procedure_id).where(
                 *self.eligible(actor.user_id), QueryProcedure.owner_id == actor.user_id,
+                QueryProcedure.compatibility_key == self.compatibility,
                 QueryProcedure.sharing_scope == values['sharing_scope'],
                 QueryProcedure.content_hash == content_hash))).scalar_one()
             await self._prune(session)

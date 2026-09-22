@@ -3,6 +3,8 @@ validated discovery artifacts. Answer the full requested scope with the simplest
 script that preserves the evidence, execution boundaries, and output contract.
 
 Evidence and scope
+- Do not introduce status filters unless requested or established by the anchored
+  follow-up scope. An unspecified status covers the requested population across statuses.
 - Use the provided artifact manifests, sql_query, api_code, result_set_refs,
   key_columns, and result_set_inspection. Use exact validated SQL and API patterns
   and observed field names; do not invent endpoints, queries, fields, or results.

@@ -85,6 +85,36 @@ class ProcedureTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(await other.inspect('run1', identifier))
         self.assertIsNone(await self.save(run='unknown'))
 
+    async def test_explicit_version_keeps_legacy_hashes_until_breaking_bump(self):
+        self.store.compatibility = 'a' * 64
+        legacy = await self.save()
+        self.store = procedures.ProcedureStore(self.db, tenant_id='tenant', limit=10)
+        self.assertEqual(self.store.compatibility, 'query-procedures-v1')
+        self.assertIsNotNone(await self.store.inspect('run2', legacy))
+        self.assertEqual([row['procedure_id'] for row in await self.store.catalog('run2', ['user'])], [legacy])
+        # Identical content under a new contract must resolve only its own row.
+        current = await self.save()
+        self.assertNotEqual(current, legacy)
+        self.assertEqual(await self.save(), current)
+        with patch.object(procedures, 'PROCEDURE_CONTRACT_VERSION', 'query-procedures-v2'):
+            next_version = procedures.ProcedureStore(self.db, tenant_id='tenant')
+            self.assertEqual(await next_version.catalog('run1', ['user']), [])
+            self.assertIsNone(await next_version.inspect('run1', legacy))
+            self.assertIsNone(await next_version.inspect('run1', current))
+
+    def test_contract_version_does_not_read_prompt_or_source_files(self):
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('File hashing is not compatibility')):
+            self.assertEqual(procedures.compatibility_key(), 'query-procedures-v1')
+
+    async def test_legacy_entries_still_enforce_validation_and_tenant_boundary(self):
+        self.store.compatibility = 'b' * 64
+        identifier = await self.save()
+        self.store = procedures.ProcedureStore(self.db, tenant_id='tenant')
+        other = procedures.ProcedureStore(self.db, tenant_id='other')
+        self.assertIsNone(await other.inspect('run3', identifier))
+        with patch.object(procedures, 'validate_generated_code', return_value=SimpleNamespace(is_valid=False)):
+            self.assertIsNone(await self.store.inspect('run1', identifier))
+
     async def test_retention_and_rejection(self):
         for n in range(3):
             await self.save(script=f"print('QUERY RESULTS {n}')")

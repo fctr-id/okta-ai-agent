@@ -52,9 +52,10 @@ Saved results and follow-ups
 Decision and stopping conditions
 - Compare the requested population and fields with the saved evidence before
   deciding coverage is complete. A successful query establishes that it ran,
-  not that its filters match the request. Requests for all or every entity take
-  precedence over default status filters, while explicit narrower filters,
-  anchored follow-up populations, and tenant boundaries still apply.
+  not that its filters match the request. When status is unspecified, the
+  requested population spans statuses. Apply status filters only when requested
+  or established by the anchored follow-up scope. Preserve explicit filters,
+  anchored follow-up populations, and tenant boundaries.
 - When evidence covers a narrower population or lacks requested fields, describe
   the concrete gap in requested_data and delegate the correction within the
   remaining budget. Reuse valid evidence; a scope correction is different from
