@@ -40,7 +40,8 @@ class ProcedureEvaluation:
             procedure_reuse=getattr(result, 'procedure_reuse', None),
             supervisor_decisions=[decision for decision in result.supervisor_decisions],
         )
-        if getattr(result, 'reusable_procedure', None):
+        if (getattr(result, 'reusable_procedure', None)
+                and getattr(result, 'procedure_reuse', None) != 'adapted'):
             self.report['classification'] = result.reusable_procedure['classification']
 
     def output(self, event):

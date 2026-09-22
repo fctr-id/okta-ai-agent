@@ -1,4 +1,4 @@
-"""Bounded, caller-owned retrieval evidence. No result payloads or direct replay."""
+"""Bounded retrieval evidence; generic procedures are shared within their tenant."""
 from datetime import datetime, timezone
 from functools import lru_cache
 import hashlib
@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-from sqlalchemy import select, delete, text, func, update
+from sqlalchemy import select, delete, text, func, update, case
 from sqlalchemy.dialects.sqlite import insert
 
 from src.config.settings import settings
@@ -63,9 +63,13 @@ class ProcedureStore:
         return row
 
     def eligible(self, owner):
-        # Shared scope is reserved for a later explicit promotion/access policy.
-        return (QueryProcedure.tenant_id == self.tenant_id, QueryProcedure.owner_id == owner,
-                QueryProcedure.sharing_scope == 'private', QueryProcedure.compatibility_key == self.compatibility,
+        # Classification is the sharing policy. Include legacy generic entries
+        # saved as private so existing candidates need no migration or re-save.
+        generic = QueryProcedure.classification_json['classification'].as_string() == 'generic'
+        accessible = ((QueryProcedure.owner_id == owner) | generic)
+        return (QueryProcedure.tenant_id == self.tenant_id, accessible,
+                QueryProcedure.sharing_scope.in_(['private', 'tenant']),
+                QueryProcedure.compatibility_key == self.compatibility,
                 QueryProcedure.classification_json['_reuse_disabled'].as_boolean().is_not(True))
 
     async def catalog(self, run_id, entities):
@@ -77,11 +81,15 @@ class ProcedureStore:
             if not actor:
                 return []
             names = func.json_each(QueryProcedure.classification_json['entities']).table_valued('value')
-            matching_entity = select(1).select_from(names).where(names.c.value.in_(entities)).exists()
+            # IN permits partial matches; rank by distinct overlap so candidates
+            # covering every requested entity precede those covering only some.
+            matched_entities = select(func.count(func.distinct(names.c.value))).select_from(names).where(
+                names.c.value.in_(entities)).scalar_subquery()
             records = (await session.execute(select(QueryProcedure.procedure_id, QueryProcedure.query_text,
                 QueryProcedure.description, QueryProcedure.data_source, QueryProcedure.classification_json,
                 QueryProcedure.output_fields_json)
-                .where(*self.eligible(actor.user_id), matching_entity).order_by(QueryProcedure.last_used_at.desc())
+                .where(*self.eligible(actor.user_id), matched_entities > 0)
+                .order_by(matched_entities.desc(), QueryProcedure.last_used_at.desc(), QueryProcedure.procedure_id)
                 .limit(min(self.limit, 8)))).mappings().all()
             catalog = [dict(row) for row in records]
             while catalog and len(json.dumps(catalog)) > self.catalog_chars:
@@ -103,18 +111,46 @@ class ProcedureStore:
                     'classification': record.classification_json, 'output_fields': record.output_fields_json}
 
     async def record_reuse(self, run_id, procedure_id, *, failed=False):
+        # A failed attempt falls back for this request only. It must neither
+        # disable the saved script nor count as a successful use.
+        if failed:
+            return
         async with self.db.get_session() as session:
             actor = await self.actor(session, run_id)
             if not actor:
                 return
             conditions = (*self.eligible(actor.user_id), QueryProcedure.procedure_id == procedure_id)
-            if failed:
-                # Runtime-owned quarantine marker; the classifier cannot authorize or clear it.
-                values = {'classification_json': func.json_set(QueryProcedure.classification_json, '$._reuse_disabled', 1)}
-            else:
-                values = {'last_used_at': datetime.now(timezone.utc), 'execution_count': QueryProcedure.execution_count + 1}
+            # Separate actual reuse from initial executions or duplicate saves.
+            reuses = func.coalesce(QueryProcedure.classification_json['_successful_reuses'].as_integer(), 0)
+            values = {'last_used_at': datetime.now(timezone.utc),
+                      'execution_count': QueryProcedure.execution_count + 1,
+                      'classification_json': func.json_set(
+                          QueryProcedure.classification_json, '$._successful_reuses', reuses + 1)}
             await session.execute(update(QueryProcedure).where(*conditions).values(**values))
             await session.commit()
+
+    async def _prune(self, session):
+        """Protect up to 80% by successful reuse; fill remaining slots by recency."""
+        tenant = QueryProcedure.tenant_id == self.tenant_id
+        usable = ((QueryProcedure.compatibility_key == self.compatibility)
+                  & QueryProcedure.classification_json['_reuse_disabled'].as_boolean().is_not(True))
+        reuses = func.coalesce(QueryProcedure.classification_json['_successful_reuses'].as_integer(), 0)
+        recent_order = (QueryProcedure.last_used_at.desc(), QueryProcedure.procedure_id)
+        popular = list((await session.execute(select(QueryProcedure.procedure_id)
+            .where(tenant, usable, reuses > 0)
+            .order_by(reuses.desc(), *recent_order).limit(self.limit * 4 // 5))).scalars())
+        # Unused popular slots also go to recent entries. Unusable entries are
+        # evicted before useful ones, even if their old execution count is high.
+        remaining = select(QueryProcedure.procedure_id).where(tenant)
+        if popular:
+            remaining = remaining.where(QueryProcedure.procedure_id.not_in(popular))
+        recent = list((await session.execute(remaining
+            .order_by(case((usable, 1), else_=0).desc(), *recent_order)
+            .limit(self.limit - len(popular)))).scalars())
+        keep = popular + recent
+        if keep:
+            await session.execute(delete(QueryProcedure).where(
+                tenant, QueryProcedure.procedure_id.not_in(keep)))
 
     async def save(self, run_id, script, description, evidence, data_source, *, classification, output_fields, parent_id=None):
         classification = ProcedureMetadata.model_validate(classification)
@@ -138,7 +174,8 @@ class ProcedureStore:
             identity = json.dumps([actor.query_text, script, classification.model_dump(), output_fields, evidence, data_source], sort_keys=True)
             content_hash = hashlib.sha256(identity.encode()).hexdigest()
             values = dict(procedure_id=str(uuid4()), tenant_id=self.tenant_id, owner_id=actor.user_id,
-                          sharing_scope='private', query_text=actor.query_text, description=classification.purpose,
+                          sharing_scope='tenant' if classification.classification == 'generic' else 'private',
+                          query_text=actor.query_text, description=classification.purpose,
                           script_code=script, content_hash=content_hash, compatibility_key=self.compatibility,
                           evidence_json=evidence, classification_json=classification.model_dump(),
                           output_fields_json=output_fields, result_summary=description,
@@ -148,13 +185,16 @@ class ProcedureStore:
             stmt = insert(QueryProcedure).values(**values).on_conflict_do_update(
                 index_elements=['tenant_id', 'owner_id', 'sharing_scope', 'compatibility_key', 'content_hash'],
                 set_={'last_used_at': values['last_used_at'], 'result_summary': description,
+                      # A newly validated successful execution restores entries
+                      # disabled under the former failure policy.
+                      'classification_json': func.json_remove(QueryProcedure.classification_json, '$._reuse_disabled'),
                       'execution_count': QueryProcedure.execution_count + 1})
             await session.execute(stmt)
             procedure_id = (await session.execute(select(QueryProcedure.procedure_id).where(
-                *self.eligible(actor.user_id), QueryProcedure.content_hash == content_hash))).scalar_one()
-            expired = select(QueryProcedure.procedure_id).where(QueryProcedure.tenant_id == self.tenant_id).order_by(
-                QueryProcedure.last_used_at.desc(), QueryProcedure.procedure_id).offset(self.limit)
-            await session.execute(delete(QueryProcedure).where(QueryProcedure.procedure_id.in_(expired)))
+                *self.eligible(actor.user_id), QueryProcedure.owner_id == actor.user_id,
+                QueryProcedure.sharing_scope == values['sharing_scope'],
+                QueryProcedure.content_hash == content_hash))).scalar_one()
+            await self._prune(session)
             await session.commit()
             return procedure_id
 
@@ -187,6 +227,8 @@ async def inspect_procedure(run_id, procedure_id):
 
 
 async def record_procedure_reuse(run_id, procedure_id, *, failed=False):
+    if failed:
+        return  # The executor already logged the failure; no database mutation.
     try:
         await (await _store()).record_reuse(run_id, procedure_id, failed=failed)
     except Exception:
@@ -198,7 +240,8 @@ async def save_successful_procedure(*, run_id, result, event, artifacts_file):
     if not settings.QUERY_PROCEDURES_ENABLED:
         return None
     try:
-        if getattr(result, 'reusable_procedure', None) and getattr(result, 'completed_result', None) is not None:
+        if (getattr(result, 'reusable_procedure', None) and getattr(result, 'completed_result', None) is not None
+                and getattr(result, 'procedure_reuse', None) != 'adapted'):
             return result.reusable_procedure['procedure_id']  # Already recorded by the shared executor.
         if (not result.success or result.is_degraded_success or result.is_special_tool
                 or not result.script_code or event.get('success') is False):

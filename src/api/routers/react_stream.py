@@ -964,6 +964,11 @@ async def stream_react_updates(
             
             if result.completed_result is not None:
                 complete_event = result.completed_result_event()
+                if result.procedure_reuse == 'adapted':
+                    from src.core.query_procedures import save_successful_procedure
+                    await save_successful_procedure(
+                        run_id=process_id, result=result, event=complete_event, artifacts_file=artifacts_file,
+                    )
                 write_turn_summary(runtime_paths, {
                     "status": "completed",
                     "user_query": process["query"],

@@ -28,6 +28,9 @@ test('follow-up phase events reach Activity without tools or internal reasoning'
         for (const [phase, label] of [
             ['planning', 'Understanding your question'], ['processor', 'Processing saved results'],
             ['review', 'Planning next step'], ['analysis', 'Analyzing saved results'],
+            ['reuse_search', 'Matching saved queries'], ['reuse_inspect', 'Evaluating query fit'],
+            ['reuse', 'Running a saved query'],
+            ['reuse_adapt', 'Adapting a saved query'],
         ]) {
             stream.onmessage({ data: JSON.stringify({ type: 'STEP-START', phase, step: 1,
                 title: 'PRIVATE_TITLE', text: 'PRIVATE_RESULT_SET_AND_REASONING', timestamp: 1 }) })
@@ -48,14 +51,14 @@ test('follow-up phase events reach Activity without tools or internal reasoning'
                 { phase: 'synthesis', tools: [{ name: 'load_artifacts' }] },
             ],
         }) }))
-        const orderedLabels = ['Understanding your question', 'Checking the database',
+        const orderedLabels = ['Understanding your question', 'Querying the database',
             'Read database schema', 'Test database query', 'Planning next step · Database',
-            'Checking live data', 'Find available API endpoints', 'Planning next step · API',
+            'Retrieving live data', 'Find available API endpoints', 'Planning next step · API',
             'Preparing the answer', 'Read saved results']
         for (let i = 1; i < orderedLabels.length; i++) {
             assert.ok(grouped.indexOf(orderedLabels[i - 1]) < grouped.indexOf(orderedLabels[i]))
         }
-        assert.equal(grouped.split('Checking the database').length - 1, 1)
+        assert.equal(grouped.split('Querying the database').length - 1, 1)
         assert.match(grouped, /4 tool calls/)
         // Unknown phase values and old prose are never rendered as public progress.
         stream.onmessage({ data: JSON.stringify({ type: 'STEP-START', phase: 'PRIVATE_UNKNOWN',

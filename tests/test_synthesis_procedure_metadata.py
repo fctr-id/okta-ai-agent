@@ -9,6 +9,23 @@ from pydantic_ai.models.test import TestModel
 
 
 class SynthesisMetadataTests(unittest.IsolatedAsyncioTestCase):
+    async def test_adaptation_uses_saved_evidence_without_discovery_artifacts(self):
+        with patch('src.core.models.model_picker.ModelConfig.get_model', return_value=TestModel()):
+            from src.core.agents.synthesis_agent import synthesis_agent, execute_synthesis, SynthesisDeps
+        output = {'success': True, 'script_code': "print('QUERY RESULTS')\nprint('[]')", 'display_type': 'table'}
+        candidate = {'script_code': "print('old')", 'query_text': 'List users',
+                     'evidence': [{'sql_query': 'SELECT email, created_at FROM users'}]}
+        with TemporaryDirectory() as tmp, synthesis_agent.override(model=TestModel(custom_output_args=output)), \
+             patch.object(synthesis_agent, 'run', wraps=synthesis_agent.run) as run:
+            result, usage = await execute_synthesis('List users created in the last 20 days',
+                SynthesisDeps('fixture', Path(tmp)/'absent.json', saved_procedure=candidate, user_timezone='UTC'))
+        self.assertTrue(result.success)
+        self.assertEqual(usage.requests, 1)
+        prompt = run.call_args.args[0]
+        self.assertIn('List users created in the last 20 days', prompt)
+        self.assertIn('SELECT email, created_at FROM users', prompt)
+        self.assertIn("print('old')", prompt)
+
     async def test_metadata_uses_existing_synthesis_response_and_records_model(self):
         with patch('src.core.models.model_picker.ModelConfig.get_model', return_value=TestModel()):
             from src.core.agents.synthesis_agent import synthesis_agent, execute_synthesis, SynthesisDeps

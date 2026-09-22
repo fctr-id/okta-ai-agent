@@ -1,4 +1,4 @@
-"""Advisory synthesis metadata; never an authorization or execution decision."""
+"""Synthesis metadata; generic classification permits same-tenant procedure sharing."""
 import json
 from functools import lru_cache
 from pathlib import Path

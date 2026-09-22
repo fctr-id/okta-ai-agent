@@ -392,8 +392,12 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
     if result.completed_result is not None:
         results_data = result.completed_result_event()
         results_data["data"] = results_data.get("results", [])
-        print("Executed a matching saved query against current data." if getattr(result, 'procedure_reuse', None) == 'used'
-              else "Using completed analysis of saved results; no script execution needed.")
+        reuse_mode = getattr(result, 'procedure_reuse', None)
+        if reuse_mode in {'used', 'adapted'}:
+            print("Executed an adapted saved query against current data." if reuse_mode == 'adapted'
+                  else "Executed a matching saved query against current data.")
+        else:
+            print("Using completed analysis of saved results; no script execution needed.")
     else:
         print(f"\n{Colors.OKGREEN}Discovery complete. Executing script...{Colors.ENDC}")
         results_data = await execute_generated_script(result.script_code, date_str, query)

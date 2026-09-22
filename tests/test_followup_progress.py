@@ -27,6 +27,10 @@ class FollowUpProgressTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(event['type'], 'STEP-START')
             self.assertEqual(event['phase'], phase or 'planning')
             self.assertEqual(event['tools'], [])
+        for phase in ('reuse_search', 'reuse_inspect'):
+            await aggregator.step_start({'phase': phase, 'title': 'Saved queries', 'text': 'Checking saved queries'})
+            event = namespace['event_queue'].get_nowait()
+            self.assertEqual(event['phase'], phase)
 
 
 if __name__ == '__main__':

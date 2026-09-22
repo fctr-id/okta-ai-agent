@@ -1016,6 +1016,8 @@ class EventAggregator:
         """Forward step_start event with renumbered step"""
         if self.event_callback:
             # Stable phase identifier for public progress; never display model reasoning.
+            if event.get('phase'):
+                self.set_phase(event['phase'])
             event['phase'] = self.current_phase or 'planning'
             if self.current_phase:
                 offset = self.phase_offsets.get(self.current_phase, 0)
@@ -2135,17 +2137,39 @@ async def execute_multi_agent_query(
         if result.initial_supervisor_decision.reuse_procedure_id:
             from src.core.procedure_reuse import execute_selected_procedure
             selected_id = result.initial_supervisor_decision.reuse_procedure_id
-            aggregator.set_phase('reuse')
-            await aggregator.step_start({'title': 'Saved query', 'text': 'Running a matching saved query against current data'})
+            adapting = result.initial_supervisor_decision.adapt_procedure
+            adapted_synthesis = None
+
+            async def adapt_saved_script(candidate):
+                nonlocal adapted_synthesis
+                adapted_synthesis, usage = await execute_synthesis(user_query, SynthesisDeps(
+                    correlation_id=correlation_id, artifacts_file=artifacts_file,
+                    user_timezone=result.user_timezone, cli_mode=cli_mode, saved_procedure=candidate,
+                    step_start_callback=aggregator.step_start, step_end_callback=aggregator.step_end,
+                    tool_call_callback=aggregator.tool_call, progress_callback=aggregator.progress,
+                ))
+                _add_usage_to_result(result, usage)
+                if not adapted_synthesis.success or adapted_synthesis.display_type != 'table':
+                    return None
+                aggregator.set_phase('reuse')
+                await aggregator.step_start({'title': 'Saved query', 'text': 'Running the adapted query against current data'})
+                return adapted_synthesis.script_code
+
+            aggregator.set_phase('reuse_adapt' if adapting else 'reuse')
+            await aggregator.step_start({'title': 'Saved query', 'text':
+                'Adapting a saved query to your question' if adapting else 'Running a matching saved query against current data'})
             reused = await execute_selected_procedure(
                 run_id=correlation_id, procedure_id=selected_id, artifacts_file=artifacts_file,
                 cancellation_check=cancellation_check,
+                adapt_script=adapt_saved_script if adapting else None,
             )
             if reused:
                 candidate, payload = reused
                 result.reusable_procedure = candidate
                 result.success = True
-                result.procedure_reuse = 'used'
+                result.procedure_reuse = 'adapted' if adapting else 'used'
+                if adapting:
+                    result.synthesis_result = adapted_synthesis
                 result.script_code = candidate['script_code']
                 result.completed_result = payload
                 result.display_type = 'table'
@@ -2153,7 +2177,7 @@ async def execute_multi_agent_query(
                 if result.data_source_type in {'sql', 'hybrid'}:
                     result.last_sync_time = get_last_sync_timestamp()
                 payload['metadata'].update(data_source=result.data_source_type, last_sync=result.last_sync_time)
-                result.phases_executed.append('reuse')
+                result.phases_executed.extend(['reuse_adapt', 'reuse'] if adapting else ['reuse'])
                 _set_result_outcome(result, 'success', reason='Executed a compatible saved retrieval procedure.')
                 append_artifacts_with_result_sets(artifacts_file, [{
                     'key': 'turn_output_final', 'category': 'turn_output', 'display_type': 'table',
@@ -2162,6 +2186,7 @@ async def execute_multi_agent_query(
                 }], source_specialist='synthesis')
                 return result
             result.procedure_reuse = 'fallback'
+            aggregator.set_phase('planning')
             await aggregator.step_start({'title': 'Discovery', 'text': 'The saved query was unavailable or failed; retrieving the data again'})
             # One fresh routing decision with reuse disabled; no recursive retry loop.
             result.initial_supervisor_decision, fallback_usage = await supervise_query(

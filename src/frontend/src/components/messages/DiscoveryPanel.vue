@@ -78,14 +78,17 @@ const isWorking = computed(() => !props.isComplete && !props.error)
 // titles/text/reasoning, including those from older saved conversations.
 const phaseLabels = {
   planning: 'Understanding your question',
-  sql: 'Checking the database',
-  api: 'Checking live data',
+  sql: 'Querying the database',
+  api: 'Retrieving live data',
   processor: 'Processing saved results',
   analysis: 'Analyzing saved results',
   review: 'Planning next step',
   special: 'Running a specialized check',
   synthesis: 'Preparing the answer',
   reuse: 'Running a saved query',
+  reuse_adapt: 'Adapting a saved query',
+  reuse_search: 'Matching saved queries',
+  reuse_inspect: 'Evaluating query fit',
 }
 const sections = computed(() => props.steps.reduce((entries, step, stepIndex) => {
   const phase = Object.hasOwn(phaseLabels, step.phase) ? step.phase : null

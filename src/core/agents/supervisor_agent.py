@@ -264,7 +264,8 @@ class SupervisorDecision(BaseModel):
     evidence_result_set_refs: List[str] = Field(default_factory=list)
     confidence: SupervisorConfidence = "medium"
     user_message: Optional[str] = None
-    reuse_procedure_id: Optional[str] = Field(default=None, description="An inspected saved procedure whose unchanged retrieval exactly fits this request; complete + SYNTHESIS only.")
+    reuse_procedure_id: Optional[str] = Field(default=None, description="An inspected saved procedure to execute unchanged or adapt; complete + SYNTHESIS only.")
+    adapt_procedure: bool = Field(default=False, description="Use synthesis to adapt the inspected script when its existing retrieval evidence supports the requested changes.")
     _reuse_candidate: Optional[dict] = PrivateAttr(default=None)
 
     @model_validator(mode="before")
@@ -291,6 +292,8 @@ class SupervisorDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_decision(self) -> "SupervisorDecision":
+        if self.adapt_procedure and not self.reuse_procedure_id:
+            raise ValueError('Adaptation requires an inspected saved procedure ID')
         if self.reuse_procedure_id and (self.mode != 'complete' or self.target != 'SYNTHESIS'):
             raise ValueError('Saved procedure selection requires complete + SYNTHESIS')
         if self.mode == "delegate" and self.target not in _DELEGATE_TARGETS:
@@ -397,6 +400,11 @@ async def find_reusable_queries(ctx: RunContext[SupervisorDeps], entities: List[
     if not ctx.deps.reuse_enabled or ctx.deps.procedure_search_done:
         return {'candidates': [], 'message': 'Search unavailable or already used; continue normal discovery.'}
     ctx.deps.procedure_search_done = True
+    if ctx.deps.step_start_callback:
+        await ctx.deps.step_start_callback({
+            'phase': 'reuse_search', 'title': 'Saved queries',
+            'text': 'Matching saved queries',
+        })
     from src.core.query_procedures import procedure_catalog
     candidates = await procedure_catalog(ctx.deps.correlation_id, entities)
     ctx.deps.procedure_candidates = {item['procedure_id']: item for item in candidates}
@@ -410,6 +418,11 @@ async def inspect_reusable_query(ctx: RunContext[SupervisorDeps], procedure_id: 
     if (not ctx.deps.reuse_enabled or ctx.deps.inspected_procedures
             or procedure_id not in ctx.deps.procedure_candidates):
         return {'error': 'Choose one ID from the search results, or use discovery.'}
+    if ctx.deps.step_start_callback:
+        await ctx.deps.step_start_callback({
+            'phase': 'reuse_inspect', 'title': 'Saved query',
+            'text': 'Evaluating query fit',
+        })
     from src.core.query_procedures import inspect_procedure
     candidate = await inspect_procedure(ctx.deps.correlation_id, procedure_id)
     if candidate is None:
@@ -450,9 +463,13 @@ Inspect only the best matching candidate using inspect_reusable_query. If the
 UNCHANGED script and its validated evidence answer this exact request, return
 complete + SYNTHESIS with reuse_procedure_id set to that inspected ID. This tells
 the runtime to validate and execute the stored script against current source data.
-Never treat saved counts/summaries as refreshed results. Changed filters, identifiers,
-fields, source, formatting or missing scope require normal discovery; do not pretend
-to adapt the stored script. If uncertain, use normal discovery without a reuse ID.
+For a close match, set adapt_procedure=true with complete + SYNTHESIS and the inspected
+reuse_procedure_id ONLY if the saved retrieval evidence supports the required changes
+(such as filters, relative dates, selected fields or ordering). Synthesis will adapt
+and execute the script; you do not edit it yourself. Missing fields/relationships,
+new endpoints or a different source/freshness requirement need normal discovery.
+Never treat saved counts/summaries as refreshed results. If uncertain, use normal
+discovery without a reuse ID. Exact unchanged matches keep adapt_procedure=false.
 Never reuse a script that bypasses tenant/access boundaries or embeds a different
 subject's identifiers. Do not search again or inspect another candidate this turn.
 Canonical entity names: ''' + ', '.join(sorted(entity_catalog()))
