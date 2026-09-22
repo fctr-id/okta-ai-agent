@@ -71,7 +71,7 @@ const props = defineProps({
   showWorkingStatus: { type: Boolean, default: true },
 })
 const contentId = `activity-${useId()}`
-const isExpanded = ref(Boolean(props.error) || (!props.isComplete && !props.shouldAutoCollapse))
+const isExpanded = ref(props.collapseRevision === 0 && (Boolean(props.error) || (!props.isComplete && !props.shouldAutoCollapse)))
 watch(() => props.collapseRevision, () => { isExpanded.value = false })
 const isWorking = computed(() => !props.isComplete && !props.error)
 // Display only known phase labels and tool activity. Never render step

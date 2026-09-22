@@ -51,6 +51,8 @@ class ProcedureEvaluation:
             output_fields=executed_fields(event),
             result_summary=event.get('summary') or metadata.get('summary'),
             procedure_id=metadata.get('procedure_id'),
+            procedure_admission=metadata.get('procedure_admission'),
+            procedure_admission_id=metadata.get('procedure_admission_id'),
         )
 
     def finish(self, exit_code):

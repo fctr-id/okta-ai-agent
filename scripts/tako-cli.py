@@ -412,9 +412,6 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         await save_successful_procedure(
             run_id=correlation_id, result=result, event=results_data, artifacts_file=artifacts_file,
         )
-    if evaluation:
-        evaluation.output(results_data)
-
     # Display results summary
     record_count = results_data.get("count", 0)
     display_type = results_data.get("display_type", "table")
@@ -473,6 +470,10 @@ async def run_query(query: str, script_only: bool = False, session_id: Optional[
         await DatabaseOperations().mirror_runtime_turn_state(
             tenant_id=settings.tenant_id, run_id=correlation_id, runtime_paths=runtime_paths,
         )
+        from src.core.procedure_admission import finish_cli_admission
+        await finish_cli_admission(results_data)
+    if evaluation:
+        evaluation.output(results_data)
     return 0
 
 

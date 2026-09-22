@@ -8,7 +8,7 @@ from sqlalchemy import select, delete, text, func, update, case
 from sqlalchemy.dialects.sqlite import insert
 
 from src.config.settings import settings
-from src.core.okta.sync.models import QueryProcedure, ConversationSession, ConversationTurn
+from src.core.okta.sync.models import QueryProcedure, QueryProcedureAdmission, ConversationSession, ConversationTurn
 from src.core.okta.sync.operations import DatabaseOperations
 from src.data.schemas.artifact_manifest import load_artifacts_file
 from src.data.schemas.query_procedure import ProcedureMetadata, entity_catalog, executed_fields
@@ -154,7 +154,7 @@ class ProcedureStore:
             await session.execute(delete(QueryProcedure).where(
                 tenant, QueryProcedure.procedure_id.not_in(keep)))
 
-    async def save(self, run_id, script, description, evidence, data_source, *, classification, output_fields, parent_id=None):
+    async def save(self, run_id, script, description, evidence, data_source, *, classification, output_fields, parent_id=None, enqueue=False):
         classification = ProcedureMetadata.model_validate(classification)
         if (classification.classification == 'conversation_dependent'
                 or not classification.entities or not set(classification.entities).issubset(entity_catalog())):
@@ -184,22 +184,46 @@ class ProcedureStore:
                           data_source=data_source, source=actor.source,
                           originating_run_id=run_id, parent_procedure_id=parent_id,
                           created_at=datetime.now(timezone.utc), last_used_at=datetime.now(timezone.utc), execution_count=1)
-            stmt = insert(QueryProcedure).values(**values).on_conflict_do_update(
+            if enqueue:
+                existing = (await session.execute(select(QueryProcedureAdmission.admission_id).where(
+                    QueryProcedureAdmission.tenant_id == self.tenant_id,
+                    QueryProcedureAdmission.run_id == run_id))).scalar_one_or_none()
+                if existing:
+                    return existing
+                pending_count = (await session.execute(select(func.count()).select_from(QueryProcedureAdmission)
+                    .where(QueryProcedureAdmission.tenant_id == self.tenant_id))).scalar_one()
+                if pending_count >= self.limit:
+                    logger.warning('Procedure admission queue full; candidate not queued: run=%s', run_id)
+                    return None
+                admission_id = str(uuid4())
+                # Snapshot server-owned identity and validated evidence before conversation cleanup.
+                payload = {key: value.isoformat() if isinstance(value, datetime) else value
+                           for key, value in values.items()}
+                session.add(QueryProcedureAdmission(admission_id=admission_id, tenant_id=self.tenant_id,
+                    run_id=run_id, payload_json=payload))
+                await session.commit()
+                return admission_id
+            procedure_id = await self._persist(session, values)
+            await session.commit()
+            return procedure_id
+
+    async def _persist(self, session, values):
+        """Persist accepted values inside the caller's serialized transaction."""
+        stmt = insert(QueryProcedure).values(**values).on_conflict_do_update(
                 index_elements=['tenant_id', 'owner_id', 'sharing_scope', 'compatibility_key', 'content_hash'],
-                set_={'last_used_at': values['last_used_at'], 'result_summary': description,
+                set_={'last_used_at': values['last_used_at'], 'result_summary': values['result_summary'],
                       # A newly validated successful execution restores entries
                       # disabled under the former failure policy.
                       'classification_json': func.json_remove(QueryProcedure.classification_json, '$._reuse_disabled'),
                       'execution_count': QueryProcedure.execution_count + 1})
-            await session.execute(stmt)
-            procedure_id = (await session.execute(select(QueryProcedure.procedure_id).where(
-                *self.eligible(actor.user_id), QueryProcedure.owner_id == actor.user_id,
+        await session.execute(stmt)
+        procedure_id = (await session.execute(select(QueryProcedure.procedure_id).where(
+                *self.eligible(values['owner_id']), QueryProcedure.owner_id == values['owner_id'],
                 QueryProcedure.compatibility_key == self.compatibility,
                 QueryProcedure.sharing_scope == values['sharing_scope'],
-                QueryProcedure.content_hash == content_hash))).scalar_one()
-            await self._prune(session)
-            await session.commit()
-            return procedure_id
+                QueryProcedure.content_hash == values['content_hash']))).scalar_one()
+        await self._prune(session)
+        return procedure_id
 
 
 async def _store():
@@ -239,7 +263,7 @@ async def record_procedure_reuse(run_id, procedure_id, *, failed=False):
 
 
 async def save_successful_procedure(*, run_id, result, event, artifacts_file):
-    """One post-execution hook shared by web, Slack, and Teams; best effort only."""
+    """Queue validated successes for background admission across all transports."""
     if not settings.QUERY_PROCEDURES_ENABLED:
         return None
     try:
@@ -261,13 +285,14 @@ async def save_successful_procedure(*, run_id, result, event, artifacts_file):
             return None
         previous = getattr(result, 'reusable_procedure', None)
         evidence = retrieval_evidence(artifacts_file, previous)
-        procedure_id = await (await _store()).save(run_id, result.script_code,
+        admission_id = await (await _store()).save(run_id, result.script_code,
             event.get('summary') or metadata.get('summary') or '', evidence, result.data_source_type,
             classification=classification, output_fields=executed_fields(event),
-            parent_id=(previous or {}).get('procedure_id'))
-        if procedure_id:
-            event.setdefault('metadata', {})['procedure_id'] = procedure_id
-        return procedure_id
+            parent_id=(previous or {}).get('procedure_id'), enqueue=True)
+        if admission_id:
+            event.setdefault('metadata', {}).update(procedure_admission_id=admission_id,
+                                                    procedure_admission='pending')
+        return admission_id
     except Exception:
         logger.exception('Could not save reusable procedure; query result remains available')
         return None

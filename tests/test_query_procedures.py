@@ -1,6 +1,6 @@
 """Offline candidate persistence tests: no application credentials or model calls."""
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 import importlib.util
 import json
@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
-from src.core.okta.sync.models import Base, QueryProcedure, ConversationSession, ConversationTurn
+from src.core.okta.sync.models import Base, QueryProcedure, QueryProcedureAdmission, ConversationSession, ConversationTurn
 from src.data.schemas.query_procedure import ProcedureMetadata, executed_fields
 
 settings_stub = ModuleType('src.config.settings')
@@ -31,6 +31,12 @@ with patch.dict(sys.modules, {'src.config.settings': settings_stub,
                              'src.utils.logging': logging_stub}):
     spec.loader.exec_module(procedures)
 
+admission_spec = importlib.util.spec_from_file_location('admission_under_test',
+    Path(__file__).resolve().parents[1] / 'src/core/procedure_admission.py')
+admission = importlib.util.module_from_spec(admission_spec)
+with patch.dict(sys.modules, {'src.core.query_procedures': procedures, 'src.utils.logging': logging_stub}):
+    admission_spec.loader.exec_module(admission)
+
 
 class ProcedureTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -39,7 +45,8 @@ class ProcedureTests(unittest.IsolatedAsyncioTestCase):
         self.engine = create_async_engine('sqlite+aiosqlite:///' + (self.root / 'test.db').as_posix())
         async with self.engine.begin() as conn:
             await conn.run_sync(lambda connection: Base.metadata.create_all(connection, tables=[
-                ConversationSession.__table__, ConversationTurn.__table__, QueryProcedure.__table__]))
+                ConversationSession.__table__, ConversationTurn.__table__, QueryProcedure.__table__,
+                QueryProcedureAdmission.__table__]))
         self.factory = async_sessionmaker(self.engine, expire_on_commit=False)
         self.db = SimpleNamespace(get_session=self.factory)
         self.store = procedures.ProcedureStore(self.db, tenant_id='tenant', compatibility='fixture', limit=2)
@@ -223,7 +230,11 @@ class ProcedureTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(procedures, '_store', AsyncMock(return_value=self.store)):
             identifier = await procedures.save_successful_procedure(run_id='run1', result=result,
                 event=event, artifacts_file=self.artifact)
-        self.assertEqual(event['metadata']['procedure_id'], identifier)
+        self.assertEqual(event['metadata']['procedure_admission_id'], identifier)
+        self.assertNotIn('procedure_id', event['metadata'])
+        queue = admission.AdmissionQueue(self.store, AsyncMock())
+        self.assertTrue(await queue.process_one())
+        queue.compare.assert_not_awaited()  # Empty library needs no comparison call.
         async with self.factory() as session:
             row = (await session.execute(select(QueryProcedure))).scalar_one()
             self.assertEqual(row.result_summary, 'No matches')
@@ -239,8 +250,13 @@ class ProcedureTests(unittest.IsolatedAsyncioTestCase):
             synthesis_result=SimpleNamespace(procedure_metadata=self.metadata.model_copy(update={'scope': 'Recent users'})))
         event = {'display_type': 'table', 'results': [{'email': 'fixture'}], 'summary': 'Recent users'}
         with patch.object(procedures, '_store', AsyncMock(return_value=self.store)):
-            child_id = await procedures.save_successful_procedure(run_id='run2', result=result, event=event,
+            pending_id = await procedures.save_successful_procedure(run_id='run2', result=result, event=event,
                 artifacts_file=self.root/'absent.json')
+        queue = admission.AdmissionQueue(self.store, AsyncMock(return_value={
+            'decision': 'useful_variant'}))
+        await queue.process_one()
+        self.assertEqual(queue.last_outcome[0], pending_id)
+        child_id = queue.last_outcome[2]
         self.assertNotEqual(child_id, parent_id)
         async with self.factory() as session:
             child = await session.get(QueryProcedure, child_id)
@@ -335,6 +351,228 @@ class ProcedureTests(unittest.IsolatedAsyncioTestCase):
         identifier = await self.save()
         with patch.object(procedures, 'validate_generated_code', return_value=SimpleNamespace(is_valid=False)):
             self.assertIsNone(await self.store.inspect('run1', identifier))
+
+    async def enqueue(self, run='run1', metadata=None, fields=None, script="print('new implementation')", source='sql'):
+        return await self.store.save(run, script, 'Summary not sent to admission', self.evidence, source,
+            classification=metadata or self.metadata, output_fields=fields or ['email'], enqueue=True)
+
+    async def test_admission_is_durable_hidden_and_idempotent(self):
+        identifier = await self.enqueue()
+        self.assertEqual(identifier, await self.enqueue())
+        self.assertEqual(await self.store.catalog('run1', ['user']), [])
+        async with self.factory() as session:
+            item = (await session.execute(select(QueryProcedureAdmission))).scalar_one()
+            self.assertEqual(item.payload_json['owner_id'], 'alice')
+            self.assertNotIn('private@example.test', json.dumps(item.payload_json))
+            # Cleanup of conversations must not lose a successfully executed candidate.
+            from sqlalchemy import delete
+            await session.execute(delete(ConversationTurn))
+            await session.execute(delete(ConversationSession))
+            await session.commit()
+        queue = admission.AdmissionQueue(self.store, AsyncMock())
+        self.assertTrue(await queue.process_one())
+        async with self.factory() as session:
+            self.assertIsNone(await session.get(QueryProcedureAdmission, identifier))
+            record = (await session.execute(select(QueryProcedure))).scalar_one()
+            self.assertEqual(record.owner_id, 'alice')
+
+    async def test_semantic_duplicate_omits_payloads_and_keeps_original(self):
+        original = await self.save()
+        pending = await self.enqueue('run2')  # Different user, generic query.
+        compare = AsyncMock(return_value={'decision': 'duplicate', 'duplicate_id': original})
+        queue = admission.AdmissionQueue(self.store, compare)
+        await queue.process_one()
+        new, existing = compare.call_args.args
+        self.assertEqual(new['output_fields'], ['email'])
+        self.assertEqual(existing[0]['output_fields'], ['email'])
+        self.assertEqual(new['question'], 'List users')
+        self.assertEqual(new['scope'], 'All statuses')
+        encoded = json.dumps(compare.call_args.args)
+        for omitted in ('script_code', 'evidence', 'print(', 'SELECT ', 'Summary not sent', 'private@example.test'):
+            self.assertNotIn(omitted, encoded)
+        self.assertEqual(queue.last_outcome, (pending, 'duplicate', original))
+        async with self.factory() as session:
+            row = (await session.execute(select(QueryProcedure))).scalar_one()
+            self.assertEqual(row.owner_id, 'alice')
+            self.assertEqual(row.script_code, "print('QUERY RESULTS')")
+            self.assertEqual(row.execution_count, 2)
+            self.assertEqual(row.classification_json.get('_successful_reuses', 0), 0)
+
+    async def test_admission_preserves_distinct_fields_source_and_entities_even_if_model_says_duplicate(self):
+        for overrides in ({'fields': ['email', 'status']}, {'source': 'api'},
+                          {'metadata': self.metadata.model_copy(update={'entities': ['user', 'group']})}):
+            original = await self.save()
+            await self.enqueue(**overrides)
+            queue = admission.AdmissionQueue(self.store, AsyncMock(return_value={
+                'decision': 'duplicate', 'duplicate_id': original}))
+            await queue.process_one()
+            self.assertEqual(queue.last_outcome[1], 'useful_variant')
+            self.assertNotEqual(queue.last_outcome[2], original)
+
+    async def test_admission_failure_and_invalid_id_remain_pending_and_retry(self):
+        await self.save()
+        pending = await self.enqueue()
+        compare = AsyncMock(side_effect=RuntimeError('Provider unavailable'))
+        queue = admission.AdmissionQueue(self.store, compare)
+        await queue.process_one()
+        self.assertFalse(await queue.process_one())  # Backoff, no hot retry loop.
+        async with self.factory() as session:
+            row = await session.get(QueryProcedureAdmission, pending)
+            self.assertEqual(row.attempts, 1)
+            self.assertIsNone(row.lease_token)
+            row.next_attempt_at = datetime.now(timezone.utc)
+            await session.commit()
+        queue.compare = AsyncMock(return_value={'decision': 'duplicate', 'duplicate_id': 'invented'})
+        await queue.process_one()
+        async with self.factory() as session:
+            row = await session.get(QueryProcedureAdmission, pending)
+            self.assertEqual(row.attempts, 2)
+            row.next_attempt_at = datetime.now(timezone.utc)
+            await session.commit()
+        queue.compare = AsyncMock(return_value={'decision': 'distinct'})
+        await queue.process_one()
+        self.assertEqual(queue.last_outcome[1], 'distinct')
+
+    async def test_pending_bound_does_not_evict_existing_work(self):
+        self.store.limit = 1
+        first = await self.enqueue()
+        self.assertIsNone(await self.enqueue('run2'))
+        async with self.factory() as session:
+            self.assertIsNotNone(await session.get(QueryProcedureAdmission, first))
+
+    async def test_concurrent_workers_serialize_per_tenant_and_compare_latest_admission(self):
+        await self.enqueue('run1')
+        await self.enqueue('run2')
+        first, second = admission.AdmissionQueue(self.store), admission.AdmissionQueue(self.store)
+        claims = await asyncio.gather(first.claim(), second.claim())
+        self.assertEqual(sum(claim is not None for claim in claims), 1)
+        identifier, token, values = next(claim for claim in claims if claim)
+        await first.finish(identifier, token, values, admission.AdmissionDecision(decision='distinct'), [])
+        original = first.last_outcome[2]
+        second.compare = AsyncMock(return_value={'decision': 'duplicate', 'duplicate_id': original})
+        await second.process_one()
+        self.assertEqual(second.last_outcome[1], 'duplicate')
+        self.assertEqual(second.compare.call_args.args[1][0]['procedure_id'], original)
+
+    async def test_expired_lease_recovery_and_stale_worker_cannot_finish(self):
+        identifier = await self.enqueue()
+        queue = admission.AdmissionQueue(self.store)
+        _, old_token, values = await queue.claim()
+        async with self.factory() as session:
+            await session.execute(update(QueryProcedureAdmission).where(QueryProcedureAdmission.admission_id == identifier)
+                .values(lease_until=datetime.now(timezone.utc) - timedelta(seconds=1)))
+            await session.commit()
+        _, new_token, _ = await queue.claim()
+        self.assertNotEqual(old_token, new_token)
+        await queue.finish(identifier, old_token, values, admission.AdmissionDecision(decision='distinct'), [])
+        self.assertIsNone(queue.last_outcome)
+        await queue.finish(identifier, new_token, values, admission.AdmissionDecision(decision='distinct'), [])
+        self.assertEqual(queue.last_outcome[0], identifier)
+
+    async def test_cancellation_releases_lease_for_restart(self):
+        await self.save()
+        identifier = await self.enqueue()
+        queue = admission.AdmissionQueue(self.store, AsyncMock(side_effect=asyncio.CancelledError))
+        with self.assertRaises(asyncio.CancelledError):
+            await queue.process_one()
+        async with self.factory() as session:
+            row = await session.get(QueryProcedureAdmission, identifier)
+            self.assertIsNone(row.lease_token)
+        restarted = admission.AdmissionQueue(self.store, AsyncMock(return_value={'decision': 'useful_variant'}))
+        await restarted.process_one()
+        self.assertEqual(restarted.last_outcome[0], identifier)
+
+    async def test_admission_never_sends_other_owner_private_candidates_or_other_tenant(self):
+        private = self.metadata.model_copy(update={'classification': 'parameterized', 'contains_sensitive_literals': True})
+        await self.save(metadata=private)
+        await self.enqueue('run2', metadata=private)
+        queue = admission.AdmissionQueue(self.store, AsyncMock())
+        _, _, values = await queue.claim()
+        self.assertEqual(await queue.candidates(values), [])
+        other = procedures.ProcedureStore(self.db, tenant_id='other', compatibility='fixture')
+        self.assertEqual(await admission.AdmissionQueue(other).candidates(values), [])
+
+    async def test_admission_revalidates_script_and_contract(self):
+        pending = await self.enqueue()
+        queue = admission.AdmissionQueue(self.store, AsyncMock())
+        with patch.object(admission, 'validate_generated_code', return_value=SimpleNamespace(is_valid=False)):
+            await queue.process_one()
+        self.assertEqual(queue.last_outcome, (pending, 'invalid_candidate', None))
+        queue.compare.assert_not_awaited()
+        await self.enqueue()
+        self.store.compatibility = 'next-contract'
+        await queue.process_one()
+        self.assertEqual(queue.last_outcome[1], 'invalid_candidate')
+
+    async def test_duplicate_deleted_during_comparison_is_retried_not_discarded(self):
+        from sqlalchemy import delete
+        original = await self.save()
+        pending = await self.enqueue()
+        async def compare(*args):
+            async with self.factory() as session:
+                await session.execute(delete(QueryProcedure).where(QueryProcedure.procedure_id == original))
+                await session.commit()
+            return {'decision': 'duplicate', 'duplicate_id': original}
+        queue = admission.AdmissionQueue(self.store, compare)
+        await queue.process_one()
+        self.assertIsNone(queue.last_outcome)
+        await queue.process_one()
+        self.assertEqual(queue.last_outcome[0:2], (pending, 'distinct'))
+
+    async def test_cli_finishes_pending_admission(self):
+        pending = await self.enqueue()
+        event = {'metadata': {'procedure_admission_id': pending, 'procedure_admission': 'pending'}}
+        with patch.object(admission, '_store', AsyncMock(return_value=self.store)):
+            await admission.finish_cli_admission(event)
+        self.assertEqual(event['metadata']['procedure_admission'], 'distinct')
+        self.assertTrue(event['metadata']['procedure_id'])
+
+    async def test_model_timeout_preserves_pending_candidate(self):
+        await self.save()
+        pending = await self.enqueue()
+        async def stalled(*args):
+            await asyncio.Event().wait()
+        queue = admission.AdmissionQueue(self.store, stalled)
+        with patch.object(admission, 'MODEL_TIMEOUT', 0.01):
+            await queue.process_one()
+        async with self.factory() as session:
+            item = await session.get(QueryProcedureAdmission, pending)
+            self.assertIsNotNone(item)
+            self.assertIsNone(item.lease_token)
+            self.assertEqual(item.attempts, 1)
+
+    async def test_structured_admission_call_includes_comparison_prompt_and_metadata(self):
+        from pydantic_ai import Agent
+        from pydantic_ai.models.test import TestModel
+        agents_stub = ModuleType('src.core.agents')
+        picker_stub = ModuleType('src.core.models.model_picker')
+        picker_stub.ModelType = SimpleNamespace(REASONING='reasoning')
+        original = await self.save()
+        await self.enqueue()
+        queue = admission.AdmissionQueue(self.store)
+        _, _, values = await queue.claim()
+        candidate = admission.comparison_metadata(values)
+        existing = await queue.candidates(values)
+        for output in ({'decision': 'duplicate', 'duplicate_id': original},
+                       {'decision': 'useful_variant'}, {'decision': 'distinct'}):
+            captured = {}
+            def build(model_type, **kwargs):
+                captured.update(kwargs)
+                self.assertEqual(model_type, 'reasoning')
+                agent = Agent(TestModel(custom_output_args=output), **kwargs)
+                captured['run'] = AsyncMock(wraps=agent.run)
+                agent.run = captured['run']
+                return agent
+            agents_stub.build_agent = build
+            with patch.dict(sys.modules, {'src.core.agents': agents_stub,
+                                         'src.core.models.model_picker': picker_stub}):
+                decision = await admission.compare_candidate(candidate, existing)
+            self.assertEqual(decision.decision, output['decision'])
+            self.assertIn('database of successful retrieval queries for future reuse', captured['instructions'])
+            sent = json.loads(captured['run'].call_args.args[0])
+            self.assertEqual(sent['new_query']['output_fields'], ['email'])
+            self.assertEqual(sent['existing_queries'][0]['question'], 'List users')
+            self.assertNotIn('script_code', json.dumps(sent))
 
 
 if __name__ == '__main__':

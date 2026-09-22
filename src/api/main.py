@@ -137,9 +137,17 @@ async def lifespan(app: FastAPI):
     if teams_bot is not None:
         await teams_bot.start()
 
+    _procedure_admission_task = None
+    if settings.QUERY_PROCEDURES_ENABLED:
+        from src.core.procedure_admission import run_admission_worker
+        _procedure_admission_task = asyncio.create_task(run_admission_worker())
+
     try:
         yield
     finally:
+        if _procedure_admission_task is not None:
+            _procedure_admission_task.cancel()
+            await asyncio.gather(_procedure_admission_task, return_exceptions=True)
         if _slack_cleanup_task is not None:
             _slack_cleanup_task.cancel()
             await asyncio.gather(_slack_cleanup_task, return_exceptions=True)

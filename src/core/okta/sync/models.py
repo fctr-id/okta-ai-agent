@@ -514,6 +514,26 @@ class QueryProcedure(Base):
     )
 
 
+class QueryProcedureAdmission(Base):
+    """Durable candidates awaiting semantic comparison; never exposed to reuse."""
+    __tablename__ = "query_procedure_admissions"
+
+    admission_id = Column(String(36), primary_key=True)
+    tenant_id = Column(String, nullable=False)
+    run_id = Column(String(255), nullable=False)
+    payload_json = Column(JSON, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=get_utc_now)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False, default=get_utc_now)
+    attempts = Column(Integer, nullable=False, default=0)
+    lease_token = Column(String(36), nullable=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'run_id', name='uix_procedure_admission_run'),
+        Index('idx_procedure_admission_due', 'tenant_id', 'next_attempt_at'),
+    )
+
+
 class QueryHistory(Base):
     """Table to store rolling history of queries and their results"""
     __tablename__ = "query_history"

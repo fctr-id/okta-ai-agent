@@ -17,7 +17,7 @@
             </span>
             <span class="turn-heading-summary">
                 <span v-if="resultSummary" class="turn-record-count">{{ resultSummary }}</span>
-                <span class="turn-header-status" :data-tone="statusTone" role="status">
+                <span v-if="status" class="turn-header-status" :data-tone="statusTone" role="status">
                     <span class="turn-status-dot" aria-hidden="true"></span>{{ status }}
                 </span>
             </span>
