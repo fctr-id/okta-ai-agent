@@ -25,7 +25,7 @@ Example queries Tako handles today:
 
 Tako is read-only today. Modify operations with human-in-the-loop approvals are in active development.
 
-## Architecture (v3.0-beta)
+## Architecture (v3.2-beta)
 
 Tako uses a supervisor-led multi-agent harness that routes each turn dynamically:
 
@@ -41,9 +41,12 @@ Context efficiency: the multi-agent design reduces token usage by ~60% compared 
 ## Key Capabilities
 
 - Natural-language queries over Okta users, groups, applications, policies, MFA factors, and devices
+- Detailed guidance across 107 read-only Okta API endpoints
+- Reusable queries (optional) — reuse or adapt successful retrieval scripts to cut response time and token usage
+- AI Summary above results, with interactive tables (column selection, multi-column sort, grouping)
 - Local SQLite sync for speed and sovereignty — querying 10,000 users locally takes milliseconds vs minutes via API; also enables complex cross-entity queries like "find users in group A who are not in group B" that would require many chained API calls
 - Sandboxed code execution — all LLM-generated code is security-validated before running
-- Slack bot integration via /tako slash command (opt-in, disabled by default)
+- Slack and Microsoft Teams bots with follow-up conversations and CSV downloads (opt-in, disabled by default)
 - Query history and favorites for quick reuse
 - CLI for unattended runs and cron jobs
 - Python script export and CSV download
@@ -53,10 +56,12 @@ Context efficiency: the multi-agent design reduces token usage by ~60% compared 
 ## Supported AI Models (tested)
 
 Tako's structured harness means lightweight/cheap models work well—10–50x cheaper than premium models:
-- Google Gemini 2.5 Flash, 2.0 Flash
-- Anthropic Claude Haiku 3.5, Sonnet 3.7
-- OpenAI GPT-4o mini, GPT-4.1 mini
-- Ollama (local models) — for air-gapped or privacy-first deployments
+- DeepSeek V4.1 Flash
+- Z.ai GLM 5.3
+- Google Gemini 3.8 Flash
+- OpenAI GPT-5.6 Terra
+- Anthropic Claude Haiku 4.5
+- Ollama and other OpenAI-compatible endpoints (local models) — for air-gapped or privacy-first deployments
 
 "Bring Your Own LLM" has been a core design principle since v1. Enterprises locked to a specific vendor (Microsoft, Google, Anthropic, OpenAI) or running local models are all supported.
 
@@ -70,11 +75,11 @@ Tako's structured harness means lightweight/cheap models work well—10–50x ch
 
 Requirements: Docker, or Python 3.11+ with an Okta API token and LLM API key.
 
-1. Clone https://github.com/fctr-id/okta-ai-agent
-2. Copy .env.example to .env — add your Okta API token and LLM credentials
-3. Run: docker-compose up  (or: python main.py)
-4. Open http://localhost:8000
-5. Click "Sync Okta Data" to populate the local database
+1. Download docker-compose.yml and .env.sample from https://github.com/fctr-id/okta-ai-agent
+2. Rename .env.sample to .env — add your Okta credentials and one AI provider
+3. Run: docker compose up -d
+4. Open https://localhost:8001 and create the admin account using the one-time setup token from the logs
+5. Select "Sync now" in the sync menu to populate the local database, or ask for live API data directly
 6. Start asking questions
 
 ## Resources
@@ -84,7 +89,7 @@ Requirements: Docker, or Python 3.11+ with an Okta API token and LLM API key.
 - YouTube intro & demo: https://youtu.be/QZ13W6P04uQ
 - Release notes / changelog: https://github.com/fctr-id/okta-ai-agent/blob/main/VERSION.md
 - v3.0 launch blog post: https://iamse.blog/2026/05/04/tako-ai-v3-0-harness-the-vibe/
-- Docker Hub: https://hub.docker.com/r/fctrid/okta-ai-agent
+- Docker Hub: https://hub.docker.com/r/fctrid/ai-agent-for-okta
 
 ### Wiki
 

@@ -1,6 +1,6 @@
 # Version History
 
-## v3.2.0-beta - "Catch & Reuse" (Planned)
+## v3.2.0-beta - "Catch & Reuse"
 
 Faster repeat answers and deeper Okta API coverage.
 
