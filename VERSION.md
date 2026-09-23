@@ -2,40 +2,42 @@
 
 ## v3.2.0-beta - "Catch & Reuse" (Planned)
 
+Faster repeat answers and deeper Okta API coverage.
+
 ✨ Highlights
 
-- **Reusable Queries — Faster Answers, Fewer Tokens**: Reuse successful retrieval scripts or adapt supported changes to filters, dates, and output fields. Skipping repeated discovery can substantially reduce response time and LLM token usage, especially for complex queries. Scripts run again against the configured data sources; generic queries can be shared within the tenant. Enable with `QUERY_PROCEDURES_ENABLED=true`.
-- **Deeper API Understanding Across 107 Okta Endpoints**: Ask more complex questions about policies, applications, groups, devices, and authenticators. Expanded and corrected guidance for every read-only endpoint in Tako's catalog helps agents find the right data with less trial and error, distinguish similar resources, and handle paginated results and relationships more reliably.
-- **Smarter Query Library**: A background AI check compares questions, scope, and output fields to skip duplicates while retaining useful variants. Pending checks survive restarts without delaying web, Slack, or Teams answers.
-- **Dedicated AI Summary**: A clearly labeled AI Summary above the results explains what the answer means in the context of your question and follow-ups, including relevant filters or limitations.
-- **Clearer Progress**: Activity groups tool calls under their database, API, analysis, and query-reuse steps, including follow-ups.
+- **Reusable queries** — Reuse or adapt successful scripts to cut response time and token use. Scripts run again against your configured data sources. Enable with `QUERY_PROCEDURES_ENABLED=true`.
+- **107 Okta endpoints** — Expanded guidance for policies, applications, groups, devices, and authenticators.
+- **Smarter query library** — Skips duplicate entries while keeping useful variants, without delaying answers.
+- **AI Summary** — A labeled explanation above results, including relevant filters and limitations.
+- **Clearer progress** — Activity grouped into database, API, analysis, and reuse steps.
 
-🔧 Optimizations and Fixes
+🔧 Fixes
 
-- **Bounded Retrieval Recovery**: Detect incomplete API retrievals even when a generated script returns a table. Recoverable failures can return to discovery for one repair attempt; access errors and exhausted transient retries report a clear failure instead of repeatedly replanning.
-- **More Reliable Reuse**: Saved scripts remain subject to current validation, with discovery fallback when reuse fails. Temporary failures no longer disable entries, and prompt wording changes no longer invalidate the library. Retention balances successful reuse with recent additions.
-- **Preserve Requested Scope**: Removed default ACTIVE-only guidance so unspecified status does not silently exclude other account or application states.
-- **Cleaner Saved Conversations**: Reopened turns and their activity panels start collapsed. Uncertain historical status badges are hidden instead of suggesting an old query is still running.
-- **More Predictable Shutdown**: Bounded background-task cleanup and improved Ctrl+C handling help the local server stop without hanging indefinitely.
+- Incomplete API retrievals get one repair attempt and a clear error if they can't recover.
+- Saved-query reuse falls back to normal discovery on failure and survives prompt updates.
+- Queries no longer default to ACTIVE-only when you don't specify a status.
+- Reopened conversations start collapsed; stale status badges are hidden.
+- The local server shuts down cleanly on Ctrl+C.
 
 ---
 
 ## v3.1.1-beta - "Steady Course"
 
+Table controls, complete CSV exports, and an agent runtime upgrade.
+
 ✨ Highlights
 
-- **Choose Your Table Columns**: Show five, seven, all, or a custom selection of result columns, with seven shown by default. Search still covers hidden result columns, and table controls adapt to narrower layouts.
-- **Compact Lists, Complete CSVs**: List-valued cells show the first five entries with a "Show more" control. CSV export retains all loaded rows and result columns, including hidden columns and complete list values. Saved previews continue to export only the loaded preview.
-- **Pydantic AI 2 Upgrade**: Upgraded the agent runtime and provider SDKs, including OpenAI, with updated tool preparation, retry configuration, and HTTP transport integrations.
+- **Choose your columns** — Show 5, 7 (default), all, or a custom set of columns. Search still covers hidden columns.
+- **Compact lists, complete CSVs** — Long list cells show five entries with "Show more"; CSV export includes all loaded rows, columns, and values. Saved previews export only the preview rows.
+- **Pydantic AI 2** — Upgraded agent runtime and provider SDKs, including OpenAI and Google Vertex.
 
-🔧 Optimizations and Fixes
+🔧 Fixes
 
-- **More Focused Multi-Step Discovery**: SQL and API specialists now receive the supervisor's current assignment along with the overall request, helping preserve the selected population and the order of dependent retrieval steps.
-- **Evidence for Narrative Follow-Ups**: Successful saved narrative answers retain supporting evidence for later analysis. Clarifications, failures, and empty outcomes are excluded from this narrative result materialization.
-- **Provider Compatibility**: Updated Google Cloud/Vertex provider configuration, custom certificate handling, and HTTP retries for the new SDK interfaces. Explicit early termination preserves the previous behavior when an agent produces a validated final output.
-- **More Reliable CSV Formatting**: Correctly escapes quotes and multiline values, serializes nested data, preserves fields that appear in later rows when columns are inferred, and treats formula-like text as text in spreadsheet exports.
-- **Cleaner Startup Output**: Disabled the Pydantic AI startup banner while retaining application logging.
-- **Clean-Clone Docker Builds**: Removed an obsolete copy step for a local-only certificate directory, allowing builds from a fresh repository checkout.
+- Multi-step questions keep the selected population and step order more reliably.
+- Narrative answers keep supporting evidence for later follow-ups.
+- CSV exports correctly handle quotes, multiline and nested values, and treat formula-like text as text.
+- Docker builds work from a fresh clone, and the startup banner is removed.
 
 ---
 
@@ -43,38 +45,33 @@
 
 **Release Date**: September 20, 2026
 
-**Recommended upgrade for all Tako users.** This release leads with a refreshed interface, interactive result tables, and important fixes for incomplete sync data, repeated API calls, timezone handling, and misleading error states. It also adds Microsoft Teams support and continued conversations in Slack.
+**Recommended upgrade for all users.** A refreshed interface, interactive tables, Microsoft Teams support, Slack follow-ups, and important sync and reliability fixes.
+
+⚠️ Action required
+
+- **Login signing key (security)** — The shared default key was replaced with a random key generated at startup, so restarts now sign users out. Set `JWT_SECRET_KEY` to stay signed in; multiple workers must share the same key, and keys shorter than 32 bytes are rejected.
+- **Reasoning setting** — The sample sets `AI_REASONING_EFFORT=high`. If your model doesn't support it, set it to `none` or remove it. See [Reasoning setting](README.md#reasoning-setting).
+- **Azure OpenAI** — Use an endpoint ending in `/openai/v1/` with deployment names; a dated API version is no longer needed.
+- **Slack** — Existing apps need new message subscriptions and button settings. See the [updated Slack setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-%26-Testing-Guide).
 
 ✨ Highlights
 
-- **Refreshed Conversation Experience**: Questions, activity, execution details, and results now sit together in collapsible conversation cards. Earlier turns collapse when you ask a follow-up, repeated completion badges are reduced, and the query bar stays separate from scrolling results.
-- **Clearer Tables and Navigation**: Improved table readability, expandable long values, clearer saved-result previews, and updated sidebar, login, setup, and sync interfaces. Longer conversation titles and consistent tooltips with keyboard support make controls easier to understand.
-- **Multi-Column Sorting and Result Grouping**: Sort web results by multiple columns with visible sort priorities, or group by a column into collapsible sections with record counts that update with search. Both work on the displayed data, with previews clearly labeled.
-- **Reliability Improvements**: Fixes for incomplete syncs, repeated API tests, and misleading failure states make retrieval and execution more dependable. See the detailed optimizations and fixes below.
-- **New Microsoft Teams Bot**: Query Okta in a personal Teams chat, continue with follow-up questions or clarification answers, and download retrieved results as CSV. Includes ten-row previews, a New Query action, Entra group access controls, and a package builder with a [setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Teams-Bot-Setup).
-- **Continued Conversations in Slack**: Reply in a result thread to refine your question or answer a clarification while retaining prior context. New Query starts a fresh thread, and Download CSV exports saved results without rerunning the query. See the [updated Slack setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Slack-Bot-Setup-%26-Testing-Guide) for required message subscriptions and button configuration.
-- **Optional AI Thinking**: The sample sets `AI_REASONING_EFFORT=high`. If your model does not support it, set it to `none` or remove the variable and restart Tako to use the model's defaults. See [thinking settings and tested models](README.md#ai-provider-support).
-- **Direct Follow-up Results**: Completed analyses of saved data can return their results directly in the web app, CLI, and Slack without generating another script. Full results remain available for later follow-ups and export.
-- **Clarification Without False Errors**: Clarification questions appear as normal conversational responses, allowing users to answer and continue.
-- **Timezone-Aware Answers**: Browser timezone context and daylight-saving-aware conversion support local-time requests while preserving explicit timestamp offsets.
+- **Refreshed conversation view** — Questions, activity, and results sit together in collapsible cards, with updated sidebar, login, setup, and sync screens.
+- **Multi-column sort and grouping** — Sort by several columns or group results into collapsible sections with counts.
+- **Microsoft Teams bot** — Query Okta in a personal chat, follow up, and download CSVs, with Entra group access control. See the [setup guide](https://github.com/fctr-id/okta-ai-agent/wiki/Tako-AI-%E2%80%90-Teams-Bot-Setup).
+- **Slack follow-ups** — Reply in a result thread to refine a question; New Query and Download CSV buttons.
+- **Direct follow-up results** — Analyses of saved data return results directly, without generating another script.
+- **Clarifications and timezones** — Clarifying questions appear as normal replies, and local-time requests are timezone-aware.
 
-🔧 Optimizations and Fixes
+🔧 Fixes
 
-- **Session Signing Key Security**: Replaced the shared default JWT key with a random in-memory key when no key is configured or an old placeholder remains. Removed insecure signing and verification fallbacks. Automatic keys expire with the server process, requiring users to sign in again after a restart; accounts, conversations, and synced data are preserved. A configured random key keeps existing logins valid across restarts and must be shared by multiple workers or replicas. Explicit non-placeholder keys shorter than 32 bytes are rejected.
-- **Persistent Bot Sessions with Automatic Cleanup**: Slack and Teams retain conversation context across server restarts when their storage is preserved. Configurable retention defaults to 24 hours of inactivity, with cleanup at startup and hourly to remove expired local session data while protecting active work.
-- **Major Dependency Upgrades**: Refreshed backend and frontend dependencies for security and compatibility, including Pydantic AI 1.107.6 and cryptography 50.0.1, and simplified Docker dependency installation.
-- **Azure OpenAI API Compatibility**: Fixed Azure v1 Responses API configuration with the correct provider and endpoint normalization, using Azure deployment names without requiring a dated API version.
-- **More Reliable Agent Execution**: Fixed duplicate execution of API discovery tests, helper-function scope errors, and changes to escaped strings in generated scripts.
-- **Fewer Incorrect Script Rejections**: Valid helper functions are no longer rejected just because their names contain words such as "execute" or "input". Their code still goes through safety checks.
-- **Better Budget Handling**: Agent tool-budget exhaustion now stops correctly instead of triggering unintended fallback requests.
-- **Improved Retrieval Guidance**: Refined prompts for reusing saved evidence, preserving follow-up scope, respecting database freshness, and avoiding unnecessary repeat lookups.
-- **More Complete API Results**: Fixed response normalization that could discard resource fields when objects contained nested arrays.
-- **Safer, More Efficient Sync**: Reused HTTP connections, reduced database lookups, and added bounded batch commits while retaining live progress updates.
-- **Correct Sync Failure Handling**: Pagination failures, exhausted retries, and cancellation no longer masquerade as complete retrievals before stale-record cleanup. New authenticator types are preserved despite older SDK enums.
-- **Safer Relationship Updates**: Unfetched group-to-app assignments no longer erase saved links. Confirmed device-user removals and application-policy removals clear stale relationships; unresolved policy references report a sync failure.
-- **Atomic Device Batches**: Device records, user relationships, and progress counts roll back together when a batch fails.
-- **Accurate Sync Status**: Failed or canceled attempts remain visible instead of being hidden by an earlier success, while the interface retains the last successful counts and timestamp.
-- **Cleaner Output and Better Diagnostics**: Updated prompts to omit internal database fields and explain failures in plain language. Technical details stay in diagnostics, and code-validation failures no longer repeat internal error details across the web app, CLI, and Slack. Improved activity reporting, persistent logs, startup configuration loading, and CLI failure exit codes.
+- **Sync reliability** — Failed pagination, retries, or cancellations no longer count as complete syncs. Stale relationships are handled correctly, device batches roll back together, and failed syncs stay visible in the status.
+- **Faster sync** — Reused connections, fewer database lookups, and batched commits.
+- **Agent execution** — Fixed duplicate API tests, helper-function errors, altered escaped strings, incorrect script rejections, and unintended fallbacks when the tool budget runs out.
+- **More complete API results** — Fields inside objects with nested arrays are no longer dropped.
+- **Persistent bot sessions** — Slack and Teams context survives restarts, with automatic cleanup after 24 hours of inactivity.
+- **Clearer errors** — Plain-language failure messages, with technical details kept in the logs. The CLI returns failure exit codes.
+- **Dependency upgrades** — Backend and frontend dependencies refreshed for security, including Pydantic AI 1.107.6 and cryptography 50.0.1.
 
 ---
 
