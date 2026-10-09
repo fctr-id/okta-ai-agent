@@ -31,6 +31,9 @@ or unexecuted lookup is not evidence that the tenant has no matching entities.
 
 ## Security and execution boundaries
 
+- Runtime validation enforces approved imports and members. Use f-strings; do not
+  use format/format_map, rebind helpers, or pass around module objects.
+
 - Use only GET requests through the injected okta_client.make_request() method.
   All other HTTP methods, including POST, PUT, PATCH, and DELETE, are forbidden.
 - Use exact operations, paths, parameters, and documented fields from the

@@ -158,6 +158,138 @@ ALLOWED_PYTHON_METHODS = {
 # Allowed HTTP methods (GET only for security)
 ALLOWED_HTTP_METHODS = {'GET'}
 
+# Explicit exports, not Python module internals. This is a POC admission policy,
+# not an isolation boundary: accepted Python still runs with app privileges.
+GENERATED_MODULE_EXPORTS = {
+    'asyncio': {'run', 'gather', 'sleep', 'Semaphore'},
+    'json': {'loads', 'dumps', 'JSONDecodeError'},
+    'datetime': {'datetime', 'date', 'time', 'timedelta', 'timezone'},
+    'zoneinfo': {'ZoneInfo'},
+    'time': {'time', 'monotonic', 'perf_counter', 'sleep'},
+    're': {'search', 'match', 'fullmatch', 'findall', 'finditer', 'sub', 'split',
+           'escape', 'IGNORECASE', 'MULTILINE', 'DOTALL'},
+    'typing': {'Any', 'Dict', 'List', 'Tuple', 'Set', 'Optional', 'Union', 'Iterable', 'Sequence'},
+    'collections': {'Counter', 'defaultdict', 'deque'},
+    'itertools': {'chain', 'islice', 'groupby', 'product', 'combinations', 'zip_longest'},
+    'statistics': {'mean', 'median', 'mode', 'stdev', 'pstdev'},
+    'math': {'ceil', 'floor', 'sqrt', 'isfinite', 'isnan', 'isinf', 'inf', 'nan', 'pi'},
+    'decimal': {'Decimal'},
+    'base_okta_api_client': {'OktaAPIClient', 'open_database'},
+    'src.core.okta.client.base_okta_api_client': {'OktaAPIClient', 'open_database'},
+}
+
+# Keep the legacy module check aligned with explicit member admission.
+ALLOWED_MODULES = set(GENERATED_MODULE_EXPORTS)
+
+# Remove stale capabilities previously advertised for older executors.
+ALLOWED_BUILTINS.difference_update({
+    'type', 'issubclass', 'getattr', 'hasattr', 'format', 'Path',
+    'execute_results_template_from_dict', 'main',
+})
+ALLOWED_BUILTINS.update({'Exception', 'RuntimeError', 'ValueError', 'TypeError', 'open_database'})
+ALLOWED_PYTHON_METHODS.difference_update({
+    'ClientSession', 'post', 'put', 'delete', 'request', 'headers', 'params',
+    'timeout', 'raise_for_status', 'load', 'dump', 'connect', 'row_factory', 'Row',
+    'format', 'create_task', 'execute_results_template_from_dict', 'model_dump', 'pformat',
+})
+ALLOWED_PYTHON_METHODS.update({
+    'close_session', 'start_entity_progress', 'update_entity_progress', 'complete_entity_progress',
+    'title', 'casefold', 'find', 'rfind', 'rsplit', 'splitlines', 'isdigit', 'isalpha',
+    'fromkeys', 'discard', 'difference', 'intersection', 'union', 'issubset', 'issuperset',
+    'isdisjoint', 'most_common', 'fromisoformat', 'astimezone', 'utcoffset', 'total_seconds',
+    'date', 'group', 'groups', 'groupdict',
+})
+GENERATED_DATA_ATTRIBUTES = {
+    'concurrent_limit', 'utc', 'min', 'max', 'year', 'month', 'day', 'hour',
+    'minute', 'second', 'microsecond', 'tzinfo', 'days', 'seconds', 'microseconds',
+    'description',
+}
+
+
+def _capability_violations(tree, *, builtins, methods, analysis=False):
+    """Reject opaque access and unapproved capabilities before either executor."""
+    violations = []
+    nodes = list(ast.walk(tree))
+    parents = {child: node for node in nodes for child in ast.iter_child_nodes(node)}
+    functions = {n.name for n in nodes if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    modules = {'json': 'json', 're': 're'} if analysis else {'asyncio': 'asyncio'}
+    imported = set()
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                # Dotted helper imports would expose the src package; use from-imports.
+                if alias.name not in GENERATED_MODULE_EXPORTS or '.' in alias.name:
+                    violations.append(f'Unauthorized import: {alias.name}')
+                else:
+                    modules[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.ImportFrom):
+            exports = GENERATED_MODULE_EXPORTS.get(node.module, set())
+            for alias in node.names:
+                if node.level or alias.name not in exports:
+                    violations.append(f'Unauthorized import member: {node.module}.{alias.name}')
+                else:
+                    imported.add(alias.asname or alias.name)
+
+    protected = set(builtins) | functions | set(modules) | imported
+    declared = protected | {'__name__', 'client', 'okta_client'}
+    if analysis:
+        declared.update({'result_sets', 'result_metadata', 'selected_result_set_ids',
+                         'user_query', 'user_timezone', 'analysis_result'})
+    declared.update(n.id for n in nodes if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Store))
+    declared.update(n.arg for n in nodes if isinstance(n, ast.arg))
+    declared.update(n.name for n in nodes if isinstance(n, ast.ExceptHandler) and n.name)
+    allowed_attributes = set(methods) | GENERATED_DATA_ATTRIBUTES
+    # Only retrieval supports module imports; analysis has two preloaded modules.
+    if not analysis:
+        allowed_attributes.update(member for exports in GENERATED_MODULE_EXPORTS.values() for member in exports)
+    forbidden_names = {
+        'getattr', 'setattr', 'delattr', 'hasattr', 'vars', 'dir', 'globals', 'locals',
+        'type', 'eval', 'exec', 'compile', 'open', 'input', 'help', 'breakpoint',
+        'memoryview', 'property', 'classmethod', 'staticmethod', 'super',
+    }
+    for node in nodes:
+        if isinstance(node, (ast.ClassDef, ast.Global, ast.Nonlocal, ast.Match)):
+            violations.append(f'Unsupported syntax: {type(node).__name__}')
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.decorator_list or node.name.startswith('_') or node.name in set(builtins) | set(modules) | imported:
+                violations.append('Decorated, private, or reserved function declarations are not allowed')
+        if isinstance(node, ast.alias):
+            name = node.asname or node.name.split('.')[0]
+            if name.startswith('_') or name in forbidden_names or name in builtins and name != node.name:
+                violations.append('Reserved import alias is not allowed')
+        if isinstance(node, ast.arg) and (node.arg in protected or node.arg.startswith('_') and node.arg != '_'):
+            violations.append('Reserved function parameter is not allowed')
+        if isinstance(node, ast.ExceptHandler) and node.name in protected:
+            violations.append('Reserved exception binding is not allowed')
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load) and node.id not in declared:
+                violations.append(f'Undeclared name: {node.id}')
+            if node.id in forbidden_names or node.id.startswith('_') and node.id not in {'_', '__name__'}:
+                violations.append(f'Restricted name: {node.id}')
+            if isinstance(node.ctx, (ast.Store, ast.Del)) and node.id in protected:
+                violations.append(f'Rebinding runtime helpers is not allowed: {node.id}')
+            if node.id in modules:
+                parent = parents.get(node)
+                if not isinstance(parent, ast.Attribute) or parent.value is not node:
+                    violations.append('Modules may only be used through approved members')
+        if isinstance(node, ast.Attribute):
+            if not isinstance(node.ctx, ast.Load):
+                violations.append('Modifying object attributes is not allowed')
+            if node.attr.startswith('_') or node.attr in {'format', 'format_map'}:
+                violations.append('Private attributes and string format traversal are not allowed; use f-strings')
+            elif isinstance(node.value, ast.Name) and node.value.id in modules:
+                if node.attr not in GENERATED_MODULE_EXPORTS[modules[node.value.id]]:
+                    violations.append(f'Unauthorized module member: {node.attr}')
+            elif node.attr not in allowed_attributes:
+                violations.append(f'Unauthorized attribute: {node.attr}')
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                if node.func.id not in protected:
+                    violations.append(f'Unauthorized function call: {node.func.id}')
+            elif not isinstance(node.func, ast.Attribute):
+                violations.append('Indirect callable expressions are not allowed')
+    return violations
+
 # Narrower security surface for local result-analysis code.
 # This path is intentionally stricter than generated API scripts: no imports,
 # no network, no file I/O, and only safe in-memory data operations.
@@ -199,6 +331,9 @@ RESULT_ANALYSIS_BLOCKED_NAMES: Set[str] = {
     'compile', '__import__', 'socket', 'aiohttp', 'httpx', 'requests',
     'sqlite3', 'base_okta_api_client', 'OktaAPIClient',
 }
+
+RESULT_ANALYSIS_ALLOWED_BUILTINS.difference_update({'type', 'format'})
+RESULT_ANALYSIS_ALLOWED_METHODS.discard('format')
 
 # ------------------------------------------------------------------------
 # Code Preprocessing Utilities
@@ -259,11 +394,11 @@ class EnhancedSecurityValidator:
         
         try:
             # Parse the original code first. Only fall back to preprocessing if it is not already valid.
-            try:
-                tree = ast.parse(parsed_code)
-            except SyntaxError:
-                parsed_code = preprocess_llm_generated_code(code)
-                tree = ast.parse(parsed_code)
+            tree = ast.parse(parsed_code)
+            violations.extend(_capability_violations(
+                tree, builtins=self.allowed_builtins, methods=self.allowed_methods))
+            if violations:
+                risk_level = 'HIGH'
             
             # Check for dangerous patterns
             for pattern in self.blocked_patterns:
@@ -387,11 +522,11 @@ class ResultAnalysisSecurityValidator:
         parsed_code = code
 
         try:
-            try:
-                tree = ast.parse(parsed_code)
-            except SyntaxError:
-                parsed_code = preprocess_llm_generated_code(code)
-                tree = ast.parse(parsed_code)
+            tree = ast.parse(parsed_code)
+            violations.extend(_capability_violations(
+                tree, builtins=self.allowed_builtins, methods=self.allowed_methods, analysis=True))
+            if violations:
+                risk_level = 'HIGH'
 
             for pattern in self.blocked_patterns:
                 if pattern.search(parsed_code):
@@ -564,7 +699,7 @@ def get_allowed_methods_for_prompt() -> str:
     builtins = sorted([
         'len', 'str', 'int', 'float', 'bool', 'list', 'dict', 'tuple', 'set',
         'range', 'enumerate', 'zip', 'sorted', 'sum', 'min', 'max', 'isinstance', 
-        'type', 'any', 'all', 'iter', 'next', 'print'
+        'any', 'all', 'iter', 'next', 'print'
     ])
     
     # Dictionary and list methods
@@ -577,11 +712,11 @@ def get_allowed_methods_for_prompt() -> str:
     # String methods
     string_methods = sorted([
         'join', 'split', 'strip', 'lstrip', 'rstrip', 'upper', 'lower', 
-        'startswith', 'endswith', 'replace', 'format', 'find', 'count'
+        'startswith', 'endswith', 'replace', 'find', 'count'
     ])
     
     # JSON methods
-    json_methods = sorted(['dumps', 'loads', 'load', 'dump', 'JSONDecodeError'])
+    json_methods = sorted(['dumps', 'loads', 'JSONDecodeError'])
     
     # Set operations
     set_methods = sorted([
@@ -599,4 +734,4 @@ def get_allowed_methods_for_prompt() -> str:
 
 **Set Operations:** {', '.join(f'`{m}`' for m in set_methods)}
 
-**Safe Helper Functions:** You may define helper functions starting with `safe_`, `get_`, `build_`, `process_`, `format_` (e.g., `safe_join()`, `build_lookup()`)"""
+**Safe Helper Functions:** You may define helper functions starting with `safe_`, `get_`, `build_`, `process_`, `format_` (e.g., `safe_join()`, `build_lookup()`). Use f-strings for interpolation; format/format_map, helper rebinding, and indirect calls are rejected by the runtime validator."""

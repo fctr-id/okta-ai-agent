@@ -308,7 +308,8 @@ Queries such as enumerating admin role assignments may require permissions beyon
 - Self-hosted storage — Synced data, saved conversation results, and logs are stored on your infrastructure.
 - AI provider processing — Prompts can include Okta data, query samples, and result context. When you select a cloud AI provider, that content is sent to the provider.
 - Local inference option — Use a compatible local model endpoint to keep model inference on your infrastructure. Tako still needs connectivity to your Okta tenant.
-- Execution controls — Generated code is subject to validation and runtime limits.
+- Execution controls — Generated code is checked before staging and execution, with explicit imports and methods, read-only access to directory tables, and bounded subprocess time and output. The API helper permits only GET requests to the configured Okta tenant and does not follow redirects. These controls are not an OS sandbox: accepted Python still runs with the application's operating-system privileges.
+- Output and sessions — Rendered Markdown is sanitized, CSV exports keep formula-like text literal, and logout clears the local session only after the server succeeds.
 
 <a id="important-notes-for-v32"></a>
 

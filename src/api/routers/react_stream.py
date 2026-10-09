@@ -23,6 +23,7 @@ import asyncio
 import json
 import os
 import sqlite3
+import sys
 import time
 import uuid
 import shutil
@@ -330,9 +331,8 @@ async def _execute_script(
     orchestrator_result: 'OrchestratorResult' = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Execute script and stream results"""
-    # Get Python executable
-    venv_python = Path("venv/Scripts/python.exe")
-    python_exe = str(venv_python) if venv_python.exists() else "python"
+    # Keep generated scripts in the server's Python environment, including uv's .venv.
+    python_exe = sys.executable
     
     project_root = Path(__file__).parent.parent.parent.parent.resolve()
     temp_dir = (project_root / "generated_scripts").resolve()
@@ -342,88 +342,33 @@ async def _execute_script(
         error_message="Invalid script path - potential path traversal",
     )
     
-    # Create subprocess
-    # COMMENTED: Reduces log noise during script execution
-    # logger.debug(f"[{process_id}] Starting subprocess: {python_exe} -u {script_filename}")
-    # logger.debug(f"[{process_id}] CWD: {script_dir}")
-    proc = await asyncio.create_subprocess_exec(
-        python_exe,
-        "-u",
-        str(script_path_obj),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        cwd=str(project_root),
-        limit=1024*1024
-    )
-    # logger.debug(f"[{process_id}] Subprocess created with PID: {proc.pid}")
-    
-    stdout_lines = []
-    stderr_lines = []
-    
-    # Read stdout
-    async def read_stdout():
-        # COMMENTED: Reduces log noise
-        # logger.debug(f"[{process_id}] Starting stdout reader")
-        if proc.stdout:
-            line_count = 0
-            while True:
-                line = await proc.stdout.readline()
-                if not line:
-                    # logger.debug(f"[{process_id}] Stdout reader: no more lines, read {line_count} total")
-                    break
-                line_str = line.decode('utf-8', errors='replace').rstrip()
-                stdout_lines.append(line_str)
-                line_count += 1
-                # COMMENTED: Reduces log noise during script execution
-                # logger.debug(f"[{process_id}] Stdout line {line_count}: {line_str[:100]}")
-        else:
-            logger.warning(f"[{process_id}] proc.stdout is None!")
-    
-    # Stream stderr events
-    async def read_stderr_and_yield():
-        if proc.stderr:
-            while True:
-                line = await proc.stderr.readline()
-                if not line:
-                    break
-                line_str = line.decode('utf-8', errors='replace').rstrip()
-                stderr_lines.append(line_str)
-                
-                # Check for progress events
-                if line_str.startswith("__PROGRESS__"):
-                    try:
-                        progress_json = line_str.replace("__PROGRESS__", "").strip()
-                        progress_data = json.loads(progress_json)
-                        yield {
-                            "type": "STEP-PROGRESS",
-                            **progress_data,
-                            "timestamp": time.time()
-                        }
-                    except json.JSONDecodeError:
-                        pass
-    
-    # Start stdout reader
-    stdout_task = asyncio.create_task(read_stdout())
-    
+    from src.core.process_runner import run_process
+    progress_events = asyncio.Queue(maxsize=64)
+
+    async def on_stderr(line):
+        if line.startswith('__PROGRESS__'):
+            try:
+                data = json.loads(line[len('__PROGRESS__'):].strip())
+                if isinstance(data, dict):
+                    await progress_events.put({'type': 'STEP-PROGRESS', **data, 'timestamp': time.time()})
+            except json.JSONDecodeError:
+                pass
+
+    execution_task = asyncio.create_task(run_process(
+        [python_exe, '-u', str(script_path_obj)], cwd=project_root,
+        cancellation_check=check_cancelled, on_stderr=on_stderr,
+    ))
     try:
-        # Stream stderr events
-        async for event in read_stderr_and_yield():
-            if check_cancelled():
-                proc.kill()
-                break
+        while not execution_task.done() or not progress_events.empty():
+            try:
+                event = await asyncio.wait_for(progress_events.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                continue
             yield event
-        
-        # Wait for stdout to complete
-        # COMMENTED: Reduces log noise
-        # logger.debug(f"[{process_id}] Waiting for stdout task...")
-        await stdout_task
-        # logger.debug(f"[{process_id}] Stdout task complete")
-        
-        # Wait for process
-        # logger.debug(f"[{process_id}] Waiting for process to exit...")
-        await proc.wait()
-        # logger.debug(f"[{process_id}] Process exited with returncode: {proc.returncode}")
-        
+        proc = await execution_task
+        stdout_lines = proc.stdout.decode('utf-8', errors='replace').splitlines()
+        stderr_lines = proc.stderr.decode('utf-8', errors='replace').splitlines()
+
         # Check for errors
         from src.core.retrieval_outcomes import check_retrieval_outcomes
         check_retrieval_outcomes('\n'.join(stderr_lines))
@@ -504,9 +449,9 @@ async def _execute_script(
                 }
     
     finally:
-        # Ensure process is terminated
-        if proc.returncode is None:
-            proc.kill()
+        if not execution_task.done():
+            execution_task.cancel()
+        await asyncio.gather(execution_task, return_exceptions=True)
         try:
             if script_path_obj.exists():
                 script_path_obj.unlink()

@@ -3,6 +3,7 @@ import asyncio
 import ast
 import json
 import logging
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import time
@@ -44,7 +45,8 @@ class ResultExplanationTests(unittest.IsolatedAsyncioTestCase):
         self.ns['_resolve_path_within_directory'] = lambda *a, **kw: script
         result = SimpleNamespace(data_source_type='api', last_sync_time=None,
                                  outcome_metadata=lambda: {'outcome': 'success'})
-        with patch.object(asyncio, 'create_subprocess_exec', AsyncMock(return_value=process)):
+        from src.core.process_runner import ProcessResult
+        with patch('src.core.process_runner.run_process', AsyncMock(return_value=ProcessResult(0, stdout, stderr.encode()))):
             events = [event async for event in self.ns['_execute_script']('fixture', str(script), lambda: False, result)]
         return events[-1]
 

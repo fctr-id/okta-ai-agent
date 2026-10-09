@@ -1232,6 +1232,7 @@ async def _run_analysis_loop_step(
     iteration_count: int,
     max_iterations: int,
     supervisor_next_target: Callable[[DelegationResult], Any],
+    cancellation_check=None,
 ) -> tuple[DelegationResult, Optional[str]]:
     logger.info(f"Running Result Analysis Agent (iteration {iteration_count}/{max_iterations})")
     aggregator.set_phase('analysis')
@@ -1245,6 +1246,7 @@ async def _run_analysis_loop_step(
 
     analysis_delegation, analysis_usage = await execute_result_analysis(
         user_query,
+        cancellation_check=cancellation_check,
         user_timezone=result.user_timezone,
         correlation_id=correlation_id,
         artifacts_file=artifacts_file,
@@ -1699,6 +1701,7 @@ async def _run_discovery_loop(
             iteration_count += 1
             source_delegation = analysis_source or latest_api_delegation or latest_sql_delegation or latest_processor_delegation
             latest_processor_delegation, next_target = await _run_analysis_loop_step(
+                cancellation_check=cancellation_check,
                 result=result,
                 user_query=user_query,
                 correlation_id=correlation_id,

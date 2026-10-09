@@ -737,7 +737,8 @@ async def _run_query(client, channel_id, user_id, query, message_thread_ts, corr
         # Execute the generated script
         try:
             script_results = await _execute_script_for_slack(
-                correlation_id, result.script_code, result
+                correlation_id, result.script_code, result,
+                cancellation_check=check_cancelled,
             )
         except RetrievalFailure as exc:
             from src.core.execution_recovery import recover_failed_execution
@@ -1085,12 +1086,15 @@ async def _execute_script_for_slack(
     correlation_id: str,
     script_code: str,
     orchestrator_result: OrchestratorResult,
+    *, cancellation_check=None,
 ) -> Optional[Dict[str, Any]]:
     """
     Execute a generated script and return parsed results.
     Mirrors _execute_script / _write_temp_script from react_stream.py.
     """
     import shutil
+    import sys
+    from src.core.process_runner import run_process
 
     def _resolve_path_within_directory(path: Path, directory: Path, *, error_message: str) -> Path:
         resolved_directory = directory.resolve()
@@ -1128,23 +1132,12 @@ async def _execute_script_for_slack(
         with open(script_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(modified_code)
 
-        # Detect Python executable
-        venv_python = Path("venv/Scripts/python.exe")
-        python_exe = str(venv_python) if venv_python.exists() else "python"
-
-        proc = await asyncio.create_subprocess_exec(
-            python_exe,
-            "-u",
-            str(script_path.resolve()),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(project_root),
-            limit=1024 * 1024,
+        proc = await run_process(
+            [sys.executable, "-u", str(script_path.resolve())],
+            cwd=project_root, timeout=120,
+            cancellation_check=cancellation_check,
         )
-
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            proc.communicate(), timeout=120
-        )
+        stdout_bytes, stderr_bytes = proc.stdout, proc.stderr
         stdout_str = stdout_bytes.decode("utf-8", errors="replace")
         stderr_str = stderr_bytes.decode("utf-8", errors="replace")
         check_retrieval_outcomes(stderr_str)

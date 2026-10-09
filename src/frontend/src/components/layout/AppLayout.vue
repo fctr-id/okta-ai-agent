@@ -20,6 +20,7 @@
                     <!-- Add SyncStatusButton here -->
                     <div class="header-spacer"></div>
                     <SyncStatusButton v-if="showLogout" />
+                    <span v-if="logoutError" role="alert" class="text-error text-caption">{{ logoutError }}</span>
                     <button v-if="showLogout" class="logout-btn" aria-label="Logout"
                         @click="handleLogout">
                         <v-icon size="16">mdi-logout</v-icon>
@@ -86,6 +87,7 @@ const auth = useAuth()
 const router = useRouter()
 const sidebarRef = ref(null)
 const sidebarCollapsed = ref(false)
+const logoutError = ref('')
 
 // Provide sidebar refresh to children
 const refreshHistory = () => sidebarRef.value?.refresh()
@@ -102,8 +104,12 @@ const appVersion = computed(() => {
 })
 
 const handleLogout = async () => {
-    await auth.logout()
-    router.push('/login')
+    logoutError.value = ''
+    if (await auth.logout()) {
+        router.push('/login')
+    } else {
+        logoutError.value = auth.error.value
+    }
 }
 
 // Track sidebar collapse state

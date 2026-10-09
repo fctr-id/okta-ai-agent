@@ -49,6 +49,20 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
         network = patch.object(self.module, "validate_request", self.network.validate_request_data)
         network.start()
         self.addCleanup(network.stop)
+        # Exercise the child execution contract with the existing synthetic client.
+        from src.core.execution_worker import execute_api_code
+        from src.core.agents.api_test_progress import DiscoveryTestClient
+
+        async def worker(mode, payload, **kwargs):
+            self.assertEqual(mode, 'api')
+            self.client.test_mode = True
+            observed = DiscoveryTestClient(self.client, payload['endpoints'], payload['test_id'],
+                                           self.deps.progress_callback)
+            return await execute_api_code(payload['code'], observed)
+
+        worker_patch = patch('src.core.process_runner.run_worker', side_effect=worker)
+        worker_patch.start()
+        self.addCleanup(worker_patch.stop)
 
     async def test_validated_get_preserves_data_and_saves_exact_code(self):
         result = await self.tools["execute_test_query"].function(CODE, "Fetch users")
@@ -115,7 +129,7 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(json.loads(result.content), self.client.make_request.return_value["data"])
 
     async def test_nested_result_assignment_does_not_suppress_function_execution(self):
-        code = CODE.replace("response = await", "results = await").replace('response[', 'results[')
+        code = CODE.replace("response = await", "results = await").replace('response[', 'results[').replace('return response', 'return results')
         result = await self.tools["execute_test_query"].function(code, "Fixture")
         self.assertTrue(result.metadata["success"], result.content)
         self.client.make_request.assert_awaited_once()

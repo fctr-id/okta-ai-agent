@@ -21,14 +21,13 @@ from pathlib import Path
 import json
 import time
 import asyncio
-import ast
 import re
 from uuid import uuid4
 
 from src.utils.logging import get_logger
 from src.utils.security_config import validate_generated_code
 from src.core.security.network_security import validate_request
-from src.core.agents.api_test_progress import DiscoveryTestClient, response_diagnostics
+from src.core.agents.api_test_progress import response_diagnostics
 from src.core.agents.agent_callbacks import (
     notify_progress_to_user,
     notify_step_start_to_user,
@@ -539,65 +538,28 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                         metadata={'success': False, 'security_error': True, 'violations': network_validation.violations}
                     )
         
-        # QUALITY CONTROL: Enforce Test Mode for API client (forces max_results=3)
-        if hasattr(deps, 'okta_client') and hasattr(deps.okta_client, 'test_mode'):
-            deps.okta_client.test_mode = True
-            logger.debug(f"[{deps.correlation_id}] Enabled test_mode on okta_client (enforces max_results=3)")
-        
-        # Execute code
+        # Generated discovery runs in a terminable local child, not the service loop.
         try:
-            # Create namespace with okta_client available (matching one_react_agent)
-            test_client = DiscoveryTestClient(
-                deps.okta_client, deps.endpoints, test_id, deps.progress_callback,
-                diagnostic_callback=lambda details: logger.info(
-                    f"[{deps.correlation_id}] API request diagnostic: {json.dumps(details)}"
-                ),
-            )
-            namespace = {
-                'client': test_client,
-                'okta_client': test_client,
-                'asyncio': asyncio
-            }
-            
-            # Inspect only executable top-level statements. Names such as
-            # result/results/payload must not determine whether we call twice.
-            tree = ast.parse(code)
-            functions = [node for node in tree.body if isinstance(node, ast.AsyncFunctionDef)]
-            if not functions:
-                logger.error(f"[{deps.correlation_id}] Generated code must define an async function")
-                raise ValueError("Generated code must define an async function starting with 'async def function_name():'")
+            from src.core.process_runner import run_worker, WORKER_EVENT
 
-            awaited_statements = [
-                node for node in tree.body
-                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                and any(isinstance(child, ast.Await) for child in ast.walk(node))
-            ]
-            if awaited_statements:
-                last = awaited_statements[-1]
-                if isinstance(last, ast.Assign) and isinstance(last.targets[0], ast.Name):
-                    result_expression = ast.Name(id=last.targets[0].id, ctx=ast.Load())
-                elif isinstance(last, ast.AnnAssign) and isinstance(last.target, ast.Name):
-                    result_expression = ast.Name(id=last.target.id, ctx=ast.Load())
-                elif isinstance(last, ast.Expr) and isinstance(last.value, ast.Await) and last is tree.body[-1]:
-                    # A bare final await is itself the result, not a second call.
-                    tree.body.pop()
-                    result_expression = last.value
-                else:
-                    raise ValueError("Use a top-level result assignment or a final await expression for the test result")
-            else:
-                result_expression = ast.Await(value=ast.Call(
-                    func=ast.Name(id=functions[0].name, ctx=ast.Load()), args=[], keywords=[]))
-            tree.body.append(ast.Return(value=result_expression))
+            async def relay(line):
+                if not line.startswith(WORKER_EVENT):
+                    return
+                try:
+                    event = json.loads(line[len(WORKER_EVENT):])
+                    if event.get('kind') == 'progress' and deps.progress_callback:
+                        await deps.progress_callback(event['data'])
+                    elif event.get('kind') == 'diagnostic':
+                        logger.info(f"[{deps.correlation_id}] API request diagnostic: {json.dumps(event['data'])}")
+                except Exception:
+                    # Match DiscoveryTestClient: reporting must not change retrieval.
+                    # CancelledError still propagates to the process supervisor.
+                    pass
 
-            wrapper = ast.parse("async def __exec_wrapper__():\n    pass\n")
-            wrapper.body[0].body = tree.body
-            
-            # Execute to define the wrapper function
-            exec(compile(ast.fix_missing_locations(wrapper), "<api-discovery-test>", "exec"), namespace)
-            
-            # Now await the wrapper coroutine (we're already in an async context)
-            result = await namespace['__exec_wrapper__']()
-            
+            result = await run_worker('api', {
+                'code': code, 'endpoints': deps.endpoints, 'test_id': test_id,
+            }, cancellation_check=deps.cancellation_check, on_stderr=relay)
+
             # IMPORTANT: Do NOT auto-save here
             # LLM will explicitly call save_artifact() tool when results are validated
             # This allows LLM to test multiple times and only save final validated code+results

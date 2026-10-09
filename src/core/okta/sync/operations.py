@@ -1096,7 +1096,8 @@ class DatabaseOperations:
             
         # Check if the account is temporarily locked
         now = datetime.now(timezone.utc)
-        if user.locked_until and user.locked_until > now:
+        locked_until = _to_utc_datetime(user.locked_until)
+        if locked_until and locked_until > now:
             logger.warning(f"Login attempt for locked account: {username}")
             return None
         

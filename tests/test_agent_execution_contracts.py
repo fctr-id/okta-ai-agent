@@ -298,7 +298,7 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(query=query):
                 self.assertFalse(validate_user_sql(query)[0])
 
-    def test_synthesis_rejects_dynamic_import_and_accepts_normal_stderr(self):
+    def test_synthesis_rejects_dynamic_import_and_accepts_plain_output(self):
         from pydantic_ai import ModelRetry
         from src.core.agents import synthesis_agent as synthesis
 
@@ -306,9 +306,9 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ModelRetry, "failed security validation") as raised:
             synthesis.validate_synthesis_output(synthesis.SynthesisResult(success=True, script_code=bad_code))
         self.assertIn("__import__", str(raised.exception))
-        self.assertIn("file=sys.stderr", str(raised.exception))
+        self.assertIn("bare raise", str(raised.exception))
 
-        good_code = "import sys\nprint('QUERY RESULTS')\nprint('Error', file=sys.stderr)\n"
+        good_code = "print('QUERY RESULTS')\nprint('[]')\n"
         output = synthesis.SynthesisResult(success=True, script_code=good_code)
         self.assertIs(synthesis.validate_synthesis_output(output), output)
 
@@ -318,7 +318,7 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
         from src.core.agents import synthesis_agent as synthesis
 
         bad_code = "print('QUERY RESULTS')\nprint('Error', file=__import__('sys').stderr)\n"
-        good_code = "import sys\nprint('QUERY RESULTS')\nprint('Error', file=sys.stderr)\n"
+        good_code = "print('QUERY RESULTS')\nprint('[]')\n"
         calls = []
 
         def model(messages, info):
@@ -372,22 +372,19 @@ class AgentExecutionContractTests(unittest.IsolatedAsyncioTestCase):
 
     def test_generated_script_reraises_fatal_errors_and_runs_cleanup(self):
         from src.utils.security_config import validate_generated_code
-        code = '''import sys
-try:
+        code = '''try:
     1 / 0
 except Exception as error:
-    print(str(error), file=sys.stderr)
     raise
 finally:
-    print("cleanup finished", file=sys.stderr)
+    print("cleanup finished")
 '''
         self.assertTrue(validate_generated_code(code).is_valid)
         result = subprocess.run([sys.executable, '-I', '-c', code],
                                 capture_output=True, text=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, '')
+        self.assertEqual(result.stdout.strip(), 'cleanup finished')
         self.assertIn('ZeroDivisionError', result.stderr)
-        self.assertIn('cleanup finished', result.stderr)
         self.assertFalse(validate_generated_code('raise SystemExit(1)').is_valid)
 
 

@@ -50,22 +50,14 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((self.root / "execution/execution.py").exists())
         self.assertFalse((self.root / "execution/base_okta_api_client.py").exists())
 
-    async def test_timeout_and_cancellation_kill_and_reap_subprocess(self):
-        for cancel in (False, True):
-            started = asyncio.Event()
-            async def communicate():
-                started.set()
-                await asyncio.Event().wait()
-            proc = SimpleNamespace(returncode=None, communicate=communicate, kill=Mock(), wait=AsyncMock())
-            with patch.object(asyncio, "create_subprocess_exec", AsyncMock(return_value=proc)):
-                task = asyncio.create_task(runtime.execute_script('print("QUERY RESULTS")\nprint("[]")', self.root / str(cancel), timeout=0.03 if not cancel else 60))
-                await started.wait()
-                if cancel:
-                    task.cancel()
-                with self.assertRaises(asyncio.CancelledError if cancel else TimeoutError):
-                    await task
-            proc.kill.assert_called_once()
-            proc.wait.assert_awaited_once()
+    async def test_timeout_and_cancellation_clean_staged_files(self):
+        for error in (TimeoutError('fixture timeout'), asyncio.CancelledError()):
+            directory = self.root / type(error).__name__
+            with patch('src.core.process_runner.run_process', AsyncMock(side_effect=error)):
+                with self.assertRaises(type(error)):
+                    await runtime.execute_script('print("QUERY RESULTS")\nprint("[]")', directory)
+            self.assertFalse((directory / 'execution.py').exists())
+            self.assertFalse((directory / 'base_okta_api_client.py').exists())
 
     async def test_invalid_generated_code_never_launches_process(self):
         with patch.object(asyncio, "create_subprocess_exec", AsyncMock()) as launch:

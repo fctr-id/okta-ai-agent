@@ -111,16 +111,10 @@ def get_sqlite_schema_description() -> str:
 
 
 def find_sqlite_db_path() -> Optional[Path]:
-    """Return the first available Okta SQLite database path."""
-    for db_path in (
-        Path("sqlite_db/okta_sync.db"),
-        Path("okta_sync.db"),
-        Path("../sqlite_db/okta_sync.db"),
-        Path("/app/sqlite_db/okta_sync.db"),
-    ):
-        if db_path.exists():
-            return db_path
-    return None
+    """Inspect the same configured snapshot used by the retrieval worker."""
+    from src.config.settings import settings
+    db_path = Path(settings.SQLITE_PATH)
+    return db_path if db_path.is_file() else None
 
 
 def get_last_sync_timestamp() -> Optional[str]:
@@ -549,36 +543,13 @@ def create_sql_toolset(deps: SQLDiscoveryDeps) -> FunctionToolset:
         
         # Execute query
         try:
-            import sqlite3
-            from pathlib import Path
-            
-            db_path = find_sqlite_db_path()
+            from src.core.process_runner import run_worker
+            sample = await run_worker('sql', {'query': sql_query}, timeout=15,
+                                      cancellation_check=deps.cancellation_check)
+            results = sample['rows']
+            columns = sample['columns']
+            execution_time_ms = sample['execution_time_ms']
 
-            if not db_path:
-                return ToolReturn(
-                    return_value="❌ Database not found",
-                    content="Database file not accessible",
-                    metadata={'success': False, 'db_error': True}
-                )
-            
-            conn = sqlite3.connect(str(db_path))
-            cursor = conn.cursor()
-            
-            start_time = time.time()
-            cursor.execute(sql_query)
-            rows = cursor.fetchall()
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            
-            # Get column names
-            columns = [desc[0] for desc in cursor.description] if cursor.description else []
-            
-            # Convert to dicts
-            results = []
-            for row in rows:
-                results.append(dict(zip(columns, row)))
-            
-            conn.close()
-            
             # Truncate long text fields to reduce token usage
             truncated_results = truncate_sql_results(results, max_text_length=100)
             

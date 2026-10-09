@@ -55,27 +55,16 @@ async def execute_script(code: str, directory: Path, *, timeout=120, cancellatio
     directory.mkdir(parents=True, exist_ok=True)
     script = directory / "execution.py"
     helper = directory / "base_okta_api_client.py"
-    proc = None
-    communication = None
     try:
         if cancellation_check and cancellation_check():
             raise asyncio.CancelledError()
         shutil.copy2(project_root / "src/core/okta/client/base_okta_api_client.py", helper)
         script.write_text(prepare_runtime_script_code(code), encoding="utf-8")
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-u", str(script.resolve()), cwd=project_root,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        communication = asyncio.create_task(proc.communicate())
-        deadline = asyncio.get_running_loop().time() + timeout
-        while not communication.done():
-            if cancellation_check and cancellation_check():
-                raise asyncio.CancelledError()
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                raise TimeoutError('Retrieval script timed out')
-            await asyncio.wait({communication}, timeout=min(0.2, remaining))
-        stdout, stderr = communication.result()
+        from src.core.process_runner import run_process
+        proc = await run_process([sys.executable, '-u', str(script.resolve())],
+                                 cwd=project_root, timeout=timeout,
+                                 cancellation_check=cancellation_check)
+        stdout, stderr = proc.stdout, proc.stderr
         from src.core.retrieval_outcomes import check_retrieval_outcomes
         check_retrieval_outcomes(stderr.decode("utf-8", errors="replace"))
         if proc.returncode:
@@ -85,11 +74,5 @@ async def execute_script(code: str, directory: Path, *, timeout=120, cancellatio
         payload['metadata'] = {**(payload.get('metadata') or {}), 'execution_evidence': execution_evidence(code)}
         return payload
     finally:
-        if proc is not None and proc.returncode is None:
-            proc.kill()
-            await proc.wait()
-        if communication is not None and not communication.done():
-            communication.cancel()
-            await asyncio.gather(communication, return_exceptions=True)
         script.unlink(missing_ok=True)
         helper.unlink(missing_ok=True)

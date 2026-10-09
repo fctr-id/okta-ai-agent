@@ -7,6 +7,7 @@ Slack-compatible Block Kit message payloads.
 
 from typing import Dict, Any, List, Optional
 import csv
+from src.utils.csv_export import csv_literal
 import io
 
 
@@ -336,9 +337,9 @@ def results_to_csv_string(results: List[Dict[str, Any]], headers: list) -> str:
 
     writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
     # Write display labels as the header row
-    writer.writerow({key: label for label, key in norm})
+    writer.writerow({key: csv_literal(label) for label, key in norm})
     for row in results:
-        writer.writerow(row)
+        writer.writerow({key: csv_literal(value) for key, value in row.items()})
     return output.getvalue()
 
 

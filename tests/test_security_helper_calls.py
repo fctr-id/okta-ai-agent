@@ -46,11 +46,11 @@ async def execute_query():
             with self.subTest(code=code):
                 self.assertFalse(validate_generated_code(code).is_valid)
 
-    def test_sqlite_helper_uses_existing_allowed_database_calls(self):
-        code = '''import sqlite3
+    def test_sqlite_helper_uses_trusted_readonly_database_calls(self):
+        code = '''from base_okta_api_client import open_database
 def execute_query(connection, query):
     return connection.execute(query).fetchall()
-connection = sqlite3.connect(":memory:")
+connection = open_database()
 rows = execute_query(connection, "SELECT 1")
 connection.close()
 '''

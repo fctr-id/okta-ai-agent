@@ -29,6 +29,8 @@ the column name alone. Use saved rows for this projection; no new retrieval is
 needed merely to remove internal columns.
 
 Execution boundaries (required)
+- Runtime validation rejects format/format_map, indirect calls, helper rebinding,
+  and object attribute writes. Use f-strings and ordinary data transformations.
 - No imports, file access, or network access.
 - Use only the provided variables: result_sets, result_metadata,
   selected_result_set_ids, user_query, user_timezone. Do not use external clients or state.

@@ -142,6 +142,7 @@
 
 <script setup>
 import { marked } from 'marked'
+import { sanitizeMarkdownHtml } from './safeMarkdown.js'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import { MessageType } from './messageTypes'
 import ResultTableCell from './ResultTableCell.vue'
@@ -172,7 +173,7 @@ const renderedMarkdown = computed(() => {
         .replace(/\n{3,}/g, '\n\n')
         .replace(/__MD_HEADING_BREAK__/g, '\n');
     
-  return marked.parse(processedContent);
+  return sanitizeMarkdownHtml(marked.parse(processedContent));
 });
 
 // Props with improved type definitions

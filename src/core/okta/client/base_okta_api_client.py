@@ -11,6 +11,7 @@ from urllib.parse import urlencode, urlsplit
 from datetime import datetime, timezone
 import json  # NEW: for structured progress events
 import importlib
+from src.core.okta.client.read_database import open_database
 
 # Import settings for configuration
 try:
@@ -73,7 +74,7 @@ class OktaAPIClient:
     Usage:
         client = OktaAPIClient()
         result = await client.make_request("/api/v1/logs", params={"since": "2024-01-01T00:00:00.000Z"})
-        result = await client.make_request("/api/v1/users", method="POST", body={"profile": {...}})
+        result = await client.make_request("/api/v1/users", method="GET")
     """
     
     def __init__(self, timeout: int = 300, max_pages: int = 100):
@@ -527,9 +528,9 @@ class OktaAPIClient:
         
         Args:
             endpoint: API endpoint (e.g., "/api/v1/logs", "/api/v1/users")
-            method: HTTP method (GET, POST, PUT, DELETE)
+            method: HTTP method (GET only)
             params: Query parameters
-            body: Request body for POST/PUT requests
+            body: Reserved; request bodies are not supported for read-only retrieval
             max_results: Maximum total results to return (stops pagination early)
             entity_label: If provided, errors will be automatically tracked for this entity batch
             
@@ -796,11 +797,37 @@ class OktaAPIClient:
         """Handle non-GET requests (POST, PUT, DELETE) - no pagination."""
         return await self._single_request(endpoint, method, params, body)
     
+    def _validated_request_url(self, endpoint: str, method: str, body=None) -> str:
+        """Enforce the trusted client's retrieval boundary for every page."""
+        if not isinstance(method, str) or method.upper() != 'GET' or body is not None:
+            raise ValueError('Only GET requests without a body are allowed')
+        if (not isinstance(endpoint, str) or not endpoint
+                or '\\' in endpoint or any(ord(char) <= 32 or ord(char) == 127 for char in endpoint)):
+            raise ValueError('Invalid API endpoint')
+        target = urlsplit(endpoint)
+        if endpoint.startswith('//') or target.fragment or target.username is not None or target.password is not None:
+            raise ValueError('Invalid API endpoint')
+        if target.scheme or target.netloc:
+            url = endpoint
+        else:
+            url = self.base_url.rstrip('/') + '/' + endpoint.lstrip('/')
+        target = urlsplit(url)
+        tenant = urlsplit(self.base_url)
+        if (target.scheme != 'https' or tenant.scheme != 'https'
+                or target.hostname != tenant.hostname
+                or (target.port or 443) != (tenant.port or 443)):
+            raise ValueError('API requests must use the configured tenant origin')
+        return url
+
     async def _single_request(self, endpoint: str, method: str, 
                             params: Optional[Dict] = None,
                             body: Optional[Dict] = None) -> Dict[str, Any]:
         """Make a single API request with comprehensive error handling and rate limit monitoring."""
-        
+        # Validate before retrieving credentials, including absolute pagination URLs.
+        url = self._validated_request_url(endpoint, method, body)
+        if params:
+            url += ('&' if '?' in url else '?') + urlencode(params)
+
         # Get appropriate auth headers dynamically
         request_headers = await self._get_auth_headers()
         
@@ -817,18 +844,6 @@ class OktaAPIClient:
             request_headers.pop("Content-Type", None)  # Remove Content-Type for GET requests
             self.logger.debug(f"Using XML headers for SAML endpoint: {endpoint}")
         
-        # Build URL - handle both full URLs and endpoints
-        if endpoint.startswith('http'):
-            # Full URL from pagination
-            url = endpoint
-        else:
-            # Relative endpoint
-            if not endpoint.startswith('/'):
-                endpoint = f'/{endpoint}'
-            url = f"{self.base_url}{endpoint}"
-            if params:
-                url += f"?{urlencode(params)}"
-        
         # Rate limiting retry logic
         max_retries = 5  # Increased retries for rate limiting
         retry_count = 0
@@ -840,7 +855,8 @@ class OktaAPIClient:
                         method=method.upper(),
                         url=url,
                         headers=request_headers,
-                        json=body if body else None
+                        json=None,
+                        allow_redirects=False,
                     ) as response:
                         
                         # Monitor rate limit headers from Okta

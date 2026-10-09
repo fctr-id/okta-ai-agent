@@ -190,14 +190,20 @@ export function useAuth() {
     };
 
     const logout = async () => {
+        error.value = null;
         try {
-            await fetch("/api/auth/logout");
-        } catch (err) {
-            console.error("Error during logout:", err);
-        } finally {
-            // Always reset auth state locally
+            const response = await fetch("/api/auth/logout", {
+                method: "POST",
+                credentials: "same-origin",
+            });
+            if (!response.ok) throw new Error("Logout request failed");
             user.value = null;
             isAuthenticated.value = false;
+            return true;
+        } catch (err) {
+            error.value = "Could not log out. Please try again.";
+            console.error("Error during logout:", err);
+            return false;
         }
     };
 

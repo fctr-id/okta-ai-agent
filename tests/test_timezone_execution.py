@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, Mock
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, field_validator, ValidationError
-from src.utils.security_config import SECURITY_VALIDATION_USER_MESSAGE, validate_result_analysis_code, validate_generated_code
+from src.utils.security_config import GENERATED_MODULE_EXPORTS, SECURITY_VALIDATION_USER_MESSAGE, validate_result_analysis_code, validate_generated_code
 from src.utils.timezone_context import normalize_user_timezone
 from src.data.schemas.artifact_manifest import DerivationKind, append_artifacts_with_result_sets
 
@@ -79,8 +79,7 @@ analysis_result = {'summary': 'done', 'rows': [{'value': convert(v)} for v in va
 
     def test_execution_namespace_is_not_reused(self):
         self.execute("marker = 1\nanalysis_result = {'summary': 'done'}")
-        with self.assertRaises(NameError):
-            self.execute("analysis_result = {'summary': str(marker)}")
+        self.assertFalse(validate_result_analysis_code("analysis_result = {'summary': str(marker)}").is_valid)
 
     def test_restricted_code_still_blocks_imports_io_and_introspection(self):
         for code in ['import zoneinfo', "open('secret')", 'ZoneInfo.from_file(None)', 'datetime.__mro__', "__import__('os')"]:

@@ -175,8 +175,10 @@ class OutcomeTests(unittest.IsolatedAsyncioTestCase):
         session.request.return_value = manager
         session.request.reset_mock()
         with patch('aiohttp.ClientSession', return_value=session_manager), patch('asyncio.sleep', AsyncMock()) as sleep:
-            await client._single_request('/fixture', 'POST')
-        session.request.assert_called_once()
+            with self.assertRaises(ValueError):
+                await client._single_request('/fixture', 'POST')
+        session.request.assert_not_called()
+        client._get_auth_headers.assert_not_awaited()
         sleep.assert_not_awaited()
 
     async def test_real_subprocess_rejects_unflagged_partial_table(self):

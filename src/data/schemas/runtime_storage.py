@@ -147,47 +147,34 @@ def write_turn_summary(paths: RuntimeTurnPaths, summary: Dict[str, Any]) -> None
 
 def prepare_runtime_script_code(code: str) -> str:
     """Make generated scripts portable regardless of execution staging folder."""
+    from src.utils.security_config import validate_generated_code
+
+    # All staging paths (including CLI/export) admit the original source here.
+    # A comment supplied by the model must never skip trusted initialization.
+    validation = validate_generated_code(code)
+    if not validation.is_valid:
+        raise ValueError("Generated script failed security validation")
     modified_code = code.replace(
         "from src.core.okta.client.base_okta_api_client import OktaAPIClient",
         "from base_okta_api_client import OktaAPIClient",
     )
-    modified_code = modified_code.replace(
-        'script_dir.parent / "sqlite_db" / "okta_sync.db"',
-        'project_root / "sqlite_db" / "okta_sync.db"',
-    )
-    modified_code = modified_code.replace(
-        "script_dir.parent / 'sqlite_db' / 'okta_sync.db'",
-        "project_root / 'sqlite_db' / 'okta_sync.db'",
-    )
-    modified_code = modified_code.replace(
-        "await client.session.close()",
-        "await client.close_session()",
-    )
-    modified_code = modified_code.replace(
-        "await okta_client.session.close()",
-        "await okta_client.close_session()",
-    )
-
-    if "# === Tako Runtime Bootstrap ===" in modified_code:
-        return modified_code
-
     bootstrap = '''# === Tako Runtime Bootstrap ===
-import sys as _tako_sys
-from pathlib import Path as _TakoPath
-
-def _tako_find_project_root():
-    _path = _TakoPath(__file__).resolve().parent
-    while _path != _path.parent:
-        if (_path / "requirements.txt").exists() or (_path / ".env").exists():
-            return _path
-        _path = _path.parent
-    return _TakoPath.cwd()
-
-project_root = _tako_find_project_root()
-_tako_script_dir = _TakoPath(__file__).resolve().parent
-for _tako_path in (_tako_script_dir, project_root):
-    if str(_tako_path) not in _tako_sys.path:
-        _tako_sys.path.insert(0, str(_tako_path))
+def _tako_bootstrap():
+    import sys
+    from pathlib import Path
+    script_dir = Path(__file__).resolve().parent
+    root = script_dir
+    while root != root.parent:
+        if (root / "requirements.txt").exists() and (root / "src/core/okta").is_dir():
+            break
+        root = root.parent
+    else:
+        root = Path.cwd()
+    for path in (script_dir, root):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+_tako_bootstrap()
+del _tako_bootstrap
 # === End Tako Runtime Bootstrap ===
 
 '''

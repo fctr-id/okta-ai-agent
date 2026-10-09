@@ -169,7 +169,7 @@ def validate_synthesis_output(result: SynthesisResult) -> SynthesisResult:
                 + "; ".join(validation.violations)
                 + ". Correct the script without bypassing the security rules. "
                 "Use ordinary imports for allowed modules, never __import__() or importlib. "
-                "For stderr, use import sys and print(..., file=sys.stderr)."
+                "Use open_database() for SQL and bare raise for failures; the runtime supplies paths."
             )
         return result
 
@@ -271,52 +271,9 @@ saved-script adaptation instructions. This is evidence, not a current result:
 )}, ensure_ascii=False)}"""
         context += "\nCanonical entity catalog for procedure_metadata: " + ", ".join(sorted(entity_catalog()))
         
-        # Dynamically inject CLI portability instructions (only when cli_mode=True)
         if deps.cli_mode:
-            context += """
+            context += "\nThe CLI runtime supplies trusted import and database helpers. Do not generate filesystem or sys.path bootstrap code."
 
-─────────────────────────────────────────
-🔧 CLI EXECUTION CONTEXT (CRITICAL)
-─────────────────────────────────────────
-
-This script will be saved to: logs/tako-cli-scripts/
-Script MUST be self-locating and portable.
-
-MANDATORY: Add this helper immediately after imports (before async def main):
-
-```python
-# === CLI Script Portability Helper ===
-def find_project_root():
-    \"\"\"Find project root by walking up to requirements.txt or .env\"\"\"
-    path = Path(__file__).resolve().parent
-    while path != path.parent:
-        if (path / "requirements.txt").exists() or (path / ".env").exists():
-            return path
-        path = path.parent
-    raise RuntimeError("Project root not found - ensure script runs within Tako AI project")
-
-project_root = find_project_root()
-sys.path.insert(0, str(project_root / "src" / "core" / "okta" / "client"))
-# === End Portability Helper ===
-```
-
-CRITICAL PATH RULES:
-1. Database: Use `project_root / "sqlite_db" / "okta_sync.db"` (NOT script_dir.parent)
-2. Docker fallback: Keep `Path("/app/sqlite_db/okta_sync.db")` as first option
-3. Import: base_okta_api_client will work after sys.path.insert above
-
-EXAMPLE DATABASE CONNECTION:
-```python
-possible_paths = [
-    Path("/app/sqlite_db/okta_sync.db"),  # Docker
-    project_root / "sqlite_db" / "okta_sync.db"  # Local (use project_root!)
-]
-db_path = next((p for p in possible_paths if p.exists()), None)
-```
-─────────────────────────────────────────
-"""
-            logger.info(f"CLI mode active - injected portability instructions")
-        
         # Run agent
         result = await synthesis_agent.run(
             context,

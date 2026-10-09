@@ -32,6 +32,7 @@ else:
     print(f"Warning: .env file not found at {env_path}")
 
 from src.config.settings import settings
+from src.utils.csv_export import csv_literal
 from src.core.agents.orchestrator import execute_multi_agent_query
 from src.core.retrieval_outcomes import RetrievalFailure
 from src.core.okta.client import OktaClient
@@ -124,11 +125,11 @@ def save_results_to_csv(results_data: Dict[str, Any], date_str: str, output_dir:
             if isinstance(data[0], dict):
                 fieldnames = list(data[0].keys())
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-                writer.writeheader()
-                writer.writerows(data)
+                writer.writerow({key: csv_literal(key) for key in fieldnames})
+                writer.writerows({key: csv_literal(value) for key, value in row.items()} for row in data)
             else:
                 writer = csv.writer(csvfile)
-                writer.writerows(data)
+                writer.writerows([csv_literal(value) for value in row] for row in data)
         
         logger.info(f"Results saved to {output_path}")
         return output_path
@@ -193,24 +194,14 @@ async def execute_generated_script(
 
         copy_base_client_if_needed(prepared_code, script_dir)
         
-        # Detect Python executable (prefer venv)
-        venv_python = project_root / "venv" / "Scripts" / "python.exe"
-        python_exe = str(venv_python) if venv_python.exists() else "python"
+        # Keep generated scripts in the CLI's Python environment, including uv's .venv.
+        python_exe = sys.executable
         
         # Execute script
         logger.info(f"Executing script with {python_exe}")
-        proc = await asyncio.create_subprocess_exec(
-            python_exe,
-            "-u",
-            str(script_path.resolve()),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(project_root),
-            limit=1024*1024
-        )
-        
-        # Wait for completion
-        stdout, stderr = await proc.communicate()
+        from src.core.process_runner import run_process
+        proc = await run_process([python_exe, '-u', str(script_path.resolve())], cwd=project_root)
+        stdout, stderr = proc.stdout, proc.stderr
         stdout_str = stdout.decode('utf-8', errors='replace')
         stderr_str = stderr.decode('utf-8', errors='replace')
         from src.core.retrieval_outcomes import check_retrieval_outcomes

@@ -2,11 +2,12 @@
 
 from functools import lru_cache
 from pathlib import Path
+import os
 
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-ENV_FILE = BASE_DIR / ".env"
+ENV_FILE = Path(os.environ.get("TAKO_ENV_FILE", str(BASE_DIR / ".env")))
 
 
 @lru_cache(maxsize=1)
