@@ -36,6 +36,7 @@ from src.core.agents.agent_callbacks import (
 from src.core.agents import DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS, build_agent
 from src.core.models.model_picker import ModelType
 from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
+from src.data.schemas.discovery_results import DiscoveryResults, result_preview
 
 # Import schema function for database context
 from src.data.schemas.shared_schema import get_okta_database_schema
@@ -122,6 +123,7 @@ class APIDiscoveryDeps:
     current_step: int = 5  # Starts after SQL (steps 1-5)
     current_tools: List[Dict[str, str]] = None  # Track tools used in current step
     artifacts: List[Dict] = None  # Artifact storage (shared with orchestrator)
+    test_results: Optional[DiscoveryResults] = None
     allow_event_type_lookup: bool = False
     
     def __post_init__(self):
@@ -246,6 +248,7 @@ async def dump_artifacts_to_file(artifacts_file: Path, artifacts: List[dict]):
         logger.debug(f"Artifacts updated: {artifacts_file}")
     except Exception as e:
         logger.error(f"Failed to update artifacts: {e}")
+        raise
 
 
 # ============================================================================
@@ -560,9 +563,10 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                 'code': code, 'endpoints': deps.endpoints, 'test_id': test_id,
             }, cancellation_check=deps.cancellation_check, on_stderr=relay)
 
-            # IMPORTANT: Do NOT auto-save here
-            # LLM will explicitly call save_artifact() tool when results are validated
-            # This allows LLM to test multiple times and only save final validated code+results
+            # Keep exact evidence before building the bounded model preview.
+            if deps.test_results is None:
+                deps.test_results = DiscoveryResults(deps.artifacts_file)
+            deps.test_results.put(test_id, code, result)
             
             empty_result = result == [] or result == {} or result is None
             result_summary = "API call successful, returned no data" if empty_result else "API call successful, returned data"
@@ -571,8 +575,8 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                 result_summary
             )
             
-            serialized_result = json.dumps(result, separators=(',', ':'), default=str)
-            returned_content = serialized_result[:4000]
+            preview = result_preview(result)
+            returned_content = json.dumps({'test_id': test_id, **preview}, separators=(',', ':'))
             logger.info(
                 f"[{deps.correlation_id}] API test diagnostic: "
                 + json.dumps({
@@ -580,7 +584,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                     "execution_outcome": "returned", "empty_result": empty_result,
                     **response_diagnostics(result),
                     "returned_chars": len(returned_content),
-                    "truncated": len(serialized_result) > len(returned_content),
+                    "truncated": preview['truncated'],
                 })
             )
             return ToolReturn(
@@ -590,7 +594,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                     "✅ API executed successfully"
                 ),
                 content=returned_content,
-                metadata={'success': True, 'empty_result': empty_result}
+                metadata={'success': True, 'empty_result': empty_result, 'test_id': test_id}
             )
             
         except Exception as e:
@@ -613,28 +617,39 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
     
     async def save_artifact(
         key: str,
-        category: str,
-        content: str,
-        api_code: Optional[str] = None,
+        test_id: str,
         notes: Optional[str] = None
     ) -> ToolReturn:
-        """Save API results to artifacts"""
+        """Save the exact response and tested code using execute_test_query's test_id.
+
+        A truncated preview can still be saved. Do not reproduce data or code.
+        """
         check_cancellation()
+        await notify_tool_call('save_artifact', 'Save retrieval evidence')
+        if deps.test_results is None:
+            raise ModelRetry('Run execute_test_query successfully before saving its test_id')
+        try:
+            evidence = deps.test_results.get(test_id)
+        except ValueError as exc:
+            raise ModelRetry(str(exc)) from exc
+        if test_id in deps.test_results.saved:
+            return ToolReturn(return_value=f"Already saved: {deps.test_results.saved[test_id]}", content='Artifact already retained')
+        if any(item.get('key') == key for item in deps.artifacts):
+            raise ModelRetry('Choose a unique artifact key for this test')
         
         artifact = {
             "key": key,
-            "category": category,
-            "content": content,
+            "category": "api_results",
+            "content": json.dumps(evidence['result'], separators=(',', ':'), default=str),
+            "api_code": evidence['code'],
+            "test_id": test_id,
             "notes": notes or f"Saved by API agent at test #{deps.api_tests_executed}",
             "timestamp": time.time()
         }
         
-        # Add API code if provided (CRITICAL for synthesis agent)
-        if api_code:
-            artifact["api_code"] = api_code
-        
-        deps.artifacts.append(artifact)
         await dump_artifacts_to_file(deps.artifacts_file, [artifact])
+        deps.artifacts.append(artifact)
+        deps.test_results.saved[test_id] = key
         
         logger.info(f"[{deps.correlation_id}] Saved artifact: {key}")
         
@@ -648,6 +663,32 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
     # Tool 5: Get Event Types
     # ========================================================================
     
+    async def inspect_test_result(test_id: str, path: Optional[List[str]] = None) -> ToolReturn:
+        """Preview a test result or nested keys/array indexes without another API call.
+
+        Omit path for the root; otherwise pass original response keys/indexes.
+        """
+        check_cancellation()
+        await notify_tool_call('inspect_test_result', 'Read saved test data')
+        try:
+            if deps.test_results is None:
+                raise ValueError('No test results exist for this discovery run')
+            value = deps.test_results.get(test_id)['result']
+            for part in path or []:
+                if isinstance(value, list):
+                    index = int(part)
+                    if index < 0:
+                        raise ValueError('Use a non-negative array index')
+                    value = value[index]
+                elif isinstance(value, dict):
+                    value = value[part]
+                else:
+                    raise ValueError('Path cannot continue through a scalar value')
+        except (ValueError, KeyError, IndexError) as exc:
+            raise ModelRetry('Unknown test ID or result path; use an ID and fields from this run') from exc
+        return ToolReturn(return_value='Saved test result inspected', content=json.dumps(
+            {'test_id': test_id, 'path': path or [], **result_preview(value)}, separators=(',', ':')))
+
     async def get_detailed_events_from_keys(category_keys: List[str]) -> ToolReturn:
         """
         Get detailed Okta event types for selected categories.
@@ -702,6 +743,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
         timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
     )
     toolset.add_function(execute_test_query)
+    toolset.add_function(inspect_test_result, timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS)
     toolset.add_function(
         save_artifact,
         retries=1,
@@ -893,3 +935,7 @@ are unnecessary. Do not rerun validated patterns merely to combine them.
             api_data_retrieved=False,
             error=str(e)
         ), None
+    finally:
+        if deps.test_results is not None:
+            deps.test_results.cleanup()
+            deps.test_results = None

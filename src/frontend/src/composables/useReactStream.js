@@ -8,6 +8,7 @@
 import { ref, watch } from 'vue'
 import { useAuth } from './useAuth'
 import { applyApiTestProgress, interruptApiTests } from './apiTestProgress'
+import { applyModelProgress, interruptModelProgress } from './modelProgress'
 import { isClarification, clarificationResult } from './turnFeedback'
 import { getBrowserTimezone } from './userTimezone'
 
@@ -418,6 +419,7 @@ export function useReactStream() {
      * Handle STEP-PROGRESS event (subprocess execution)
      */
     const handleStepProgress = (data) => {
+        if (applyModelProgress(discoverySteps.value, data.details)) return
         if (applyApiTestProgress(discoverySteps.value, data.details)) return
         // Check if this is a rate limit event
         if (data.progress_type === 'rate_limit' && data.wait_seconds) {
@@ -569,6 +571,7 @@ export function useReactStream() {
      * Handle COMPLETE event
      */
     const handleComplete = (data) => {
+        interruptModelProgress(discoverySteps.value)
         console.log('[useReactStream] handleComplete called with:', data)
         console.log('[useReactStream] - display_type:', data.display_type)
         console.log('[useReactStream] - content type:', typeof data.content)
@@ -643,6 +646,7 @@ export function useReactStream() {
      * Handle ERROR event
      */
     const handleError = (data) => {
+        interruptModelProgress(discoverySteps.value)
         // Retain compatibility with older servers using the ERROR channel.
         if (isClarification(data)) {
             error.value = null
@@ -758,6 +762,7 @@ export function useReactStream() {
      */
     const closeStream = () => {
         interruptApiTests(discoverySteps.value)
+        interruptModelProgress(discoverySteps.value)
         if (eventSource) {
             console.log('[useReactStream] Closing EventSource (readyState:', eventSource.readyState, ')')
             eventSource.close()

@@ -259,6 +259,21 @@ async def event_callback(event_type: str, event_data: Dict[str, Any]):
         text = clean_cli_text(event_data.get('text', ''))
         print(f"{Colors.OKBLUE}[{title}] {text}{Colors.ENDC}")
     elif event_type == "progress":
+        details = event_data.get('details')
+        if isinstance(details, dict) and details.get('kind') == 'model_request':
+            from src.core.models.rate_limit_progress import public_model_progress
+            event = public_model_progress(details)
+            if event:
+                details = event['details']
+                messages = {'retry_wait': 'AI provider: rate limited',
+                            'retrying': 'AI provider: retrying request',
+                            'success': 'AI provider responded', 'failed': 'AI provider request failed',
+                            'cancelled': 'AI provider request cancelled', 'timed_out': 'AI provider request timed out'}
+                message = messages[details['status']]
+                if details['status'] == 'retry_wait' and 'retry_after_seconds' in details:
+                    message += f"; requested wait {details['retry_after_seconds']}s"
+                print(f'  {message}', flush=True)
+            return
         message = clean_cli_text(event_data.get('message', ''))
         print(f"  {Colors.OKCYAN}-> {message}{Colors.ENDC}")
     elif event_type == "tool_call":

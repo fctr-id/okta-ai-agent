@@ -40,6 +40,15 @@ test('follow-up phase events reach Activity without tools or internal reasoning'
             assert.doesNotMatch(html, /Preparing your request|No tool calls recorded|PRIVATE_|tool call/)
         }
         // Tool calls stay beneath their phase instead of collecting at the bottom.
+        const provider = { kind: 'model_request', request_id: 'a'.repeat(32), status: 'retry_wait',
+            retry_after_seconds: 20, message: 'PRIVATE_PROVIDER_ERROR' }
+        stream.onmessage({ data: JSON.stringify({ type: 'STEP-PROGRESS', details: provider }) })
+        assert.match(await render(), /AI provider rate limited/)
+        assert.doesNotMatch(await render(), /PRIVATE_PROVIDER_ERROR/)
+        stream.onmessage({ data: JSON.stringify({ type: 'STEP-PROGRESS', details: { ...provider, status: 'success' } }) })
+        assert.match(await render(), /AI provider responded/)
+        assert.doesNotMatch(await render(), /AI provider rate limited/)
+
         const grouped = await renderToString(createSSRApp({ render: () => h(Activity, {
             steps: [
                 { phase: 'planning', tools: [] },

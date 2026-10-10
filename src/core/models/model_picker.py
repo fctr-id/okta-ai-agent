@@ -17,6 +17,9 @@ import httpx2
 import ssl
 from dotenv import load_dotenv
 from src.utils.logging import logger
+from src.core.models.rate_limit_progress import (
+    observe_http_client, observe_http_provider, observe_bedrock_client, ProviderProgressModel,
+)
 
 load_dotenv()
 
@@ -183,7 +186,7 @@ class ModelConfig:
         
         if provider == AIProvider.GOOGLE:
             # Simple Google AI Studio with API key
-            google_provider = GoogleProvider(api_key=os.getenv('GOOGLE_API_KEY'))
+            google_provider = observe_http_provider(GoogleProvider(api_key=os.getenv('GOOGLE_API_KEY')))
             
             reasoning_model_name = os.getenv('GOOGLE_REASONING_MODEL', 'gemini-2.5-pro')
             coding_model_name = os.getenv('GOOGLE_CODING_MODEL', 'gemini-2.5-pro')
@@ -215,11 +218,11 @@ class ModelConfig:
                 scopes=['https://www.googleapis.com/auth/cloud-platform']
             )
             
-            vertex_provider = GoogleCloudProvider(
+            vertex_provider = observe_http_provider(GoogleCloudProvider(
                 credentials=credentials,
                 project=os.getenv('VERTEX_AI_PROJECT'),
                 location=os.getenv('VERTEX_AI_LOCATION', 'global')
-            )
+            ))
             
             reasoning_model_name = os.getenv('VERTEX_AI_REASONING_MODEL', 'gemini-2.5-pro')
             coding_model_name = os.getenv('VERTEX_AI_CODING_MODEL', 'gemini-2.5-pro')
@@ -231,7 +234,7 @@ class ModelConfig:
         
         elif provider == AIProvider.OPENAI_COMPATIBLE:
             custom_headers = parse_headers()
-            client = create_http_client_with_ssl_config()
+            client = observe_http_client(create_http_client_with_ssl_config())
             if custom_headers:
                 # Merge custom headers with existing client headers
                 client.headers.update(custom_headers)         
@@ -258,9 +261,9 @@ class ModelConfig:
             
         elif provider == AIProvider.OPENAI:
             # Create OpenAI provider
-            openai_provider = OpenAIProvider(
+            openai_provider = observe_http_provider(OpenAIProvider(
                 api_key=os.getenv('OPENAI_API_KEY')
-            )
+            ))
             
             return {
                 ModelType.REASONING: OpenAIResponsesModel(
@@ -276,10 +279,10 @@ class ModelConfig:
         elif provider == AIProvider.AZURE_OPENAI:
             # AzureProvider selects the v1 client from the configured endpoint.
             # Keep Tako's existing key variable rather than relying on SDK defaults.
-            azure_provider = AzureProvider(
+            azure_provider = observe_http_provider(AzureProvider(
                 azure_endpoint=normalize_azure_endpoint(os.getenv('AZURE_OPENAI_ENDPOINT')),
                 api_key=os.getenv('AZURE_OPENAI_KEY')
-            )
+            ))
             
             return {
                 ModelType.REASONING: OpenAIResponsesModel(
@@ -294,9 +297,9 @@ class ModelConfig:
             
         elif provider == AIProvider.ANTHROPIC:
             # Create Anthropic provider 
-            anthropic_provider = AnthropicProvider(
+            anthropic_provider = observe_http_provider(AnthropicProvider(
                 api_key=os.getenv('ANTHROPIC_API_KEY')
-            )
+            ))
             
             return {
                 ModelType.REASONING: AnthropicModel(
@@ -335,6 +338,7 @@ class ModelConfig:
                 # Use default AWS credential chain (IAM roles, profiles, etc.)
                 bedrock_provider = BedrockProvider(region_name=region_name)
             
+            observe_bedrock_client(bedrock_provider.client)
             reasoning_model_name = os.getenv('BEDROCK_REASONING_MODEL', 'anthropic.claude-3-sonnet-20240229-v1:0')
             coding_model_name = os.getenv('BEDROCK_CODING_MODEL', 'anthropic.claude-3-sonnet-20240229-v1:0')
             
@@ -352,4 +356,4 @@ class ModelConfig:
     @staticmethod
     def get_model(model_type: ModelType):
         """Get a specific model by type"""
-        return ModelConfig.get_models()[model_type]
+        return ProviderProgressModel(ModelConfig.get_models()[model_type])

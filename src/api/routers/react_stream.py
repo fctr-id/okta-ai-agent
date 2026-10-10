@@ -735,6 +735,13 @@ async def stream_react_updates(
                     await event_queue.put(sse_event)
                 
                 elif event_type == "progress":
+                    details = event_data.get("details")
+                    if isinstance(details, dict) and details.get('kind') == 'model_request':
+                        from src.core.models.rate_limit_progress import public_model_progress
+                        public_event = public_model_progress(details)
+                        if public_event:
+                            await event_queue.put(public_event)
+                        return
                     message = event_data.get("message", "")
                     
                     # Filter out internal progress messages using same pattern as step_start

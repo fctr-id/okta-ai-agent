@@ -2117,6 +2117,8 @@ async def execute_multi_agent_query(
         "timestamp": __import__('time').time()
     })
     
+    from src.core.models.rate_limit_progress import progress_callback
+    progress_token = progress_callback.set(event_callback)
     try:
         hydrated_session_result_sets = await _hydrate_session_result_set_context(correlation_id, artifacts_file)
         if hydrated_session_result_sets:
@@ -2372,3 +2374,5 @@ async def execute_multi_agent_query(
             "timestamp": time.time()
         })
         return result
+    finally:
+        progress_callback.reset(progress_token)

@@ -311,6 +311,18 @@ Queries such as enumerating admin role assignments may require permissions beyon
 - Execution controls — Generated code is checked before staging and execution, with explicit imports and methods, read-only access to directory tables, and bounded subprocess time and output. The API helper permits only GET requests to the configured Okta tenant and does not follow redirects. These controls are not an OS sandbox: accepted Python still runs with the application's operating-system privileges.
 - Output and sessions — Rendered Markdown is sanitized, CSV exports keep formula-like text literal, and logout clears the local session only after the server succeeds.
 
+API discovery keeps each returned test response and its exact tested code locally.
+The model sees a bounded JSON preview and saves evidence by test ID, avoiding
+response copying and allowing local inspection without repeating API requests.
+Temporary test files are removed when discovery ends; the next query removes
+abandoned test folders older than 24 hours. Selected evidence follows the
+conversation's existing retention.
+
+When an AI provider throttles a request, query activity and the CLI show the
+waiting/retry status. A countdown appears only when the provider supplies a valid
+retry-delay hint; it is not a guaranteed quota-reset time. SDK retry behavior and
+execution limits remain unchanged, and terminal status clears the waiting state.
+
 <a id="important-notes-for-v32"></a>
 
 ## Upgrading

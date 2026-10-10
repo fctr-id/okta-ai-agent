@@ -136,6 +136,7 @@ class ProcessLimitsTests(unittest.IsolatedAsyncioTestCase):
         tool = create_api_toolset(deps).tools['execute_test_query']
         with patch('src.core.process_runner.run_worker', side_effect=worker):
             result = await tool.function('async def sample():\n    return []')
+        self.addCleanup(deps.test_results.cleanup)
         self.assertTrue(result.metadata['success'])
         self.assertIn('sample', result.content)
 

@@ -25,6 +25,12 @@
             <h3 class="phase-label">{{ section.label }}</h3>
             <span class="phase-status">{{ index === sections.length - 1 && error ? 'Stopped' : isWorking && index === sections.length - 1 ? 'In progress' : 'Completed' }}</span>
           </div>
+          <ul v-if="section.modelRequests.length" class="request-list" aria-label="AI provider status" aria-live="polite">
+            <li v-for="request in section.modelRequests" :key="request.id" :class="['request', request.status]">
+              <span class="request-indicator" aria-hidden="true"></span>
+              <span class="request-status">{{ modelProgressLabel(request, clock) }}</span>
+            </li>
+          </ul>
           <ol v-if="section.tools.length" class="tool-list" :class="{ 'phase-tools': section.label }">
         <li v-for="entry in section.tools" :key="entry.key" class="tool-entry">
           <div class="tool-heading">
@@ -56,8 +62,9 @@
 </template>
 
 <script setup>
-import { computed, ref, useId, watch } from 'vue'
+import { computed, ref, useId, watch, onMounted, onUnmounted } from 'vue'
 import { requestStatusLabels } from '../../composables/apiTestProgress'
+import { modelProgressLabel } from '../../composables/modelProgress'
 
 const props = defineProps({
   steps: { type: Array, default: () => [] },
@@ -74,6 +81,17 @@ const contentId = `activity-${useId()}`
 const isExpanded = ref(props.collapseRevision === 0 && (Boolean(props.error) || (!props.isComplete && !props.shouldAutoCollapse)))
 watch(() => props.collapseRevision, () => { isExpanded.value = false })
 const isWorking = computed(() => !props.isComplete && !props.error)
+const clock = ref(Date.now())
+const mounted = ref(false)
+onMounted(() => { mounted.value = true; clock.value = Date.now() })
+let clockTimer
+const hasCountdown = computed(() => mounted.value && isExpanded.value && isWorking.value && props.steps.some(step =>
+  (step.modelRequests || []).some(request => request.status === 'retry_wait' && request.retryUntil > clock.value)))
+watch(hasCountdown, (active) => {
+  clearInterval(clockTimer)
+  if (active) clockTimer = setInterval(() => { clock.value = Date.now() }, 1000)
+}, { immediate: true })
+onUnmounted(() => clearInterval(clockTimer))
 // Display only known phase labels and tool activity. Never render step
 // titles/text/reasoning, including those from older saved conversations.
 const phaseLabels = {
@@ -97,15 +115,16 @@ const sections = computed(() => props.steps.reduce((entries, step, stepIndex) =>
     tool, key: tool.testId || `${step.id || stepIndex}-${toolIndex}`,
   }))
   // Old steps without phase metadata retain their tools, without guessing a phase.
-  if (!phase && !stepTools.length) return entries
+  if (!phase && !stepTools.length && !step.modelRequests?.length) return entries
   let section = entries.at(-1)
   if (!section || section.phase !== phase) {
     const source = section?.phase === 'sql' ? 'Database' : section?.phase === 'api' ? 'API' : null
     const label = phase === 'review' && source ? `${phaseLabels.review} · ${source}` : phaseLabels[phase]
-    section = { key: step.id || `phase-${stepIndex}`, phase, label, tools: [] }
+    section = { key: step.id || `phase-${stepIndex}`, phase, label, tools: [], modelRequests: [] }
     entries.push(section)
   }
   section.tools.push(...stepTools)
+  section.modelRequests.push(...(step.modelRequests || []))
   return entries
 }, []))
 const tools = computed(() => sections.value.flatMap(section => section.tools))
@@ -126,6 +145,7 @@ const toolLabels = {
   execute_test_query_sql: 'Test database query',
   load_artifacts: 'Read saved results',
   save_artifact: 'Save results',
+  inspect_test_result: 'Read saved test data',
 }
 const formatToolName = (name = 'Tool call') => toolLabels[name] || name.replace(/_/g, ' ').replace(/^okta /, '')
 const toolLabel = (tool) => tool.testId

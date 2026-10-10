@@ -107,18 +107,27 @@ the validated retrieval for the full population rather than hardcoding sample ID
 
 After each successful, non-empty test, immediately call save_artifact() with:
 - key: a unique identifier for that retrieval step or combined chain;
-- category: api_results;
-- content: a JSON string containing the actual raw test data, with only the
-  sampling and parent-child association described above;
-- api_code: the exact Python code that passed this test;
+- test_id: the exact server-issued ID returned by execute_test_query;
 - notes: what was tested, its filters and dependencies, and that it is a sample.
+
+The server retains the original returned test data and exact tested code before
+building a preview. save_artifact promotes that evidence into a durable artifact.
+Never reproduce response data or code in the save call. Save the test_id even
+when the preview is truncated.
+
+Tool responses contain test_id, truncated, original_chars, and data. Reduced
+containers are marked preview_only: fields contains sampled object fields,
+sample contains array items, and count/omitted_items/omitted_fields describe
+omissions. These wrapper keys are not Okta response fields.
+Use inspect_test_result(test_id, path) to inspect original nested keys or array
+indexes locally when needed. Do not repeat API requests to recover preview data.
+Saving or inspecting evidence does not validate a different script.
 
 One artifact can preserve a combined chain: include its exact tested code and
 raw parent and child samples with their associations. Separate artifacts or
 tests per endpoint are not required. If discovery needed separate tests, save
 their successful evidence as you go. Synthesis receives saved artifacts; it
-cannot recover code or evidence you omitted. If a tool response is truncated,
-do not reconstruct unseen data or invent fields.
+cannot recover unsaved tests. Never reconstruct unseen data or invent fields.
 
 ## Validation, errors, and stopping
 
@@ -146,7 +155,7 @@ permission failures, missing sources, and unfinished work.
 
 Continue the required dependency steps while budget remains, saving successful
 evidence as you go. The current run allows at most 10 tool calls in total, shared
-by catalog lookup, testing, saving, and event lookup; it is not 10 API tests plus
+by catalog lookup, testing, saving, inspection, and event lookup; it is not 10 API tests plus
 unlimited other tools. Reserve calls for saving evidence and finishing. Existing
 runtime limits and cancellation remain binding. Report gaps if work cannot finish.
 

@@ -64,14 +64,18 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
         worker_patch.start()
         self.addCleanup(worker_patch.stop)
 
+    def tearDown(self):
+        if self.deps.test_results is not None:
+            self.deps.test_results.cleanup()
+
     async def test_validated_get_preserves_data_and_saves_exact_code(self):
         result = await self.tools["execute_test_query"].function(CODE, "Fetch users")
         self.assertTrue(result.metadata["success"])
         self.assertTrue(self.client.test_mode)
-        self.assertEqual(json.loads(result.content), self.client.make_request.return_value["data"])
+        self.assertEqual(json.loads(result.content)["data"], self.client.make_request.return_value["data"])
         self.assertFalse(self.deps.artifacts, "Execution must not silently replace explicit saving")
         await self.tools["save_artifact"].function(
-            "users_sample", "api_results", result.content, api_code=CODE, notes="Synthetic discovery sample"
+            "users_sample", result.metadata["test_id"], notes="Synthetic discovery sample"
         )
         self.assertEqual(self.deps.artifacts[0]["api_code"], CODE)
         self.assertTrue(self.deps.artifacts_file.exists())
@@ -101,18 +105,20 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
                     )
                 self.assertFalse(result.output.success)
 
-    async def test_truncation_is_logged_without_changing_tool_content(self):
+    async def test_truncation_keeps_valid_preview_and_exact_evidence(self):
         data = [{"id": "private-id", "description": "private-value" * 500}]
         self.client.make_request.return_value = {"status": "success", "data": data}
         with patch.object(self.module.logger, "info") as log:
             result = await self.tools["execute_test_query"].function(CODE, "Fixture truncation")
         serialized = json.dumps(data, separators=(',', ':'))
-        self.assertEqual(result.content, serialized[:4000])
+        self.assertTrue(json.loads(result.content)["truncated"])
+        self.assertLess(len(result.content), 4200)
+        self.assertEqual(self.deps.test_results.get(result.metadata["test_id"])["result"], data)
         messages = [c.args[0] for c in log.call_args_list if "API test diagnostic: " in c.args[0]]
         diagnostic = json.loads(messages[0].split("API test diagnostic: ", 1)[1])
         self.assertTrue(diagnostic["truncated"])
         self.assertEqual(diagnostic["response_chars"], len(serialized))
-        self.assertEqual(diagnostic["returned_chars"], 4000)
+        self.assertEqual(diagnostic["returned_chars"], len(result.content))
         self.assertNotIn("private", messages[0])
 
     async def test_explicit_function_call_is_executed_once_regardless_of_result_name(self):
@@ -126,7 +132,7 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
                 result = await self.tools["execute_test_query"].function(CODE + "\n" + ending, "Fixture")
                 self.assertTrue(result.metadata["success"], result.content)
                 self.client.make_request.assert_awaited_once()
-                self.assertEqual(json.loads(result.content), self.client.make_request.return_value["data"])
+                self.assertEqual(json.loads(result.content)["data"], self.client.make_request.return_value["data"])
 
     async def test_nested_result_assignment_does_not_suppress_function_execution(self):
         code = CODE.replace("response = await", "results = await").replace('response[', 'results[').replace('return response', 'return results')
@@ -158,7 +164,7 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
         error = {"status": "error", "status_code": 403, "error": "Access forbidden"}
         self.client.make_request.return_value = error
         result = await self.tools["execute_test_query"].function(CODE, "Fetch users")
-        self.assertEqual(json.loads(result.content), error)
+        self.assertEqual(json.loads(result.content)["data"], error)
         self.assertFalse(self.deps.artifacts)
 
     async def test_discovery_streams_actual_calls_and_keeps_retries_separate(self):

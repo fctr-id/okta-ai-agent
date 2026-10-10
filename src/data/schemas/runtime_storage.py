@@ -74,6 +74,8 @@ def create_runtime_turn_paths(
     root: Path = RUNTIME_ROOT,
 ) -> RuntimeTurnPaths:
     """Create the runtime folder structure for one user turn/run."""
+    from src.data.schemas.discovery_results import cleanup_stale_discovery_results
+    cleanup_stale_discovery_results(root)
     safe_user_id = sanitize_path_part(user_id, fallback="user")
     safe_session_id = sanitize_path_part(session_id or run_id, fallback="session")
     safe_run_id = sanitize_path_part(run_id, fallback="run")
