@@ -19,6 +19,13 @@ RUN npm ci && \
 # Stage 2: Python application with built frontend  
 FROM python:3.13-slim
 
+ARG APP_VERSION=dev
+ARG VCS_REF=unknown
+LABEL org.opencontainers.image.title="Tako AI Agent for Okta" \
+      org.opencontainers.image.version="${APP_VERSION}" \
+      org.opencontainers.image.source="https://github.com/fctr-id/okta-ai-agent" \
+      org.opencontainers.image.revision="${VCS_REF}"
+
 WORKDIR /app
 
 # Install OpenSSL for certificate generation and curl for healthchecks

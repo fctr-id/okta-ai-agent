@@ -441,7 +441,8 @@ def _materialize_result_set(
         entity_type=entity_type or "records",
         key_columns=inspection.key_columns,
         source_specialist=source_specialist,
-        status="empty" if inspection.row_count == 0 else "available",
+        status=(artifact.get("metadata") or {}).get("discovery_status")
+               or ("empty" if inspection.row_count == 0 else "available"),
         artifact_keys=[artifact_key],
         session_id=session_id,
         run_id=run_id,

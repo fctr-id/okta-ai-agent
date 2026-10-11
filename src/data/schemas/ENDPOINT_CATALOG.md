@@ -26,17 +26,21 @@ names rather than detailed documentation.
   their own child/detail operations.
 - Keep the two catalogs synchronized when editing names, descriptions, notes, or
   supported parameters. Preserve stable operation IDs and unrelated write entries.
+- Keep static agent context self-contained: no external web or documentation
+  links. Include the relevant guidance locally and preserve relative API paths
+  for requests through the configured Okta client.
 
 ## September 22, 2026 review
 
 Reviewed all 107 runtime GET endpoints: seven policy endpoints followed by the
 remaining 100. The review used Okta's
-[management OpenAPI specification at revision 6bef7392](https://github.com/okta/okta-management-openapi-spec/blob/6bef7392c9dc2fec180c799984fd61749a8eb33f/dist/current/management-minimal.yaml),
+management OpenAPI specification at revision `6bef7392`,
 including parameter definitions, response schemas, and examples. Policy subtype
 guidance additionally uses the
-[account management policy guide](https://developer.okta.com/docs/guides/okta-account-management-policy/main/)
-and [policy concepts](https://developer.okta.com/docs/concepts/policies/).
-Endpoint notes record their sources. These are reviewed contracts, not guarantees
+account management policy guide
+and policy concepts documentation.
+Source provenance is recorded here without links in agent context.
+These are reviewed contracts, not guarantees
 that every feature is enabled in every tenant.
 
 Significant corrections include:

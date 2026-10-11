@@ -563,6 +563,11 @@ class OktaAPIClient:
             else:
                 result = await self._handle_single_request(endpoint, method, params, body)
             
+            # Discovery intentionally caps records and nested arrays. Do not
+            # confuse that sample with full retrieval or an API failure.
+            if self.test_mode and result.get("status") == "success":
+                result["discovery_sample"] = True
+
             # NEW: Automatic error tracking for entity batch operations
             if entity_label and result.get("status") == "error":
                 self.increment_entity_errors(entity_label, 1)

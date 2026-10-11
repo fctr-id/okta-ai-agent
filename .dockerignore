@@ -51,7 +51,10 @@ src/data/documentation/
 
 # Environment and config files not needed in production
 .env
+.env.*
 .env.local
+**/.env
+**/.env.*
 okta.yaml
 
 # Results and generated files

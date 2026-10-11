@@ -1,5 +1,6 @@
 """Offline checks for the execution and output contracts retained by the prompt."""
 
+from tests import security_support  # Synthetic settings; never load local configuration.
 import json
 import os
 from pathlib import Path
@@ -73,10 +74,9 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.metadata["success"])
         self.assertTrue(self.client.test_mode)
         self.assertEqual(json.loads(result.content)["data"], self.client.make_request.return_value["data"])
-        self.assertFalse(self.deps.artifacts, "Execution must not silently replace explicit saving")
-        await self.tools["save_artifact"].function(
-            "users_sample", result.metadata["test_id"], notes="Synthetic discovery sample"
-        )
+        self.assertNotIn("save_artifact", self.tools)
+        self.assertEqual(len(self.deps.artifacts), 1)
+        self.assertEqual(result.metadata["artifact_key"], self.deps.artifacts[0]["key"])
         self.assertEqual(self.deps.artifacts[0]["api_code"], CODE)
         self.assertTrue(self.deps.artifacts_file.exists())
         output = self.module.APIDiscoveryResult(success=True, api_data_retrieved=True, found_data=["users"])
@@ -165,7 +165,9 @@ class APIDiscoveryContractTests(unittest.IsolatedAsyncioTestCase):
         self.client.make_request.return_value = error
         result = await self.tools["execute_test_query"].function(CODE, "Fetch users")
         self.assertEqual(json.loads(result.content)["data"], error)
-        self.assertFalse(self.deps.artifacts)
+        self.assertFalse(result.metadata["success"])
+        self.assertEqual(result.metadata["evidence_status"], "error")
+        self.assertEqual(self.deps.artifacts[0]["category"], "api_test_diagnostics")
 
     async def test_discovery_streams_actual_calls_and_keeps_retries_separate(self):
         tool_events, progress_events = [], []

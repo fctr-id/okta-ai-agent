@@ -48,7 +48,14 @@ try {
 }
 
 # Get parent directory for context
-$contextPath = (Get-Item -Path "../").FullName
+$contextPath = Split-Path -Parent $PSScriptRoot
+$sourceRevision = git -C $contextPath rev-parse HEAD
+if ($LASTEXITCODE -ne 0) {
+    throw "Cannot determine the source revision for the image label."
+}
+if (git -C $contextPath status --porcelain --untracked-files=no) {
+    $sourceRevision = "$sourceRevision-dirty"
+}
 
 # Build multi-architecture images (but don't push yet)
 Write-Host "Building multi-architecture Docker images (linux/amd64, linux/arm64)..."
@@ -63,7 +70,8 @@ if ($latestTag) {
     docker buildx build --pull --rm --no-cache `
         --platform linux/amd64,linux/arm64 `
         --build-arg APP_VERSION=$Version `
-        --file "../Dockerfile" `
+        --build-arg VCS_REF=$sourceRevision `
+        --file (Join-Path $contextPath "Dockerfile") `
         --tag "$Registry/$ImageName`:$Version" `
         --tag "$Registry/$ImageName`:latest" `
         --push `
@@ -72,7 +80,8 @@ if ($latestTag) {
     docker buildx build --pull --rm --no-cache `
         --platform linux/amd64,linux/arm64 `
         --build-arg APP_VERSION=$Version `
-        --file "../Dockerfile" `
+        --build-arg VCS_REF=$sourceRevision `
+        --file (Join-Path $contextPath "Dockerfile") `
         --tag "$Registry/$ImageName`:$Version" `
         --push `
         $contextPath

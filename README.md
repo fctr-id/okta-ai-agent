@@ -312,11 +312,13 @@ Queries such as enumerating admin role assignments may require permissions beyon
 - Output and sessions — Rendered Markdown is sanitized, CSV exports keep formula-like text literal, and logout clears the local session only after the server succeeds.
 
 API discovery keeps each returned test response and its exact tested code locally.
-The model sees a bounded JSON preview and saves evidence by test ID, avoiding
+Evidence is saved automatically before the model sees a bounded JSON preview, avoiding
 response copying and allowing local inspection without repeating API requests.
 Temporary test files are removed when discovery ends; the next query removes
-abandoned test folders older than 24 hours. Selected evidence follows the
+abandoned test folders older than 24 hours. Automatically retained evidence follows the
 conversation's existing retention.
+Failed and empty responses remain diagnostics; partial results retain their status.
+Discovery samples validate retrieval patterns, not full query coverage.
 
 When an AI provider throttles a request, query activity and the CLI show the
 waiting/retry status. A countdown appears only when the provider supplies a valid

@@ -33,7 +33,6 @@
     "jsdom": "30.1.2",
     "sass": "^1.104.1",
     "sass-embedded": "^1.104.1",
-    "unplugin-fonts": "^2.0.0",
     "unplugin-vue-components": "^32.1.0",
     "unplugin-vue-router": "^0.19.2",
     "vite": "^8.3.0",

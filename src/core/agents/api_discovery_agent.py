@@ -36,7 +36,7 @@ from src.core.agents.agent_callbacks import (
 from src.core.agents import DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS, build_agent
 from src.core.models.model_picker import ModelType
 from src.data.schemas.artifact_manifest import append_artifacts_with_result_sets
-from src.data.schemas.discovery_results import DiscoveryResults, result_preview
+from src.data.schemas.discovery_results import DiscoveryResults, discovery_result_status, result_preview
 
 # Import schema function for database context
 from src.data.schemas.shared_schema import get_okta_database_schema
@@ -263,7 +263,7 @@ try:
 except FileNotFoundError:
     logger.error(f"API discovery prompt not found: {PROMPT_FILE}")
     BASE_SYSTEM_PROMPT = """You are an API discovery specialist.
-Filter endpoints, generate API code, test calls, save results."""
+Filter endpoints, generate API code, and test calls. Evidence is saved automatically."""
 
 
 # Create agent
@@ -283,7 +283,8 @@ def validate_api_discovery_output(
     result: APIDiscoveryResult,
 ) -> APIDiscoveryResult:
     """Reject contradictory outputs and require artifacts when API data was actually retrieved."""
-    artifacts = getattr(ctx.deps, "artifacts", []) or []
+    artifacts = [artifact for artifact in (getattr(ctx.deps, "artifacts", []) or [])
+                 if artifact.get("category") == "api_results"]
 
     if result.needs_sql == []:
         result.needs_sql = None
@@ -296,7 +297,7 @@ def validate_api_discovery_output(
             raise ModelRetry("Successful API discovery output cannot include an error")
         if result.api_data_retrieved and not artifacts:
             raise ModelRetry(
-                "Successful API discovery must save at least one artifact when API data is retrieved"
+                "No retrieved API evidence was retained. Report the missing data or storage failure."
             )
         if not result.api_data_retrieved and not result.needs_sql:
             raise ModelRetry(
@@ -308,7 +309,7 @@ def validate_api_discovery_output(
         raise ModelRetry("Failed API discovery output must include an error message")
 
     if result.api_data_retrieved and not artifacts:
-        raise ModelRetry("Failed API discovery with retrieved API data must save an artifact before finishing")
+        raise ModelRetry("No retrieved API evidence was retained; do not claim api_data_retrieved=True.")
 
     return result
 
@@ -563,20 +564,38 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                 'code': code, 'endpoints': deps.endpoints, 'test_id': test_id,
             }, cancellation_check=deps.cancellation_check, on_stderr=relay)
 
-            # Keep exact evidence before building the bounded model preview.
+            # Save exact evidence before returning a bounded preview to the model.
             if deps.test_results is None:
                 deps.test_results = DiscoveryResults(deps.artifacts_file)
             deps.test_results.put(test_id, code, result)
-            
-            empty_result = result == [] or result == {} or result is None
-            result_summary = "API call successful, returned no data" if empty_result else "API call successful, returned data"
-            await notify_step_end(
-                f"API Test #{deps.api_tests_executed} Complete",
-                result_summary
-            )
-            
+            evidence_status = discovery_result_status(result)
+            artifact = {
+                'key': test_id,
+                'category': 'api_results' if evidence_status in ('available', 'partial') else 'api_test_diagnostics',
+                'content': json.dumps(result, separators=(',', ':'), default=str),
+                'api_code': code,
+                'test_id': test_id,
+                'notes': f'{description}. Discovery sample; status={evidence_status}. '
+                         'Inspect responses for errors and missing requirements; not a full-population result.',
+                'metadata': {'discovery_status': evidence_status},
+                'timestamp': time.time(),
+            }
+            await dump_artifacts_to_file(deps.artifacts_file, [artifact])
+            deps.artifacts.append(artifact)
+            logger.info(f"[{deps.correlation_id}] Automatically saved API evidence: {test_id} ({evidence_status})")
+
+            empty_result = evidence_status == 'empty'
+            result_summary = {
+                'available': 'Discovery sample saved; full retrieval pending',
+                'empty': 'Discovery returned no matching records',
+                'partial': 'Discovery evidence saved; incomplete retrieval needs review',
+                'error': 'Discovery request failed; diagnostic saved',
+            }[evidence_status]
+            await notify_step_end(f"API Test #{deps.api_tests_executed} Complete", result_summary)
+
             preview = result_preview(result)
-            returned_content = json.dumps({'test_id': test_id, **preview}, separators=(',', ':'))
+            returned_content = json.dumps({'test_id': test_id, 'artifact_key': test_id,
+                                           'evidence_status': evidence_status, **preview}, separators=(',', ':'))
             logger.info(
                 f"[{deps.correlation_id}] API test diagnostic: "
                 + json.dumps({
@@ -588,15 +607,12 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
                 })
             )
             return ToolReturn(
-                return_value=(
-                    "✅ API executed successfully but returned no data"
-                    if empty_result else
-                    "✅ API executed successfully"
-                ),
+                return_value=result_summary,
                 content=returned_content,
-                metadata={'success': True, 'empty_result': empty_result, 'test_id': test_id}
+                metadata={'success': evidence_status != 'error', 'empty_result': empty_result,
+                          'test_id': test_id, 'artifact_key': test_id, 'evidence_status': evidence_status}
             )
-            
+
         except Exception as e:
             logger.info(
                 f"[{deps.correlation_id}] API test diagnostic: "
@@ -612,55 +628,7 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
             )
     
     # ========================================================================
-    # Tool 4: Save Artifact
-    # ========================================================================
-    
-    async def save_artifact(
-        key: str,
-        test_id: str,
-        notes: Optional[str] = None
-    ) -> ToolReturn:
-        """Save the exact response and tested code using execute_test_query's test_id.
-
-        A truncated preview can still be saved. Do not reproduce data or code.
-        """
-        check_cancellation()
-        await notify_tool_call('save_artifact', 'Save retrieval evidence')
-        if deps.test_results is None:
-            raise ModelRetry('Run execute_test_query successfully before saving its test_id')
-        try:
-            evidence = deps.test_results.get(test_id)
-        except ValueError as exc:
-            raise ModelRetry(str(exc)) from exc
-        if test_id in deps.test_results.saved:
-            return ToolReturn(return_value=f"Already saved: {deps.test_results.saved[test_id]}", content='Artifact already retained')
-        if any(item.get('key') == key for item in deps.artifacts):
-            raise ModelRetry('Choose a unique artifact key for this test')
-        
-        artifact = {
-            "key": key,
-            "category": "api_results",
-            "content": json.dumps(evidence['result'], separators=(',', ':'), default=str),
-            "api_code": evidence['code'],
-            "test_id": test_id,
-            "notes": notes or f"Saved by API agent at test #{deps.api_tests_executed}",
-            "timestamp": time.time()
-        }
-        
-        await dump_artifacts_to_file(deps.artifacts_file, [artifact])
-        deps.artifacts.append(artifact)
-        deps.test_results.saved[test_id] = key
-        
-        logger.info(f"[{deps.correlation_id}] Saved artifact: {key}")
-        
-        return ToolReturn(
-            return_value=f"✅ Saved artifact: {key}",
-            content=f"Artifact saved",
-            metadata={'artifact_count': len(deps.artifacts)}
-        )
-    
-    # ========================================================================
-    # Tool 5: Get Event Types
+    # Tool 4: Inspect Saved Evidence
     # ========================================================================
     
     async def inspect_test_result(test_id: str, path: Optional[List[str]] = None) -> ToolReturn:
@@ -744,11 +712,6 @@ def create_api_toolset(deps: APIDiscoveryDeps) -> FunctionToolset:
     )
     toolset.add_function(execute_test_query)
     toolset.add_function(inspect_test_result, timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS)
-    toolset.add_function(
-        save_artifact,
-        retries=1,
-        timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
-    )
     toolset.add_function(
         get_detailed_events_from_keys,
         timeout=DEFAULT_LOCAL_TOOL_CALL_TIMEOUT_SECONDS,
@@ -883,7 +846,7 @@ Do not repeat discovery of entities already retrieved. Use scoped endpoints for
 known IDs and retain the relationship to the original result set. Sample IDs
 validate the retrieval pattern; they do not establish the full population.
 Validate the missing retrieval patterns together when their dependencies are
-known, and save the tested code and raw samples. Separate tests per endpoint
+known; tested code and returned samples are saved automatically. Separate tests per endpoint
 are unnecessary. Do not rerun validated patterns merely to combine them.
 ─────────────────────────────────────────
 """

@@ -29,6 +29,27 @@ def client_fixture():
 
 
 class OutcomeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_discovery_sample_marking_does_not_hide_failures(self):
+        from src.data.schemas.discovery_results import discovery_result_status
+
+        for test_mode in (False, True):
+            for payload, expected in (
+                ({'status': 'success', 'data': [{'id': 'sample'}],
+                  'limited_by_max_results': True}, 'available' if test_mode else 'partial'),
+                ({'status': 'success', 'data': []}, 'empty'),
+                ({'status': 'error', 'error': 'Pagination stopped', 'error_code': 'PAGINATION_LIMIT',
+                  'data': [{'id': 'first-page'}], 'is_partial': True}, 'partial'),
+            ):
+                with self.subTest(test_mode=test_mode, expected=expected):
+                    client = client_fixture()
+                    client.test_mode = test_mode
+                    client._handle_get_request = AsyncMock(return_value=dict(payload))
+                    with redirect_stderr(io.StringIO()):
+                        result = await client.make_request('/api/v1/users')
+                    self.assertEqual(result.get('discovery_sample', False),
+                                     test_mode and payload['status'] == 'success')
+                    self.assertEqual(discovery_result_status(result), expected)
+
     async def test_failure_classification_survives_swallowed_exceptions(self):
         for response, category, rediscover in [
             ({'http_status': 401}, 'access', False),

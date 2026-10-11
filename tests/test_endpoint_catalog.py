@@ -30,6 +30,25 @@ class EndpointCatalogTests(unittest.TestCase):
         self.assertEqual(set(operations), set(self.operations))
         self.assertTrue(all(e["method"] == "GET" for e in endpoints))
 
+    def test_static_agent_context_has_no_external_links(self):
+        src = SCHEMAS.parents[1]
+        roots = (
+            SCHEMAS,
+            src / "core" / "agents",
+            src / "core" / "tools" / "special_tools",
+            src / "data" / "documentation",
+        )
+        for root in roots:
+            for path in root.rglob("*"):
+                if path.suffix not in {".json", ".txt", ".md", ".py"}:
+                    continue
+                with self.subTest(path=str(path.relative_to(src))):
+                    self.assertNotRegex(
+                        path.read_text(encoding="utf-8"),
+                        re.compile(r"https?://|www\.", re.IGNORECASE),
+                        "Keep agent context self-contained; retain relative API paths.",
+                    )
+
     def test_parallel_catalogs_agree_on_read_only_contracts_and_documentation(self):
         # The source catalog uses :param; the runtime catalog uses {param}.
         # Some inherited parameter aliases differ, so compare route structure.
